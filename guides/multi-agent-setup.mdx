@@ -1,0 +1,370 @@
+---
+title: "Multi-Agent Setup"
+description: "Configure multiple agents with Alignment Cards, run coherence checks, and monitor fleet alignment."
+sidebarTitle: "Multi-Agent Setup"
+icon: "users"
+---
+
+# Multi-Agent Setup
+
+**Configure multiple AI agents with [Alignment Cards](/concepts/alignment-cards), verify value compatibility before coordination, and monitor fleet-wide alignment with [smoltbot](/smoltbot/overview).**
+
+When you operate more than one agent -- a shopping assistant, a data analyst, an internal scheduler -- each one needs its own alignment posture. And when those agents interact, their declared values need to be compatible. This guide walks through registering multiple agents, checking value coherence between them, monitoring the fleet, and configuring enforcement per agent.
+
+## Why Multi-Agent Alignment Matters
+
+A single agent's alignment is between it and its principal. Multi-agent alignment introduces a harder problem: **inter-agent compatibility**. Two agents can each be perfectly aligned with their respective principals while being fundamentally incompatible with each other.
+
+Consider:
+
+- Agent A declares `minimal_data` as a core value. Agent B requires `comprehensive_analytics` to function. If A delegates data collection to B, whose value wins?
+- Agent A commits to `transparency` and discloses all reasoning. Agent B treats its decision process as proprietary. Their definitions of good behavior conflict.
+- Agent A's `conflicts_with` list includes a value that Agent B declares. No amount of runtime negotiation fixes a structural incompatibility.
+
+AAP's [Value Coherence Handshake](/concepts/value-coherence) checks this **before** coordination begins. It compares Alignment Cards pairwise and returns a compatibility score, conflict list, and proceed/block recommendation -- so you catch structural mismatches at configuration time, not at runtime.
+
+## Registering Multiple Agents
+
+Each agent gets its own [Alignment Card](/concepts/alignment-cards) declaring its values, autonomy envelope, and audit commitment. There is no shared card for a fleet -- alignment is per-agent.
+
+Here are two agents with different value sets and operational scopes:
+
+<CodeGroup>
+```python Python
+from aap import AlignmentCard
+
+shopping_agent = AlignmentCard(
+    agent_id="did:web:shopping.agent.example.com",
+    principal={"type": "human", "relationship": "delegated_authority"},
+    values={
+        "declared": ["principal_benefit", "transparency", "honesty"],
+        "definitions": {
+            "principal_benefit": "Recommendations optimize for the user's stated needs, not commission.",
+            "transparency": "Disclose reasoning behind every product recommendation.",
+        },
+        "conflicts_with": ["deceptive_marketing"],
+    },
+    autonomy_envelope={
+        "bounded_actions": ["search_products", "compare_prices", "recommend"],
+        "forbidden_actions": ["purchase_without_confirmation", "store_payment_info"],
+        "escalation_triggers": ["price_above_budget", "out_of_stock_substitution"],
+    },
+    audit_commitment={
+        "retention_days": 90,
+        "queryable": True,
+        "tamper_evidence": "append_only",
+        "trace_format": "ap-trace-v1",
+    },
+)
+
+data_analyst = AlignmentCard(
+    agent_id="did:web:analyst.agent.example.com",
+    principal={"type": "human", "relationship": "advisory"},
+    values={
+        "declared": ["accuracy", "minimal_data", "transparency"],
+        "definitions": {
+            "accuracy": "Report findings exactly as computed, flag uncertainty explicitly.",
+            "minimal_data": "Request only the data fields necessary for the analysis.",
+        },
+        "conflicts_with": ["data_hoarding", "selective_reporting"],
+    },
+    autonomy_envelope={
+        "bounded_actions": ["query_database", "compute_statistics", "generate_report"],
+        "forbidden_actions": ["export_raw_pii", "modify_source_data"],
+        "escalation_triggers": ["anomaly_detected", "data_quality_below_threshold"],
+    },
+    audit_commitment={
+        "retention_days": 90,
+        "queryable": True,
+        "tamper_evidence": "append_only",
+        "trace_format": "ap-trace-v1",
+    },
+)
+```
+
+```typescript TypeScript
+import { AlignmentCard } from '@mnemom/agent-alignment-protocol';
+
+const shoppingAgent: AlignmentCard = {
+  agentId: 'did:web:shopping.agent.example.com',
+  principal: { type: 'human', relationship: 'delegated_authority' },
+  values: {
+    declared: ['principal_benefit', 'transparency', 'honesty'],
+    definitions: {
+      principal_benefit: 'Recommendations optimize for the user\'s stated needs, not commission.',
+      transparency: 'Disclose reasoning behind every product recommendation.',
+    },
+    conflictsWith: ['deceptive_marketing'],
+  },
+  autonomyEnvelope: {
+    boundedActions: ['search_products', 'compare_prices', 'recommend'],
+    forbiddenActions: ['purchase_without_confirmation', 'store_payment_info'],
+    escalationTriggers: ['price_above_budget', 'out_of_stock_substitution'],
+  },
+  auditCommitment: {
+    retentionDays: 90,
+    queryable: true,
+    tamperEvidence: 'append_only',
+    traceFormat: 'ap-trace-v1',
+  },
+};
+
+const dataAnalyst: AlignmentCard = {
+  agentId: 'did:web:analyst.agent.example.com',
+  principal: { type: 'human', relationship: 'advisory' },
+  values: {
+    declared: ['accuracy', 'minimal_data', 'transparency'],
+    definitions: {
+      accuracy: 'Report findings exactly as computed, flag uncertainty explicitly.',
+      minimal_data: 'Request only the data fields necessary for the analysis.',
+    },
+    conflictsWith: ['data_hoarding', 'selective_reporting'],
+  },
+  autonomyEnvelope: {
+    boundedActions: ['query_database', 'compute_statistics', 'generate_report'],
+    forbiddenActions: ['export_raw_pii', 'modify_source_data'],
+    escalationTriggers: ['anomaly_detected', 'data_quality_below_threshold'],
+  },
+  auditCommitment: {
+    retentionDays: 90,
+    queryable: true,
+    tamperEvidence: 'append_only',
+    traceFormat: 'ap-trace-v1',
+  },
+};
+```
+</CodeGroup>
+
+<Tip>
+  Each agent's `values.definitions` field is optional but recommended. Definitions remove ambiguity when two agents declare the same value name but mean different things by it.
+</Tip>
+
+## Value Coherence Checks
+
+Before two agents coordinate on a task, run a coherence check to verify their values are compatible. The `check_coherence` function compares both Alignment Cards and returns a structured result.
+
+<CodeGroup>
+```python Python
+from aap import check_coherence
+
+result = check_coherence(
+    initiator_card=shopping_agent.to_dict(),
+    responder_card=data_analyst.to_dict(),
+    required_values=["transparency"],
+)
+
+print(f"Compatible: {result.compatible}")   # True
+print(f"Score: {result.score}")             # 0.82
+print(f"Matched: {result.matched}")         # ["transparency"]
+print(f"Conflicts: {result.conflicts}")     # []
+
+if result.compatible:
+    print("Agents can coordinate on this task.")
+else:
+    print(f"Blocked: {result.conflicts}")
+```
+
+```typescript TypeScript
+import { checkCoherence } from '@mnemom/agent-alignment-protocol';
+
+const result = checkCoherence({
+  initiatorCard: shoppingAgent,
+  responderCard: dataAnalyst,
+  requiredValues: ['transparency'],
+});
+
+console.log(`Compatible: ${result.compatible}`);   // true
+console.log(`Score: ${result.score}`);             // 0.82
+console.log(`Matched: ${result.matched}`);         // ["transparency"]
+console.log(`Conflicts: ${result.conflicts}`);     // []
+
+if (result.compatible) {
+  console.log('Agents can coordinate on this task.');
+} else {
+  console.log('Blocked:', result.conflicts);
+}
+```
+</CodeGroup>
+
+### Understanding the Result
+
+The coherence result contains three key fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `compatible` | boolean | Whether the agents can safely coordinate. `false` if any declared value conflicts with the other agent's `conflicts_with` list. |
+| `score` | float (0-1) | Numeric coherence score. Higher means more value overlap. Scores below 0.70 trigger a `proceed: false` recommendation. |
+| `conflicts` | list | Specific value conflicts found -- e.g., one agent declares a value the other explicitly opposes. |
+
+<Note>
+  Coherence checks operate on **declared** values only. They verify that two agents' claims are compatible, not that either agent actually acts on those values. Behavioral verification happens through [AP-Traces](/concepts/ap-traces) and [integrity checkpoints](/concepts/integrity-checkpoints).
+</Note>
+
+For the full protocol exchange and advanced options, see [Value Coherence](/concepts/value-coherence).
+
+## Fleet Monitoring with smoltbot
+
+When you run multiple agents through the [smoltbot gateway](/smoltbot/overview), each agent gets its own:
+
+- **Trace history** -- Every AP-Trace and integrity checkpoint is stored per agent, queryable by agent ID.
+- **Integrity scores** -- Rolling integrity ratio computed from recent checkpoints. A healthy agent stays above 0.90.
+- **Drift alerts** -- Automated alerts when behavioral patterns shift away from the agent's declared alignment.
+
+The smoltbot dashboard shows fleet-wide status at a glance: which agents are healthy, which are drifting, and which have active violations.
+
+```
+Fleet Dashboard
+────────────────────────────────────────────────────
+Agent                     Integrity   Drift    Mode
+────────────────────────────────────────────────────
+shopping.agent            0.97        none     enforce
+analyst.agent             0.94        none     enforce
+staging.recommender       0.81        warning  observe
+────────────────────────────────────────────────────
+```
+
+See [smoltbot Overview](/smoltbot/overview) for gateway setup and dashboard configuration.
+
+## Drift Detection Across Agents
+
+Each agent should be monitored for drift independently. Drift is the gradual divergence of an agent's behavior from its declared alignment -- it rarely appears as a single dramatic violation. More commonly, an agent that used to escalate 15% of decisions quietly drops to 5%, or stops applying a declared value in its traces.
+
+Use `detect_drift` per agent to compare recent traces against the agent's baseline:
+
+<CodeGroup>
+```python Python
+from aap import detect_drift
+
+# Check each agent independently
+for agent_id in ["shopping.agent", "analyst.agent"]:
+    traces = fetch_traces(agent_id=agent_id, days=30)
+    card = fetch_alignment_card(agent_id=agent_id)
+
+    alerts = detect_drift(
+        traces=traces,
+        card=card,
+        similarity_threshold=0.30,
+        sustained_threshold=3,
+    )
+
+    if alerts:
+        for alert in alerts:
+            print(f"[{agent_id}] Drift detected: {alert.drift_direction}")
+            print(f"  Similarity: {alert.similarity_score}")
+            print(f"  Sustained traces: {alert.sustained_traces}")
+    else:
+        print(f"[{agent_id}] No drift detected.")
+```
+
+```typescript TypeScript
+import { detectDrift } from '@mnemom/agent-alignment-protocol';
+
+const agentIds = ['shopping.agent', 'analyst.agent'];
+
+for (const agentId of agentIds) {
+  const traces = await fetchTraces({ agentId, days: 30 });
+  const card = await fetchAlignmentCard({ agentId });
+
+  const alerts = detectDrift({
+    traces,
+    card,
+    similarityThreshold: 0.30,
+    sustainedThreshold: 3,
+  });
+
+  if (alerts.length > 0) {
+    for (const alert of alerts) {
+      console.log(`[${agentId}] Drift: ${alert.driftDirection}`);
+      console.log(`  Similarity: ${alert.similarityScore}`);
+      console.log(`  Sustained: ${alert.sustainedTraces} traces`);
+    }
+  } else {
+    console.log(`[${agentId}] No drift detected.`);
+  }
+}
+```
+</CodeGroup>
+
+Drift alerts surface when an agent's behavior diverges from its declared alignment **over time** -- not from a single anomalous trace. The `sustained_threshold` parameter controls how many consecutive low-similarity traces are required before an alert fires, preventing false positives from one-off edge cases.
+
+<Tip>
+  Run drift detection on a schedule (e.g., daily or after every N traces) rather than on every request. Drift is a trend, not a point-in-time check.
+</Tip>
+
+For the full drift detection algorithm, calibration thresholds, and alert structure, see [Drift Detection](/concepts/drift-detection).
+
+## Enforcement Modes Per Agent
+
+Each agent in your fleet can have its own enforcement mode, controlling how smoltbot responds when violations are detected. The three modes are:
+
+| Mode | Behavior |
+|---|---|
+| **observe** | Detect and record violations, take no action. Default for new agents. |
+| **nudge** | Inject feedback into the agent's next request so it can self-correct. |
+| **enforce** | Hard block (403) for non-streaming requests. Falls back to nudge for streaming. |
+
+Set enforcement mode per agent via the API:
+
+<CodeGroup>
+```python Python
+import requests
+
+# Production agents: enforce mode
+requests.put(
+    "https://api.mnemom.ai/v1/agents/shopping.agent/enforcement",
+    json={"mode": "enforce"},
+    headers={"Authorization": "Bearer YOUR_API_KEY"},
+)
+
+# Staging agents: observe mode
+requests.put(
+    "https://api.mnemom.ai/v1/agents/staging.recommender/enforcement",
+    json={"mode": "observe"},
+    headers={"Authorization": "Bearer YOUR_API_KEY"},
+)
+```
+
+```typescript TypeScript
+// Production agents: enforce mode
+await fetch('https://api.mnemom.ai/v1/agents/shopping.agent/enforcement', {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_API_KEY',
+  },
+  body: JSON.stringify({ mode: 'enforce' }),
+});
+
+// Staging agents: observe mode
+await fetch('https://api.mnemom.ai/v1/agents/staging.recommender/enforcement', {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_API_KEY',
+  },
+  body: JSON.stringify({ mode: 'observe' }),
+});
+```
+</CodeGroup>
+
+A common fleet pattern:
+
+- **Production agents** on `enforce` -- violations are blocked before reaching end users.
+- **Staging agents** on `observe` -- violations are recorded for review during testing without blocking development workflows.
+- **New agents** on `nudge` -- the agent gets feedback and a chance to self-correct while you build confidence in its alignment.
+
+For full details on each mode, see [Enforcement Modes](/smoltbot/enforcement).
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="AAP Quickstart" icon="rocket" href="/protocols/aap/quickstart">
+    Create your first Alignment Card, generate a traced decision, and verify it in 5 minutes.
+  </Card>
+  <Card title="Enforcement Modes" icon="gavel" href="/smoltbot/enforcement">
+    Deep dive into observe, nudge, and enforce modes with streaming behavior and configuration options.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/overview">
+    Full API reference for agents, traces, coherence checks, drift detection, and enforcement.
+  </Card>
+</CardGroup>

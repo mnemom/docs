@@ -1,0 +1,243 @@
+---
+title: "Security & Trust Model"
+description: "How Mnemom handles data, authentication, encryption, and threat modeling across the alignment infrastructure."
+sidebarTitle: "Security & Trust"
+icon: "shield-halved"
+---
+
+# Security & Trust Model
+
+This document describes the unified security and trust model across the full Mnemom stack: the [Agent Alignment Protocol (AAP)](/protocols/aap/specification), the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), and [smoltbot](/smoltbot/overview) -- the gateway that ties them together. It covers what data is stored, how authentication works, how data is encrypted, and what threats the system does and does not defend against.
+
+---
+
+## Trust Model Overview
+
+Mnemom provides **transparency, not guarantees**. The two protocols serve complementary roles:
+
+- **AAP** provides **post-hoc verification**. It records agent decisions as [AP-Traces](/concepts/ap-traces), detects behavioral [drift](/concepts/drift-detection), and verifies traces against declared [Alignment Cards](/concepts/alignment-cards). AAP operates after the action has been taken -- typically 30-60 seconds later.
+
+- **AIP** provides **real-time detection**. It analyzes the agent's [thinking blocks](/concepts/integrity-checkpoints) between turns, producing integrity verdicts before the next action executes. AIP operates in the ~2-second window between agent reasoning and agent action.
+
+Together they provide **full-coverage observability**: AIP catches problems as the agent thinks; AAP catches problems after the agent acts. The cross-protocol linkage (`IntegrityCheckpoint.linked_trace_id` references `APTrace.trace_id`) creates a complete audit chain from reasoning to decision.
+
+<Warning>
+AAP is a transparency protocol, not a trust protocol. A verified trace means the agent's declared behavior is internally consistent -- it does not mean the agent is trustworthy, safe, or aligned with human values. Verification checks consistency, not correctness.
+</Warning>
+
+**smoltbot** is the operational layer that runs both protocols. It is a Cloudflare Workers gateway that intercepts LLM API traffic, extracts thinking blocks for AIP analysis, generates AP-Traces for AAP verification, and enforces configurable [enforcement modes](/smoltbot/enforcement) based on the combined results.
+
+---
+
+## Data Handling
+
+### What Is Stored
+
+| Data Type | Description | Storage Location |
+|-----------|-------------|------------------|
+| **AP-Traces** | Structured decision records: what action the agent took, which values were applied, what alternatives were considered, and whether escalation was evaluated | Supabase Postgres |
+| **Integrity Checkpoints** | Verdict (`clear`, `review_needed`, `boundary_violation`), concern categories, severity, reasoning summary, and a SHA-256 hash of the thinking block | Supabase Postgres |
+| **Alignment Cards** | Agent identity declarations: values, autonomy envelope, escalation triggers, audit commitment | Supabase Postgres |
+| **Drift Alerts** | Alerts generated when behavioral similarity drops below threshold over sustained turns (AAP) or when integrity patterns degrade within a session window (AIP) | Supabase Postgres |
+| **Enforcement Records** | Records of enforcement actions taken (observe, nudge, enforce) in response to violations | Supabase Postgres |
+
+### What Is NOT Stored
+
+| Data Type | Why Not |
+|-----------|---------|
+| **Prompts** | User prompts are not persisted by the Mnemom infrastructure. They pass through the gateway transiently. |
+| **Responses** | LLM responses are not persisted. Only the structured trace and checkpoint are retained. |
+| **Thinking block content** | The full thinking block text is never stored. Only its SHA-256 hash (`thinking_block_hash`) is retained in the Integrity Checkpoint for content-addressed reference. |
+| **API keys** | API keys are never stored in plaintext. Only SHA-256 hashes are stored, used for agent identification and billing attribution. |
+
+<Note>
+The SHA-256 hash of the thinking block serves two purposes: it provides tamper evidence (proving that a specific thinking block was analyzed) and it enables correlation (linking a checkpoint back to the exact content that was evaluated) -- all without retaining the agent's private reasoning.
+</Note>
+
+---
+
+## Authentication & Authorization
+
+The Mnemom API supports three authentication patterns, each serving a different use case.
+
+### Bearer Token (Supabase JWT)
+
+Used for authenticated user operations -- dashboard access, card management, agent configuration.
+
+| Header | Value |
+|--------|-------|
+| `Authorization` | `Bearer <supabase-jwt>` |
+
+The JWT is issued by Supabase Auth and contains the user's identity, organization membership, and role. Tokens are validated on every request.
+
+### API Key (`x-api-key` header)
+
+Used for programmatic access -- billing API calls, automated agent registration, CI/CD integrations.
+
+| Header | Value |
+|--------|-------|
+| `x-api-key` | `<api-key>` |
+
+API keys are scoped to a user or organization. The key itself is never stored; only its SHA-256 hash is persisted for lookup and validation.
+
+### Service Role Key
+
+Used for internal and administrative operations -- database migrations, system maintenance, admin export endpoints. Service role access bypasses row-level security.
+
+<Warning>
+Service role keys must never be exposed to client-side code or included in agent configurations. They are intended exclusively for server-side administrative operations.
+</Warning>
+
+### Organization RBAC
+
+Resources are scoped to organizations. Each organization member holds one of three roles:
+
+| Role | Capabilities |
+|------|-------------|
+| **Owner** | Full access. Can delete the organization, manage billing, transfer ownership. |
+| **Admin** | Can manage members, invite users, configure agents, manage API keys, view billing. |
+| **Member** | Can view agents, traces, and checkpoints within the organization. Cannot modify configuration or manage members. |
+
+Role-based access is enforced at the API layer via Supabase row-level security policies. Organization-scoped API keys inherit the permissions of the role they were created under.
+
+---
+
+## Encryption
+
+### In Transit
+
+All endpoints enforce **TLS 1.2+**. This applies to:
+
+- The smoltbot gateway (Cloudflare Workers edge network)
+- The Mnemom API (Supabase edge functions)
+- Webhook signal delivery (AIP `POST` to registered endpoints, authenticated with HMAC-SHA256)
+- Cross-protocol communication between AAP and AIP components
+
+Cloudflare's edge network terminates TLS and re-encrypts traffic to origin servers. Certificate management is handled automatically.
+
+### At Rest
+
+Database storage uses **Supabase Postgres with encryption at rest**. This covers all persisted data: AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts, enforcement records, and user/organization data.
+
+### Thinking Block Privacy
+
+Thinking blocks receive special treatment. The full thinking block content is **never written to any persistent storage** -- not in the database, not in logs, not in object storage. The analysis flow is:
+
+1. The thinking block is extracted from the LLM response (in the gateway or SDK)
+2. The thinking block is sent to the analysis LLM for evaluation
+3. The analysis result is captured as an Integrity Checkpoint
+4. The thinking block content is discarded
+5. Only the SHA-256 hash is retained in the checkpoint
+
+<Info>
+The `IntegrityConcern.evidence` field may contain a short excerpt (recommended maximum 200 characters) from the thinking block to support human review of flagged concerns. This is an intentional tradeoff between privacy and reviewability. Implementations may configure evidence redaction for maximum privacy.
+</Info>
+
+---
+
+## Threat Model
+
+The Mnemom stack is designed with explicit awareness of what it can and cannot defend against. The following threat categories are addressed.
+
+### Adversarial Agents
+
+An agent can produce perfect AP-Traces and pass every integrity checkpoint while acting against its principal's interests. If the agent controls what it logs and reasons in ways not captured by the thinking block, the protocols provide visibility into what the agent *declares* and *exposes*, not what it *actually does*.
+
+AAP provides **visibility, not prevention**. AIP provides **detection, not certainty**. Together they raise the cost of deception -- an adversarial agent must maintain consistency across both real-time thinking analysis and post-hoc trace verification -- but they do not make deception impossible.
+
+<Warning>
+Do not treat protocol compliance as evidence of alignment. A verified trace and a clear integrity verdict mean the agent's observable behavior is internally consistent with its declarations. They do not mean the agent is safe.
+</Warning>
+
+### Prompt Injection
+
+AIP detects injection patterns in thinking blocks. When an agent's reasoning reveals it is responding to injected instructions (e.g., instructions embedded in tool output rather than the user's original request), the analysis LLM flags the concern and the checkpoint verdict reflects it.
+
+However, AIP operates *after* the agent has already processed the injected content. The injection has occurred. AIP detects its effects on reasoning and can intervene before the *action* lands (in gateway or enforce mode), but it does not prevent the injected content from reaching the model in the first place.
+
+### Replay Attacks
+
+Trace IDs (`trace_id`) and timestamps prevent AP-Trace replay. Each trace is uniquely identified and temporally bound. Integrity Checkpoint IDs (`checkpoint_id`, format `ic-{uuid}`) are unique per checkpoint. AIP webhook signals include timestamps, and receivers should reject signals older than a configurable threshold (recommended: 5 minutes). HMAC-SHA256 signatures on webhooks prevent signal forgery.
+
+### LLM-as-Judge Limits
+
+AIP uses an LLM to evaluate another LLM's thinking. This introduces a fundamental ceiling: the analysis model can be fooled by sophisticated adversarial content crafted specifically to manipulate the evaluation. This is the meta-injection threat -- the content under analysis attempts to subvert the analysis itself.
+
+Mitigations include structured output validation, explicit meta-injection warnings in the conscience prompt, and using a separate model instance (ideally a different model family) for analysis. These raise the bar but do not eliminate the risk.
+
+<Note>
+Detection accuracy is bounded by the analysis model's capability. A smaller, cheaper analysis model will miss subtleties that a larger model would catch. AIP provides probabilistic detection, not mathematical proof of alignment.
+</Note>
+
+### Model Dependency
+
+AIP requires models that expose thinking blocks. Current provider support:
+
+| Provider | Thinking Source | Extraction Confidence |
+|----------|----------------|----------------------|
+| **Anthropic** | Native `thinking` content blocks | 1.0 |
+| **OpenAI** | `reasoning_content` field (GPT-5 Thinking) | 0.9 |
+| **Google Gemini** | Thinking content parts | 0.9 |
+| **Fallback** | Regex-based inference from response text | 0.3 |
+
+Models without exposed thinking blocks cannot be analyzed by AIP. In this case, the system generates **synthetic `clear` verdicts** -- the agent proceeds, but without integrity analysis. This is a known gap: models with opaque reasoning are invisible to AIP.
+
+---
+
+## Retention & Audit
+
+### Configurable Retention
+
+Trace and checkpoint retention is configurable via the `audit_commitment.retention_days` field in the [Alignment Card](/concepts/alignment-cards). This field declares how long the agent's operator commits to retaining audit data.
+
+| Use Case | Recommended Retention |
+|----------|----------------------|
+| Development / testing | 7-30 days |
+| Production general purpose | 90 days |
+| EU AI Act compliance | 90+ days (see [EU Compliance](/guides/eu-compliance)) |
+| Enterprise / regulated | 365+ days |
+
+### Queryability
+
+AP-Traces and Integrity Checkpoints are queryable via the Mnemom API:
+
+- [`GET /agents/{agent_id}/traces`](/api-reference/endpoint/get-agents-agent-id-traces) -- Retrieve traces for an agent
+- [`GET /traces/{trace_id}`](/api-reference/endpoint/get-traces-trace-id) -- Retrieve a specific trace
+- [`GET /agents/{agent_id}/checkpoints`](/api-reference/endpoint/get-agents-agent-id-checkpoints) -- Retrieve integrity checkpoints for an agent
+- [`GET /agents/{agent_id}/checkpoints/{checkpoint_id}`](/api-reference/endpoint/get-agents-agent-id-checkpoints-checkpoint-id) -- Retrieve a specific checkpoint
+- [`GET /drift/{agent_id}`](/api-reference/endpoint/get-drift-agent-id) -- Retrieve drift analysis for an agent
+
+### Compliance Exports
+
+Enterprise customers have access to compliance export endpoints for bulk data retrieval:
+
+- [`GET /billing/export/usage`](/api-reference/endpoint/get-billing-export-usage) -- Export usage data for billing and compliance reporting
+
+Admin export endpoints are available for organization-level data extraction, supporting regulatory audit requirements.
+
+---
+
+## Responsible Disclosure
+
+If you discover a security vulnerability in any Mnemom component, please report it responsibly via GitHub Security Advisories on the relevant repository:
+
+| Component | Repository |
+|-----------|-----------|
+| Agent Alignment Protocol | [github.com/mnemom/aap](https://github.com/mnemom/aap) |
+| Agent Integrity Protocol | [github.com/mnemom/aip](https://github.com/mnemom/aip) |
+| smoltbot Gateway | [github.com/mnemom/smoltbot](https://github.com/mnemom/smoltbot) |
+
+<Warning>
+Do not open public GitHub issues for security vulnerabilities. Use the Security Advisories feature (Security tab on each repository) to report vulnerabilities privately. We will acknowledge receipt within 48 hours and aim to provide a fix or mitigation within 7 days.
+</Warning>
+
+---
+
+## Further Reading
+
+- [AAP Security Model](/protocols/aap/security) -- Detailed threat analysis, cryptographic requirements, and adversarial scenarios for AAP
+- [AIP Security Model](/protocols/aip/security) -- Threat model and attack surface analysis for AIP
+- [AAP Limitations](/protocols/aap/limitations) -- What AAP cannot protect against
+- [AIP Limitations](/protocols/aip/limitations) -- What AIP cannot protect against
+- [EU AI Act Compliance](/guides/eu-compliance) -- Article 50 transparency obligation mapping
+- [Enforcement Modes](/smoltbot/enforcement) -- How smoltbot acts on protocol verdicts
