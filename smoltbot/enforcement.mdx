@@ -1,0 +1,202 @@
+---
+title: "Enforcement Modes"
+description: "Configure how smoltbot responds to alignment and integrity violations"
+sidebarTitle: "Enforcement"
+icon: "gavel"
+---
+
+# Enforcement Modes
+
+Smoltbot supports three enforcement modes that control how the system responds when alignment or integrity violations are detected. You can choose the level of intervention appropriate for your use case — from passive observation to active blocking.
+
+## Modes Overview
+
+<CardGroup cols={3}>
+  <Card title="Observe" icon="eye">
+    Detect violations, record them, take no action. This is the **default mode**. Ideal for initial deployment and monitoring.
+  </Card>
+  <Card title="Nudge" icon="comment">
+    Detect violations and inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct.
+  </Card>
+  <Card title="Enforce" icon="ban">
+    Hard block with 403 for non-streaming requests. Falls back to nudge for streaming requests.
+  </Card>
+</CardGroup>
+
+## Mode Details
+
+<Tabs>
+  <Tab title="Observe">
+
+### Observe Mode (Default)
+
+In observe mode, smoltbot detects and records all violations but takes no action to modify agent behavior. This is the default mode for all new agents.
+
+**Behavior:**
+
+- All API calls pass through unchanged
+- Violations are detected and recorded in the trace database
+- Integrity checkpoints are created for every interaction
+- Drift alerts are generated when behavioral patterns shift
+- No modification to agent requests or responses
+
+**When to use:**
+
+- During initial deployment to establish behavioral baselines
+- When you want to monitor without affecting agent behavior
+- For compliance auditing where you need a record but not intervention
+- When evaluating whether to enable more active enforcement
+
+**Configuration:**
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "observe"}'
+```
+
+  </Tab>
+  <Tab title="Nudge">
+
+### Nudge Mode
+
+In nudge mode, when a violation is detected, smoltbot creates a pending nudge record. On the agent's next request, the gateway injects an integrity notice into the system prompt. The agent sees the notice, can review its approach, and self-correct.
+
+**Behavior:**
+
+- Violations are detected and recorded
+- A pending nudge record is created for each violation
+- On the next API request, an integrity notice is injected into the system prompt
+- The agent receives the nudge and can self-correct
+- Nudge delivery is tracked in the conscience timeline
+- The original request passes through (not blocked)
+
+**How nudges work:**
+
+1. Observer detects a violation (e.g., `UNBOUNDED_ACTION`)
+2. A nudge record is created with the violation details
+3. On the agent's next API call, the gateway injects a system prompt addition:
+   ```
+   [INTEGRITY NOTICE] Your previous action was flagged for:
+   UNBOUNDED_ACTION (HIGH) — action "delete_all_records" is not
+   in your declared bounded_actions. Please review your approach.
+   ```
+4. The agent processes the notice alongside its normal instructions
+5. The nudge is marked as delivered in the conscience timeline
+
+**When to use:**
+
+- When you want the agent to self-correct without hard blocking
+- For agents in production where availability is critical
+- When building trust in the enforcement system before enabling hard blocks
+- For `advisory` or `delegated_authority` principal relationships
+
+**Configuration:**
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "nudge"}'
+```
+
+  </Tab>
+  <Tab title="Enforce">
+
+### Enforce Mode
+
+In enforce mode, smoltbot actively blocks requests when critical violations are detected. The behavior depends on whether the request is streaming or non-streaming.
+
+**Behavior:**
+
+- **Non-streaming requests**: Hard block with HTTP 403 response. The request does not reach the AI provider.
+- **Streaming requests**: Falls back to nudge mode (injects integrity notice into system prompt). This is because streaming connections cannot be cleanly terminated mid-stream.
+
+**When to use:**
+
+- For high-security environments where violations must be prevented
+- When operating under `fail_closed` AIP failure policy
+- For agents handling sensitive data or financial transactions
+- When regulatory requirements demand active intervention
+
+**Configuration:**
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "enforce"}'
+```
+
+<Warning>
+Enforce mode will block non-streaming API calls when violations are detected. Ensure your application handles 403 responses gracefully before enabling this mode.
+</Warning>
+
+  </Tab>
+</Tabs>
+
+## Setting Enforcement Mode
+
+Set enforcement mode via the API:
+
+```bash
+PUT /v1/agents/:id/enforcement
+```
+
+**Request body:**
+
+```json
+{
+  "mode": "observe" | "nudge" | "enforce"
+}
+```
+
+**Example:**
+
+```bash
+# Enable nudge mode
+curl -X PUT https://api.mnemom.ai/v1/agents/agent_abc123/enforcement \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "nudge"}'
+```
+
+## Violation Types and Enforcement
+
+Enforcement applies to all violation types detected by the AAP verification engine and AIP integrity checks:
+
+| Violation Type | Severity | Enforcement Behavior |
+|----------------|----------|---------------------|
+| `FORBIDDEN_ACTION` | CRITICAL | Blocked in enforce mode; nudged in nudge mode |
+| `CARD_MISMATCH` | CRITICAL | Blocked in enforce mode; nudged in nudge mode |
+| `UNBOUNDED_ACTION` | HIGH | Blocked in enforce mode; nudged in nudge mode |
+| `MISSED_ESCALATION` | HIGH | Blocked in enforce mode; nudged in nudge mode |
+| `CARD_EXPIRED` | HIGH | Blocked in enforce mode; nudged in nudge mode |
+| `UNDECLARED_VALUE` | MEDIUM | Nudged in nudge/enforce mode (not blocked) |
+
+<Note>
+In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode.
+</Note>
+
+## Conscience Timeline
+
+All enforcement actions are tracked in the conscience timeline, accessible via the API and the web dashboard at [mnemom.ai](https://mnemom.ai). The timeline records:
+
+- When a violation was detected
+- What type and severity
+- What enforcement action was taken (observed, nudged, blocked)
+- Whether the agent self-corrected after a nudge
+- Drift patterns across enforcement events
+
+## Provider Compatibility
+
+Enforcement works across all providers where AIP is supported:
+
+| Provider | Observe | Nudge | Enforce (non-streaming) | Enforce (streaming) |
+|----------|---------|-------|------------------------|---------------------|
+| Anthropic | Yes | Yes | Yes | Falls back to nudge |
+| OpenAI | Yes | Yes | Yes | Falls back to nudge |
+| Gemini | Yes | Yes | Yes | Falls back to nudge |
+
+## Related
+
+- [Smoltbot Overview](/smoltbot/overview) — Architecture and how it works
+- [CLI Reference](/smoltbot/cli) — CLI commands for monitoring enforcement
+- [Observability](/guides/observability) — Export enforcement data to your observability platform

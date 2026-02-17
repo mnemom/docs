@@ -1,0 +1,460 @@
+---
+title: "AP-Traces"
+description: "Structured records of agent actions for post-hoc alignment verification"
+sidebarTitle: "AP-Traces"
+icon: "route"
+---
+
+# AP-Traces
+
+An AP-Trace (Alignment Protocol Trace) is a structured audit log entry that records an agent's decision process -- the action it took, the alternatives it considered, the reasoning behind its choice, and whether escalation was evaluated. AP-Traces are the behavioral evidence that makes [Alignment Cards](/concepts/alignment-cards) verifiable.
+
+Where an Alignment Card says "what I claim to be," an AP-Trace says "what I actually did."
+
+<Note>
+  AP-Traces capture significant decisions, not every computation. They use a sampling approach: each trace records a decision point where the agent chose between alternatives, applied values, and evaluated escalation triggers. The absence of a trace does not mean nothing happened.
+</Note>
+
+## Why AP-Traces Exist
+
+Alignment Cards are declarations. Without evidence, they are just promises. AP-Traces provide the evidence layer -- structured records that can be programmatically checked against the card to determine whether the agent's behavior matches its declarations.
+
+This enables three verification levels:
+
+| Level | Scope | Question |
+|---|---|---|
+| **Trace verification** | Single decision | Did this action comply with the card? |
+| **Session verification** | One session | Was the agent consistent throughout this session? |
+| **Longitudinal verification** | Multiple sessions | Is the agent [drifting](/concepts/drift-detection) from its declared alignment? |
+
+## Trace Structure
+
+An AP-Trace contains four required blocks and one optional block:
+
+```
+AP-Trace
+  +-- Identity (trace_id, agent_id, card_id, timestamp)
+  +-- Action Block (what was done)
+  +-- Decision Block (why it was done)
+  +-- Escalation Block (whether escalation was evaluated)
+  +-- Context Block (optional session metadata)
+```
+
+### Identity Fields
+
+Every trace begins with identity fields that link it to a specific agent and Alignment Card:
+
+```json
+{
+  "trace_id": "tr-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "timestamp": "2026-01-31T12:30:00Z"
+}
+```
+
+The `card_id` is critical: it binds the trace to the specific Alignment Card in effect when the decision was made. Verification always checks the trace against this referenced card, not the agent's current card.
+
+### Action Block
+
+The action block describes what the agent did or considered doing:
+
+```json
+{
+  "action": {
+    "type": "recommend",
+    "name": "product_recommendation",
+    "category": "bounded",
+    "target": {
+      "type": "product_search",
+      "identifier": "search-12345"
+    }
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `type` | Action type: `recommend`, `execute`, `escalate`, or `deny` |
+| `name` | Human-readable action name |
+| `category` | How the action relates to the autonomy envelope: `bounded`, `escalation_trigger`, or `forbidden` |
+| `target` | The resource affected (optional) |
+
+The `category` field is what verification checks first. A `bounded` action must appear in the card's `bounded_actions` list. A `forbidden` category should never appear in a compliant trace.
+
+### Decision Block
+
+The decision block records the agent's reasoning process -- the alternatives it evaluated, how it scored them, which it selected, and why:
+
+```json
+{
+  "decision": {
+    "alternatives_considered": [
+      {
+        "option_id": "prod-A",
+        "description": "Product A - Best match for stated preferences",
+        "score": 0.85,
+        "scoring_factors": {
+          "preference_match": 0.9,
+          "price_value": 0.8,
+          "reviews": 0.85
+        },
+        "flags": []
+      },
+      {
+        "option_id": "prod-B",
+        "description": "Product B - Lower price point",
+        "score": 0.72,
+        "scoring_factors": {
+          "preference_match": 0.7,
+          "price_value": 0.95,
+          "reviews": 0.6
+        },
+        "flags": []
+      },
+      {
+        "option_id": "prod-C",
+        "description": "Product C - Sponsored listing",
+        "score": 0.68,
+        "scoring_factors": {
+          "preference_match": 0.75,
+          "price_value": 0.7,
+          "reviews": 0.7
+        },
+        "flags": ["sponsored_content"]
+      }
+    ],
+    "selected": "prod-A",
+    "selection_reasoning": "Highest overall score based on preference match and reviews. Product C was flagged as sponsored and deprioritized per principal_benefit value.",
+    "values_applied": ["principal_benefit", "transparency"],
+    "confidence": 0.85
+  }
+}
+```
+
+Key fields:
+
+- **alternatives_considered**: At least one alternative must be present. Each includes a description, optional score, and optional flags (concerns about that option).
+- **selected**: Which alternative was chosen.
+- **selection_reasoning**: Human-readable explanation of why this option was selected.
+- **values_applied**: Which declared values influenced the decision. These are checked against the card during verification.
+- **confidence**: Decision confidence from 0.0 to 1.0 (optional).
+
+<Tip>
+  The `flags` array on alternatives is particularly useful for transparency. In the example above, `"sponsored_content"` on Product C makes it auditable that the agent identified and deprioritized a sponsored result.
+</Tip>
+
+### Escalation Block
+
+The escalation block records whether escalation triggers were evaluated and what happened:
+
+**When no escalation is needed:**
+
+```json
+{
+  "escalation": {
+    "evaluated": true,
+    "triggers_checked": [
+      {
+        "trigger": "action_type == \"purchase\"",
+        "matched": false
+      }
+    ],
+    "required": false,
+    "reason": "Recommendation only, no purchase action"
+  }
+}
+```
+
+**When escalation is triggered:**
+
+```json
+{
+  "escalation": {
+    "evaluated": true,
+    "triggers_checked": [
+      {
+        "trigger": "action_type == \"purchase\"",
+        "matched": true
+      }
+    ],
+    "required": true,
+    "reason": "Purchase action requires principal approval",
+    "escalation_id": "esc-abc123",
+    "escalation_status": "approved",
+    "principal_response": {
+      "decision": "approved",
+      "timestamp": "2026-01-31T12:05:00Z",
+      "conditions": ["max_price <= 50"]
+    }
+  }
+}
+```
+
+The escalation block is where the autonomy envelope becomes enforceable. Verification checks that every trigger condition that matched the trace context resulted in an escalation. A matched trigger without escalation produces a `MISSED_ESCALATION` violation.
+
+### Context Block
+
+The context block provides optional session and environment metadata:
+
+```json
+{
+  "context": {
+    "session_id": "sess-789xyz",
+    "conversation_turn": 3,
+    "prior_trace_ids": ["tr-abc123", "tr-def456"],
+    "environment": {
+      "client": "web",
+      "locale": "en-US"
+    }
+  }
+}
+```
+
+When [AIP integration](/concepts/integrity-checkpoints) is active, the context block also carries integrity metadata:
+
+```json
+{
+  "context": {
+    "session_id": "sess-789xyz",
+    "metadata": {
+      "has_thinking": true,
+      "integrity_verdict": "clear",
+      "integrity_checkpoint_id": "ic-xyz789",
+      "integrity_concerns": 0
+    }
+  }
+}
+```
+
+## How Traces Are Generated
+
+AP-Traces can be generated through two mechanisms:
+
+### Gateway-Level Generation
+
+In a Mnemom deployment, the Gateway Worker routes requests and the Observer Worker processes logs asynchronously. The Observer extracts trace data from gateway logs, builds AP-Trace structures, and stores them. This happens automatically, with no SDK integration required from the agent developer.
+
+### SDK-Level Generation
+
+Agents using the AAP SDK can generate traces directly:
+
+<CodeGroup>
+```python Python
+from aap import create_trace
+
+trace = create_trace(
+    agent_id="my-agent",
+    card_id="ac-my-card-id",
+    action={
+        "type": "recommend",
+        "name": "product_recommendation",
+        "category": "bounded",
+    },
+    decision={
+        "alternatives_considered": [
+            {
+                "option_id": "A",
+                "description": "Top-rated product",
+                "score": 0.9,
+            }
+        ],
+        "selected": "A",
+        "selection_reasoning": "Highest rated product matching user criteria",
+        "values_applied": ["principal_benefit"],
+    },
+    escalation={
+        "evaluated": True,
+        "triggers_checked": [],
+        "required": False,
+        "reason": "No escalation triggers matched",
+    },
+)
+```
+
+```typescript TypeScript
+import { createTrace } from '@mnemom/agent-alignment-protocol';
+
+const trace = createTrace({
+  agentId: 'my-agent',
+  cardId: 'ac-my-card-id',
+  action: {
+    type: 'recommend',
+    name: 'product_recommendation',
+    category: 'bounded',
+  },
+  decision: {
+    alternativesConsidered: [
+      {
+        optionId: 'A',
+        description: 'Top-rated product',
+        score: 0.9,
+      },
+    ],
+    selected: 'A',
+    selectionReasoning: 'Highest rated product matching user criteria',
+    valuesApplied: ['principal_benefit'],
+  },
+  escalation: {
+    evaluated: true,
+    triggersChecked: [],
+    required: false,
+    reason: 'No escalation triggers matched',
+  },
+});
+```
+</CodeGroup>
+
+## Verification
+
+Verification checks a trace against its referenced Alignment Card. The algorithm performs five checks:
+
+1. **Autonomy compliance**: Is the action's `category` consistent with the autonomy envelope? Bounded actions must be in `bounded_actions`.
+2. **Forbidden action compliance**: Is the action name absent from `forbidden_actions`?
+3. **Escalation compliance**: Were all matched escalation triggers properly escalated?
+4. **Value consistency**: Are all `values_applied` in the card's `declared` values?
+5. **Behavioral similarity**: Is the trace's behavioral fingerprint semantically similar to the card?
+
+<CodeGroup>
+```python Python
+from aap import verify_trace
+
+result = verify_trace(trace, card)
+
+print(f"Verified: {result.verified}")
+print(f"Violations: {result.violations}")
+print(f"Similarity: {result.similarity_score}")
+```
+
+```typescript TypeScript
+import { verifyTrace } from '@mnemom/agent-alignment-protocol';
+
+const result = verifyTrace(trace, card);
+
+console.log(`Verified: ${result.verified}`);
+console.log(`Violations: ${result.violations}`);
+console.log(`Similarity: ${result.similarityScore}`);
+```
+</CodeGroup>
+
+### Violation Types
+
+| Type | Severity | Description |
+|---|---|---|
+| `UNBOUNDED_ACTION` | HIGH | Action not in the `bounded_actions` list |
+| `FORBIDDEN_ACTION` | CRITICAL | Action in the `forbidden_actions` list |
+| `MISSED_ESCALATION` | HIGH | Escalation trigger matched but agent did not escalate |
+| `UNDECLARED_VALUE` | MEDIUM | Agent applied a value not in its declared values |
+| `CARD_EXPIRED` | HIGH | The referenced Alignment Card has expired |
+| `CARD_MISMATCH` | CRITICAL | Trace references a different card than the one provided |
+
+### Behavioral Similarity
+
+Beyond structural checks, verification computes a behavioral similarity score using SSM (Self-Similarity Matrix) analysis. This catches cases where a trace passes all structural checks but the overall behavior pattern diverges from what the card describes.
+
+The threshold is `0.50`. A trace that passes structural checks but scores below `0.50` on behavioral similarity receives a `low_behavioral_similarity` warning -- not a violation, but a signal for investigation.
+
+## Trace Storage and Querying
+
+Traces are append-only: once created, they must not be modified. Storage options are declared in the Alignment Card's `audit_commitment` block.
+
+If `queryable` is `true`, the agent exposes a query endpoint where principals and auditors can retrieve traces:
+
+```bash
+curl https://shopping.agent.example.com/api/v1/traces \
+  -H "Authorization: Bearer $TOKEN" \
+  -G -d "session_id=sess-789xyz" \
+  -d "from=2026-01-31T00:00:00Z" \
+  -d "to=2026-01-31T23:59:59Z"
+```
+
+<Warning>
+  AP-Traces are sampled records of decision points. They do not capture every computation the agent performs. Significant reasoning may occur between traced decisions. The presence of clean traces does not prove the absence of misaligned behavior -- it proves the absence of misaligned behavior at traced decision points.
+</Warning>
+
+## Complete Example
+
+```json
+{
+  "trace_id": "tr-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "timestamp": "2026-01-31T12:30:00Z",
+
+  "action": {
+    "type": "recommend",
+    "name": "product_recommendation",
+    "category": "bounded",
+    "target": {
+      "type": "product_search",
+      "identifier": "search-12345"
+    }
+  },
+
+  "decision": {
+    "alternatives_considered": [
+      {
+        "option_id": "prod-A",
+        "description": "Product A - Best match for stated preferences",
+        "score": 0.85,
+        "scoring_factors": {
+          "preference_match": 0.9,
+          "price_value": 0.8,
+          "reviews": 0.85
+        },
+        "flags": []
+      },
+      {
+        "option_id": "prod-C",
+        "description": "Product C - Sponsored listing",
+        "score": 0.68,
+        "scoring_factors": {
+          "preference_match": 0.75,
+          "price_value": 0.7,
+          "reviews": 0.7
+        },
+        "flags": ["sponsored_content"]
+      }
+    ],
+    "selected": "prod-A",
+    "selection_reasoning": "Highest overall score. Product C flagged as sponsored and deprioritized per principal_benefit value.",
+    "values_applied": ["principal_benefit", "transparency"],
+    "confidence": 0.85
+  },
+
+  "escalation": {
+    "evaluated": true,
+    "triggers_checked": [
+      {
+        "trigger": "action_type == \"purchase\"",
+        "matched": false
+      }
+    ],
+    "required": false,
+    "reason": "Recommendation only, no purchase action"
+  },
+
+  "context": {
+    "session_id": "sess-789xyz",
+    "conversation_turn": 3,
+    "prior_trace_ids": ["tr-abc123", "tr-def456"]
+  }
+}
+```
+
+## Design Principles
+
+1. **Sampling, not completeness.** Traces capture significant decisions, not every internal computation. This keeps overhead manageable while providing meaningful audit data.
+
+2. **Structured reasoning.** Decision rationale is machine-parseable, not free-form text. This enables automated verification at scale.
+
+3. **Verifiable references.** Every trace references the Alignment Card in effect via `card_id`. This makes verification unambiguous.
+
+4. **Append-only.** Traces must not be modified after creation. This ensures audit trail integrity.
+
+## Further Reading
+
+- [Alignment Cards](/concepts/alignment-cards) -- The declarations that traces are verified against
+- [Drift Detection](/concepts/drift-detection) -- How traces across sessions reveal behavioral drift
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- Real-time analysis that enriches traces
+- [AAP Specification](/protocols/aap/specification) -- Full normative specification

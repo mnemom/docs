@@ -1,0 +1,340 @@
+---
+title: "EU AI Act Compliance"
+description: "Article 50 transparency obligation mapping for AAP and AIP protocols"
+sidebarTitle: "EU Compliance"
+icon: "scale-balanced"
+---
+
+# EU AI Act Compliance
+
+The EU AI Act's Article 50 establishes transparency obligations for providers and deployers of AI systems. These obligations require that users are informed they are interacting with AI, that AI-generated content is machine-detectable, that decisions are explainable, and that audit trails are maintained.
+
+Both protocols in the Mnemom trust infrastructure address these requirements:
+
+- **AAP** (Agent Alignment Protocol) provides post-hoc audit trails — what the agent *did*, with structured decision records and verification.
+- **AIP** (Agent Integrity Protocol) provides real-time transparency — what the agent was *thinking*, with integrity checkpoints and concern detection.
+
+Together they satisfy both dimensions of Article 50 transparency. The cross-protocol linkage (`IntegrityCheckpoint.linked_trace_id` references `APTrace.trace_id`) creates a complete audit chain from reasoning to decision.
+
+<Note>
+This document reflects a technical mapping of AAP and AIP features to Article 50 requirements. It does not constitute legal advice. Consult qualified legal counsel for your specific compliance obligations.
+</Note>
+
+<Tabs>
+  <Tab title="AAP Mapping">
+
+## AAP: Article 50 Obligation Mapping
+
+### 50(1) — Inform Users of AI Interaction
+
+**Requirement**: Providers shall ensure that AI systems intended to interact directly with natural persons are designed and developed in such a way that the natural persons concerned are informed that they are interacting with an AI system.
+
+| Obligation | AAP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Identify the AI system | `AlignmentCard.agent_id` | Unique, persistent agent identifier |
+| Identify the principal | `AlignmentCard.principal` | Declares human/org oversight and relationship type |
+| Disclose AI nature | `extensions.eu_ai_act.disclosure_text` | Machine-readable disclosure text for presentation to users |
+| Classify the system | `extensions.eu_ai_act.ai_system_classification` | Declares risk classification per AI Act categories |
+
+**SDK preset**: `EU_COMPLIANCE_EXTENSIONS` provides a ready-made extension block:
+
+```python
+from aap.compliance import EU_COMPLIANCE_EXTENSIONS
+
+card = AlignmentCard(
+    ...,
+    extensions=EU_COMPLIANCE_EXTENSIONS,
+)
+# card.extensions["eu_ai_act"]["disclosure_text"] contains the disclosure
+```
+
+### 50(2) — Machine-Readable Marking
+
+**Requirement**: Providers of AI systems shall ensure that the outputs of the AI system are marked in a machine-readable format and detectable as artificially generated or manipulated.
+
+| Obligation | AAP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Machine-readable format | AP-Trace structured JSON | Every decision is a structured, parseable record |
+| Protocol versioning | `AlignmentCard.aap_version` | Protocol version enables tooling compatibility |
+| Trace format declaration | `audit_commitment.trace_format` = `"ap-trace-v1"` | Declares the structured format used |
+| Agent attribution | `APTrace.agent_id` + `APTrace.card_id` | Every trace links to the producing agent and its card |
+
+AP-Traces are inherently machine-readable — they are structured JSON documents with a defined schema. Any system processing AAP-instrumented agent output can parse the trace to determine that it was AI-generated and by which agent.
+
+### 50(3) — Transparency of Decisions
+
+**Requirement**: Deployers of AI systems that generate or manipulate content shall disclose that the content has been artificially generated or manipulated.
+
+| Obligation | AAP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Decision reasoning | `APTrace.decision.selection_reasoning` | Free-text explanation of why the agent chose this action |
+| Values applied | `APTrace.decision.values_applied` | Which declared values influenced the decision |
+| Alternatives considered | `APTrace.decision.alternatives_considered` | All options the agent evaluated, with scores |
+| Escalation evaluation | `APTrace.escalation.evaluated` + `triggers_checked` | Whether human oversight was considered and why |
+| Confidence | `APTrace.decision.confidence` | Agent's self-assessed confidence in the decision |
+
+The AP-Trace `decision` block provides complete transparency into agent reasoning: what alternatives were considered, how they were scored, which values were applied, and why the selected option was chosen. This goes beyond Article 50's minimum requirements by making the full decision process auditable.
+
+### 50(4) — Audit Trail
+
+**Requirement**: AI systems shall be designed and developed to allow for the logging of relevant events over the lifetime of the system.
+
+| Obligation | AAP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Retention period | `audit_commitment.retention_days` >= 90 | Minimum 90 days recommended for EU compliance |
+| Queryability | `audit_commitment.queryable` = `true` | Traces can be retrieved and inspected |
+| Tamper evidence | `audit_commitment.tamper_evidence` = `"append_only"` | Audit log integrity protection |
+| Query endpoint | `audit_commitment.query_endpoint` | Optional: API endpoint for trace retrieval |
+| Trace format | `audit_commitment.trace_format` = `"ap-trace-v1"` | Standardized, versioned format |
+
+**SDK preset**: `EU_COMPLIANCE_AUDIT_COMMITMENT` provides recommended values:
+
+```python
+from aap.compliance import EU_COMPLIANCE_AUDIT_COMMITMENT
+
+card = AlignmentCard(
+    ...,
+    audit_commitment=AuditCommitment(**EU_COMPLIANCE_AUDIT_COMMITMENT),
+)
+# retention_days=90, queryable=True, tamper_evidence="append_only"
+```
+
+## AAP Risk Assessment Support
+
+Article 50 obligations vary by risk classification. AAP supports risk assessment through:
+
+| Risk Dimension | AAP Feature | Reference |
+|---------------|-------------|-----------|
+| Behavioral boundaries | `autonomy_envelope.bounded_actions` + `forbidden_actions` | Alignment Card |
+| Escalation policy | `autonomy_envelope.escalation_triggers` | Alignment Card |
+| Value declaration | `values.declared` + `values.definitions` | Alignment Card |
+| Known limitations | LIMITS.md documentation pattern | `docs/LIMITS.md` |
+| Behavioral drift | `detect_drift()` API | Verification Engine |
+| Violation detection | `verify_trace()` API | Verification Engine |
+
+The Alignment Card + LIMITS.md combination provides the static risk assessment. The Verification Engine provides dynamic, ongoing risk monitoring.
+
+## AAP SDK Compliance Presets
+
+AAP provides three compliance presets that encapsulate the recommended configuration:
+
+### `EU_COMPLIANCE_AUDIT_COMMITMENT`
+
+```python
+{
+    "retention_days": 90,
+    "queryable": True,
+    "query_endpoint": "https://audit.example.com/traces",
+    "tamper_evidence": "append_only",
+    "trace_format": "ap-trace-v1",
+}
+```
+
+### `EU_COMPLIANCE_EXTENSIONS`
+
+```python
+{
+    "eu_ai_act": {
+        "article_50_compliant": True,
+        "ai_system_classification": "general_purpose",
+        "disclosure_text": "This system is powered by an AI agent. Its decisions "
+                           "are logged and auditable. You may request a human "
+                           "review of any decision.",
+        "compliance_version": "2026-08",
+    },
+}
+```
+
+### `EU_COMPLIANCE_VALUES`
+
+```python
+["transparency", "honesty", "user_control", "principal_benefit"]
+```
+
+These are available in both Python and TypeScript:
+
+```python
+from aap.compliance import (
+    EU_COMPLIANCE_AUDIT_COMMITMENT,
+    EU_COMPLIANCE_EXTENSIONS,
+    EU_COMPLIANCE_VALUES,
+)
+```
+
+```typescript
+import {
+  EU_COMPLIANCE_AUDIT_COMMITMENT,
+  EU_COMPLIANCE_EXTENSIONS,
+  EU_COMPLIANCE_VALUES,
+} from "agent-alignment-protocol";
+```
+
+For the full AAP specification, see the [AAP Specification](/protocols/aap/specification).
+
+  </Tab>
+  <Tab title="AIP Mapping">
+
+## AIP: Article 50 Obligation Mapping
+
+### 50(1) — Inform Users of AI Interaction
+
+**Requirement**: Providers shall ensure that AI systems intended to interact directly with natural persons are informed that they are interacting with an AI system.
+
+| Obligation | AIP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Identify the AI system | `IntegrityCheckpoint.agent_id` | Unique agent identifier in every checkpoint |
+| Link to alignment declaration | `IntegrityCheckpoint.card_id` | References the AAP Alignment Card |
+| Session tracking | `IntegrityCheckpoint.session_id` | Groups checks within a conversation |
+| Provider identification | `IntegrityCheckpoint.provider` + `model` | Identifies the underlying LLM |
+
+Every Integrity Checkpoint carries the agent's identity, linking real-time analysis back to the agent's declared alignment posture (the AAP Alignment Card).
+
+### 50(2) — Machine-Readable Marking
+
+**Requirement**: Providers of AI systems shall ensure that the outputs of the AI system are marked in a machine-readable format and detectable as artificially generated or manipulated.
+
+| Obligation | AIP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Structured format | IntegrityCheckpoint JSON | Every checkpoint is structured, parseable JSON |
+| Content integrity | `thinking_block_hash` | SHA-256 hash of the thinking block — tamper-evident |
+| Protocol versioning | AIP protocol version in headers | `X-AIP-Version` header on all responses |
+| Unique identification | `checkpoint_id` (`ic-{uuid}`) | Every checkpoint is uniquely identified |
+
+Integrity Checkpoints are inherently machine-readable. The `thinking_block_hash` provides cryptographic evidence that a specific thinking block was analyzed, without exposing the thinking block content itself.
+
+### 50(3) — Transparency of Decisions
+
+**Requirement**: Deployers shall disclose that content has been artificially generated or manipulated. Systems shall provide explanations of their operation.
+
+| Obligation | AIP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Reasoning summary | `IntegrityCheckpoint.reasoning_summary` | Natural-language explanation of the integrity analysis |
+| Values checked | `ConscienceContext.values_checked` | Which conscience values were evaluated |
+| Value conflicts | `ConscienceContext.conflicts` | Which values were in tension |
+| Value supports | `ConscienceContext.supports` | Which values the thinking aligned with |
+| Integrity verdict | `IntegrityCheckpoint.verdict` | `clear`, `review_needed`, or `boundary_violation` |
+| Specific concerns | `IntegrityCheckpoint.concerns[]` | Categorized concerns with evidence and severity |
+
+The `ConscienceContext` block provides Article 50's required transparency into how the AI system's reasoning was evaluated. The `reasoning_summary` field provides a human-readable explanation suitable for disclosure.
+
+### 50(4) — Audit Trail
+
+**Requirement**: AI systems shall be designed and developed to allow for the logging of relevant events over the lifetime of the system.
+
+| Obligation | AIP Field | How It Satisfies |
+|-----------|-----------|------------------|
+| Session windowing | `WindowConfig.max_age_seconds` = 7200 | Extended 2-hour retention window for EU compliance |
+| Window management | `WindowConfig.mode` = `"sliding"` | Continuous monitoring with bounded memory |
+| Session boundaries | `WindowConfig.session_boundary` = `"reset"` | Clean session isolation |
+| Cross-protocol audit | `IntegrityCheckpoint.linked_trace_id` | Links to AAP AP-Trace for full audit chain |
+| Failure handling | `FailurePolicy.mode` = `"fail_closed"` | System blocks on analysis failure — no silent pass-through |
+| Analysis metadata | `AnalysisMetadata` | Records analysis model, duration, token counts |
+
+**SDK preset**: `EU_COMPLIANCE_WINDOW_CONFIG` and `EU_COMPLIANCE_FAILURE_POLICY` provide recommended values:
+
+```python
+from aip import EU_COMPLIANCE_WINDOW_CONFIG, EU_COMPLIANCE_FAILURE_POLICY
+
+config = AIPConfig(
+    ...,
+    window=WindowConfig(**EU_COMPLIANCE_WINDOW_CONFIG),
+    failure_policy=FailurePolicy(**EU_COMPLIANCE_FAILURE_POLICY),
+)
+# max_age_seconds=7200, mode="sliding", fail_closed with 15s timeout
+```
+
+## AIP Concern Categories and Article 50
+
+AIP's concern taxonomy maps to Article 50's risk dimensions:
+
+| Concern Category | Article 50 Relevance | Severity |
+|-----------------|---------------------|----------|
+| `prompt_injection` | Content manipulation transparency | High-Critical |
+| `value_misalignment` | Declared vs. actual behavior transparency | Medium-High |
+| `autonomy_violation` | Human oversight requirements | High |
+| `data_exfiltration` | User data protection transparency | Critical |
+| `deception` | AI system honesty obligations | Critical |
+
+When a concern is detected, the Integrity Checkpoint records:
+- **Category**: What type of concern
+- **Severity**: How serious (low/medium/high/critical)
+- **Description**: What was found
+- **Evidence**: Quoted excerpt from the thinking block (max 200 chars)
+- **Relevant card field**: Which Alignment Card field is implicated
+- **Relevant conscience value**: Which conscience value was triggered
+
+## AIP SDK Compliance Presets
+
+AIP provides two compliance presets that encapsulate the recommended configuration:
+
+### `EU_COMPLIANCE_WINDOW_CONFIG`
+
+```python
+{
+    "max_size": 10,
+    "mode": "sliding",
+    "session_boundary": "reset",
+    "max_age_seconds": 7200,
+}
+```
+
+Extended to 2 hours (vs. default 1 hour) to ensure adequate retention during user sessions.
+
+### `EU_COMPLIANCE_FAILURE_POLICY`
+
+```python
+{
+    "mode": "fail_closed",
+    "analysis_timeout_ms": 15000,
+}
+```
+
+Fail-closed ensures no agent response passes without integrity analysis. Timeout extended to 15 seconds (vs. default 10) to reduce false failures.
+
+These are available in both Python and TypeScript:
+
+```python
+from aip import EU_COMPLIANCE_WINDOW_CONFIG, EU_COMPLIANCE_FAILURE_POLICY
+```
+
+```typescript
+import {
+  EU_COMPLIANCE_WINDOW_CONFIG,
+  EU_COMPLIANCE_FAILURE_POLICY,
+} from "@mnemom/agent-integrity-protocol";
+```
+
+For the full AIP specification, see the [AIP Specification](/protocols/aip/specification).
+
+  </Tab>
+</Tabs>
+
+## Cross-Protocol Linkage
+
+AAP provides post-hoc audit trails (what the agent did). AIP provides real-time transparency (what the agent is thinking). Together they satisfy both dimensions of Article 50:
+
+| Dimension | Protocol | Artifact |
+|-----------|----------|----------|
+| Decision audit trail | AAP | AP-Trace |
+| Real-time reasoning transparency | AIP | Integrity Checkpoint |
+| Cross-protocol linkage | Both | `IntegrityCheckpoint.linked_trace_id` references `APTrace.trace_id` |
+
+## Working Examples
+
+- [AAP EU Compliance Example](https://github.com/mnemom/aap/tree/main/examples/eu-compliance/) — Creates an EU-compliant Alignment Card, generates a traced decision, verifies it, and prints a compliance summary.
+- [AIP EU Compliance Example](https://github.com/mnemom/aip/tree/main/examples/eu-compliance/) — Creates an AIP configuration with EU compliance presets, runs an integrity check, shows the checkpoint audit trail, and demonstrates fail-closed behavior.
+
+## Enforcement Timeline
+
+| Date | Milestone |
+|------|-----------|
+| August 2025 | AI Act general provisions in force |
+| February 2026 | Prohibited practices apply |
+| **August 2026** | **Article 50 transparency obligations apply** |
+| August 2027 | High-risk system obligations apply |
+
+## References
+
+- [EU AI Act Article 50 — Full Text](https://artificialintelligenceact.eu/article/50/)
+- [AAP Specification](/protocols/aap/specification)
+- [AIP Specification](/protocols/aip/specification)

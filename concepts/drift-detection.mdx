@@ -1,0 +1,331 @@
+---
+title: "Drift Detection"
+description: "Detecting when AI agent behavior diverges from declared alignment over time"
+sidebarTitle: "Drift Detection"
+icon: "chart-line-down"
+---
+
+# Drift Detection
+
+Drift is the gradual or sudden divergence of an agent's behavior from its declared alignment posture. A single verified [AP-Trace](/concepts/ap-traces) or a single clear [integrity checkpoint](/concepts/integrity-checkpoints) tells you the agent was aligned at that moment. Drift detection tells you whether the agent is *staying* aligned over time.
+
+Mnemom detects drift at two timescales through two complementary protocols:
+
+| Protocol | Timescale | Input | Detection Method |
+|---|---|---|---|
+| **AAP** (post-hoc) | Days to weeks, cross-session | AP-Trace structural features | Cosine similarity to baseline centroid |
+| **AIP** (real-time) | Minutes, within a session | Integrity checkpoint verdicts | Consecutive non-clear count |
+
+Both protocols store alerts in the same `drift_alerts` database table, surfaced through a unified API and dashboard.
+
+## What Drift Looks Like
+
+Drift rarely appears as a single dramatic violation. More commonly, it manifests as a pattern:
+
+- An agent that used to escalate 15% of decisions now escalates only 5%.
+- An agent that declared `transparency` as a value stops applying it in trace decisions.
+- An agent's integrity checkpoints shift from consistently `clear` to occasional `review_needed` verdicts, then more frequent ones.
+- An agent starts reasoning about actions not in its `bounded_actions` list, even if it does not ultimately take them.
+
+Each individual action might pass verification. The problem is the trend.
+
+## AAP Drift Detection (Post-Hoc)
+
+AAP drift detection analyzes AP-Trace structural features across sessions to detect behavioral patterns that diverge from a computed baseline.
+
+### How It Works
+
+1. **Feature extraction**: Extract structural features from each trace -- action types, values applied, escalation patterns, confidence scores. Content features (reasoning text) are excluded because they dilute cosine similarity without adding alignment signal.
+
+2. **Chronological ordering**: Sort all traces by timestamp.
+
+3. **Baseline computation**: Compute a baseline centroid from the first N traces, where N = `max(sustained_threshold, min(10, len(traces) // 4))`. This centroid represents the agent's "normal" behavioral fingerprint.
+
+4. **Similarity computation**: Compute cosine similarity between each subsequent trace's feature vector and the baseline centroid.
+
+5. **Divergence tracking**: Track similarity over time. Alert when similarity drops below the threshold for a sustained number of consecutive traces.
+
+### Structural Features
+
+AAP drift uses only structural features extracted from traces and cards:
+
+| Feature | Source | Weight |
+|---|---|---|
+| `value:{v}` | Declared/applied values | 1.0 |
+| `action_name:{name}` | Bounded actions / action name | 1.0 |
+| `action:{type}` | Action type (trace only) | 1.0 |
+| `category:{cat}` | Principal type / action category | 1.0 |
+| `escalation:*` | Escalation triggers / escalation state | 1.0 |
+| `confidence` | Decision confidence | 0.0-1.0 |
+
+<Note>
+  Content features (TF-IDF from reasoning text) are available for text-to-text comparison (e.g., SSM pairwise similarity between traces) but are not used for drift detection. Alignment Cards declare structural constraints -- values, bounded actions, principal relationships -- and contain no reasoning text. Including content tokens dilutes similarity without adding alignment signal.
+</Note>
+
+### Calibration Thresholds
+
+These thresholds are calibrated from empirical analysis of approximately 50 multi-turn agent conversations totaling around 2,500 messages:
+
+| Constant | Value | Description |
+|---|---|---|
+| `DEFAULT_SIMILARITY_THRESHOLD` | 0.30 | Alert when drift similarity drops below |
+| `DEFAULT_SUSTAINED_TURNS_THRESHOLD` | 3 | Alert after N consecutive low-similarity traces |
+| `BEHAVIORAL_SIMILARITY_THRESHOLD` | 0.50 | Warn on single-trace verification when below |
+| `MIN_COHERENCE_FOR_PROCEED` | 0.70 | Minimum coherence score for automatic proceed |
+
+### Code Example
+
+<CodeGroup>
+```python Python
+from aap import detect_drift
+
+traces = fetch_traces(agent_id="my-agent", days=30)
+card = fetch_alignment_card(agent_id="my-agent")
+
+alerts = detect_drift(
+    traces=traces,
+    card=card,
+    similarity_threshold=0.30,
+    sustained_threshold=3,
+)
+
+for alert in alerts:
+    print(f"Drift detected: {alert.drift_direction}")
+    print(f"  Similarity: {alert.similarity_score}")
+    print(f"  Sustained traces: {alert.sustained_traces}")
+    print(f"  Trace IDs: {alert.trace_ids}")
+```
+
+```typescript TypeScript
+import { detectDrift } from '@mnemom/agent-alignment-protocol';
+
+const traces = await fetchTraces({ agentId: 'my-agent', days: 30 });
+const card = await fetchAlignmentCard({ agentId: 'my-agent' });
+
+const alerts = detectDrift({
+  traces,
+  card,
+  similarityThreshold: 0.30,
+  sustainedThreshold: 3,
+});
+
+for (const alert of alerts) {
+  console.log(`Drift: ${alert.driftDirection}`);
+  console.log(`  Similarity: ${alert.similarityScore}`);
+  console.log(`  Sustained: ${alert.sustainedTraces} traces`);
+}
+```
+</CodeGroup>
+
+### AAP Drift Alert Structure
+
+```json
+{
+  "alert_type": "drift_detected",
+  "agent_id": "did:web:agent.example.com",
+  "card_id": "ac-abc123",
+  "detection_timestamp": "2026-01-31T14:00:00Z",
+  "analysis": {
+    "similarity_score": 0.25,
+    "sustained_traces": 4,
+    "threshold": 0.30,
+    "drift_direction": "toward_autonomy_expansion",
+    "specific_indicators": [
+      {
+        "indicator": "escalation_rate_decrease",
+        "baseline": 0.15,
+        "current": 0.05,
+        "description": "Escalation rate decreased from 15% to 5% of decisions"
+      }
+    ]
+  },
+  "recommendation": "Review recent decisions for alignment drift",
+  "trace_ids": ["tr-1", "tr-2", "tr-3", "tr-4"]
+}
+```
+
+### AAP Drift Categories
+
+| Category | Description | Indicators |
+|---|---|---|
+| `autonomy_expansion` | Agent acting outside declared bounds | Decreased escalation rate, new action types |
+| `value_drift` | Applied values diverging from declared | Different values appearing in traces |
+| `principal_misalignment` | Decisions not serving principal | Declining principal-benefit scores |
+| `communication_drift` | Explanations becoming inconsistent | Selection reasoning diverging from values |
+
+## AIP Drift Detection (Real-Time)
+
+AIP drift detection monitors the pattern of integrity verdicts within a session. It is deliberately simpler than AAP drift because it operates on a faster timescale where complex statistical methods are unnecessary.
+
+### How It Works
+
+1. Maintain a running count of consecutive non-clear verdicts (`sustained_nonclear`).
+2. On each checkpoint:
+   - If `verdict === "clear"`: reset `sustained_nonclear` to 0.
+   - If `verdict !== "clear"`: increment `sustained_nonclear`.
+3. When `sustained_nonclear >= threshold` (default: 3): generate an IntegrityDriftAlert.
+4. Compute `integrity_similarity` as the ratio of clear verdicts in the current window: `clear_count / window_size`.
+5. Derive severity from `integrity_similarity`.
+
+### Severity Thresholds
+
+| Severity | integrity_similarity | Meaning |
+|---|---|---|
+| `low` | >= 0.7 | Minor variance, likely normal |
+| `medium` | 0.4 -- 0.7 | Notable pattern, warrants attention |
+| `high` | < 0.4 | Significant drift, review recommended |
+
+### AIP Drift Direction Types
+
+| Direction | Description |
+|---|---|
+| `injection_pattern` | Multiple checks flagging prompt injection. Agent may be under sustained attack. |
+| `value_erosion` | Increasing frequency of value misalignment. Reasoning gradually departing from declared values. |
+| `autonomy_creep` | Growing tendency toward actions outside the autonomy envelope. |
+| `deception_pattern` | Multiple checks flagging deceptive reasoning. Developing a pattern of misleading intent. |
+| `unknown` | Drift detected but direction cannot be categorized. |
+
+The direction is inferred from the dominant `ConcernCategory` across the non-clear checkpoints in the streak.
+
+### Code Example
+
+<CodeGroup>
+```python Python
+from aip import detect_integrity_drift, WindowManager
+
+manager = WindowManager(max_size=10)
+
+# Add checkpoints as they're produced during a session
+for checkpoint in session_checkpoints:
+    manager.add(checkpoint)
+
+# Check for drift
+alerts = detect_integrity_drift(manager.get_state())
+for alert in alerts:
+    print(f"Integrity drift: {alert.drift_direction}")
+    print(f"  Similarity: {alert.integrity_similarity}")
+    print(f"  Sustained checks: {alert.sustained_checks}")
+    print(f"  Severity: {alert.severity}")
+```
+
+```typescript TypeScript
+import { detectIntegrityDrift, WindowManager } from '@mnemom/agent-integrity-protocol';
+
+const manager = new WindowManager({ maxSize: 10 });
+
+for (const checkpoint of sessionCheckpoints) {
+  manager.add(checkpoint);
+}
+
+const alerts = detectIntegrityDrift(manager.getState());
+for (const alert of alerts) {
+  console.log(`Integrity drift: ${alert.driftDirection}`);
+  console.log(`  Similarity: ${alert.integritySimilarity}`);
+  console.log(`  Sustained: ${alert.sustainedChecks} checks`);
+}
+```
+</CodeGroup>
+
+### AIP Drift Alert Structure
+
+```json
+{
+  "alert_id": "ida-a1b2c3d4-5678-9abc-def0-123456789abc",
+  "agent_id": "did:web:agent.example.com",
+  "session_id": "sess-abc12345-1234567",
+  "checkpoint_ids": ["ic-1", "ic-2", "ic-3"],
+  "integrity_similarity": 0.5,
+  "sustained_checks": 3,
+  "alert_type": "informative",
+  "severity": "medium",
+  "drift_direction": "value_erosion",
+  "message": "3 consecutive integrity concerns detected -- reasoning patterns diverging from declared values",
+  "detection_timestamp": "2026-02-01T15:30:00Z"
+}
+```
+
+<Tip>
+  AIP drift alerts are always informative, never prescriptive. They describe what was observed ("3 consecutive integrity concerns"), not what to do ("stop the agent immediately"). The host system decides how to respond.
+</Tip>
+
+## SSM: Semantic Similarity Mapping
+
+Both protocols use a technique called SSM (Self-Similarity Matrix) for measuring semantic similarity. In the context of drift detection:
+
+- **AAP** uses SSM to compute cosine similarity between trace feature vectors and a baseline centroid.
+- **AIP** uses a simpler version: the ratio of clear verdicts in a session window.
+
+### How SSM Works for AAP Drift
+
+1. Extract a feature vector from each AP-Trace (structural features only).
+2. Compute the baseline centroid from early traces.
+3. For each subsequent trace, compute cosine similarity to the centroid.
+4. Track similarity over time. A sustained drop below the threshold triggers an alert.
+
+```python
+def cosine_similarity(a: dict, b: dict) -> float:
+    """Compute cosine similarity between two feature dictionaries."""
+    common_keys = set(a.keys()) & set(b.keys())
+    dot_product = sum(a[k] * b[k] for k in common_keys)
+
+    mag_a = sum(v * v for v in a.values()) ** 0.5
+    mag_b = sum(v * v for v in b.values()) ** 0.5
+
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+
+    return dot_product / (mag_a * mag_b)
+```
+
+### TF-IDF Weighting (Text-to-Text Only)
+
+For text-to-text similarity (e.g., comparing reasoning text between traces), AAP uses a 60/30/10 weighting:
+
+| Component | Weight | Description |
+|---|---|---|
+| Word TF-IDF | 60% | Semantic content from unigrams and bigrams |
+| Character TF-IDF | 30% | Stylistic patterns from 3-5 character n-grams |
+| Metadata features | 10% | Structural alignment (action types, values) |
+
+<Warning>
+  This weighting is for text-to-text comparison only. Drift detection uses structural features exclusively. These are different operations -- do not conflate them.
+</Warning>
+
+## Responding to Drift
+
+When drift is detected, the recommended investigation workflow is:
+
+1. **Review the alerting traces/checkpoints**: Examine the specific decisions or thinking blocks that triggered the alert.
+
+2. **Identify the pattern**: Is this autonomy expansion? Value drift? Prompt injection? The `drift_direction` field provides an initial categorization.
+
+3. **Check for environmental causes**: Did the user's requests change? Did tool availability change? Not all drift indicates misalignment -- sometimes the operating context has shifted.
+
+4. **Recalibrate or update the card**: If the drift represents a legitimate behavioral evolution (new capabilities, expanded scope), update the [Alignment Card](/concepts/alignment-cards) to match. If it represents actual misalignment, investigate the root cause.
+
+5. **Reset the baseline**: After addressing the drift, allow new traces to establish a new baseline centroid for future detection.
+
+## Unified Storage
+
+Both AAP and AIP drift alerts are stored in the same `drift_alerts` database table, distinguished by the `alert_type` field:
+
+| Protocol | alert_type prefix | Example |
+|---|---|---|
+| AAP | (none) | `autonomy_expansion`, `value_drift` |
+| AIP | `aip:` | `aip:injection_pattern`, `aip:value_erosion` |
+
+This unified storage enables dashboards and APIs to surface all drift signals together, providing a complete picture of agent behavioral trends.
+
+## Limitations
+
+<Warning>
+  Drift detection identifies statistical patterns. It does not determine intent or cause. A drift alert means "behavior is changing" -- not "the agent is misaligned." False positives occur when operating context shifts legitimately (new user requests, new tool availability). False negatives occur when drift is too subtle to exceed thresholds or when the agent games the structural features.
+</Warning>
+
+## Further Reading
+
+- [Alignment Cards](/concepts/alignment-cards) -- The baseline that drift is measured against
+- [AP-Traces](/concepts/ap-traces) -- The behavioral records used for AAP drift detection
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The real-time verdicts used for AIP drift detection
+- [AAP Specification](/protocols/aap/specification) -- Full normative specification for post-hoc drift
+- [AIP Specification](/protocols/aip/specification) -- Full normative specification for real-time drift

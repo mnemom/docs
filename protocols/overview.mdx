@@ -1,0 +1,149 @@
+---
+title: "Protocol Overview"
+description: "Understanding AAP and AIP — the twin protocols for agent trust"
+sidebarTitle: "Overview"
+icon: "layer-group"
+---
+
+# Protocol Overview
+
+Mnemom is built on two complementary open-source protocols. Together, they provide both retrospective and real-time verification of AI agent behavior.
+
+| | AAP | AIP |
+|---|-----|-----|
+| **Full name** | Agent Alignment Protocol | Agent Integrity Protocol |
+| **When it checks** | After the agent acts (post-hoc) | While the agent thinks (real-time) |
+| **What it checks** | "Did the agent behave consistently with its declared values?" | "Is the agent's reasoning being compromised right now?" |
+| **Core mechanism** | Alignment Cards + AP-Traces + verification | Thinking block analysis + integrity checkpoints |
+| **Detects** | Value drift, autonomy violations, missing escalations | Prompt injection, manipulation, value erosion, boundary violations |
+
+## The twin protocol relationship
+
+**AAP** is post-hoc verification. After an agent makes a decision, AAP records what happened (the AP-Trace) and checks it against what the agent declared it would do (the Alignment Card). This catches inconsistencies between declared and actual behavior -- but only after the fact.
+
+**AIP** is real-time assurance. During execution, AIP analyzes the LLM's thinking blocks (Anthropic), thought parts (Gemini), or reasoning summaries (OpenAI) to detect active threats: prompt injection attempts, gradual value drift within a session, or manipulation by adversarial inputs. AIP catches problems before the agent acts on compromised reasoning.
+
+They complement each other:
+
+- AAP catches **behavioral drift over time** that develops gradually across many interactions
+- AIP catches **active attacks in progress** that compromise a single reasoning step
+- AAP verifies **declared vs. actual** alignment across a session or lifetime
+- AIP verifies **reasoning integrity** within a single inference call
+
+Neither protocol alone is sufficient. An agent that passes all AIP checks during execution could still drift from its declared values over weeks of operation (caught by AAP). An agent that matches its alignment card perfectly could have its reasoning temporarily compromised by a prompt injection (caught by AIP).
+
+<Warning>
+**Neither protocol guarantees trustworthiness.** AAP and AIP make agent behavior observable and auditable. They detect certain categories of misalignment and compromise. But they cannot prove an agent is safe, aligned, or trustworthy in any absolute sense. See the [AAP limitations](/protocols/aap/limitations) and [AIP limitations](/protocols/aip/limitations) for what each protocol can and cannot guarantee.
+</Warning>
+
+## How they work together
+
+When deployed via the [Smoltbot Gateway](/quickstart/smoltbot-gateway), both protocols run automatically:
+
+```
+Your Application
+       │
+       ▼
+┌─────────────────────────────────────────┐
+│           Smoltbot Gateway              │
+│                                         │
+│  1. Intercept LLM API call              │
+│  2. Forward to provider                 │
+│  3. Receive response with thinking      │
+│                                         │
+│  ┌─────────────┐   ┌─────────────────┐  │
+│  │ AIP Analyzer │   │  AAP Observer   │  │
+│  │             │   │                 │  │
+│  │ Analyze      │   │ Extract action   │  │
+│  │ thinking     │   │ Build AP-Trace   │  │
+│  │ blocks       │   │ Verify against   │  │
+│  │             │   │ Alignment Card   │  │
+│  │ Verdict:     │   │                 │  │
+│  │ clear /      │   │ Result:          │  │
+│  │ review /     │   │ verified /       │  │
+│  │ violation    │   │ violation        │  │
+│  └─────────────┘   └─────────────────┘  │
+│                                         │
+│  4. Return response to your app         │
+│  5. Store trace + checkpoint            │
+└─────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────┐
+│         Dashboard (mnemom.ai)           │
+│                                         │
+│  Conscience timeline, drift alerts,     │
+│  integrity scores, enforcement log      │
+└─────────────────────────────────────────┘
+```
+
+## Protocol layers
+
+Mnemom's protocols sit alongside existing agent infrastructure standards:
+
+| Layer | Protocol | Purpose |
+|-------|----------|---------|
+| Tool access | [MCP](https://modelcontextprotocol.io/) | Standardized tool and context access for LLMs |
+| Agent communication | [A2A](https://google.github.io/A2A/) | Agent-to-agent task delegation and coordination |
+| Alignment verification | **AAP** | Post-hoc verification of behavior against declared values |
+| Integrity assurance | **AIP** | Real-time analysis of reasoning for active threats |
+
+AAP and AIP do not replace MCP or A2A -- they add a verification layer on top. An agent can use MCP tools, communicate via A2A, and have all of that activity traced and verified through AAP and AIP.
+
+- **MCP + AAP**: Every MCP tool call can generate an AP-Trace. See [MCP migration](/protocols/aap/mcp-migration).
+- **A2A + AAP**: Before two agents collaborate, value coherence checks verify compatibility. See [A2A integration](/protocols/aap/a2a-integration).
+
+## Core concepts
+
+<CardGroup cols={2}>
+  <Card title="Alignment Cards" icon="id-card" href="/concepts/alignment-cards">
+    Machine-readable declarations of agent identity, values, autonomy boundaries, escalation triggers, and audit commitments. The reference document that all verification checks against.
+  </Card>
+  <Card title="AP-Traces" icon="route" href="/concepts/ap-traces">
+    Structured records of agent decisions. Each trace captures what action was taken, what alternatives were considered, what values were applied, and whether escalation was triggered.
+  </Card>
+  <Card title="Integrity Checkpoints" icon="shield-check" href="/concepts/integrity-checkpoints">
+    Real-time AIP analysis results. Each checkpoint contains a verdict (`clear`, `review_needed`, `boundary_violation`), identified concerns, and confidence levels.
+  </Card>
+  <Card title="Drift Detection" icon="chart-line" href="/concepts/drift-detection">
+    Statistical analysis of agent behavior over time. Detects sustained deviations from declared alignment, including autonomy expansion, escalation rate changes, and value application shifts.
+  </Card>
+  <Card title="Value Coherence" icon="handshake" href="/concepts/value-coherence">
+    Pairwise compatibility checking between two agents' Alignment Cards. Identifies shared values, conflicts, and proposes resolutions before collaboration begins.
+  </Card>
+</CardGroup>
+
+## Specifications
+
+<CardGroup cols={2}>
+  <Card title="AAP Specification" icon="file-contract" href="/protocols/aap/specification">
+    Full Agent Alignment Protocol specification. Covers Alignment Card schema, AP-Trace format, verification algorithm, coherence checking, and drift detection.
+  </Card>
+  <Card title="AIP Specification" icon="file-shield" href="/protocols/aip/specification">
+    Full Agent Integrity Protocol specification. Covers thinking block analysis, checkpoint format, verdict mapping, signal building, and window management.
+  </Card>
+  <Card title="AAP Security Model" icon="lock" href="/protocols/aap/security">
+    AAP threat model, attack surfaces, and mitigations. Covers card forgery, trace tampering, similarity gaming, and adversarial alignment.
+  </Card>
+  <Card title="AIP Security Model" icon="shield-halved" href="/protocols/aip/security">
+    AIP threat model and limitations. Covers thinking block suppression, adversarial reasoning, and confidence calibration.
+  </Card>
+</CardGroup>
+
+## SDK packages
+
+Both protocols have SDK implementations in Python and TypeScript:
+
+| Package | Language | Protocol | Registry |
+|---------|----------|----------|----------|
+| `agent-alignment-proto` | Python | AAP | [PyPI](https://pypi.org/project/agent-alignment-proto/) |
+| `@mnemom/agent-alignment-protocol` | TypeScript | AAP | [npm](https://www.npmjs.com/package/@mnemom/agent-alignment-protocol) |
+| `agent-integrity-proto` | Python | AIP | [PyPI](https://pypi.org/project/agent-integrity-proto/) |
+| `@mnemom/agent-integrity-protocol` | TypeScript | AIP | [npm](https://www.npmjs.com/package/@mnemom/agent-integrity-protocol) |
+
+## Quickstarts
+
+- [Smoltbot Gateway quickstart](/quickstart/smoltbot-gateway) -- Both protocols, zero code changes
+- [SDK direct quickstart](/quickstart/sdk-direct) -- Full programmatic control
+- [AAP protocol quickstart](/protocols/aap/quickstart) -- AAP SDK standalone
+- [AIP protocol quickstart](/protocols/aip/quickstart) -- AIP SDK standalone

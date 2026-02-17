@@ -1,0 +1,231 @@
+---
+title: "Self-Hosted Deployment"
+description: "Run the full Mnemom stack on your own infrastructure"
+sidebarTitle: "Self-Hosted"
+icon: "server"
+---
+
+# Self-Hosted Deployment
+
+Run the complete smoltbot stack on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your accounts. The stack runs on Cloudflare Workers (gateway, observer, API) and Supabase (Postgres database with row-level security).
+
+<Note>
+For enterprise self-hosting with SLA guarantees, license keys, and dedicated support, [contact us](https://mnemom.ai/contact). Enterprise licenses include hybrid analysis mode, SSO/SAML integration, and priority support.
+</Note>
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- **Node.js 20+** and npm installed
+- A **Supabase** project (or any Postgres 15+ database)
+- A **Cloudflare** account with Workers enabled
+- A **Cloudflare AI Gateway** configured (for request logging)
+- An **Anthropic API key** (required for AIP analysis, which uses Claude Haiku)
+- Optional: OpenAI and Gemini API keys for multi-provider tracing
+
+<Steps>
+  <Step title="Clone the repositories">
+    Clone smoltbot and both protocol SDKs:
+
+    ```bash
+    git clone https://github.com/mnemom/smoltbot.git
+    git clone https://github.com/mnemom/aap.git
+    git clone https://github.com/mnemom/aip.git
+    ```
+  </Step>
+
+  <Step title="Set up the database">
+    Create a Supabase project (or provision your own Postgres instance) and apply the schema:
+
+    ```bash
+    cd smoltbot/database
+    psql $DATABASE_URL < schema.sql
+    ```
+
+    The schema creates tables for agents, traces, integrity checkpoints, drift alerts, enforcement records, and the conscience timeline. Row-level security policies ensure agents can only access their own data.
+
+    <Tip>
+    If using Supabase, you can run the schema via the SQL Editor in the Supabase dashboard. Navigate to **SQL Editor**, paste the contents of `schema.sql`, and execute.
+    </Tip>
+  </Step>
+
+  <Step title="Configure Cloudflare AI Gateway">
+    The smoltbot gateway routes LLM requests through Cloudflare AI Gateway for logging and analytics. Set up an AI Gateway in your Cloudflare dashboard:
+
+    1. Go to **AI** > **AI Gateway** in the Cloudflare dashboard
+    2. Create a new gateway (e.g., `smoltbot-gateway`)
+    3. Note the gateway ID and account ID -- you will need these for worker configuration
+  </Step>
+
+  <Step title="Deploy the API worker">
+    The API worker serves agent data, traces, integrity scores, and the conscience timeline.
+
+    ```bash
+    cd smoltbot/api
+    npm install
+    ```
+
+    Configure `wrangler.toml` with your Supabase credentials, then deploy:
+
+    ```bash
+    wrangler secret put SUPABASE_URL
+    wrangler secret put SUPABASE_SERVICE_KEY
+    wrangler secret put ANTHROPIC_API_KEY
+    wrangler deploy
+    ```
+
+    Note the deployed URL (e.g., `https://api.your-domain.com`).
+  </Step>
+
+  <Step title="Deploy the Gateway worker">
+    The gateway worker intercepts LLM API calls, attaches tracing metadata, and proxies requests to providers.
+
+    ```bash
+    cd smoltbot/gateway
+    npm install
+    ```
+
+    Configure secrets and deploy:
+
+    ```bash
+    wrangler secret put SUPABASE_URL
+    wrangler secret put SUPABASE_SERVICE_KEY
+    wrangler secret put CF_AI_GATEWAY_ID
+    wrangler secret put CF_ACCOUNT_ID
+    wrangler secret put ANTHROPIC_API_KEY
+    wrangler deploy
+    ```
+
+    Note the deployed URL (e.g., `https://gateway.your-domain.com`).
+  </Step>
+
+  <Step title="Deploy the Observer worker">
+    The observer is a scheduled worker that processes AI Gateway logs, builds AP-Traces, runs AAP verification, and performs AIP integrity checks.
+
+    ```bash
+    cd smoltbot/observer
+    npm install
+    ```
+
+    Configure secrets and deploy:
+
+    ```bash
+    wrangler secret put SUPABASE_URL
+    wrangler secret put SUPABASE_SERVICE_KEY
+    wrangler secret put CF_AI_GATEWAY_ID
+    wrangler secret put CF_ACCOUNT_ID
+    wrangler secret put ANTHROPIC_API_KEY
+    wrangler deploy
+    ```
+
+    The observer runs on a cron schedule (configured in `wrangler.toml`) to process new gateway logs.
+  </Step>
+
+  <Step title="Configure the CLI">
+    Point the smoltbot CLI to your self-hosted gateway:
+
+    ```bash
+    npm install -g smoltbot
+    smoltbot init --gateway=https://gateway.your-domain.com
+    ```
+
+    The `--gateway` flag tells the CLI to route API calls through your infrastructure instead of the Mnemom-hosted gateway.
+  </Step>
+
+  <Step title="Verify the deployment">
+    Check that everything is connected:
+
+    ```bash
+    smoltbot status
+    ```
+
+    ```text Expected output
+    Agent: agent-xxxxxxxx
+    Status: active
+    Providers: anthropic
+    Gateway: https://gateway.your-domain.com (healthy)
+    Traces: 0
+    Integrity: no checkpoints yet
+    ```
+
+    Make a test API call through the gateway to generate a trace:
+
+    ```bash
+    curl https://gateway.your-domain.com/anthropic/v1/messages \
+      -H "x-api-key: $ANTHROPIC_API_KEY" \
+      -H "content-type: application/json" \
+      -d '{
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
+
+    Wait for the observer to run (check the cron schedule in `observer/wrangler.toml`), then verify traces were generated:
+
+    ```bash
+    smoltbot logs
+    ```
+  </Step>
+</Steps>
+
+## Architecture overview
+
+When self-hosted, the full stack runs across your Cloudflare and Supabase accounts:
+
+```
+Your App
+  │
+  ▼
+Gateway Worker (Cloudflare)
+  │ ── proxies to ──▶ Anthropic / OpenAI / Gemini
+  │
+  ▼
+Cloudflare AI Gateway (logging)
+  │
+  ▼
+Observer Worker (Cloudflare, scheduled)
+  │ ── builds AP-Traces
+  │ ── runs AAP verification
+  │ ── runs AIP integrity checks
+  │
+  ▼
+Supabase (Postgres)
+  │
+  ▼
+API Worker (Cloudflare)
+  │
+  ├──▶ CLI (smoltbot)
+  └──▶ Dashboard (optional, self-hosted)
+```
+
+## Required secrets per worker
+
+| Secret | Gateway | Observer | API |
+|--------|---------|----------|-----|
+| `SUPABASE_URL` | Yes | Yes | Yes |
+| `SUPABASE_SERVICE_KEY` | Yes | Yes | Yes |
+| `CF_AI_GATEWAY_ID` | Yes | Yes | No |
+| `CF_ACCOUNT_ID` | Yes | Yes | No |
+| `ANTHROPIC_API_KEY` | Yes | Yes | No |
+
+<Warning>
+Never commit secrets to version control. Use `wrangler secret put` to securely store them in Cloudflare, or use Cloudflare's environment variable encryption. The Supabase service key has full database access -- treat it accordingly.
+</Warning>
+
+## Custom domain setup
+
+To serve the gateway and API on custom domains:
+
+1. Add your domain to Cloudflare DNS
+2. In the Cloudflare dashboard, go to **Workers & Pages** > your worker > **Settings** > **Triggers**
+3. Add a custom domain (e.g., `gateway.your-domain.com`)
+4. Repeat for the API worker (e.g., `api.your-domain.com`)
+
+## Next steps
+
+- [Smoltbot overview](/smoltbot/overview) -- Detailed architecture and component documentation
+- [Enforcement modes](/smoltbot/enforcement) -- Configure observe, nudge, and enforce modes
+- [Protocol overview](/protocols/overview) -- How AAP and AIP work together
+- [Limitations](/protocols/aap/limitations) -- What the protocols can and cannot guarantee

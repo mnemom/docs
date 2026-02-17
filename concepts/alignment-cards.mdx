@@ -1,0 +1,332 @@
+---
+title: "Alignment Cards"
+description: "Declarative specifications of an AI agent's intended values, boundaries, and behavioral commitments"
+sidebarTitle: "Alignment Cards"
+icon: "id-card"
+---
+
+# Alignment Cards
+
+An Alignment Card is a structured, machine-readable document that declares an AI agent's alignment posture: its values, the boundaries of its autonomous behavior, and its commitments around audit and transparency. Think of it as a passport for agent intent -- it states who the agent serves, what it believes, what it will and will not do, and how it logs its decisions.
+
+Alignment Cards are the foundational data structure of the [Agent Alignment Protocol (AAP)](/protocols/aap/specification). Every other AAP operation -- [AP-Traces](/concepts/ap-traces), [verification](/protocols/aap/specification), [value coherence](/concepts/value-coherence), and [drift detection](/concepts/drift-detection) -- references an Alignment Card as its source of truth.
+
+<Note>
+  Alignment Cards declare intent, not guarantee behavior. An agent can publish a card claiming any set of values. The card becomes meaningful only when paired with AP-Traces that can be verified against it and integrity checkpoints that analyze the agent's reasoning in real time.
+</Note>
+
+## Why Alignment Cards Exist
+
+Current agent protocols solve capability discovery (A2A Agent Cards), tool integration (MCP), and payment authorization. None of them address a fundamental question: **is this agent serving its principal's interests?**
+
+Alignment Cards fill this gap by making the answer to that question observable. They give principals, auditors, and other agents a structured declaration to verify behavior against.
+
+## Structure
+
+An Alignment Card contains five required blocks and one optional block:
+
+| Block | Purpose | Required |
+|---|---|---|
+| **Identity** | Agent ID, card ID, version, timestamps | Yes |
+| **Principal** | Who the agent serves and how | Yes |
+| **Values** | What the agent prioritizes | Yes |
+| **Autonomy Envelope** | What the agent can do independently | Yes |
+| **Audit Commitment** | How the agent logs decisions | Yes |
+| **Extensions** | Protocol-specific additions (A2A, MCP) | No |
+
+### Identity Fields
+
+Every card begins with identity and versioning metadata:
+
+```json
+{
+  "aap_version": "0.1.0",
+  "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "issued_at": "2026-01-31T12:00:00Z",
+  "expires_at": "2026-07-31T12:00:00Z"
+}
+```
+
+- `card_id` is a unique identifier (UUID or URI) for this specific version of the card.
+- `agent_id` identifies the agent itself, using a DID, URL, or UUID.
+- `issued_at` and `expires_at` establish the card's validity window.
+
+### Principal Block
+
+The principal block declares who the agent serves and the nature of that relationship:
+
+```json
+{
+  "principal": {
+    "type": "human",
+    "relationship": "delegated_authority",
+    "escalation_contact": "mailto:user@example.com"
+  }
+}
+```
+
+Three relationship types are defined:
+
+| Relationship | Meaning |
+|---|---|
+| `delegated_authority` | Agent acts within bounds set by principal |
+| `advisory` | Agent recommends; principal decides |
+| `autonomous` | Agent operates independently within declared values |
+
+### Values Block
+
+The values block declares the agent's operational priorities:
+
+```json
+{
+  "values": {
+    "declared": ["principal_benefit", "transparency", "minimal_data"],
+    "conflicts_with": ["deceptive_marketing", "hidden_fees"],
+    "hierarchy": "lexicographic"
+  }
+}
+```
+
+AAP defines a set of standard value identifiers:
+
+| Identifier | Description |
+|---|---|
+| `principal_benefit` | Prioritize principal's interests |
+| `transparency` | Disclose reasoning and limitations |
+| `minimal_data` | Collect only necessary information |
+| `harm_prevention` | Avoid actions causing harm |
+| `honesty` | Do not deceive or mislead |
+| `user_control` | Respect user autonomy and consent |
+| `privacy` | Protect personal information |
+| `fairness` | Avoid discriminatory outcomes |
+
+Custom values are supported but must be defined in a `definitions` block:
+
+```json
+{
+  "values": {
+    "declared": ["principal_benefit", "eco_preference"],
+    "definitions": {
+      "eco_preference": {
+        "name": "Ecological Preference",
+        "description": "Prefer environmentally sustainable options when quality and price are comparable",
+        "priority": 3
+      }
+    },
+    "hierarchy": "lexicographic"
+  }
+}
+```
+
+The `conflicts_with` array lists values the agent refuses to coordinate with during [value coherence checks](/concepts/value-coherence).
+
+### Autonomy Envelope Block
+
+The autonomy envelope defines the boundaries of independent action:
+
+```json
+{
+  "autonomy_envelope": {
+    "bounded_actions": ["search", "compare", "recommend", "add_to_cart"],
+    "escalation_triggers": [
+      {
+        "condition": "action_type == \"purchase\"",
+        "action": "escalate",
+        "reason": "Purchases require explicit approval"
+      },
+      {
+        "condition": "purchase_value > 100",
+        "action": "escalate",
+        "reason": "Exceeds autonomous spending limit"
+      },
+      {
+        "condition": "shares_personal_data",
+        "action": "escalate",
+        "reason": "Data sharing requires consent"
+      }
+    ],
+    "max_autonomous_value": {
+      "amount": 100,
+      "currency": "USD"
+    },
+    "forbidden_actions": ["store_payment_credentials", "subscribe_to_services"]
+  }
+}
+```
+
+This block has four components:
+
+- **bounded_actions**: Actions the agent may take without escalation.
+- **escalation_triggers**: Conditions that require the agent to pause and seek approval. Each trigger specifies a condition, an action (`escalate`, `deny`, or `log`), and a human-readable reason.
+- **max_autonomous_value**: Optional financial ceiling for independent decisions.
+- **forbidden_actions**: Actions the agent must never take, regardless of context.
+
+<Warning>
+  Forbidden actions are the hardest boundary. During [verification](/protocols/aap/specification), taking a forbidden action produces a `FORBIDDEN_ACTION` violation at `CRITICAL` severity. During [integrity checking](/concepts/integrity-checkpoints), intent to take a forbidden action triggers a `boundary_violation` verdict.
+</Warning>
+
+### Audit Commitment Block
+
+The audit commitment declares how the agent logs and exposes its decisions:
+
+```json
+{
+  "audit_commitment": {
+    "trace_format": "ap-trace-v1",
+    "retention_days": 90,
+    "queryable": true,
+    "query_endpoint": "https://shopping.agent.example.com/api/v1/traces",
+    "tamper_evidence": "append_only"
+  }
+}
+```
+
+Key fields:
+- `queryable`: Whether external parties can query the agent's traces.
+- `tamper_evidence`: Mechanism for ensuring trace integrity (`append_only`, `signed`, or `merkle`).
+
+### Extensions Block
+
+Extensions allow protocol-specific metadata without modifying the core schema:
+
+```json
+{
+  "extensions": {
+    "a2a": {
+      "agent_card_url": "https://shopping.agent.example.com/.well-known/agent.json"
+    },
+    "mcp": {
+      "tool_alignment_requirements": ["consent_logging", "rate_limiting"]
+    }
+  }
+}
+```
+
+Extensions must be namespaced by protocol identifier. Implementations ignore unrecognized extensions.
+
+## Complete Example
+
+Here is a full Alignment Card for a shopping assistant agent:
+
+```json
+{
+  "aap_version": "0.1.0",
+  "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "issued_at": "2026-01-31T12:00:00Z",
+  "expires_at": "2026-07-31T12:00:00Z",
+
+  "principal": {
+    "type": "human",
+    "relationship": "delegated_authority",
+    "escalation_contact": "mailto:user@example.com"
+  },
+
+  "values": {
+    "declared": ["principal_benefit", "transparency", "minimal_data"],
+    "conflicts_with": ["deceptive_marketing", "hidden_fees"],
+    "hierarchy": "lexicographic"
+  },
+
+  "autonomy_envelope": {
+    "bounded_actions": ["search", "compare", "recommend", "add_to_cart"],
+    "escalation_triggers": [
+      {
+        "condition": "action_type == \"purchase\"",
+        "action": "escalate",
+        "reason": "Purchases require explicit approval"
+      },
+      {
+        "condition": "purchase_value > 100",
+        "action": "escalate",
+        "reason": "Exceeds autonomous spending limit"
+      },
+      {
+        "condition": "shares_personal_data",
+        "action": "escalate",
+        "reason": "Data sharing requires consent"
+      }
+    ],
+    "max_autonomous_value": {
+      "amount": 100,
+      "currency": "USD"
+    },
+    "forbidden_actions": ["store_payment_credentials", "subscribe_to_services"]
+  },
+
+  "audit_commitment": {
+    "trace_format": "ap-trace-v1",
+    "retention_days": 90,
+    "queryable": true,
+    "query_endpoint": "https://shopping.agent.example.com/api/v1/traces",
+    "tamper_evidence": "append_only"
+  },
+
+  "extensions": {
+    "a2a": {
+      "agent_card_url": "https://shopping.agent.example.com/.well-known/agent.json"
+    }
+  }
+}
+```
+
+## How Cards Are Used
+
+Alignment Cards serve as the reference point across the entire Mnemom trust infrastructure:
+
+1. **Publication**: Agents publish their card at `/.well-known/alignment-card.json`. Other agents and auditors can fetch it.
+
+2. **Trace Verification**: Every [AP-Trace](/concepts/ap-traces) references a `card_id`. Verification checks that the trace's actions, values, and escalation behavior are consistent with the card.
+
+3. **Integrity Analysis**: The [Agent Integrity Protocol (AIP)](/concepts/integrity-checkpoints) compresses the card into a ~500-token summary and includes it in the conscience prompt that evaluates the agent's thinking blocks.
+
+4. **Value Coherence**: Before two agents collaborate, they exchange cards and run a [coherence check](/concepts/value-coherence) to confirm their values are compatible.
+
+5. **Drift Detection**: [Drift detection](/concepts/drift-detection) compares traces over time against the card to identify behavioral divergence.
+
+## Card Versioning and Updates
+
+Cards are versioned through their `card_id` and `issued_at`/`expires_at` timestamps. When an agent's alignment posture changes:
+
+1. Issue a new card with a new `card_id` and updated `issued_at`.
+2. The old card remains valid until its `expires_at` or until explicitly revoked via `/.well-known/alignment-card-revocations.json`.
+3. AP-Traces generated during the old card's validity period reference the old `card_id`. Traces generated after the update reference the new one.
+
+<Tip>
+  Keep card lifetimes reasonable. A 6-month expiration is typical. Shorter lifetimes increase operational overhead; longer lifetimes risk the card becoming stale relative to actual behavior.
+</Tip>
+
+## Relationship to A2A Agent Cards
+
+If you use Google's A2A protocol for agent discovery, the Alignment Card extends the A2A Agent Card rather than replacing it. The A2A Agent Card describes capabilities (what the agent can do). The Alignment Card describes alignment (what the agent will and will not do, and why). The `extensions.a2a.agent_card_url` field links the two.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Be specific about boundaries" icon="border-all">
+    Vague forbidden actions like "harmful behavior" are unverifiable. Use concrete actions: `delete_without_confirmation`, `share_credentials`, `exfiltrate_data`.
+  </Card>
+  <Card title="Declare values you actually apply" icon="check-double">
+    Only list values that appear in your AP-Traces. Declaring `fairness` but never applying it in decisions produces verification warnings.
+  </Card>
+  <Card title="Use standard identifiers" icon="tags">
+    Prefer the standard value identifiers (`principal_benefit`, `transparency`, etc.) for interoperability. Use custom values only when the standard set does not cover your needs.
+  </Card>
+  <Card title="Set meaningful escalation triggers" icon="arrow-up-from-bracket">
+    Escalation triggers are the card's most actionable component. Define clear conditions, not aspirational ones.
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+  An Alignment Card is a declaration, not a guarantee. Agents can publish cards claiming any values. The card's value comes from being verifiable against observed behavior via AP-Traces and integrity checkpoints -- not from the declaration itself.
+</Warning>
+
+## Further Reading
+
+- [AP-Traces](/concepts/ap-traces) -- How agent actions are recorded for verification against cards
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- Real-time analysis of agent thinking against cards
+- [Value Coherence](/concepts/value-coherence) -- Checking card compatibility between agents
+- [AAP Specification](/protocols/aap/specification) -- Full normative specification

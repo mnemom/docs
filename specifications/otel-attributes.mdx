@@ -1,0 +1,154 @@
+---
+title: "OpenTelemetry Attributes"
+description: "Complete reference for AIP/AAP OTel span attributes and metrics"
+sidebarTitle: "OTel Attributes"
+icon: "list-check"
+---
+
+# OpenTelemetry Attributes Reference
+
+Complete reference for all span attributes and metrics emitted by the [aip-otel-exporter](/guides/observability). These attributes follow [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/) for span naming and attribute structure.
+
+## Span Attributes
+
+### `aip.integrity_check` — 22 attributes + 2 GenAI SIG aliases
+
+The primary span for AIP integrity checkpoint results.
+
+| Attribute | Type | Source | Description |
+|---|---|---|---|
+| `aip.integrity.checkpoint_id` | string | checkpoint | Unique checkpoint identifier |
+| `aip.integrity.verdict` | string | checkpoint | `clear`, `review_needed`, or `boundary_violation` |
+| `aip.integrity.agent_id` | string | checkpoint | Agent identifier |
+| `aip.integrity.card_id` | string | checkpoint | Alignment Card identifier |
+| `aip.integrity.session_id` | string | checkpoint | Session identifier |
+| `aip.integrity.thinking_hash` | string | checkpoint | SHA-256 hash of the thinking block |
+| `aip.integrity.proceed` | boolean | signal | Whether the agent should proceed |
+| `aip.integrity.recommended_action` | string | signal | `continue`, `log_and_continue`, `pause_for_review`, or `deny_and_escalate` |
+| `aip.integrity.concerns_count` | int | signal | Number of concerns detected |
+| `aip.integrity.analysis_model` | string | analysis_metadata | Model used for integrity analysis |
+| `aip.integrity.analysis_duration_ms` | float | analysis_metadata | Analysis duration in milliseconds |
+| `aip.integrity.thinking_tokens` | int | analysis_metadata | Token count of the thinking block |
+| `aip.integrity.truncated` | boolean | analysis_metadata | Whether the thinking block was truncated |
+| `aip.integrity.extraction_confidence` | float | analysis_metadata | Confidence in thinking block extraction |
+| `aip.conscience.consultation_depth` | string | conscience_context | `standard` or `deep` conscience evaluation |
+| `aip.conscience.values_checked_count` | int | conscience_context | Number of values evaluated |
+| `aip.conscience.conflicts_count` | int | conscience_context | Number of value conflicts detected |
+| `aip.window.size` | int | window_summary | Number of checkpoints in the rolling window |
+| `aip.window.integrity_ratio` | float | window_summary | Ratio of `clear` verdicts (0.0-1.0) |
+| `aip.window.drift_alert_active` | boolean | window_summary | Whether a drift alert is currently active |
+| `gen_ai.evaluation.verdict` | string | GenAI SIG | Forward-compatible alias for `aip.integrity.verdict` |
+| `gen_ai.evaluation.score` | float | GenAI SIG | Forward-compatible alias for `aip.window.integrity_ratio` |
+
+**Events emitted on this span:**
+
+- `aip.concern` — One event per concern detected. Includes `category`, `severity`, `description`, and `evidence`.
+- `aip.drift_alert` — Emitted when a drift alert is active. Includes `drift_direction` and `integrity_similarity`.
+
+### `aap.verify_trace` — 8 attributes
+
+Span for AAP trace verification results.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `aap.verification.result` | boolean | Whether the trace passed verification |
+| `aap.verification.similarity_score` | float | Similarity score between trace and card |
+| `aap.verification.violations_count` | int | Number of violations detected |
+| `aap.verification.warnings_count` | int | Number of warnings detected |
+| `aap.verification.trace_id` | string | AP-Trace identifier |
+| `aap.verification.card_id` | string | Alignment Card identifier |
+| `aap.verification.duration_ms` | float | Verification duration in milliseconds |
+| `aap.verification.checks_performed` | string | Comma-separated list of checks performed |
+
+**Events emitted on this span:**
+
+- `aap.violation` — One event per violation. Includes `type`, `severity`, `description`, and `field`.
+
+### `aap.check_coherence` — 5 attributes
+
+Span for AAP value coherence check results (used in multi-agent coordination).
+
+| Attribute | Type | Description |
+|---|---|---|
+| `aap.coherence.compatible` | boolean | Whether the agents are value-compatible |
+| `aap.coherence.score` | float | Coherence score (0.0-1.0) |
+| `aap.coherence.proceed` | boolean | Whether coordination should proceed |
+| `aap.coherence.matched_count` | int | Number of matched values |
+| `aap.coherence.conflict_count` | int | Number of conflicting values |
+
+### `aap.detect_drift` — 2 attributes
+
+Span for AAP behavioral drift detection results.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `aap.drift.alerts_count` | int | Number of drift alerts generated |
+| `aap.drift.traces_analyzed` | int | Number of traces analyzed for drift |
+
+**Events emitted on this span:**
+
+- `aap.drift_alert` — One event per alert. Includes `drift_direction`, `integrity_similarity`, and `sustained_checks`.
+
+## Span Hierarchy
+
+Spans are created as children of the current active span via `context.active()`:
+
+```
+your_application_span
+  ├── aip.integrity_check
+  │    ├── event: aip.concern (one per concern)
+  │    └── event: aip.drift_alert (when drift active)
+  ├── aap.verify_trace
+  │    └── event: aap.violation (one per violation)
+  ├── aap.check_coherence
+  └── aap.detect_drift
+       └── event: aap.drift_alert (one per alert)
+```
+
+## Metrics
+
+9 metric instruments for aggregate monitoring:
+
+### AIP Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `aip.integrity_checks.total` | Counter | `verdict`, `agent_id` | Total number of integrity checks performed |
+| `aip.concerns.total` | Counter | `category`, `severity` | Total number of concerns detected |
+| `aip.analysis.duration_ms` | Histogram | `verdict` | Distribution of analysis durations |
+| `aip.window.integrity_ratio` | Histogram | — | Distribution of integrity ratios across windows |
+| `aip.drift_alerts.total` | Counter | — | Total number of drift alerts generated |
+
+### AAP Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `aap.verifications.total` | Counter | `verified` | Total number of trace verifications |
+| `aap.violations.total` | Counter | `type`, `severity` | Total number of violations detected |
+| `aap.verification.duration_ms` | Histogram | — | Distribution of verification durations |
+| `aap.coherence.score` | Histogram | `compatible` | Distribution of coherence scores |
+
+## GenAI SIG Forward Compatibility
+
+The exporter includes forward-compatible aliases that track the emerging [OTel GenAI SIG](https://github.com/open-telemetry/semantic-conventions/tree/main/docs/gen-ai) conventions for AI/ML observability:
+
+| GenAI SIG Attribute | Maps To | Description |
+|---|---|---|
+| `gen_ai.evaluation.verdict` | `aip.integrity.verdict` | Standardized evaluation verdict |
+| `gen_ai.evaluation.score` | `aip.window.integrity_ratio` | Standardized evaluation score |
+
+These aliases are emitted alongside the `aip.*` attributes on every `aip.integrity_check` span, ensuring forward compatibility as the OTel GenAI SIG conventions stabilize.
+
+## Dashboard Templates
+
+Pre-built Grafana and Datadog dashboards that consume these attributes and metrics are available in the [aip-otel-exporter repository](https://github.com/mnemom/aip-otel-exporter/tree/main/packages/typescript/dashboards):
+
+- **grafana-aip-overview.json** — Fleet-wide integrity monitoring using `aip.integrity_checks.total`, `aip.concerns.total`, and `aip.window.integrity_ratio`
+- **grafana-aip-detail.json** — Per-agent deep-dive using all `aip.integrity.*` span attributes
+- **datadog-aip-overview.json** — Datadog importable dashboard
+
+## Related
+
+- [Observability Guide](/guides/observability) — Full integration guide for the aip-otel-exporter
+- [AIP Specification](/protocols/aip/specification) — Protocol specification for Integrity Checkpoints
+- [AAP Specification](/protocols/aap/specification) — Protocol specification for AP-Traces and verification

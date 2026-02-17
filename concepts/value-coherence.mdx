@@ -1,0 +1,436 @@
+---
+title: "Value Coherence"
+description: "Pairwise verification that interacting AI agents share compatible values"
+sidebarTitle: "Value Coherence"
+icon: "handshake"
+---
+
+# Value Coherence
+
+Value coherence is the degree to which two agents' declared values are compatible for a proposed task. Before two agents collaborate, the Value Coherence Handshake verifies that their [Alignment Cards](/concepts/alignment-cards) do not conflict -- that one agent is not committed to values that the other explicitly opposes.
+
+This is a pre-coordination check, not a trust guarantee. It answers "can we work together without value conflicts?" -- not "should I trust this agent?"
+
+<Note>
+  Value coherence operates on declared values. It checks whether two agents' *claims* are compatible. It does not verify that either agent actually holds or acts on those values. Observed behavior is verified through [AP-Traces](/concepts/ap-traces) and [integrity checkpoints](/concepts/integrity-checkpoints).
+</Note>
+
+## Why Value Coherence Matters
+
+As autonomous agents increasingly interact with each other -- delegating tasks, sharing data, coordinating actions -- a new class of problems emerges. Two agents may each serve their respective principals faithfully while being fundamentally incompatible in how they operate:
+
+- Agent A commits to `minimal_data` collection. Agent B requires `comprehensive_analytics` for its service. Collaborating means one must compromise.
+- Agent A declares `transparency` and discloses all reasoning. Agent B treats its decision process as proprietary. Their definitions of good behavior conflict.
+- Agent A explicitly `conflicts_with` values that Agent B declares. No amount of negotiation resolves this.
+
+Without a coherence check, these conflicts surface at runtime as unexpected behavior, data handling violations, or broken trust assumptions.
+
+## The Coherence Handshake
+
+The Value Coherence Handshake is a four-message protocol exchange:
+
+```
+Agent A (Initiator)                     Agent B (Responder)
+       |                                       |
+       |--- alignment_card_request ----------->|
+       |    { request_id, task_context }       |
+       |                                       |
+       |<-- alignment_card_response -----------|
+       |    { alignment_card, signature }      |
+       |                                       |
+       |--- value_coherence_check ------------>|
+       |    { my_card, proposed_values,        |
+       |      task_requirements }              |
+       |                                       |
+       |<-- coherence_result ------------------|
+       |    { compatible, score, conflicts,    |
+       |      proposed_resolution }            |
+       |                                       |
+```
+
+### Step 1: Card Request
+
+The initiating agent requests the responder's Alignment Card, providing context about the proposed task:
+
+```json
+{
+  "message_type": "alignment_card_request",
+  "request_id": "req-abc123",
+  "requester": {
+    "agent_id": "did:web:agent-a.example.com",
+    "card_id": "ac-initiator-card-id"
+  },
+  "task_context": {
+    "task_type": "product_comparison",
+    "values_required": ["principal_benefit", "transparency"],
+    "data_categories": ["product_info", "pricing"]
+  },
+  "timestamp": "2026-01-31T12:00:00Z"
+}
+```
+
+The `task_context` tells the responder what the collaboration involves and which values are required. This allows the responder to evaluate compatibility before sharing its full card.
+
+### Step 2: Card Response
+
+The responder returns its Alignment Card, optionally signed for authenticity:
+
+```json
+{
+  "message_type": "alignment_card_response",
+  "request_id": "req-abc123",
+  "alignment_card": { "..." },
+  "signature": {
+    "algorithm": "Ed25519",
+    "value": "base64-encoded-signature",
+    "key_id": "key-identifier"
+  },
+  "timestamp": "2026-01-31T12:00:01Z"
+}
+```
+
+<Tip>
+  Signatures are optional but recommended for high-stakes interactions. An Ed25519 signature on the card response prevents man-in-the-middle substitution of alignment cards during the handshake.
+</Tip>
+
+### Step 3: Coherence Check
+
+The initiator compares both cards and sends a coherence check specifying the proposed collaboration scope:
+
+```json
+{
+  "message_type": "value_coherence_check",
+  "request_id": "req-abc123",
+  "initiator_card_id": "ac-initiator-card-id",
+  "responder_card_id": "ac-responder-card-id",
+  "proposed_collaboration": {
+    "task_type": "product_comparison",
+    "values_intersection": ["principal_benefit", "transparency"],
+    "data_sharing": {
+      "from_initiator": ["search_criteria", "preferences"],
+      "from_responder": ["product_catalog", "pricing"]
+    },
+    "autonomy_scope": {
+      "initiator_actions": ["search", "compare"],
+      "responder_actions": ["provide_data", "answer_queries"]
+    }
+  },
+  "timestamp": "2026-01-31T12:00:02Z"
+}
+```
+
+### Step 4: Coherence Result
+
+The responder returns the coherence assessment:
+
+**When compatible:**
+
+```json
+{
+  "message_type": "coherence_result",
+  "request_id": "req-abc123",
+  "coherence": {
+    "compatible": true,
+    "score": 0.85,
+    "value_alignment": {
+      "matched": ["principal_benefit", "transparency"],
+      "unmatched": [],
+      "conflicts": []
+    }
+  },
+  "proceed": true,
+  "conditions": [],
+  "timestamp": "2026-01-31T12:00:03Z"
+}
+```
+
+**When conflicts exist:**
+
+```json
+{
+  "message_type": "coherence_result",
+  "request_id": "req-abc123",
+  "coherence": {
+    "compatible": false,
+    "score": 0.45,
+    "value_alignment": {
+      "matched": ["transparency"],
+      "unmatched": ["data_minimization"],
+      "conflicts": [
+        {
+          "initiator_value": "minimal_data",
+          "responder_value": "comprehensive_analytics",
+          "conflict_type": "incompatible",
+          "description": "Initiator requires minimal data collection; responder requires comprehensive tracking"
+        }
+      ]
+    }
+  },
+  "proceed": false,
+  "proposed_resolution": {
+    "type": "escalate_to_principals",
+    "reason": "Value conflict requires human decision",
+    "alternative": {
+      "type": "modified_scope",
+      "description": "Proceed with limited data sharing (no analytics)",
+      "modified_values": {
+        "responder_concession": "disable_analytics_for_this_task"
+      }
+    }
+  },
+  "timestamp": "2026-01-31T12:00:03Z"
+}
+```
+
+## Coherence Score
+
+The coherence score is computed as:
+
+```
+coherence_score = (matched_values / total_required_values) * (1 - conflict_penalty)
+
+where:
+  matched_values = count of values present in both cards
+  total_required_values = count of values required for the task
+  conflict_penalty = 0.5 * (conflicts_count / total_required_values)
+```
+
+The score is always in the range [0.0, 1.0]:
+
+| Score Range | Interpretation |
+|---|---|
+| 0.85 - 1.0 | Strong coherence. Agents share most or all required values. |
+| 0.70 - 0.85 | Adequate coherence. Some values unmatched but no conflicts. |
+| 0.50 - 0.70 | Marginal coherence. Consider modified scope or additional conditions. |
+| Below 0.50 | Poor coherence. Significant conflicts present. |
+
+The automatic proceed threshold is `0.70` (`MIN_COHERENCE_FOR_PROCEED`). Below this score, the recommendation is to negotiate, modify scope, or escalate to principals.
+
+### Code Example
+
+<CodeGroup>
+```python Python
+from aap import check_coherence
+
+initiator_card = {
+    "card_id": "ac-initiator",
+    "values": {
+        "declared": ["principal_benefit", "transparency", "minimal_data"],
+        "conflicts_with": ["deceptive_marketing"],
+    },
+    "autonomy_envelope": {
+        "bounded_actions": ["search", "compare", "recommend"],
+        "forbidden_actions": ["store_credentials"],
+        "escalation_triggers": [],
+    },
+}
+
+responder_card = {
+    "card_id": "ac-responder",
+    "values": {
+        "declared": ["principal_benefit", "transparency", "fairness"],
+        "conflicts_with": [],
+    },
+    "autonomy_envelope": {
+        "bounded_actions": ["provide_data", "answer_queries"],
+        "forbidden_actions": ["share_personal_data"],
+        "escalation_triggers": [],
+    },
+}
+
+result = check_coherence(
+    initiator_card=initiator_card,
+    responder_card=responder_card,
+    required_values=["principal_benefit", "transparency"],
+)
+
+print(f"Compatible: {result.compatible}")  # True
+print(f"Score: {result.score}")            # 0.85
+print(f"Matched: {result.matched}")        # ["principal_benefit", "transparency"]
+print(f"Conflicts: {result.conflicts}")    # []
+```
+
+```typescript TypeScript
+import { checkCoherence } from '@mnemom/agent-alignment-protocol';
+
+const result = checkCoherence({
+  initiatorCard: {
+    cardId: 'ac-initiator',
+    values: {
+      declared: ['principal_benefit', 'transparency', 'minimal_data'],
+      conflictsWith: ['deceptive_marketing'],
+    },
+    autonomyEnvelope: {
+      boundedActions: ['search', 'compare', 'recommend'],
+      forbiddenActions: ['store_credentials'],
+      escalationTriggers: [],
+    },
+  },
+  responderCard: {
+    cardId: 'ac-responder',
+    values: {
+      declared: ['principal_benefit', 'transparency', 'fairness'],
+      conflictsWith: [],
+    },
+    autonomyEnvelope: {
+      boundedActions: ['provide_data', 'answer_queries'],
+      forbiddenActions: ['share_personal_data'],
+      escalationTriggers: [],
+    },
+  },
+  requiredValues: ['principal_benefit', 'transparency'],
+});
+
+console.log(`Compatible: ${result.compatible}`); // true
+console.log(`Score: ${result.score}`);           // 0.85
+```
+</CodeGroup>
+
+## Conflict Detection
+
+Conflicts are detected in several ways:
+
+### Explicit Conflicts
+
+The most direct: one agent's `conflicts_with` array contains a value the other agent declares.
+
+```json
+// Agent A declares:
+{ "conflicts_with": ["deceptive_marketing"] }
+
+// Agent B declares:
+{ "declared": ["deceptive_marketing", "engagement_optimization"] }
+```
+
+This produces an immediate incompatibility. No amount of scope modification resolves an explicit value conflict.
+
+### Value Incompatibility
+
+Two values that are not explicitly conflicted but are operationally incompatible for the proposed task:
+
+```json
+{
+  "initiator_value": "minimal_data",
+  "responder_value": "comprehensive_analytics",
+  "conflict_type": "incompatible",
+  "description": "Initiator requires minimal data collection; responder requires comprehensive tracking"
+}
+```
+
+These conflicts may be resolvable through scope modification.
+
+### Autonomy Scope Conflicts
+
+When the proposed collaboration requires one agent to take actions outside its autonomy envelope, or actions that the other agent has listed as forbidden:
+
+```json
+{
+  "initiator_action": "share_user_preferences",
+  "responder_forbidden": "receive_personal_data",
+  "conflict_type": "autonomy_conflict",
+  "description": "Proposed data sharing conflicts with responder's forbidden actions"
+}
+```
+
+## Resolution Strategies
+
+When conflicts are detected, AAP defines a three-tier resolution order:
+
+### 1. Automatic Resolution
+
+If one value strictly subsumes another -- for example, `privacy` subsumes `minimal_data` -- the more general value can satisfy both parties without negotiation.
+
+### 2. Negotiated Resolution (Modified Scope)
+
+Agents may propose a modified collaboration scope that avoids the conflict:
+
+```json
+{
+  "proposed_resolution": {
+    "type": "modified_scope",
+    "description": "Proceed with limited data sharing (no analytics)",
+    "modified_values": {
+      "responder_concession": "disable_analytics_for_this_task"
+    }
+  }
+}
+```
+
+The modified scope removes the conflicting requirement, allowing collaboration on the remaining compatible values.
+
+### 3. Principal Escalation
+
+When agents cannot resolve autonomously, the conflict is escalated to their respective principals (human operators or higher-authority agents):
+
+```json
+{
+  "proposed_resolution": {
+    "type": "escalate_to_principals",
+    "reason": "Value conflict requires human decision"
+  }
+}
+```
+
+<Warning>
+  Principal escalation is the fallback of last resort. If agents routinely escalate coherence conflicts, the alignment cards may need revision. Frequent escalation suggests the cards are either too restrictive or poorly calibrated for the agent's actual operating context.
+</Warning>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Multi-Agent Systems" icon="sitemap">
+    Before delegating a subtask to another agent, verify that the delegate's values are compatible with the delegator's. This prevents an agent from unknowingly outsourcing work to an agent with conflicting priorities.
+  </Card>
+  <Card title="A2A Protocol Integration" icon="link">
+    When using Google's A2A protocol for agent discovery, run a coherence check after capability matching. An agent may be capable of the task but value-incompatible.
+  </Card>
+  <Card title="MCP Tool Providers" icon="wrench">
+    When an agent connects to an MCP tool server, the tool server's alignment card (if published) can be checked for coherence with the agent's card. This is especially relevant for tools that handle sensitive data.
+  </Card>
+  <Card title="Agent Marketplaces" icon="store">
+    Platforms listing agents for hire can pre-compute coherence matrices between agents, enabling users to find agents that are both capable and value-aligned with their existing agent fleet.
+  </Card>
+</CardGroup>
+
+## Observability
+
+Value coherence checks are observable through the [OpenTelemetry exporter](/guides/observability):
+
+```typescript
+import { createAIPOTelRecorder } from "@mnemom/aip-otel-exporter";
+
+const recorder = createAIPOTelRecorder({ tracerProvider });
+
+// Record coherence check
+recorder.recordCoherence(result);
+```
+
+This produces an `aap.check_coherence` span with attributes:
+
+| Attribute | Type |
+|---|---|
+| `aap.coherence.compatible` | boolean |
+| `aap.coherence.score` | float (0.0-1.0) |
+| `aap.coherence.proceed` | boolean |
+| `aap.coherence.matched_count` | int |
+| `aap.coherence.conflict_count` | int |
+
+## Protocol Security
+
+Coherence handshake messages must be transmitted over TLS 1.3 or equivalent. Requests include unique `request_id` and `timestamp` fields for replay protection. Responses must reference the `request_id` they are responding to.
+
+Card signatures (Ed25519) are optional but recommended for high-stakes interactions to prevent man-in-the-middle card substitution.
+
+## Limitations
+
+<Warning>
+  Value coherence checks declared values, not actual behavior. An agent can declare `principal_benefit` and score highly on coherence while acting against its principal's interests. Coherence is necessary but not sufficient for trustworthy collaboration. Pair it with ongoing [AP-Trace verification](/concepts/ap-traces) and [integrity monitoring](/concepts/integrity-checkpoints) of collaborating agents.
+</Warning>
+
+## Further Reading
+
+- [Alignment Cards](/concepts/alignment-cards) -- The declarations that coherence checks compare
+- [AP-Traces](/concepts/ap-traces) -- Behavioral verification that complements coherence
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- Real-time monitoring during collaboration
+- [Drift Detection](/concepts/drift-detection) -- Detecting when coherent agents diverge over time
+- [AAP Specification](/protocols/aap/specification) -- Full normative specification including handshake messages

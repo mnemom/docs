@@ -1,0 +1,92 @@
+---
+title: "API Reference Overview"
+description: "Authentication, base URL, error handling, and rate limits for the Mnemom API"
+sidebarTitle: "Overview"
+icon: "code"
+---
+
+## Base URL
+
+All API requests are made to:
+
+```
+https://api.mnemom.ai/v1
+```
+
+The API is versioned via URL path. The current version is `v1`.
+
+## Authentication
+
+The Mnemom API supports two authentication methods depending on your use case.
+
+### Bearer Token (Supabase JWT)
+
+For dashboard and user-facing requests, authenticate with a Supabase JWT:
+
+```bash
+curl https://api.mnemom.ai/v1/agents \
+  -H "Authorization: Bearer <token>"
+```
+
+**How to get a Bearer token**: Sign in to the [Mnemom Dashboard](https://mnemom.ai/dashboard). Your session token is available in the dashboard settings under **API Access**, or programmatically via the Supabase Auth SDK after signing in.
+
+### API Key
+
+For server-to-server integrations, authenticate with an API key:
+
+```bash
+curl https://api.mnemom.ai/v1/checks \
+  -H "X-Mnemom-Api-Key: <key>"
+```
+
+**How to get an API key**: Generate an API key from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your organization and can be rotated at any time.
+
+<Warning>
+API keys are hashed on our servers and cannot be retrieved after creation. Store your key securely when it is first displayed.
+</Warning>
+
+## Error Format
+
+All error responses return a JSON body with a human-readable `error` field:
+
+```json
+{
+  "error": "Human-readable error message"
+}
+```
+
+### Common HTTP Status Codes
+
+| Status Code | Meaning |
+|-------------|---------|
+| `400` | **Bad Request** — The request body is malformed or missing required fields. |
+| `401` | **Unauthorized** — Missing or invalid authentication credentials. |
+| `403` | **Forbidden** — Valid credentials but insufficient permissions for the requested resource. |
+| `404` | **Not Found** — The requested resource does not exist. |
+| `429` | **Too Many Requests** — Rate limit exceeded. Retry after the duration specified in the `Retry-After` header. |
+| `500` | **Internal Server Error** — Something went wrong on our end. Contact support if the issue persists. |
+
+## Rate Limits
+
+API requests are rate-limited per authentication credential:
+
+| Plan | Rate Limit |
+|------|------------|
+| Free | 10 requests/second |
+| Developer | 50 requests/second |
+| Team | 200 requests/second |
+| Enterprise | Custom |
+
+When you exceed the rate limit, the API returns a `429` status code with a `Retry-After` header indicating how many seconds to wait before retrying.
+
+## Endpoint Documentation
+
+<Note>
+All endpoint documentation below is auto-generated from our OpenAPI specification. Each endpoint has a "Try It" button for interactive testing.
+</Note>
+
+## Versioning
+
+The API is versioned via the URL path (`/v1`). When breaking changes are introduced, a new version will be released under a new path (e.g., `/v2`). Non-breaking changes (new optional fields, new endpoints) are added to the current version without a version bump.
+
+We will provide advance notice and a migration guide before deprecating any API version.

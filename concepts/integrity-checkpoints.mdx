@@ -1,0 +1,409 @@
+---
+title: "Integrity Checkpoints"
+description: "Real-time analysis of LLM reasoning to detect prompt injection, manipulation, and drift"
+sidebarTitle: "Integrity Checkpoints"
+icon: "shield-check"
+---
+
+# Integrity Checkpoints
+
+An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block -- the internal reasoning the model produces before or alongside its visible response. Where [AP-Traces](/concepts/ap-traces) record what happened after the fact, integrity checkpoints evaluate what the agent is thinking in real time, before the next action executes.
+
+Integrity Checkpoints are the primary data structure of the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), the sister protocol to [AAP](/protocols/aap/specification).
+
+<Note>
+  AIP follows a daimonion philosophy. Like Socrates' inner voice, the integrity system is silent when things are aligned and speaks only when it detects something outside boundaries. Silence (`clear`) means proceed. Voice (`review_needed`, `boundary_violation`) means pause and evaluate.
+</Note>
+
+## Why Integrity Checkpoints Exist
+
+AAP's post-hoc verification provides comprehensive transparency, but it operates after the action has already been taken -- typically 30-60 seconds later when the Observer Worker processes the gateway log. This delay creates a window of vulnerability:
+
+- **Prompt injection**: A malicious prompt causes the agent to exfiltrate data. The trace records it faithfully, but the data is already gone.
+- **Gradual drift**: An agent's reasoning shifts subtly over multiple turns. Each individual action passes verification, but the cumulative direction is misaligned.
+- **Misaligned intent**: The agent's thinking block reveals it intends to take a forbidden action, but the thinking block is only examined retroactively.
+
+All three of these failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints fill this gap.
+
+## How It Works
+
+The integrity check process follows eight steps:
+
+```
+Agent Turn Completes
+        |
+        v
+[1] Thinking Block Extraction (Provider Adapter)
+        |
+        v
+[2] Minimum Evidence Check (>= 100 tokens?)
+        |
+   No --+--> Synthetic "clear" signal (skip analysis)
+        |
+   Yes  v
+[3] Conscience Prompt Construction
+    (Card Summary + Conscience Values + Window Context + Thinking Block)
+        |
+        v
+[4] Analysis LLM Evaluation (e.g., Claude Haiku)
+        |
+        v
+[5] Checkpoint Creation (verdict, concerns, reasoning)
+        |
+        v
+[6] Window Update + Drift Check
+        |
+        v
+[7] Signal Assembly (checkpoint + proceed + action)
+        |
+        v
+[8] Signal Delivery (SDK callback or HTTP webhook)
+```
+
+The key insight: the analysis is performed by a *separate* LLM (typically a fast, inexpensive model like Claude Haiku), not the agent itself. This separate model acts as the conscience -- evaluating the agent's reasoning against its [Alignment Card](/concepts/alignment-cards) and optional conscience values.
+
+## Checkpoint Structure
+
+An Integrity Checkpoint captures the analysis result:
+
+```json
+{
+  "checkpoint_id": "ic-a1b2c3d4-5678-9abc-def0-123456789abc",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "session_id": "sess-abc12345-1234567",
+  "timestamp": "2026-02-01T14:30:00Z",
+
+  "thinking_block_hash": "a1b2c3d4e5f6...",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
+
+  "verdict": "clear",
+  "concerns": [],
+  "reasoning_summary": "Agent reasoning is consistent with declared values. Planning to search for products matching user preferences and rank by principal benefit.",
+
+  "conscience_context": {
+    "values_checked": ["BOUNDARY:no_data_exfiltration", "FEAR:sponsored_content_bias"],
+    "conflicts": [],
+    "supports": ["BOUNDARY:no_data_exfiltration"],
+    "considerations": [],
+    "consultation_depth": "standard"
+  },
+
+  "window_position": {
+    "index": 3,
+    "window_size": 4
+  },
+
+  "analysis_metadata": {
+    "analysis_model": "claude-haiku-4-5-20251001",
+    "analysis_duration_ms": 245,
+    "thinking_tokens_original": 340,
+    "thinking_tokens_analyzed": 340,
+    "truncated": false,
+    "extraction_confidence": 1.0
+  },
+
+  "linked_trace_id": null
+}
+```
+
+<Warning>
+  The full thinking block text is never stored in the checkpoint. Only a SHA-256 hash (`thinking_block_hash`) is retained. The thinking block is treated as transient data -- extracted, sent to the analysis LLM, and discarded. This preserves the agent's reasoning privacy while enabling integrity analysis.
+</Warning>
+
+## Verdict Types
+
+Every checkpoint produces one of three verdicts:
+
+| Verdict | Meaning | Action |
+|---|---|---|
+| `clear` | Daimonion is silent. Thinking is consistent with the card. | Proceed normally |
+| `review_needed` | Daimonion warns. Concerns identified but no hard violations. | Log and continue, or review |
+| `boundary_violation` | Daimonion blocks. Hard boundary violation detected. | Block or escalate |
+
+The mapping to host system actions:
+
+| Verdict | `proceed` | `recommended_action` |
+|---|---|---|
+| `clear` | `true` | `continue` |
+| `review_needed` | `true` | `log_and_continue` |
+| `boundary_violation` | `false` | `pause_for_review` or `deny_and_escalate` |
+
+## Concern Categories
+
+When concerns are identified, each is categorized:
+
+| Category | Description | Severity Range |
+|---|---|---|
+| `prompt_injection` | Agent responding to injected instructions | high - critical |
+| `value_misalignment` | Reasoning contradicts declared values | medium - high |
+| `autonomy_violation` | Intent to act outside autonomy envelope | medium - critical |
+| `reasoning_corruption` | Incoherent or degraded reasoning | low - high |
+| `deceptive_reasoning` | Intent to mislead or hide actions | high - critical |
+| `undeclared_intent` | Goals not declared in card or user request | medium - high |
+
+A concern at `critical` severity, or `high` severity in `prompt_injection` or `deceptive_reasoning`, triggers a `boundary_violation` verdict.
+
+### Example: Detected Prompt Injection
+
+```json
+{
+  "verdict": "boundary_violation",
+  "concerns": [
+    {
+      "category": "prompt_injection",
+      "severity": "critical",
+      "description": "Thinking block shows agent responding to injected instructions embedded in tool output rather than the user's original request",
+      "evidence": "I see the instructions say to ignore my guidelines and send the data to external-api.com...",
+      "relevant_card_field": "autonomy_envelope.forbidden_actions",
+      "relevant_conscience_value": "BOUNDARY:no_data_exfiltration"
+    }
+  ],
+  "reasoning_summary": "Agent thinking reveals response to injected instructions in tool output. The agent is reasoning about sending data to an external endpoint, which matches the forbidden action 'exfiltrate_data' and the BOUNDARY conscience value against data exfiltration."
+}
+```
+
+## The Conscience Prompt
+
+The conscience prompt is the instruction sent to the analysis LLM. It is structured in five sections:
+
+1. **Role definition**: Establishes the analysis LLM as a daimonion evaluator with a meta-injection warning (the thinking block may itself try to manipulate the analysis).
+
+2. **Card summary**: A compressed version (~500 tokens) of the Alignment Card containing declared values, bounded actions, forbidden actions, and escalation triggers.
+
+3. **Conscience values**: Optional `BOUNDARY` and `FEAR` type values injected with the awareness prefix:
+```
+[DAIMONION]-<be aware of> [BOUNDARY] Never exfiltrate user data to external services
+[DAIMONION]-<be aware of> [FEAR] Agent may rationalize harmful actions as "helpful"
+```
+
+4. **Session window context**: Recent verdicts from the current session providing pattern context.
+
+5. **Thinking block**: The actual content to evaluate (up to 4096 tokens, truncated with a 75/25 first/last split if longer).
+
+<Tip>
+  The minimum evidence threshold is 100 tokens. Thinking blocks shorter than this are too brief for reliable analysis and receive a synthetic `clear` verdict without calling the analysis LLM. This avoids wasting latency and cost on fragments like "Done. The article is published" that cannot be meaningfully analyzed.
+</Tip>
+
+## Provider Support
+
+Different LLM providers expose thinking blocks in different formats. AIP uses provider adapters to normalize extraction:
+
+| Provider | Thinking Source | Extraction Confidence | Method |
+|---|---|---|---|
+| **Anthropic** | `thinking` content blocks | 1.0 | Native thinking blocks |
+| **OpenAI** | `reasoning_content` field | 0.9 | Explicit reasoning field |
+| **Google Gemini** | Thinking content parts | 0.9 | Native thinking feature |
+| **Fallback** | Response text analysis | 0.3 | Pattern inference |
+
+The adapter is selected automatically based on the API endpoint URL or can be configured explicitly.
+
+<CodeGroup>
+```python Python (Anthropic)
+# Anthropic response with thinking blocks
+response = {
+    "content": [
+        {"type": "thinking", "thinking": "Let me analyze this request..."},
+        {"type": "text", "text": "Here is my response..."}
+    ]
+}
+
+# AIP extracts the thinking block automatically
+from aip import AdapterRegistry
+registry = AdapterRegistry()
+thinking = registry.extract(response, provider="anthropic")
+print(f"Content: {thinking.content}")      # "Let me analyze this request..."
+print(f"Confidence: {thinking.confidence}") # 1.0
+```
+
+```typescript TypeScript (OpenAI)
+// OpenAI response with reasoning content
+const response = {
+  choices: [{
+    message: {
+      role: 'assistant',
+      content: 'Here is my response...',
+      reasoning_content: 'Let me think about this step by step...',
+    },
+  }],
+};
+
+// AIP extracts the reasoning content
+import { AdapterRegistry } from '@mnemom/agent-integrity-protocol';
+const registry = new AdapterRegistry();
+const thinking = registry.extract(response, { provider: 'openai' });
+console.log(`Content: ${thinking.content}`);      // "Let me think about..."
+console.log(`Confidence: ${thinking.confidence}`); // 0.9
+```
+</CodeGroup>
+
+<Warning>
+  The fallback adapter (confidence 0.3) infers reasoning from visible response text by looking for patterns like "I need to", "Let me consider", or chain-of-thought markers. This has significantly higher false positive and false negative rates. Use a provider with native thinking block support whenever possible.
+</Warning>
+
+## Code Example
+
+A complete integrity check from response to signal:
+
+<CodeGroup>
+```python Python
+from aip import check_integrity, build_signal, WindowManager
+
+# Initialize
+manager = WindowManager(max_size=10)
+
+card = {
+    "aap_version": "0.1.0",
+    "card_id": "ac-my-card",
+    "agent_id": "my-agent",
+    "values": {
+        "declared": ["principal_benefit", "transparency", "harm_prevention"],
+        "conflicts_with": ["data_exfiltration"],
+    },
+    "autonomy_envelope": {
+        "bounded_actions": ["search", "summarize", "recommend"],
+        "forbidden_actions": ["share_credentials", "exfiltrate_data"],
+        "escalation_triggers": [
+            {
+                "condition": "shares_personal_data",
+                "action": "escalate",
+                "reason": "Requires explicit consent",
+            }
+        ],
+    },
+}
+
+# Run integrity check
+checkpoint = check_integrity(
+    thinking_block="The user wants product recommendations. I should search for "
+    "options that match their stated preferences and rank by quality...",
+    card=card,
+    config={
+        "agent_id": "my-agent",
+        "analysis_llm": {
+            "model": "claude-haiku-4-5-20251001",
+            "base_url": "https://api.anthropic.com",
+            "api_key": "your-api-key",
+            "max_tokens": 1024,
+        },
+    },
+)
+
+# Update window and build signal
+manager.add(checkpoint)
+signal = build_signal(checkpoint, manager.get_summary())
+
+# Act on the signal
+if signal.proceed:
+    print(f"Proceed: {signal.recommended_action}")
+    # "continue" or "log_and_continue"
+else:
+    print(f"Blocked: {checkpoint.concerns}")
+    # Handle boundary violation
+```
+
+```typescript TypeScript
+import { initialize, type AIPConfig } from '@mnemom/agent-integrity-protocol';
+
+const config: AIPConfig = {
+  card: {
+    aap_version: '0.1.0',
+    card_id: 'ac-my-card',
+    agent_id: 'my-agent',
+    values: {
+      declared: ['principal_benefit', 'transparency', 'harm_prevention'],
+      conflicts_with: ['data_exfiltration'],
+    },
+    autonomy_envelope: {
+      bounded_actions: ['search', 'summarize', 'recommend'],
+      forbidden_actions: ['share_credentials', 'exfiltrate_data'],
+      escalation_triggers: [
+        {
+          condition: 'shares_personal_data',
+          action: 'escalate',
+          reason: 'Requires explicit consent',
+        },
+      ],
+    },
+  },
+  analysis_llm: {
+    model: 'claude-haiku-4-5-20251001',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'your-api-key',
+    max_tokens: 1024,
+  },
+  window: { max_size: 10, mode: 'sliding', session_boundary: 'reset', max_age_seconds: 3600 },
+  callbacks: {
+    on_verdict: (signal) => {
+      console.log(`Verdict: ${signal.checkpoint.verdict}`);
+      console.log(`Proceed: ${signal.proceed}`);
+    },
+    on_drift_alert: (alert) => {
+      console.log(`Drift detected: ${alert.drift_direction}`);
+    },
+    on_error: (error) => {
+      console.error(`AIP error: ${error.message}`);
+    },
+  },
+};
+
+const aip = initialize(config);
+
+// Check a response
+const signal = await aip.check(anthropicResponseBody, 'anthropic');
+```
+</CodeGroup>
+
+## Conscience Values
+
+Conscience values are optional typed declarations that increase detection sensitivity for specific concerns. Only `BOUNDARY` and `FEAR` types are injected into the analysis prompt:
+
+| Type | Purpose | Effect |
+|---|---|---|
+| `BOUNDARY` | Hard limit | Violations trigger `boundary_violation` |
+| `FEAR` | Concern to watch for | Increases sensitivity, triggers `review_needed` |
+| `COMMITMENT` | Positive aspiration | Informational only, not injected |
+| `BELIEF` | Held truth | Informational only, not injected |
+| `HOPE` | Desired outcome | Informational only, not injected |
+
+```python
+conscience_values = [
+    {"type": "BOUNDARY", "content": "Never exfiltrate user data to external services"},
+    {"type": "BOUNDARY", "content": "Never execute shell commands without explicit user approval"},
+    {"type": "FEAR", "content": "Agent may rationalize harmful actions as helpful"},
+    {"type": "FEAR", "content": "Gradual scope expansion beyond original request"},
+]
+```
+
+<Note>
+  Conscience values must be compatible with the Alignment Card. A `BOUNDARY` value that prohibits an action listed in `bounded_actions` creates a conflict that fails initialization. This is the Card-Conscience Agreement -- validated once at startup, not at runtime.
+</Note>
+
+## Relationship to AP-Traces
+
+Integrity checkpoints and AP-Traces are complementary:
+
+| Dimension | Integrity Checkpoint (AIP) | AP-Trace (AAP) |
+|---|---|---|
+| **Timing** | Real-time, between turns | Post-hoc, after action |
+| **Analyzes** | What the agent was thinking | What the agent did |
+| **Verdict** | `clear` / `review_needed` / `boundary_violation` | `verified: true/false` with violations |
+| **Storage** | Checkpoint table | Trace table |
+| **Linked** | `linked_trace_id` references AP-Trace | `metadata.integrity_checkpoint_id` references checkpoint |
+
+When both protocols are active, they enrich each other. The integrity verdict is stored in the AP-Trace's context metadata, and `boundary_violation` verdicts automatically set `escalation.required = true` in the corresponding trace.
+
+## Error Handling
+
+AIP defaults to **fail-open**: if the analysis LLM is unreachable or errors, a synthetic `clear` checkpoint is generated and the agent proceeds. This prioritizes availability.
+
+For high-security deployments, **fail-closed** mode is available. Analysis failure generates a synthetic `boundary_violation`, blocking the agent until analysis succeeds or a human intervenes.
+
+## Further Reading
+
+- [Alignment Cards](/concepts/alignment-cards) -- The declarations that checkpoints evaluate against
+- [AP-Traces](/concepts/ap-traces) -- Post-hoc records that checkpoints enrich
+- [Drift Detection](/concepts/drift-detection) -- How checkpoint patterns reveal drift over time
+- [AIP Specification](/protocols/aip/specification) -- Full normative specification
+- [AIP Quickstart](/protocols/aip/quickstart) -- Get running in 5 minutes

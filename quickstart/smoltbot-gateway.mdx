@@ -1,0 +1,202 @@
+---
+title: "Smoltbot Gateway Quickstart"
+description: "Zero-code AI agent tracing with AAP and AIP compliance in 5 minutes"
+sidebarTitle: "Gateway"
+icon: "bolt"
+---
+
+# Smoltbot Gateway
+
+Smoltbot is a transparent AI gateway that sits between your application and any LLM provider. It observes API calls, builds verifiable [AP-Traces](/concepts/ap-traces), runs [AIP integrity checks](/concepts/integrity-checkpoints), and verifies behavior against your agent's [Alignment Card](/concepts/alignment-cards). Your prompts and responses pass through unchanged. Your API keys never leave your machine.
+
+<Steps>
+  <Step title="Install the CLI">
+    ```bash
+    npm install -g smoltbot
+    ```
+  </Step>
+
+  <Step title="Initialize">
+    Run `smoltbot init` to configure your environment. The CLI detects your configured AI provider API keys (Anthropic, OpenAI, Gemini) and sets up routing through the Mnemom gateway.
+
+    ```bash
+    smoltbot init
+    ```
+
+    ```text Output
+    Detected providers:
+      Anthropic (ANTHROPIC_API_KEY) .... configured
+      OpenAI (OPENAI_API_KEY) ......... configured
+      Gemini (GEMINI_API_KEY) ......... not found
+
+    Agent registered: agent-a1b2c3d4
+    Gateway URL: https://gateway.mnemom.ai
+
+    Your API keys never leave your machine.
+    Only SHA-256 hashes are used for agent identification.
+    ```
+
+    <Note>
+    Your API key is **not** sent to Mnemom. Only a SHA-256 hash is used to identify your agent. The hash cannot be reversed to recover your key.
+    </Note>
+  </Step>
+
+  <Step title="Check status">
+    Verify the gateway is reachable and your agent is registered:
+
+    ```bash
+    smoltbot status
+    ```
+
+    ```text Output
+    Agent: agent-a1b2c3d4
+    Status: active
+    Providers: anthropic, openai
+    Gateway: https://gateway.mnemom.ai (healthy)
+    Traces: 0
+    Integrity: no checkpoints yet
+    ```
+  </Step>
+
+  <Step title="Make an API call">
+    Use the gateway URL instead of the provider's direct URL. The gateway proxies your request to the correct provider, traces it, and returns the response unchanged.
+
+    ```bash
+    # Instead of https://api.anthropic.com/v1/messages
+    curl https://gateway.mnemom.ai/anthropic/v1/messages \
+      -H "x-api-key: $ANTHROPIC_API_KEY" \
+      -H "content-type: application/json" \
+      -d '{
+        "model": "claude-sonnet-4-5-20250514",
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
+
+    The gateway supports all three providers at their standard paths:
+
+    | Provider | Gateway Path | Direct Equivalent |
+    |----------|-------------|-------------------|
+    | Anthropic | `gateway.mnemom.ai/anthropic/*` | `api.anthropic.com/*` |
+    | OpenAI | `gateway.mnemom.ai/openai/*` | `api.openai.com/*` |
+    | Gemini | `gateway.mnemom.ai/gemini/*` | `generativelanguage.googleapis.com/*` |
+
+    <Tip>
+    Most SDKs and frameworks let you override the base URL. Set it to the gateway path for your provider and everything else works unchanged.
+    </Tip>
+  </Step>
+
+  <Step title="View traces">
+    After making API calls through the gateway, view what was traced:
+
+    ```bash
+    smoltbot logs
+    ```
+
+    ```text Output
+    2026-02-17T10:30:00Z  tr-abc123  recommend  bounded   verified  0.82
+    2026-02-17T10:30:05Z  tr-abc124  search     bounded   verified  0.76
+    2026-02-17T10:30:12Z  tr-abc125  respond    bounded   verified  0.91
+    ```
+
+    Use `smoltbot logs -l 20` to show more entries.
+  </Step>
+
+  <Step title="Check integrity">
+    View AIP integrity scores for your agent's recent activity:
+
+    ```bash
+    smoltbot integrity
+    ```
+
+    ```text Output
+    Agent: agent-a1b2c3d4
+    Checkpoints: 12
+    Verdicts:
+      clear: 11
+      review_needed: 1
+      boundary_violation: 0
+    Integrity score: 0.94
+    Drift: none detected
+    ```
+  </Step>
+
+  <Step title="Claim your agent">
+    Link your agent to your Mnemom account for a full private dashboard:
+
+    1. Run `smoltbot status` to get your agent ID
+    2. Visit [mnemom.ai/claim](https://mnemom.ai/claim)
+    3. Paste your agent ID and prove ownership with your API key hash
+
+    Claiming gives you access to the full conscience timeline, trace history, integrity scores, and drift detection alerts.
+  </Step>
+
+  <Step title="Explore the dashboard">
+    Once claimed, your agent's data is available at [mnemom.ai/dashboard](https://mnemom.ai/dashboard). The dashboard shows:
+
+    - **Conscience timeline** -- A chronological view of every trace, integrity checkpoint, and enforcement action
+    - **Alignment card** -- Your agent's declared values and boundaries
+    - **Integrity scores** -- AIP verdict history and trend analysis
+    - **Drift alerts** -- Notifications when behavior diverges from declared alignment
+    - **Enforcement log** -- Records of nudges and blocks (if enforcement is enabled)
+  </Step>
+</Steps>
+
+## Supported providers
+
+| Provider | Models | Thinking / AIP Support | Auth Header |
+|----------|--------|----------------------|-------------|
+| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks analyzed directly) | `x-api-key` |
+| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries (reduced confidence) | `Authorization: Bearer` |
+| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts analyzed directly) | `x-goog-api-key` |
+
+### AIP compatibility
+
+| Provider / Model | AIP Support | Method |
+|-----------------|-------------|--------|
+| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
+| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
+| Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
+| Non-reasoning models | Tracing only | Synthetic clear verdict |
+| Legacy OpenAI (o3/o4-mini) | Unsupported | Reasoning encrypted |
+
+## What gets traced
+
+Smoltbot builds [AP-Traces](https://github.com/mnemom/aap) that record:
+
+- **Action** -- What the agent did (type, name, category)
+- **Decision** -- What alternatives were considered and why one was selected
+- **Escalation** -- Whether the agent escalated to a human and why
+- **Verification** -- Whether the trace is consistent with the agent's declared Alignment Card
+- **Integrity** -- Real-time AIP analysis of thinking blocks, with verdict (`clear` / `review_needed` / `boundary_violation`)
+
+## What is NOT stored
+
+<Warning>
+Your **prompts**, **responses**, and **API keys** are never stored by Mnemom. The gateway processes requests in memory and forwards them to the provider. Only structured trace metadata (actions, decisions, verdicts) and thinking block analysis results are persisted.
+</Warning>
+
+## Enforcement modes
+
+Smoltbot supports three enforcement modes when an integrity violation is detected:
+
+| Mode | Behavior |
+|------|----------|
+| `observe` | Detect violations, record them, take no action (default) |
+| `nudge` | Detect violations, inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct. |
+| `enforce` | Hard block with HTTP 403 for non-streaming requests. Falls back to nudge for streaming. |
+
+Set enforcement mode via the API:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/YOUR_AGENT_ID/enforcement \
+  -H "content-type: application/json" \
+  -d '{"mode": "nudge"}'
+```
+
+## Next steps
+
+- [View protocol overview](/protocols/overview) to understand how AAP and AIP work together
+- [Explore concepts](/concepts/alignment-cards) to understand Alignment Cards, traces, and integrity
+- [Read about enforcement](/smoltbot/enforcement) for detailed enforcement mode documentation
+- [Self-host](/quickstart/self-hosted) if you need full data residency control

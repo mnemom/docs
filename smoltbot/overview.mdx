@@ -1,0 +1,126 @@
+---
+title: "Smoltbot Overview"
+description: "Transparent AI agent tracing gateway with AAP and AIP compliance"
+sidebarTitle: "Overview"
+icon: "satellite-dish"
+---
+
+# Smoltbot Overview
+
+Smoltbot is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
+
+Smoltbot is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs real-time [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
+
+## Architecture
+
+```
+smoltbot/
+├── cli/          # CLI tool (npm package)
+├── gateway/      # Cloudflare Worker — API proxy + tracing
+├── observer/     # Cloudflare Worker — trace builder + AAP verification
+├── api/          # Cloudflare Worker — REST API
+├── dashboard/    # React frontend (legacy, see mnemom-website)
+└── database/     # Supabase schema (Postgres)
+```
+
+### Request Flow
+
+```
+                    ┌─── /anthropic/* ──→ Anthropic (Claude)
+Your App → smoltbot ├─── /openai/*    ──→ OpenAI (GPT-5)
+           gateway  └─── /gemini/*    ──→ Google (Gemini)
+                ↓
+           CF AI Gateway
+                ↓
+           Observer Worker
+                ↓
+         AP-Trace + Verify → Supabase
+                ↓
+         Dashboard (mnemom.ai)
+```
+
+The system consists of five components:
+
+1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, injects thinking/reasoning per provider, performs real-time integrity checking, injects conscience nudges, and delivers webhooks. Your prompts and responses pass through unchanged.
+
+2. **Observer** — A scheduled Cloudflare Worker that processes AI Gateway logs. It extracts thinking blocks (Anthropic/Gemini) or reasoning summaries (OpenAI) from responses, analyzes decisions with Claude Haiku, builds AP-Traces, verifies them against your agent's alignment card using the AAP SDK, and runs AIP integrity checks. Creates enforcement nudges when violations are detected.
+
+3. **API** — Serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
+
+4. **CLI** — The `smoltbot` command. Configures your local environment and queries your agent's transparency data. See the [CLI Reference](/smoltbot/cli) for details.
+
+5. **Dashboard** — Web UI at [mnemom.ai](https://mnemom.ai) where you can view the conscience timeline, claim your agent, and monitor alignment.
+
+## Supported Providers
+
+| Provider | Models | Thinking/AIP | Auth |
+|----------|--------|-------------|------|
+| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks) | `x-api-key` |
+| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries | `Authorization: Bearer` |
+| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts) | `x-goog-api-key` |
+
+## What Gets Traced
+
+Smoltbot builds AP-Traces that record:
+
+- **Action** — What the agent did (type, name, category)
+- **Decision** — What alternatives were considered and why one was selected
+- **Escalation** — Whether the agent escalated to a human and why
+- **Verification** — Whether the trace is consistent with the agent's declared alignment card
+- **Integrity** — Real-time AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
+
+### What is NOT Stored
+
+Your prompts, responses, and API keys are never stored. Only SHA-256 hashes of API keys are used for agent identification.
+
+## AIP Compatibility Matrix
+
+| Provider/Model | AIP Support | Method |
+|----------------|-------------|--------|
+| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
+| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
+| Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
+| Non-reasoning models | Tracing only | Synthetic clear verdict |
+| Legacy OpenAI (o3/o4-mini) | Unsupported | Reasoning encrypted |
+
+## Claiming Your Agent
+
+After running `smoltbot init`, your agent is registered automatically. To link it to your Mnemom account:
+
+1. Run `smoltbot status` to get your agent ID
+2. Go to [mnemom.ai/claim](https://mnemom.ai/claim)
+3. Paste your agent ID and prove ownership with your API key hash
+
+Claiming gives you a private dashboard with full trace history, integrity scores, and drift detection.
+
+## Current Limitations
+
+- **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
+- **AIP requires reasoning models** — AIP integrity checking requires models with exposed thinking (Anthropic, Gemini, GPT-5 Thinking). Models without thinking get synthetic clear verdicts.
+- **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
+
+## Dependencies
+
+- [Agent Alignment Protocol (AAP)](/protocols/aap/specification) — `@mnemom/agent-alignment-protocol@0.1.8` on npm
+- [Agent Integrity Protocol (AIP)](/protocols/aip/specification) — `@mnemom/agent-integrity-protocol@0.1.4` on npm
+- [Cloudflare Workers](https://workers.cloudflare.com/) — Gateway, observer, and API hosting
+- [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) — Request logging and analytics
+- [Supabase](https://supabase.com/) — Postgres database with row-level security
+- API keys: Anthropic (required for AIP analysis), OpenAI and Gemini (optional, for multi-provider tracing)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CLI Reference" icon="terminal" href="/smoltbot/cli">
+    Learn about all CLI commands and usage
+  </Card>
+  <Card title="Enforcement Modes" icon="gavel" href="/smoltbot/enforcement">
+    Configure how smoltbot responds to violations
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/guides/observability">
+    Export traces to your observability platform via OpenTelemetry
+  </Card>
+  <Card title="EU Compliance" icon="scale-balanced" href="/guides/eu-compliance">
+    Map AAP/AIP to EU AI Act Article 50 obligations
+  </Card>
+</CardGroup>

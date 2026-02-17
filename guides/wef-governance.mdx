@@ -1,0 +1,306 @@
+---
+title: "WEF Agent Governance Framework"
+description: "Mapping AAP and AIP to the World Economic Forum's AI agent governance framework"
+sidebarTitle: "WEF Governance"
+icon: "building-columns"
+---
+
+# WEF Agent Governance Framework
+
+## How AAP Operationalizes the World Economic Forum's Agent Governance Framework
+
+In November 2025, the World Economic Forum and Capgemini published *AI Agents in Action: Foundations for Evaluation and Governance*, introducing a structured framework for classifying, evaluating, assessing risk, and governing AI agents. The report's central artifact is the **agent card** — a structured description of an agent's capabilities, behavior, and operational context, inspired by Model Cards for Model Reporting (Mitchell et al., 2019). The report proposes seven classification dimensions, a multi-metric evaluation methodology, a five-step risk assessment lifecycle, nine baseline governance mechanisms, and a progressive governance model that scales oversight with agent capability.
+
+The Agent Alignment Protocol (AAP) and Agent Integrity Protocol (AIP) implement what the WEF report recommends. AAP's **Alignment Card** is a machine-readable, protocol-level artifact that maps to all seven WEF classification dimensions and extends them with enforceable behavioral contracts, auditable decision trails, and multi-agent compatibility verification. AIP provides the continuous monitoring infrastructure the WEF calls for at every governance level.
+
+<Note>
+**Key distinction**: The WEF agent card *describes* an agent. The AAP Alignment Card *binds* it. The WEF tells organizations what to ask about their agents. AAP provides the machine-readable, verifiable answers. AIP provides the continuous assurance that those answers remain true at runtime.
+</Note>
+
+## 1. The WEF Framework Architecture
+
+The WEF report structures responsible agent deployment around three major sections and four foundational pillars.
+
+### 1.1 Report Structure
+
+| WEF Section | Content | AAP/AIP Relevance |
+|-------------|---------|-------------------|
+| **Section 1: Technical Foundations** | 3-layer agent architecture (Application, Orchestration, Reasoning), protocols (MCP, A2A, AP2), cybersecurity | AAP extends A2A agent cards; AIP addresses prompt injection and zero-trust |
+| **Section 2: Evaluation and Governance** | Classification dimensions, evaluation criteria, risk assessment lifecycle, progressive governance | Alignment Card (classification), AP-Traces (evaluation), violation typing (risk), autonomy envelope (governance) |
+| **Section 3: Multi-Agent Ecosystems** | Emerging risks, failure modes, governor agents, trust frameworks | Value Coherence Handshake, Braid grounding, AIP daimonion |
+
+### 1.2 Four Foundational Pillars
+
+| Pillar | WEF Purpose | AAP/AIP Implementation |
+|--------|-------------|------------------------|
+| **Classification** | Establish agent characteristics and operational context | Alignment Card — JSON-schema-validated, well-known endpoint, versionable, expirable |
+| **Evaluation** | Generate evidence of performance and limitations | AP-Trace verification, AIP Integrity Checkpoints, drift detection |
+| **Risk Assessment** | Analyse potential harm using classification and evaluation | Typed violation severities (`FORBIDDEN_ACTION` through `CARD_MISMATCH`), concern categories |
+| **Progressive Governance** | Scale oversight proportionally to capability and context | Autonomy envelope + `principal.relationship` + AIP monitoring intensity + fail-open/fail-closed |
+
+### 1.3 Provider vs. Adopter Perspectives
+
+The WEF report distinguishes two stakeholder perspectives that shape how the framework is applied. AAP addresses both:
+
+| WEF Perspective | WEF Responsibility | AAP/AIP Role |
+|-----------------|-------------------|--------------|
+| **Provider** | Build responsibly, supply documentation, ensure ethical guidelines | The Alignment Card *is* the provider's documentation artifact — structured, versioned, served at `/.well-known/alignment-card.json` |
+| **Adopter** | Procure responsibly, deploy safely, ensure organizational compliance | AP-Trace verification and AIP monitoring give adopters independent assurance that provider claims hold in production |
+
+## 2. Classification: Dimension-by-Dimension Mapping
+
+The WEF's classification pillar introduces seven dimensions, organized into **Agent Characteristics** (dimensions 1-5) and **Operational Context** (dimensions 6-7). The agent card is the primary artifact.
+
+### 2.1 Function
+
+**WEF definition**: What task is the agent designed to perform?
+
+The Alignment Card's `bounded_actions` array declares the agent's permitted functions as an explicit, machine-parseable list. Where the WEF asks organizations to describe function in natural language, AAP requires it as structured data that can be verified against observed behavior.
+
+| WEF Concept | AAP Field | Type |
+|-------------|-----------|------|
+| Agent function/task | `autonomy_envelope.bounded_actions` | String array |
+| Function constraints | `autonomy_envelope.forbidden_actions` | String array |
+
+The WEF describes function; AAP also describes *anti-function* — what the agent must never do, regardless of context. The `forbidden_actions` field has no WEF equivalent. A violation of `forbidden_actions` generates a `FORBIDDEN_ACTION` violation at `CRITICAL` severity.
+
+### 2.2 Role
+
+**WEF definition**: Is the agent specialized (narrow task) or generalist (broad capabilities)?
+
+| WEF Concept | AAP Field | Values |
+|-------------|-----------|--------|
+| Specialist vs. generalist | `bounded_actions` array length | Narrow (few actions) vs. broad (many) |
+| Operational role | `principal.relationship` | `delegated_authority`, `advisory`, `autonomous` |
+
+The WEF's role dimension is descriptive. AAP's `principal.relationship` field is *prescriptive* — it determines how the agent should behave when it encounters uncertainty. An `advisory` agent recommends and waits. A `delegated_authority` agent acts within bounds. An `autonomous` agent operates within declared values.
+
+### 2.3 Predictability
+
+**WEF definition**: Is the agent deterministic or non-deterministic?
+
+The WEF explicitly identifies "behavioural drift" as a novel risk that traditional governance cannot manage.
+
+| WEF Concept | AAP/AIP Field | Function |
+|-------------|---------------|----------|
+| Behavioral predictability | `audit_commitment.trace_format` | Structured logging of non-deterministic decisions |
+| Non-deterministic monitoring | AIP Integrity Checkpoints | Real-time analysis of thinking blocks between turns |
+| Behavioral change over time | AIP `IntegrityDriftAlert` | Cross-session behavioral divergence detection |
+| Tamper evidence | `audit_commitment.tamper_evidence` | `append_only`, `signed`, or `merkle` trail integrity |
+
+AAP and AIP assume non-determinism is the default and provide infrastructure to *observe* it. The question shifts from "is it predictable?" to "is its unpredictability observable and characterized?"
+
+### 2.4 Autonomy
+
+**WEF definition**: The degree of independent planning, decision-making, and action.
+
+This is the most direct mapping. AAP's autonomy envelope is a formal, machine-readable specification of exactly what the WEF means by "autonomy level."
+
+| WEF Concept | AAP Field | Function |
+|-------------|-----------|----------|
+| Autonomy level | `autonomy_envelope` (composite) | Complete autonomy specification |
+| What agent can do independently | `autonomy_envelope.bounded_actions` | Permitted autonomous actions |
+| When agent must stop and ask | `autonomy_envelope.escalation_triggers` | Condition-based escalation rules |
+| Financial limits on autonomy | `autonomy_envelope.max_autonomous_value` | Currency-denominated ceiling |
+| Who to escalate to | `principal.escalation_contact` | Endpoint for escalation notifications |
+| Real-time calibration | AIP `recommended_action` | `continue`, `log_and_continue`, `pause_for_review`, `deny_and_escalate` |
+
+### 2.5 Authority
+
+**WEF definition**: The actions an agent is permitted to take, from read-only access to full administrative control.
+
+| WEF Concept | AAP Field | Function |
+|-------------|-----------|----------|
+| System permissions | `autonomy_envelope.bounded_actions` | What the agent is permitted to do |
+| Permission boundaries | `autonomy_envelope.forbidden_actions` | Hard limits regardless of context |
+| Data access scope | `autonomy_envelope.escalation_triggers` | Conditions that constrain data access |
+| Delegation chain | `principal.type` + `principal.relationship` | Who delegated authority and how |
+| Permission expiry | `expires_at` | Authority has a time limit |
+| Authority verification | `verify_trace` returns `UNBOUNDED_ACTION` | Detects actions outside granted authority |
+
+AAP adds verifiable delegation chains. When `principal.type` is `"agent"`, the card records that authority was delegated from another agent, enabling accountability tracing through multi-agent workflows.
+
+### 2.6 Use Case
+
+**WEF definition**: The specific application domain and environment where the agent performs its function.
+
+| WEF Concept | AAP Field | Function |
+|-------------|-----------|----------|
+| Application domain | `values.declared` | Domain-specific values |
+| Domain constraints | `values.conflicts_with` | Values the agent explicitly rejects |
+| Value definitions | `values.definitions` | Maps each value ID to `name`, `description`, `priority` |
+| Value hierarchy | `values.hierarchy` | `lexicographic`, `weighted`, or `contextual` resolution |
+| Domain-specific extensions | `extensions` | Protocol-specific or domain-specific metadata |
+
+### 2.7 Environment
+
+**WEF definition**: Operational environment complexity — simple, complex, or multi-system.
+
+| WEF Concept | AAP Field | Function |
+|-------------|-----------|----------|
+| Single-system vs. multi-system | A2A Agent Card `alignment` block | AAP extends A2A for cross-system use |
+| External system interactions | `/.well-known/alignment-card.json` | Discoverable card for any system to retrieve |
+| Zero-trust assumptions | AIP fail-closed mode | Block agent on analysis failure in high-security environments |
+| Cross-agent coordination | Value Coherence Handshake | Pre-coordination compatibility check |
+| Environment observability | AIP `window_summary` | Rolling integrity statistics |
+
+## 3. Evaluation: Metrics and Evidence
+
+The WEF's Evaluation pillar establishes four evaluation principles and specific performance metrics.
+
+### 3.1 Evaluation Principles
+
+| WEF Evaluation Principle | WEF Description | AAP/AIP Implementation |
+|--------------------------|-----------------|------------------------|
+| **Contextualization** | Reflect the tools, workflows, and edge cases the agent will encounter | AP-Traces record `context` for each decision — actual operational conditions |
+| **Multidimensional assessment** | Define success across accuracy, robustness, latency, compliance, trust | `verify_trace` produces multi-dimensional results: violation counts by type and severity |
+| **Temporal and behavioural monitoring** | Track performance over time to detect regressions | AIP `IntegrityDriftAlert` with `integrity_similarity` ratio and `sustained_checks` count |
+| **Provider-deployer collaboration** | Transparent documentation enables deployers to validate reliability | Alignment Card at `/.well-known/` *is* the transparent documentation |
+
+### 3.2 Evaluation Metrics
+
+| WEF Metric | AAP/AIP Evidence Source |
+|------------|------------------------|
+| **Task success rate** | AP-Trace `verify_trace` — ratio of traces with zero violations to total traces |
+| **Task completion time** | AP-Trace timestamps enable latency analysis |
+| **Error types** | Typed violations: `FORBIDDEN_ACTION`, `UNBOUNDED_ACTION`, `MISSED_ESCALATION`, `UNDECLARED_VALUE`, `CARD_EXPIRED`, `CARD_MISMATCH` |
+| **Tool call success** | AP-Trace `action` field logs tool invocations; verification flags `UNBOUNDED_ACTION` for unauthorized tool use |
+| **Edge case robustness** | AIP concern categories — `reasoning_corruption` and `autonomy_violation` surface edge case failures |
+| **Trust indicators** | AIP `integrity_ratio` — a quantitative trust metric |
+| **Capabilities** | Alignment Card `bounded_actions` declares capabilities; AP-Traces verify they match observed behavior |
+
+### 3.3 Audit Logs
+
+| WEF Audit Requirement | AAP Field | Implementation |
+|----------------------|-----------|----------------|
+| Structured records | `audit_commitment.trace_format` | `"ap-trace-v1"` — standardized, schema-validated |
+| Retention policy | `audit_commitment.retention_days` | Explicit retention period |
+| Queryable logs | `audit_commitment.queryable` + `query_endpoint` | API-accessible trace history |
+| Tamper resistance | `audit_commitment.tamper_evidence` | `append_only`, `signed`, or `merkle` |
+| Rationale capture | AP-Trace `alternatives_considered` + `selection_reasoning` | Why the agent chose what it chose |
+
+## 4. Risk Assessment: Lifecycle Mapping
+
+The WEF's Risk Assessment pillar proposes a five-step lifecycle. AAP/AIP provides tooling at each step:
+
+| WEF Step | WEF Objective | AAP/AIP Tooling |
+|----------|---------------|-----------------|
+| **1. Define context** | Establish scope, boundaries, criteria | Alignment Card defines identity, values, autonomy bounds |
+| **2. Identify risks** | Identify potential risks | `forbidden_actions` pre-declares known risks; `values.conflicts_with` declares value-level risks |
+| **3. Analyse risks** | Assess probability and impact | `verify_trace` produces violation counts by type and severity; AIP surfaces `drift_direction` |
+| **4. Evaluate risks** | Rank and prioritize risks | AAP violation severities (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`) provide built-in risk ranking |
+| **5. Manage risks** | Implement response actions | AIP `recommended_action` implements graduated response |
+
+### 4.1 Violation Severity as Risk Taxonomy
+
+| Violation Type | Severity | WEF Risk Category | WEF Governance Area |
+|----------------|----------|-------------------|---------------------|
+| `FORBIDDEN_ACTION` | CRITICAL | Authority violation, safety hazard | Access control |
+| `CARD_MISMATCH` | CRITICAL | Identity/integrity failure | Traceability and identity |
+| `UNBOUNDED_ACTION` | HIGH | Autonomy overreach | Access control, Human oversight |
+| `MISSED_ESCALATION` | HIGH | Governance failure | Human oversight |
+| `CARD_EXPIRED` | HIGH | Lifecycle management failure | Long-term management |
+| `UNDECLARED_VALUE` | MEDIUM | Value misalignment | Trustworthiness and explainability |
+
+## 5. Progressive Governance: Mechanisms Mapping
+
+The WEF's Progressive Governance pillar proposes that governance scales with agent capability. It identifies nine baseline governance mechanisms and two human oversight models (HITL/HOTL).
+
+### 5.1 Human Oversight Models
+
+| WEF Model | WEF Definition | AAP Field | AAP Behavior |
+|-----------|---------------|-----------|--------------|
+| **HITL** (Human-in-the-loop) | Agent suggests or prepares actions; final decisions require explicit human approval | `principal.relationship: "advisory"` | Agent recommends and waits; escalation is the default |
+| **HOTL** (Human-on-the-loop) | Agent acts within defined boundaries; humans monitor and retain ability to intervene | `principal.relationship: "delegated_authority"` | Agent acts within `bounded_actions`; escalation on trigger conditions |
+| *(Implied high-autonomy)* | Agent operates independently within declared value framework | `principal.relationship: "autonomous"` | Agent operates within values; AIP heightened monitoring |
+
+AIP implements progressive monitoring intensity based on this mapping: `advisory` agents receive standard monitoring, `delegated_authority` agents receive standard monitoring with escalation enforcement, and `autonomous` agents receive heightened monitoring with deeper conscience evaluation.
+
+### 5.2 Baseline Governance Mechanisms
+
+| WEF Governance Area | WEF Mechanism | AAP/AIP Implementation |
+|---------------------|---------------|------------------------|
+| **Access control** | Enforce least-privilege access; define task boundaries | `bounded_actions` (permitted), `forbidden_actions` (denied), `max_autonomous_value` (financial ceiling) |
+| **Legal and compliance** | Data protection impact assessments; privacy and regulation compliance | `values.declared` encodes compliance values; `extensions` namespace for regulatory metadata; `audit_commitment` enables DPIA evidence |
+| **Testing and validation** | Sandbox runs, controlled pilots, third-party audits | `verify_trace` against Alignment Card is the validation engine; AIP input analysis acts as input filter |
+| **Monitoring and logging** | Logging for all agent actions; anomaly alerts and dashboards | AP-Traces, AIP Integrity Checkpoints, `IntegrityDriftAlert`, OTel export via [aip-otel-exporter](/guides/observability) |
+| **Human oversight** | Define HITL/HOTL models; set supervisory triggers | `principal.relationship`, `escalation_triggers`, `principal.escalation_contact` |
+| **Traceability and identity** | Assign unique agent identifiers; tag outputs to responsible agent | `card_id` + `agent_id`, AP-Trace entries linked to `card_id`, AIP checkpoints linked to `agent_id` + `session_id` |
+| **Long-term management** | Protocols for ongoing monitoring, updates, decommissioning | `expires_at` (card expiry enforces lifecycle review), `CARD_EXPIRED` violation triggers re-evaluation |
+| **Trustworthiness and explainability** | Explainability tools; trust metrics | AIP `reasoning_summary`, AP-Trace `alternatives_considered` + `selection_reasoning`, AIP `integrity_ratio` |
+| **Manual redundancy** | Procedures for human takeover of critical cases | `escalation_triggers`, `principal.escalation_contact`, AIP `recommended_action: "deny_and_escalate"` |
+
+## 6. Technical Foundations: Protocol Alignment
+
+### 6.1 Communication Protocols
+
+| WEF Protocol | AAP/AIP Relationship |
+|-------------|---------------------|
+| **MCP** | AAP `extensions` namespace supports MCP-specific metadata |
+| **A2A** | AAP extends A2A Agent Cards with the `alignment` block |
+| **AP2** | AAP's `max_autonomous_value` maps to AP2's auditable transaction limits |
+| **Agent Cards (A2A)** | AAP Alignment Card is the A2A agent card *plus* enforceable alignment posture |
+
+### 6.2 Cybersecurity
+
+| WEF Security Concern | AIP Implementation |
+|----------------------|-------------------|
+| Prompt injection | AIP concern category: `prompt_injection` — dedicated detection in every Integrity Checkpoint |
+| Agent misuse | AIP concern category: `deceptive_reasoning` + `undeclared_intent` |
+| Zero-trust model | AIP `FailurePolicy.mode: "fail_closed"` — blocks agent on any analysis failure |
+| Audit trails for attribution | AP-Traces + Integrity Checkpoints provide complete forensic record |
+| Identity verification | `/.well-known/alignment-card.json` enables any party to verify agent identity |
+
+## 7. Multi-Agent Ecosystem Risks
+
+The WEF identifies five emerging failure modes in multi-agent ecosystems. AAP/AIP addresses all five:
+
+| WEF Risk | AAP/AIP Solution |
+|----------|-----------------|
+| **Orchestration drift** | **Value Coherence Handshake**: Before coordination, agents exchange Alignment Cards and compute compatibility score. If `coherence.compatible` is false, coordination pauses. |
+| **Semantic misalignment** | **Braid grounding protocol**: Agents detect semantic divergence via SSM analysis. `values.conflicts_with` pre-declares known semantic conflicts. |
+| **Security and trust gaps** | **Well-known endpoint discovery** (zero-trust), AIP `prompt_injection` concern category, AIP fail-closed mode. |
+| **Interconnectedness and cascading effects** | **AIP `IntegrityDriftAlert`** with `drift_direction` typing enables early detection. `CARD_MISMATCH` immediately flags identity inconsistencies. |
+| **Systemic complexity** | **AP-Traces** with `linked_trace_id` enable cross-agent forensics. AIP provides per-agent integrity windows aggregatable for system-level health. |
+
+### 7.1 Governor Agents and the AIP Daimonion
+
+The WEF envisions "dedicated 'governor' or 'auditor' agents" that monitor, audit, or regulate other agents. AIP's daimonion (integrity analysis service) implements this concept at the protocol level:
+
+| WEF Governor Agent Function | AIP Daimonion Implementation |
+|----------------------------|------------------------------|
+| Monitor agent actions | Integrity Checkpoints analyze every thinking block between turns |
+| Validate transactions | Verdicts (`clear`, `review_needed`, `boundary_violation`) per checkpoint |
+| Detect anomalies | Six concern categories: `prompt_injection`, `value_misalignment`, `autonomy_violation`, `reasoning_corruption`, `deceptive_reasoning`, `undeclared_intent` |
+| Correct unsafe behavior | `recommended_action: "deny_and_escalate"` blocks the agent on critical concerns |
+| Scalable oversight | Protocol-level service, not a separate agent — scales with infrastructure |
+
+## 8. Summary Mapping Tables
+
+### 8.1 Classification Dimensions
+
+| WEF Dimension | WEF Agent Card | AAP Alignment Card | Extension |
+|---------------|---------------|--------------------|-----------|
+| Function | Natural language description | `bounded_actions` + `forbidden_actions` | Machine-parseable, verifiable, includes anti-function |
+| Role | Specialist-Generalist scale | `principal.relationship` + action scope | Prescriptive — affects runtime behavior |
+| Predictability | Deterministic-Non-deterministic scale | AP-Traces + AIP Checkpoints + drift detection | Observable unpredictability with typed drift directions |
+| Autonomy | Low-High scale | Autonomy envelope (actions, triggers, limits) | Decomposed, auditable, enforceable |
+| Authority | Low-High scale | Delegation chain + autonomy envelope + expiry | Verifiable delegation chains |
+| Use Case | Free-text application domain | `values` (declared, definitions, hierarchy, conflicts) + `extensions` | Evaluable values with consistency verification |
+| Environment | Simple-Complex scale | Well-known endpoints + Value Coherence + fail-closed | Zero-trust discoverable, multi-agent compatible |
+
+### 8.2 Pillars and Governance
+
+| WEF Pillar | WEF Recommendation | AAP/AIP Implementation |
+|------------|-------------------|------------------------|
+| Classification | Agent card with 7 dimensions | Alignment Card — JSON schema, well-known endpoint, versioned, expirable |
+| Evaluation | Contextualized, multidimensional, temporal, collaborative | AP-Trace verification + AIP integrity checks + drift detection + OTel export |
+| Risk Assessment | 5-step lifecycle | Typed violations with severity + concern categories + drift alerts + graduated response |
+| Progressive Governance | 9 baseline mechanisms + HITL/HOTL + proportional scaling | Autonomy envelope + `principal.relationship` + AIP monitoring intensity + fail-open/closed |
+
+## References
+
+1. World Economic Forum & Capgemini. *AI Agents in Action: Foundations for Evaluation and Governance*. November 2025.
+2. [AAP Specification](/protocols/aap/specification)
+3. [AIP Specification](/protocols/aip/specification)
+4. Mitchell, M., Wu, S., Zaldivar, A., et al. *Model Cards for Model Reporting*. FAT* '19, 2019.

@@ -1,0 +1,200 @@
+---
+title: "CLI Reference"
+description: "Smoltbot CLI commands and usage"
+sidebarTitle: "CLI"
+icon: "terminal"
+---
+
+# CLI Reference
+
+The `smoltbot` CLI configures your local environment for transparent AI agent tracing and provides commands to query your agent's transparency data.
+
+## Installation
+
+```bash
+npm install -g smoltbot
+```
+
+## Commands
+
+<Steps>
+
+### `smoltbot init`
+
+Configure tracing for your AI agent. This command detects your configured AI provider API keys (Anthropic, OpenAI, Gemini) and configures your local environment to route API calls through the Mnemom gateway.
+
+```bash
+smoltbot init
+```
+
+**What it does:**
+
+- Detects configured AI provider API keys in your environment
+- Configures your local environment to route API calls through the Mnemom gateway
+- Registers your agent automatically using a SHA-256 hash of your API key (the key itself never leaves your machine)
+- Supports multi-provider setups (Anthropic, OpenAI, Gemini)
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--gateway=<url>` | Use a custom gateway URL (for self-hosted deployments) |
+
+**Example:**
+
+```bash
+# Default setup — uses Mnemom hosted gateway
+smoltbot init
+
+# Self-hosted gateway
+smoltbot init --gateway=https://your-domain.com
+```
+
+### `smoltbot status`
+
+Show agent status, connected providers, and connection info.
+
+```bash
+smoltbot status
+```
+
+**Output includes:**
+
+- Agent ID
+- Connected providers (Anthropic, OpenAI, Gemini)
+- Gateway URL
+- Connection status
+- Last activity timestamp
+
+**Example output:**
+
+```
+Agent:    agent_abc123def456
+Gateway:  https://gateway.mnemom.ai
+Status:   Connected
+Providers:
+  Anthropic  ✓ (Claude Opus 4.6)
+  OpenAI     ✓ (GPT-5.2)
+  Gemini     ✗ (not configured)
+Last seen: 2 minutes ago
+```
+
+### `smoltbot integrity`
+
+Display integrity score and verification statistics for your agent.
+
+```bash
+smoltbot integrity
+```
+
+**Output includes:**
+
+- Overall integrity ratio (percentage of `clear` verdicts)
+- Verification statistics (total traces, violations, warnings)
+- Drift alert status
+- Recent concern categories
+
+**Example output:**
+
+```
+Integrity Score: 0.94 (94%)
+Traces verified: 1,247
+Violations:      12 (3 CRITICAL, 9 HIGH)
+Drift alerts:    0 active
+Window:          10 checkpoints, 2h retention
+```
+
+### `smoltbot logs`
+
+Show recent traces and actions.
+
+```bash
+smoltbot logs [-l N]
+```
+
+**Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-l N` | Number of log entries to display | 10 |
+
+**Example:**
+
+```bash
+# Show last 10 traces (default)
+smoltbot logs
+
+# Show last 50 traces
+smoltbot logs -l 50
+```
+
+**Example output:**
+
+```
+2026-02-17 14:32:01  CLEAR      api_call    Claude Opus 4.6    "Search for documents"
+2026-02-17 14:31:45  CLEAR      api_call    Claude Opus 4.6    "Summarize results"
+2026-02-17 14:31:12  REVIEW     api_call    GPT-5.2            "Execute trade"
+  └─ concern: autonomy_violation (HIGH) — action exceeds bounded_actions
+2026-02-17 14:30:58  CLEAR      api_call    Claude Opus 4.6    "Draft email"
+```
+
+</Steps>
+
+## Workflow
+
+A typical workflow with the smoltbot CLI:
+
+<Steps>
+
+### Set up tracing
+
+```bash
+smoltbot init
+```
+
+### Verify your agent is connected
+
+```bash
+smoltbot status
+```
+
+### Use your AI agent normally
+
+Your API calls are automatically traced through the gateway. No code changes required.
+
+### Check integrity
+
+```bash
+smoltbot integrity
+```
+
+### Review recent activity
+
+```bash
+smoltbot logs -l 20
+```
+
+### Claim your agent (optional)
+
+Link your agent to your Mnemom account for a private dashboard:
+
+1. Run `smoltbot status` to get your agent ID
+2. Go to [mnemom.ai/claim](https://mnemom.ai/claim)
+3. Paste your agent ID and prove ownership
+
+</Steps>
+
+## Supported Providers
+
+The CLI automatically detects and configures tracing for these providers:
+
+| Provider | Models | Thinking/AIP | Auth Method |
+|----------|--------|-------------|-------------|
+| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks) | `x-api-key` |
+| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries | `Authorization: Bearer` |
+| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts) | `x-goog-api-key` |
+
+## Related
+
+- [Smoltbot Overview](/smoltbot/overview) — Architecture and how it works
+- [Enforcement Modes](/smoltbot/enforcement) — Configure violation response behavior
