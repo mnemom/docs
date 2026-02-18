@@ -1,158 +1,123 @@
 ---
 title: "Self-Hosted Deployment"
-description: "Run the full Mnemom stack on your own infrastructure"
+description: "Run the smoltbot gateway on your own infrastructure with Docker or Kubernetes"
 sidebarTitle: "Self-Hosted"
 icon: "server"
 ---
 
 # Self-Hosted Deployment
 
-Run the complete smoltbot stack on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your accounts. The stack runs on Cloudflare Workers (gateway, observer, API) and Supabase (Postgres database with row-level security).
+Run the smoltbot gateway on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your network. The self-hosted gateway is a Node.js adapter that runs the same code as the managed Cloudflare Workers service — identical behavior, your infrastructure.
 
 <Note>
-For enterprise self-hosting with SLA guarantees, license keys, and dedicated support, [contact us](https://mnemom.ai/contact). Enterprise licenses include hybrid analysis mode, SSO/SAML integration, and priority support.
+Self-hosted deployment requires an **Enterprise license**. [Contact us](https://mnemom.ai/contact) to obtain a license key. Enterprise includes hybrid analysis mode, SSO/SAML integration, and dedicated support.
 </Note>
+
+## Deployment options
+
+| | **Managed (Cloud)** | **Docker Compose** | **Kubernetes (Helm)** |
+|---|---|---|---|
+| **Best for** | Most teams | Small teams, eval, dev | Production at scale |
+| **Infrastructure** | None (Mnemom hosts) | Single VM or server | K8s cluster |
+| **Setup time** | Minutes | ~10 minutes | ~30 minutes |
+| **Scaling** | Automatic | Manual | HPA auto-scaling |
+| **Data residency** | Mnemom cloud | Your infrastructure | Your infrastructure |
+| **High availability** | Built-in | Single node | Multi-replica, PDB |
+| **Monitoring** | Dashboard | Prometheus + logs | Prometheus + ServiceMonitor |
 
 ## Prerequisites
 
-Before starting, ensure you have:
-
-- **Node.js 20+** and npm installed
-- A **Supabase** project (or any Postgres 15+ database)
-- A **Cloudflare** account with Workers enabled
-- A **Cloudflare AI Gateway** configured (for request logging)
-- An **Anthropic API key** (required for AIP analysis, which uses Claude Haiku)
+- An **Enterprise license JWT** from [mnemom.ai/dashboard](https://mnemom.ai/dashboard)
+- An **Anthropic API key** (required for AIP integrity analysis)
 - Optional: OpenAI and Gemini API keys for multi-provider tracing
 
-<Steps>
-  <Step title="Clone the repositories">
-    Clone smoltbot and both protocol SDKs:
+---
 
+## Quick Start: Docker Compose
+
+The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis, and automatic database migrations.
+
+### Requirements
+
+- Docker 24+ and Docker Compose v2+
+- 2 GB RAM minimum, 4 GB recommended
+- 10 GB disk space
+
+<Steps>
+  <Step title="Clone the repository">
     ```bash
     git clone https://github.com/mnemom/smoltbot.git
-    git clone https://github.com/mnemom/aap.git
-    git clone https://github.com/mnemom/aip.git
+    cd smoltbot/deploy/docker
     ```
   </Step>
 
-  <Step title="Set up the database">
-    Create a Supabase project (or provision your own Postgres instance) and apply the schema:
+  <Step title="Configure environment">
+    Copy the example environment file and fill in your credentials:
 
     ```bash
-    cd smoltbot/database
-    psql $DATABASE_URL < schema.sql
+    cp .env.example .env
     ```
 
-    The schema creates tables for agents, traces, integrity checkpoints, drift alerts, enforcement records, and the conscience timeline. Row-level security policies ensure agents can only access their own data.
+    Edit `.env` and set the required values:
 
-    <Tip>
-    If using Supabase, you can run the schema via the SQL Editor in the Supabase dashboard. Navigate to **SQL Editor**, paste the contents of `schema.sql`, and execute.
-    </Tip>
+    ```bash
+    # Required
+    POSTGRES_PASSWORD=<strong-password>
+    SUPABASE_URL=http://postgres:5432
+    SUPABASE_KEY=<your-supabase-service-role-key>
+    MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
+    ANTHROPIC_API_KEY=<your-anthropic-api-key>
+
+    # Optional: additional providers
+    OPENAI_API_KEY=<your-openai-key>
+    GEMINI_API_KEY=<your-gemini-key>
+    ```
   </Step>
 
-  <Step title="Configure Cloudflare AI Gateway">
-    The smoltbot gateway routes LLM requests through Cloudflare AI Gateway for logging and analytics. Set up an AI Gateway in your Cloudflare dashboard:
+  <Step title="Start the stack">
+    ```bash
+    docker compose up -d
+    ```
 
-    1. Go to **AI** > **AI Gateway** in the Cloudflare dashboard
-    2. Create a new gateway (e.g., `smoltbot-gateway`)
-    3. Note the gateway ID and account ID -- you will need these for worker configuration
+    This starts five services in order:
+    1. **PostgreSQL** — database with health check
+    2. **Redis** — caching layer with persistence
+    3. **Migrate** — applies database schema (runs once, then exits)
+    4. **Gateway** — HTTP proxy on port 8787
+    5. **Observer** — background scheduler for trace processing
   </Step>
 
-  <Step title="Deploy the API worker">
-    The API worker serves agent data, traces, integrity scores, and the conscience timeline.
+  <Step title="Verify health">
+    Wait about 30 seconds, then check the gateway health:
 
     ```bash
-    cd smoltbot/api
-    npm install
+    curl http://localhost:8787/health/ready
     ```
 
-    Configure `wrangler.toml` with your Supabase credentials, then deploy:
-
-    ```bash
-    wrangler secret put SUPABASE_URL
-    wrangler secret put SUPABASE_SERVICE_KEY
-    wrangler secret put ANTHROPIC_API_KEY
-    wrangler deploy
+    ```json Expected response
+    {
+      "status": "ready",
+      "checks": {
+        "redis": { "status": "ok" },
+        "supabase": { "status": "ok" },
+        "license": { "status": "valid" }
+      }
+    }
     ```
-
-    Note the deployed URL (e.g., `https://api.your-domain.com`).
   </Step>
 
-  <Step title="Deploy the Gateway worker">
-    The gateway worker intercepts LLM API calls, attaches tracing metadata, and proxies requests to providers.
-
-    ```bash
-    cd smoltbot/gateway
-    npm install
-    ```
-
-    Configure secrets and deploy:
-
-    ```bash
-    wrangler secret put SUPABASE_URL
-    wrangler secret put SUPABASE_SERVICE_KEY
-    wrangler secret put CF_AI_GATEWAY_ID
-    wrangler secret put CF_ACCOUNT_ID
-    wrangler secret put ANTHROPIC_API_KEY
-    wrangler deploy
-    ```
-
-    Note the deployed URL (e.g., `https://gateway.your-domain.com`).
-  </Step>
-
-  <Step title="Deploy the Observer worker">
-    The observer is a scheduled worker that processes AI Gateway logs, builds AP-Traces, runs AAP verification, and performs AIP integrity checks.
-
-    ```bash
-    cd smoltbot/observer
-    npm install
-    ```
-
-    Configure secrets and deploy:
-
-    ```bash
-    wrangler secret put SUPABASE_URL
-    wrangler secret put SUPABASE_SERVICE_KEY
-    wrangler secret put CF_AI_GATEWAY_ID
-    wrangler secret put CF_ACCOUNT_ID
-    wrangler secret put ANTHROPIC_API_KEY
-    wrangler deploy
-    ```
-
-    The observer runs on a cron schedule (configured in `wrangler.toml`) to process new gateway logs.
-  </Step>
-
-  <Step title="Configure the CLI">
-    Point the smoltbot CLI to your self-hosted gateway:
+  <Step title="Connect an agent">
+    Point the smoltbot CLI at your self-hosted gateway:
 
     ```bash
     npm install -g smoltbot
-    smoltbot init --gateway=https://gateway.your-domain.com
+    smoltbot init --gateway=http://localhost:8787
     ```
 
-    The `--gateway` flag tells the CLI to route API calls through your infrastructure instead of the Mnemom-hosted gateway.
-  </Step>
-
-  <Step title="Verify the deployment">
-    Check that everything is connected:
+    Make a test request:
 
     ```bash
-    smoltbot status
-    ```
-
-    ```text Expected output
-    Agent: agent-xxxxxxxx
-    Status: active
-    Providers: anthropic
-    Gateway: https://gateway.your-domain.com (healthy)
-    Traces: 0
-    Integrity: no checkpoints yet
-    ```
-
-    Make a test API call through the gateway to generate a trace:
-
-    ```bash
-    curl https://gateway.your-domain.com/anthropic/v1/messages \
+    curl http://localhost:8787/anthropic/v1/messages \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -H "content-type: application/json" \
       -d '{
@@ -162,70 +127,264 @@ Before starting, ensure you have:
       }'
     ```
 
-    Wait for the observer to run (check the cron schedule in `observer/wrangler.toml`), then verify traces were generated:
+    Verify the agent is connected:
 
     ```bash
-    smoltbot logs
+    smoltbot status
     ```
   </Step>
 </Steps>
 
-## Architecture overview
+---
 
-When self-hosted, the full stack runs across your Cloudflare and Supabase accounts:
+## Production: Kubernetes with Helm
+
+For production deployments with auto-scaling, high availability, and monitoring.
+
+### Requirements
+
+- Kubernetes 1.27+
+- Helm 3.12+
+- `kubectl` configured for your cluster
+
+<Steps>
+  <Step title="Add the Helm chart">
+    ```bash
+    cd smoltbot/deploy/helm
+    ```
+  </Step>
+
+  <Step title="Create a Kubernetes Secret">
+    Store sensitive credentials in a Secret:
+
+    ```bash
+    kubectl create secret generic smoltbot-secrets \
+      --from-literal=SUPABASE_URL=<your-supabase-url> \
+      --from-literal=SUPABASE_KEY=<your-service-role-key> \
+      --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
+      --from-literal=MNEMOM_LICENSE_JWT=<your-license-jwt> \
+      --from-literal=REDIS_URL=<your-redis-url> \
+      --from-literal=DATABASE_URL=<your-postgres-url>
+    ```
+  </Step>
+
+  <Step title="Install the chart">
+    ```bash
+    helm install smoltbot ./mnemom-gateway \
+      --set secrets.existingSecret=smoltbot-secrets \
+      --set ingress.enabled=true \
+      --set ingress.hosts[0].host=gateway.yourcompany.com \
+      --set ingress.hosts[0].paths[0].path=/ \
+      --set ingress.hosts[0].paths[0].pathType=Prefix
+    ```
+  </Step>
+
+  <Step title="Verify the deployment">
+    ```bash
+    kubectl get pods -l app.kubernetes.io/name=mnemom-gateway
+    helm test smoltbot
+    ```
+  </Step>
+</Steps>
+
+### What the chart deploys
+
+- **Gateway Deployment** (2 replicas by default) — HTTP proxy with liveness, readiness, and startup probes
+- **Observer Deployment** (1 replica) — background scheduler for trace processing
+- **Migration Job** — Helm pre-install/pre-upgrade hook that applies database migrations
+- **Service** — ClusterIP on port 8787
+- **NetworkPolicy** — deny-all default with explicit allows for ingress, Redis, PostgreSQL, and upstream LLM APIs
+- **PodDisruptionBudget** — ensures at least 1 replica during rolling updates
+- **Optional**: Ingress with TLS, HPA, ServiceMonitor for Prometheus
+
+### Scaling
+
+Enable the HorizontalPodAutoscaler for automatic scaling:
+
+```yaml
+# values.yaml
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPU: 70
+  targetMemory: 80
+```
+
+---
+
+## Architecture
+
+In self-hosted mode, a Node.js adapter layer replaces Cloudflare-specific APIs while running the exact same gateway code:
 
 ```
-Your App
+Your App / Agents
   │
   ▼
-Gateway Worker (Cloudflare)
-  │ ── proxies to ──▶ Anthropic / OpenAI / Gemini
+Self-Hosted Gateway (Node.js, port 8787)
+  │ ── KV adapter ──▶ Redis (or in-memory)
+  │ ── fetch interceptor ──▶ Anthropic / OpenAI / Gemini (direct)
+  │
+  ├──▶ Observer (cron scheduler)
+  │     ── builds AP-Traces
+  │     ── runs AAP verification
+  │     ── runs AIP integrity checks
   │
   ▼
-Cloudflare AI Gateway (logging)
+PostgreSQL (Supabase or self-managed)
   │
-  ▼
-Observer Worker (Cloudflare, scheduled)
-  │ ── builds AP-Traces
-  │ ── runs AAP verification
-  │ ── runs AIP integrity checks
-  │
-  ▼
-Supabase (Postgres)
-  │
-  ▼
-API Worker (Cloudflare)
-  │
-  ├──▶ CLI (smoltbot)
-  └──▶ Dashboard (optional, self-hosted)
+  ├──▶ CLI (smoltbot status / logs)
+  └──▶ Dashboard (mnemom.ai or self-hosted)
 ```
 
-## Required secrets per worker
+**Adaptation layer** — zero modifications to gateway source code:
 
-| Secret | Gateway | Observer | API |
-|--------|---------|----------|-----|
-| `SUPABASE_URL` | Yes | Yes | Yes |
-| `SUPABASE_SERVICE_KEY` | Yes | Yes | Yes |
-| `CF_AI_GATEWAY_ID` | Yes | Yes | No |
-| `CF_ACCOUNT_ID` | Yes | Yes | No |
-| `ANTHROPIC_API_KEY` | Yes | Yes | No |
+| Cloudflare API | Self-Hosted Replacement |
+|---|---|
+| KV Namespace | Redis (with in-memory fallback) |
+| `ctx.waitUntil()` | Promise collection with drain after response |
+| AI Gateway URL routing | Fetch interceptor rewriting to upstream APIs |
+| `ExecutionContext` | Node.js shim with fire-and-forget semantics |
+
+---
+
+## Configuration Reference
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL or PostgreSQL REST endpoint |
+| `SUPABASE_KEY` | Supabase service-role key |
+| `MNEMOM_LICENSE_JWT` | Enterprise license JWT from [mnemom.ai/dashboard](https://mnemom.ai/dashboard) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (required for AIP analysis) |
+
+### Optional: Providers
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | -- | OpenAI API key for multi-provider routing |
+| `GEMINI_API_KEY` | -- | Google Gemini API key for multi-provider routing |
+
+### Optional: Hybrid Analysis
+
+| Variable | Default | Description |
+|---|---|---|
+| `MNEMOM_ANALYZE_URL` | -- | Delegate AIP analysis to Mnemom cloud (`https://api.mnemom.ai/v1/analyze`) |
+| `MNEMOM_API_KEY` | -- | Mnemom API key with `analyze` scope (required when `MNEMOM_ANALYZE_URL` is set) |
+
+<Tip>
+In hybrid mode, only thinking/reasoning blocks are sent for analysis — raw prompts and responses never leave your infrastructure.
+</Tip>
+
+### Optional: Infrastructure
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | -- | Redis connection URL. Without Redis, an in-memory KV adapter is used (single-node only). |
+| `PORT` | `8787` | HTTP listen port |
+| `HOST` | `0.0.0.0` | HTTP bind address |
+| `SMOLTBOT_ROLE` | `all` | `gateway` (HTTP only), `scheduler` (cron only), or `all` (both) |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. Structured JSON to stdout. |
+
+---
+
+## Health Endpoints
+
+Three Kubernetes-standard probes:
+
+| Endpoint | Purpose | Behavior |
+|---|---|---|
+| `/health/live` | Liveness probe | Always 200 unless deadlocked |
+| `/health/ready` | Readiness probe | Checks Redis, PostgreSQL, and license validity |
+| `/health/startup` | Startup probe | Returns 503 until initialization complete |
+
+## Prometheus Metrics
+
+The gateway exposes a `/metrics` endpoint with:
+
+- `gateway_requests_total{provider,status}` — request counter
+- `gateway_request_duration_seconds{provider}` — latency histogram
+- `gateway_aip_checks_total{verdict}` — integrity check counter
+- `gateway_cache_operations_total{operation,result}` — cache hit/miss
+- Standard `process_*` and `nodejs_*` metrics
+
+For Kubernetes, enable the ServiceMonitor in `values.yaml`:
+
+```yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+```
+
+---
+
+## Upgrading
+
+### Docker Compose
+
+```bash
+cd smoltbot && git pull
+cd deploy/docker
+docker compose build
+docker compose up -d
+```
+
+Migrations run automatically via the `migrate` service.
+
+### Helm
+
+```bash
+helm upgrade smoltbot ./deploy/helm/mnemom-gateway \
+  --set secrets.existingSecret=smoltbot-secrets
+```
+
+The migration job runs as a pre-upgrade Helm hook.
 
 <Warning>
-Never commit secrets to version control. Use `wrangler secret put` to securely store them in Cloudflare, or use Cloudflare's environment variable encryption. The Supabase service key has full database access -- treat it accordingly.
+Always back up your database before upgrading. For Docker: `docker compose exec postgres pg_dump -U smoltbot mnemom > backup.sql`. For Kubernetes: use your standard PostgreSQL backup procedure.
 </Warning>
 
-## Custom domain setup
+---
 
-To serve the gateway and API on custom domains:
+## Troubleshooting
 
-1. Add your domain to Cloudflare DNS
-2. In the Cloudflare dashboard, go to **Workers & Pages** > your worker > **Settings** > **Triggers**
-3. Add a custom domain (e.g., `gateway.your-domain.com`)
-4. Repeat for the API worker (e.g., `api.your-domain.com`)
+<AccordionGroup>
+  <Accordion title="Gateway won't start — EnvValidationError">
+    A required environment variable is missing. Check the error message for which variable, then verify your `.env` file or Kubernetes Secret.
+  </Accordion>
+
+  <Accordion title="Redis connection refused">
+    - Docker Compose: ensure the `redis` service is healthy (`docker compose ps`)
+    - Kubernetes: verify `REDIS_URL` in your Secret points to a reachable Redis instance
+    - Without Redis, the gateway falls back to in-memory KV (single-node only)
+  </Accordion>
+
+  <Accordion title="License validation failed">
+    - Verify `MNEMOM_LICENSE_JWT` is set and not expired
+    - Check `/health/ready` for the specific license error
+    - Contact [support@mnemom.ai](mailto:support@mnemom.ai) for license reissuance
+  </Accordion>
+
+  <Accordion title="Upstream LLM API errors (401/403)">
+    - Verify your API keys are correct and have sufficient credits
+    - The gateway proxies directly to provider APIs — ensure outbound HTTPS (port 443) is allowed
+    - In Kubernetes, check the NetworkPolicy allows egress to `0.0.0.0/0:443`
+  </Accordion>
+
+  <Accordion title="High memory / OOMKilled">
+    - Increase container memory limits (512Mi minimum, 1Gi recommended for high traffic)
+    - If using in-memory KV, switch to Redis to reduce memory pressure
+    - Set `NODE_OPTIONS=--max-old-space-size=768` for fine-grained heap control
+  </Accordion>
+</AccordionGroup>
+
+---
 
 ## Next steps
 
-- [Smoltbot overview](/smoltbot/overview) -- Detailed architecture and component documentation
-- [Enforcement modes](/smoltbot/enforcement) -- Configure observe, nudge, and enforce modes
-- [Protocol overview](/protocols/overview) -- How AAP and AIP work together
-- [Limitations](/protocols/aap/limitations) -- What the protocols can and cannot guarantee
+- [Smoltbot overview](/smoltbot/overview) — architecture and components
+- [Enforcement modes](/smoltbot/enforcement) — observe, nudge, and enforce
+- [Observability guide](/guides/observability) — dashboards and alerting
+- [Security model](/guides/security-trust-model) — trust boundaries and threat model
