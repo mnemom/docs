@@ -1,0 +1,718 @@
+---
+title: "Webhook Notifications"
+description: "Real-time HTTP POST notifications for integrity events — pipe violations, drift, conscience escalations, and billing events into your ops stack."
+sidebarTitle: "Webhooks"
+icon: "bell"
+---
+
+# Webhook Notifications
+
+**Real-time HTTP POST notifications for integrity events.** Pipe violations, drift alerts, conscience escalations, and billing events into PagerDuty, Slack, Datadog, or any HTTP endpoint.
+
+Instead of polling the API, configure webhook endpoints to receive events as they happen. Mnemom signs every payload with HMAC-SHA256 so your server can verify authenticity before acting on it.
+
+```
+Integrity Event ──→ Mnemom ──→ Signed HTTP POST ──→ Your Endpoint
+                                     │
+                                     ├── PagerDuty
+                                     ├── Slack
+                                     ├── Datadog
+                                     └── Custom handler
+```
+
+<Info>
+Webhook notifications are available on the **Enterprise** plan. [Contact sales](https://mnemom.ai/pricing) to enable this feature.
+</Info>
+
+---
+
+## Quick Start
+
+Get your first webhook firing in under 5 minutes:
+
+**1. Create an endpoint** in your organization settings, or via the API:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhooks/mnemom",
+    "description": "Production alerts",
+    "event_types": ["integrity.violation", "drift.detected"]
+  }'
+```
+
+**2. Copy the signing secret** from the response — it's shown only once:
+
+```json
+{
+  "endpoint_id": "whe-a1b2c3d4",
+  "url": "https://your-server.com/webhooks/mnemom",
+  "signing_secret": "a1b2c3d4e5f6...",
+  "event_types": ["integrity.violation", "drift.detected"],
+  "is_active": true
+}
+```
+
+<Warning>
+Copy the `signing_secret` immediately. It is not retrievable after creation. If you lose it, use the [rotate secret](/api-reference/endpoint/post-orgs-org-id-webhooks-endpoint-id-rotate-secret) endpoint to generate a new one.
+</Warning>
+
+**3. Send a test event** to verify connectivity:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/whe-a1b2c3d4/test \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**4. Verify the signature** on your server (see [Signature Verification](#signature-verification) below).
+
+---
+
+## Event Catalog
+
+Mnemom emits 8 event types across integrity, drift, conscience, and billing domains.
+
+| Event Type | Description | Trigger |
+|---|---|---|
+| `integrity.checkpoint` | An integrity checkpoint was recorded | Every stored AIP checkpoint |
+| `integrity.violation` | A boundary violation was detected | Checkpoint verdict = `boundary_violation` |
+| `drift.detected` | Behavioral drift detected in a session | 3+ consecutive non-clear verdicts |
+| `drift.resolved` | A drift alert was acknowledged | Org member acknowledges alert |
+| `conscience.escalation` | Conscience value conflict during analysis | Checkpoint has conscience conflicts |
+| `quota.warning` | Usage approaching plan limit (80%+) | Cron check on billing period |
+| `quota.exceeded` | Usage has exceeded plan limit (100%+) | Cron check on billing period |
+| `subscription.status_changed` | Subscription status changed | Plan upgrade, downgrade, or cancellation |
+
+Subscribe to specific event types when creating an endpoint, or leave `event_types` empty to receive all events.
+
+---
+
+## Payload Envelope
+
+Every webhook delivery uses the same envelope structure:
+
+```json
+{
+  "id": "evt-a1b2c3d4",
+  "type": "integrity.violation",
+  "created_at": "2026-02-17T14:30:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    // Event-specific payload (see examples below)
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique event ID (`evt-xxxxxxxx`). Use for idempotency. |
+| `type` | string | One of the 8 event types above |
+| `created_at` | string | ISO 8601 timestamp |
+| `account_id` | string | Billing account that owns the resource |
+| `data` | object | Event-specific payload |
+
+### Example Payloads
+
+<AccordionGroup>
+<Accordion title="integrity.violation">
+```json
+{
+  "id": "evt-vl7k2m9x",
+  "type": "integrity.violation",
+  "created_at": "2026-02-17T14:30:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "checkpoint_id": "ic-abc12345",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "verdict": "boundary_violation",
+    "concerns": [
+      {
+        "category": "autonomy_violation",
+        "severity": "high",
+        "description": "Agent attempted to bypass escalation trigger"
+      }
+    ],
+    "reasoning_summary": "Agent's reasoning shows intent to take action outside defined autonomy envelope."
+  }
+}
+```
+</Accordion>
+
+<Accordion title="integrity.checkpoint">
+```json
+{
+  "id": "evt-cp3j8n2w",
+  "type": "integrity.checkpoint",
+  "created_at": "2026-02-17T14:30:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "checkpoint_id": "ic-ghi34567",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "verdict": "clear",
+    "concerns": [],
+    "reasoning_summary": "Agent reasoning is consistent with declared values and autonomy envelope."
+  }
+}
+```
+</Accordion>
+
+<Accordion title="drift.detected">
+```json
+{
+  "id": "evt-dr9p4k1q",
+  "type": "drift.detected",
+  "created_at": "2026-02-17T14:31:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "alert_id": "ida-drift-abc123",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "severity": "high",
+    "drift_direction": "value_erosion",
+    "sustained_checks": 7,
+    "message": "Detected 7 consecutive non-clear verdicts in session sess-def67890"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="drift.resolved">
+```json
+{
+  "id": "evt-rs2m7h5v",
+  "type": "drift.resolved",
+  "created_at": "2026-02-17T15:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "alert_id": "ida-drift-abc123",
+    "org_id": "org-xyz98765",
+    "acknowledged_by": "user-uuid-1234"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="conscience.escalation">
+```json
+{
+  "id": "evt-ce6t3w8r",
+  "type": "conscience.escalation",
+  "created_at": "2026-02-17T14:30:05.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "checkpoint_id": "ic-jkl45678",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "conflicts": [
+      {
+        "value": "transparency",
+        "description": "Agent reasoning conflicts with declared transparency commitment"
+      }
+    ],
+    "verdict": "review_needed"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="quota.warning">
+```json
+{
+  "id": "evt-qw1n5b9d",
+  "type": "quota.warning",
+  "created_at": "2026-02-17T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "usage_percent": 85,
+    "checks_used": 12750,
+    "checks_included": 15000
+  }
+}
+```
+</Accordion>
+
+<Accordion title="quota.exceeded">
+```json
+{
+  "id": "evt-qx4m8g2j",
+  "type": "quota.exceeded",
+  "created_at": "2026-02-17T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "usage_percent": 105,
+    "checks_used": 15750,
+    "checks_included": 15000
+  }
+}
+```
+</Accordion>
+
+<Accordion title="subscription.status_changed">
+```json
+{
+  "id": "evt-ss7k3p1w",
+  "type": "subscription.status_changed",
+  "created_at": "2026-02-17T10:15:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "status": "active",
+    "previous_plan_id": "plan-team",
+    "new_plan_id": "plan-enterprise",
+    "cancel_at_period_end": false
+  }
+}
+```
+</Accordion>
+</AccordionGroup>
+
+---
+
+## Security
+
+### HMAC-SHA256 Signing
+
+Every webhook delivery includes three headers for signature verification:
+
+| Header | Description |
+|---|---|
+| `X-Webhook-Id` | Unique event ID (same as `payload.id`) |
+| `X-Webhook-Timestamp` | Unix timestamp (seconds) when the payload was signed |
+| `X-Webhook-Signature` | HMAC-SHA256 signature in format `v1={hex}` |
+
+The signature is computed over the string `{timestamp}.{raw_body}` using your endpoint's signing secret as the HMAC key. This follows the [Stripe webhook signing convention](https://docs.stripe.com/webhooks/signatures).
+
+### Replay Protection
+
+Always verify that the timestamp is within an acceptable window (recommended: 5 minutes) to prevent replay attacks. Reject any delivery where `X-Webhook-Timestamp` is more than 300 seconds from your server's current time.
+
+### Constant-Time Comparison
+
+Use a constant-time comparison function when verifying signatures to prevent timing attacks. All standard libraries provide one — see the verification examples below.
+
+---
+
+## Signature Verification
+
+Verify webhook signatures in your endpoint handler to ensure payloads are authentic and untampered. Below are examples in four languages.
+
+<CodeGroup>
+```javascript Node.js
+const crypto = require('crypto');
+
+function verifyWebhookSignature(req, signingSecret) {
+  const timestamp = req.headers['x-webhook-timestamp'];
+  const signature = req.headers['x-webhook-signature'];
+  const rawBody = req.rawBody; // Must be raw string, not parsed JSON
+
+  // 1. Check timestamp freshness (5-minute tolerance)
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+    throw new Error('Timestamp too old — possible replay attack');
+  }
+
+  // 2. Compute expected signature
+  const signatureInput = `${timestamp}.${rawBody}`;
+  const expected = 'v1=' + crypto
+    .createHmac('sha256', signingSecret)
+    .update(signatureInput)
+    .digest('hex');
+
+  // 3. Constant-time comparison
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    throw new Error('Invalid signature');
+  }
+
+  return JSON.parse(rawBody);
+}
+```
+
+```python Python
+import hmac
+import hashlib
+import time
+import json
+
+def verify_webhook_signature(request, signing_secret):
+    timestamp = request.headers['X-Webhook-Timestamp']
+    signature = request.headers['X-Webhook-Signature']
+    raw_body = request.get_data(as_text=True)
+
+    # 1. Check timestamp freshness (5-minute tolerance)
+    if abs(time.time() - int(timestamp)) > 300:
+        raise ValueError('Timestamp too old — possible replay attack')
+
+    # 2. Compute expected signature
+    signature_input = f'{timestamp}.{raw_body}'
+    expected = 'v1=' + hmac.new(
+        signing_secret.encode(),
+        signature_input.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    # 3. Constant-time comparison
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError('Invalid signature')
+
+    return json.loads(raw_body)
+```
+
+```go Go
+package webhooks
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"fmt"
+	"math"
+	"strconv"
+	"time"
+)
+
+func VerifyWebhookSignature(timestamp, signature, rawBody, signingSecret string) error {
+	// 1. Check timestamp freshness (5-minute tolerance)
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid timestamp")
+	}
+	if math.Abs(float64(time.Now().Unix()-ts)) > 300 {
+		return fmt.Errorf("timestamp too old")
+	}
+
+	// 2. Compute expected signature
+	signatureInput := fmt.Sprintf("%s.%s", timestamp, rawBody)
+	mac := hmac.New(sha256.New, []byte(signingSecret))
+	mac.Write([]byte(signatureInput))
+	expected := "v1=" + hex.EncodeToString(mac.Sum(nil))
+
+	// 3. Constant-time comparison
+	if subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) != 1 {
+		return fmt.Errorf("invalid signature")
+	}
+
+	return nil
+}
+```
+
+```ruby Ruby
+require 'openssl'
+require 'json'
+
+def verify_webhook_signature(request, signing_secret)
+  timestamp = request.env['HTTP_X_WEBHOOK_TIMESTAMP']
+  signature = request.env['HTTP_X_WEBHOOK_SIGNATURE']
+  raw_body = request.body.read
+
+  # 1. Check timestamp freshness (5-minute tolerance)
+  if (Time.now.to_i - timestamp.to_i).abs > 300
+    raise 'Timestamp too old — possible replay attack'
+  end
+
+  # 2. Compute expected signature
+  signature_input = "#{timestamp}.#{raw_body}"
+  expected = 'v1=' + OpenSSL::HMAC.hexdigest(
+    'sha256', signing_secret, signature_input
+  )
+
+  # 3. Constant-time comparison
+  unless ActiveSupport::SecurityUtils.secure_compare(signature, expected)
+    raise 'Invalid signature'
+  end
+
+  JSON.parse(raw_body)
+end
+```
+</CodeGroup>
+
+<Warning>
+Always verify signatures against the **raw request body** (the exact bytes received), not a re-serialized JSON object. JSON serialization can alter key ordering, whitespace, or Unicode escaping, which will cause signature mismatches.
+</Warning>
+
+---
+
+## Delivery & Retries
+
+### First Delivery
+
+Mnemom attempts inline delivery immediately when an event is emitted. Most webhooks arrive within seconds of the triggering event. If inline delivery fails, the event enters the retry queue.
+
+### Retry Schedule
+
+Failed deliveries are retried with exponential backoff:
+
+| Attempt | Delay | Cumulative |
+|---|---|---|
+| 1 (initial) | Immediate | 0s |
+| 2 | 10 seconds | 10s |
+| 3 | 30 seconds | 40s |
+| 4 | 2 minutes | 2m 40s |
+| 5 | 10 minutes | 12m 40s |
+| 6 | 1 hour | 1h 12m 40s |
+
+After 6 attempts, the delivery is marked as **failed** (terminal).
+
+### Permanent vs. Retryable Failures
+
+| Response | Behavior |
+|---|---|
+| **2xx** | Success. Delivery marked as `delivered`. |
+| **429** | Rate limited. Retries with at least 60s backoff. |
+| **4xx** (except 429) | Permanent failure. No retries. Fix your endpoint. |
+| **5xx** | Retryable. Follows backoff schedule. |
+| **Timeout** (>10s) | Retryable. Your endpoint must respond within 10 seconds. |
+
+### Auto-Disable
+
+If an endpoint accumulates **100 consecutive failures**, it is automatically disabled. The account owner receives an email notification. To resume deliveries:
+
+1. Fix the underlying issue with your endpoint
+2. Re-enable the endpoint in organization settings (or via `PATCH` with `is_active: true`)
+3. The failure counter resets when you re-enable
+
+### Idempotency
+
+Use the `id` field in the payload envelope as an idempotency key. The same event may be delivered more than once (e.g., after a redeliver request). Your handler should deduplicate using the event ID.
+
+### Ordering
+
+Webhook deliveries are **best-effort ordered** by creation time. Due to retries and network variance, events may arrive out of order. Use the `created_at` timestamp for ordering if your use case requires it.
+
+---
+
+## Testing
+
+### Test Delivery Button
+
+Every endpoint has a "Test" action that sends a synthetic `webhook.test` event with a test payload. Use this to verify connectivity and signature verification without triggering a real integrity event.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id}/test \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "status": 200,
+  "latency_ms": 145,
+  "error": null
+}
+```
+
+### Development Tools
+
+For local development, use [webhook.site](https://webhook.site) or [ngrok](https://ngrok.com) to expose a local endpoint:
+
+```bash
+# Start ngrok tunnel
+ngrok http 3000
+
+# Use the HTTPS URL as your webhook endpoint
+# https://abc123.ngrok.io/webhooks/mnemom
+```
+
+### Delivery Log
+
+View the delivery history for any endpoint to debug issues:
+
+```bash
+curl https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/deliveries?endpoint_id=whe-a1b2c3d4 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Each delivery record includes: status, HTTP response code, attempt count, latency, and error details.
+
+### Redelivery
+
+Redeliver a failed event to retry with the same payload:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/deliveries/{delivery_id}/redeliver \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Integration Examples
+
+### PagerDuty
+
+Route integrity violations to PagerDuty as incidents:
+
+```javascript
+app.post('/webhooks/mnemom', (req, res) => {
+  verify(req); // Verify signature first
+
+  const event = req.body;
+
+  if (event.type === 'integrity.violation') {
+    fetch('https://events.pagerduty.com/v2/enqueue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        routing_key: process.env.PAGERDUTY_ROUTING_KEY,
+        event_action: 'trigger',
+        payload: {
+          summary: `Integrity violation: ${event.data.agent_id}`,
+          severity: 'critical',
+          source: 'mnemom',
+          custom_details: event.data,
+        },
+      }),
+    });
+  }
+
+  res.sendStatus(200);
+});
+```
+
+### Slack
+
+Post alerts to a Slack channel via incoming webhook:
+
+```javascript
+app.post('/webhooks/mnemom', (req, res) => {
+  verify(req);
+
+  const event = req.body;
+  const emoji = {
+    'integrity.violation': ':rotating_light:',
+    'drift.detected': ':warning:',
+    'conscience.escalation': ':brain:',
+    'quota.warning': ':chart_with_upwards_trend:',
+  }[event.type] || ':bell:';
+
+  fetch(process.env.SLACK_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: `${emoji} *${event.type}*\n${JSON.stringify(event.data, null, 2)}`,
+    }),
+  });
+
+  res.sendStatus(200);
+});
+```
+
+### Datadog
+
+Send custom events to Datadog:
+
+```javascript
+app.post('/webhooks/mnemom', (req, res) => {
+  verify(req);
+
+  const event = req.body;
+
+  fetch(`https://api.datadoghq.com/api/v1/events`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'DD-API-KEY': process.env.DD_API_KEY,
+    },
+    body: JSON.stringify({
+      title: `Mnemom: ${event.type}`,
+      text: JSON.stringify(event.data),
+      tags: [`event_type:${event.type}`, `account:${event.account_id}`],
+      alert_type: event.type.includes('violation') ? 'error' : 'info',
+    }),
+  });
+
+  res.sendStatus(200);
+});
+```
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+<Accordion title="Signature mismatch">
+- Ensure you're verifying against the **raw request body**, not re-serialized JSON
+- Check that your signing secret is correct — it was only shown once at creation time. If lost, rotate the secret.
+- Verify the timestamp header is being read correctly (it's in Unix seconds, not milliseconds)
+</Accordion>
+
+<Accordion title="HTTPS required">
+Webhook endpoints must use HTTPS. HTTP URLs are rejected at creation time. For local development, use ngrok or a similar tunneling tool.
+</Accordion>
+
+<Accordion title="Timeouts (>10 seconds)">
+Your endpoint must respond within 10 seconds. If processing takes longer, return `200` immediately and process the event asynchronously (e.g., via a background job queue).
+</Accordion>
+
+<Accordion title="4xx permanent failure">
+HTTP 4xx responses (except 429) are treated as permanent failures and are not retried. Common causes:
+- **401/403** — Your auth middleware is blocking the request. Mnemom webhooks don't include bearer tokens.
+- **404** — The endpoint URL path is incorrect.
+- **400** — Your request validation is rejecting the payload format.
+</Accordion>
+
+<Accordion title="Endpoint auto-disabled">
+After 100 consecutive delivery failures, the endpoint is automatically disabled. Fix the underlying issue, then re-enable the endpoint. The failure counter resets on re-enable.
+</Accordion>
+
+<Accordion title="Events not firing">
+- Verify the endpoint is active (`is_active: true`)
+- Check that the event type is included in the endpoint's `event_types` (or that `event_types` is empty for all events)
+- Confirm the triggering action occurred on an agent linked to an Enterprise billing account
+- Check the delivery log for failed attempts
+</Accordion>
+</AccordionGroup>
+
+---
+
+## FAQ
+
+<AccordionGroup>
+<Accordion title="Are there rate limits on webhook deliveries?">
+Mnemom does not impose explicit rate limits on outbound deliveries. However, if your endpoint returns 429 (Too Many Requests), we respect that signal and back off for at least 60 seconds before retrying.
+</Accordion>
+
+<Accordion title="Are events delivered in order?">
+Events are delivered in best-effort order. Due to retries and network conditions, events may arrive out of order. Use the `created_at` field for sequencing.
+</Accordion>
+
+<Accordion title="What is the maximum payload size?">
+Webhook payloads are typically under 4 KB. The maximum payload size is 64 KB.
+</Accordion>
+
+<Accordion title="How do I rotate my signing secret?">
+Use the rotate secret endpoint: `POST /v1/orgs/{org_id}/webhooks/{endpoint_id}/rotate-secret`. The new secret is returned once. Update your verification code before new deliveries arrive.
+</Accordion>
+
+<Accordion title="Can I have multiple endpoints?">
+Yes, up to 5 endpoints per organization. Each endpoint can subscribe to different event types.
+</Accordion>
+
+<Accordion title="How long are delivery logs retained?">
+Delivery records are retained for 30 days. Older records are automatically purged.
+</Accordion>
+
+<Accordion title="What happens to events during endpoint downtime?">
+Events are queued and retried according to the backoff schedule. If your endpoint recovers within the retry window (~1 hour), all events will be delivered. Beyond that, they are marked as failed but remain in the delivery log for redelivery.
+</Accordion>
+</AccordionGroup>
+
+---
+
+## API Reference
+
+| Endpoint | Description |
+|---|---|
+| [POST /orgs/{org_id}/webhooks](/api-reference/endpoint/post-orgs-org-id-webhooks) | Create webhook endpoint |
+| [GET /orgs/{org_id}/webhooks](/api-reference/endpoint/get-orgs-org-id-webhooks) | List webhook endpoints |
+| [GET /orgs/{org_id}/webhooks/{endpoint_id}](/api-reference/endpoint/get-orgs-org-id-webhooks-endpoint-id) | Get endpoint details |
+| [PATCH /orgs/{org_id}/webhooks/{endpoint_id}](/api-reference/endpoint/patch-orgs-org-id-webhooks-endpoint-id) | Update endpoint |
+| [DELETE /orgs/{org_id}/webhooks/{endpoint_id}](/api-reference/endpoint/delete-orgs-org-id-webhooks-endpoint-id) | Delete endpoint |
+| [POST .../rotate-secret](/api-reference/endpoint/post-orgs-org-id-webhooks-endpoint-id-rotate-secret) | Rotate signing secret |
+| [POST .../test](/api-reference/endpoint/post-orgs-org-id-webhooks-endpoint-id-test) | Send test delivery |
+| [GET .../deliveries](/api-reference/endpoint/get-orgs-org-id-webhooks-deliveries) | Delivery log |
+| [POST .../redeliver](/api-reference/endpoint/post-orgs-org-id-webhooks-deliveries-delivery-id-redeliver) | Redeliver failed event |
+| [GET /admin/webhooks/health](/api-reference/endpoint/get-admin-webhooks-health) | Platform health (admin) |

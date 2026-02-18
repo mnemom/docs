@@ -75,6 +75,10 @@
     {
       "name": "Blog",
       "description": "Blog posts listing, retrieval, creation, and author profiles"
+    },
+    {
+      "name": "Webhook Notifications",
+      "description": "Organization-level webhook endpoints for real-time HTTP POST notifications of integrity, drift, conscience, and billing events"
     }
   ],
   "security": [],
@@ -4526,6 +4530,578 @@
           }
         }
       }
+    },
+    "/orgs/{org_id}/webhooks": {
+      "post": {
+        "operationId": "createWebhookEndpoint",
+        "summary": "Create a webhook endpoint",
+        "description": "Create a new webhook endpoint for the organization. Returns the signing secret (shown only once). Maximum 5 endpoints per organization.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "HTTPS URL that will receive webhook POST requests"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Human-readable description of this endpoint"
+                  },
+                  "event_types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["integrity.violation", "integrity.checkpoint", "drift.detected", "drift.resolved", "conscience.escalation", "quota.warning", "quota.exceeded", "subscription.status_changed"]
+                    },
+                    "description": "Event types to subscribe to. Empty array means all events."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook endpoint created. Response includes signing_secret (shown only once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhookEndpoints",
+        "summary": "List webhook endpoints",
+        "description": "List all webhook endpoints for the organization. Signing secrets are not included.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of webhook endpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookEndpointPublic"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/{endpoint_id}": {
+      "get": {
+        "operationId": "getWebhookEndpoint",
+        "summary": "Get webhook endpoint details",
+        "description": "Get details for a single webhook endpoint. Signing secret is not included.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook endpoint details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointPublic"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateWebhookEndpoint",
+        "summary": "Update webhook endpoint",
+        "description": "Update an existing webhook endpoint. Re-enabling a disabled endpoint resets the failure counter.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "New HTTPS URL"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event_types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["integrity.violation", "integrity.checkpoint", "drift.detected", "drift.resolved", "conscience.escalation", "quota.warning", "quota.exceeded", "subscription.status_changed"]
+                    }
+                  },
+                  "is_active": {
+                    "type": "boolean",
+                    "description": "Set to true to re-enable a disabled endpoint (resets failure counter)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointPublic"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhookEndpoint",
+        "summary": "Delete webhook endpoint",
+        "description": "Permanently delete a webhook endpoint and all its delivery history.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Endpoint deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "endpoint_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/{endpoint_id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate webhook signing secret",
+        "description": "Generate a new signing secret for the endpoint. The new secret is returned once. Previous secret is immediately invalidated.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New signing secret (shown only once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint_id": {
+                      "type": "string"
+                    },
+                    "signing_secret": {
+                      "type": "string",
+                      "description": "New 32-byte hex-encoded signing secret. Store securely — not retrievable again."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/{endpoint_id}/test": {
+      "post": {
+        "operationId": "testWebhookEndpoint",
+        "summary": "Send test webhook delivery",
+        "description": "Send a synchronous test delivery to the endpoint with a synthetic webhook.test event. Returns the delivery result immediately.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Test delivery result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": ["integer", "null"],
+                      "description": "HTTP response status code from the endpoint"
+                    },
+                    "latency_ms": {
+                      "type": ["integer", "null"],
+                      "description": "Round-trip time in milliseconds"
+                    },
+                    "error": {
+                      "type": ["string", "null"],
+                      "description": "Error message if delivery failed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/deliveries": {
+      "get": {
+        "operationId": "getWebhookDeliveryLog",
+        "summary": "Get webhook delivery log",
+        "description": "Paginated delivery log for the organization. Optionally filter by endpoint_id.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "endpoint_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter deliveries to a specific endpoint"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            },
+            "description": "Number of deliveries to return (max 100)"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            },
+            "description": "Offset for pagination"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookDelivery"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/deliveries/{delivery_id}/redeliver": {
+      "post": {
+        "operationId": "redeliverWebhookEvent",
+        "summary": "Redeliver a webhook event",
+        "description": "Create a new delivery attempt for a previously failed event. A new delivery row is created with next_attempt_at set to now.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Delivery identifier (e.g. whd-abc12345)"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New delivery created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "event_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/admin/webhooks/health": {
+      "get": {
+        "operationId": "adminWebhookHealth",
+        "summary": "Get platform-wide webhook health metrics",
+        "description": "Admin-only endpoint returning active endpoints count, 24h success rate, disabled endpoints, and top event types.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook health metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "active_endpoints": {
+                      "type": "integer"
+                    },
+                    "disabled_endpoints": {
+                      "type": "integer"
+                    },
+                    "deliveries_24h": {
+                      "type": "integer"
+                    },
+                    "success_24h": {
+                      "type": "integer"
+                    },
+                    "failed_24h": {
+                      "type": "integer"
+                    },
+                    "success_rate_24h": {
+                      "type": "number"
+                    },
+                    "top_event_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event_type": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4567,6 +5143,15 @@
           "type": "string"
         },
         "description": "Organization identifier (e.g. org-abc12345)"
+      },
+      "EndpointId": {
+        "name": "endpoint_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Webhook endpoint identifier (e.g. whe-abc12345)"
       }
     },
     "responses": {
@@ -5358,6 +5943,152 @@
               "string",
               "null"
             ],
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "description": "Webhook endpoint with signing secret (only returned on creation and secret rotation)",
+        "properties": {
+          "endpoint_id": {
+            "type": "string",
+            "description": "Unique identifier (whe-xxxxxxxx)"
+          },
+          "billing_account_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": {
+            "type": "string"
+          },
+          "signing_secret": {
+            "type": "string",
+            "description": "32-byte hex-encoded HMAC signing secret. Only returned on creation and rotation."
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Subscribed event types. Empty array means all events."
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "disabled_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "disabled_reason": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEndpointPublic": {
+        "type": "object",
+        "description": "Webhook endpoint without signing secret (used in list and get responses)",
+        "properties": {
+          "endpoint_id": {
+            "type": "string"
+          },
+          "billing_account_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "description": {
+            "type": "string"
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "disabled_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "disabled_reason": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "description": "Webhook delivery log entry",
+        "properties": {
+          "delivery_id": {
+            "type": "string",
+            "description": "Unique identifier (whd-xxxxxxxx)"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "endpoint_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "delivering", "delivered", "failed", "retrying"]
+          },
+          "attempt_count": {
+            "type": "integer"
+          },
+          "max_attempts": {
+            "type": "integer"
+          },
+          "last_response_status": {
+            "type": ["integer", "null"],
+            "description": "HTTP status code from last delivery attempt"
+          },
+          "last_error": {
+            "type": ["string", "null"]
+          },
+          "latency_ms": {
+            "type": ["integer", "null"],
+            "description": "Round-trip latency in milliseconds"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
             "format": "date-time"
           }
         }
