@@ -200,3 +200,124 @@ Enforcement works across all providers where AIP is supported:
 - [Smoltbot Overview](/smoltbot/overview) — Architecture and how it works
 - [CLI Reference](/smoltbot/cli) — CLI commands for monitoring enforcement
 - [Observability](/guides/observability) — Export enforcement data to your observability platform
+
+---
+
+## Agent Containment
+
+<Note>
+Agent containment is a separate enforcement layer that operates above the per-request enforcement modes. While enforcement modes (observe/nudge/enforce) control individual request handling, containment controls whether the agent can make requests at all.
+</Note>
+
+### Containment States
+
+| State | Meaning | Gateway Behavior |
+|-------|---------|-----------------|
+| `active` | Normal operation (default) | Requests proceed normally |
+| `paused` | Temporarily stopped | All requests blocked with HTTP 403 |
+| `killed` | Permanently stopped | All requests blocked with HTTP 403 |
+
+**Paused** agents can be resumed by an org owner or admin. **Killed** agents require explicit reactivation by an owner only. The distinction matters for audit: pause means "we need to investigate," kill means "this agent is compromised."
+
+### Containment API
+
+```bash
+# Pause an agent
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/pause \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"reason": "Investigating boundary violations"}'
+
+# Resume a paused agent
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/resume \
+  -H "Authorization: Bearer $TOKEN"
+
+# Kill an agent (owner only)
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/kill \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"reason": "Agent compromised"}'
+
+# Reactivate a killed agent (owner only)
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/reactivate \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get containment status and audit log
+curl https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/containment \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Error Response
+
+When a contained agent attempts an API request through the gateway, it receives:
+
+```json
+{
+  "error": "Agent contained",
+  "type": "containment_error",
+  "reason": "agent_paused"
+}
+```
+
+The HTTP status code is `403 Forbidden` (distinct from `402 Payment Required` used for billing enforcement).
+
+### Auto-Containment
+
+Agents can be configured to automatically pause after consecutive boundary violations:
+
+```bash
+# Enable auto-containment after 3 consecutive violations
+curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/containment-policy \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"auto_containment_threshold": 3}'
+
+# Disable auto-containment
+curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/containment-policy \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"auto_containment_threshold": null}'
+```
+
+When auto-containment triggers, it:
+- Sets the agent status to `paused` with actor `system`
+- Logs the action in the containment audit log
+- Emits an `agent.paused` webhook event
+- Purges the gateway cache so the block takes effect immediately
+
+### RBAC Requirements
+
+| Action | Required Role |
+|--------|--------------|
+| Pause | `owner` or `admin` |
+| Resume | `owner` or `admin` |
+| Kill | `owner` only |
+| Reactivate | `owner` only |
+| View status | Any org role |
+| Set auto-containment policy | `owner` or `admin` |
+
+### Webhook Events
+
+Three webhook events are emitted for containment actions:
+
+- `agent.paused` — Agent was paused (manually or automatically)
+- `agent.resumed` — Agent was resumed or reactivated
+- `agent.killed` — Agent was killed
+
+Each event includes:
+```json
+{
+  "agent_id": "smolt-xxxxxxxx",
+  "org_id": "org-xxx",
+  "action": "pause",
+  "actor": "user-xxx",
+  "reason": "Investigating boundary violations",
+  "previous_status": "active",
+  "new_status": "paused"
+}
+```
+
+### Containment Audit Log
+
+Every containment action is recorded in a tamper-evident audit log. Each entry includes:
+- The action taken (pause, resume, kill, reactivate, auto_pause)
+- Who triggered it (user ID or `system` for auto-containment)
+- The reason provided
+- Previous and new containment states
+- Timestamp

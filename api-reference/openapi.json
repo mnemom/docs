@@ -83,6 +83,10 @@
     {
       "name": "Verification",
       "description": "Public cryptographic verification endpoints for integrity certificates, Merkle proofs, signing keys, and ZK verdict proofs"
+    },
+    {
+      "name": "Agent Containment",
+      "description": "Pause, resume, kill, and reactivate agents. Manage auto-containment policies and view containment audit logs."
     }
   ],
   "security": [],
@@ -3521,6 +3525,264 @@
             "$ref": "#/components/responses/NotFound"
           }
         }
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/pause": {
+      "post": {
+        "operationId": "pauseAgent",
+        "summary": "Pause an agent",
+        "description": "Temporarily stop an agent from making API requests. Requires owner or admin role.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {"type": "string", "description": "Reason for pausing the agent"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent paused successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "containment_status": {"type": "string", "enum": ["paused"]},
+                    "contained_at": {"type": "string", "format": "date-time"},
+                    "contained_by": {"type": "string"},
+                    "containment_reason": {"type": "string", "nullable": true}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Agent is already paused"},
+          "403": {"description": "Insufficient permissions"},
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/resume": {
+      "post": {
+        "operationId": "resumeAgent",
+        "summary": "Resume a paused agent",
+        "description": "Resume a paused agent back to active state. Only works on paused agents. Requires owner or admin role.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent resumed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "containment_status": {"type": "string", "enum": ["active"]}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Agent is not paused"},
+          "403": {"description": "Insufficient permissions"},
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/kill": {
+      "post": {
+        "operationId": "killAgent",
+        "summary": "Kill an agent",
+        "description": "Permanently stop an agent. Requires explicit reactivation to restore. Owner only.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {"type": "string", "description": "Reason for killing the agent"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent killed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "containment_status": {"type": "string", "enum": ["killed"]},
+                    "contained_at": {"type": "string", "format": "date-time"},
+                    "contained_by": {"type": "string"},
+                    "containment_reason": {"type": "string", "nullable": true}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Agent is already killed"},
+          "403": {"description": "Insufficient permissions - owner only"},
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/reactivate": {
+      "post": {
+        "operationId": "reactivateAgent",
+        "summary": "Reactivate a killed agent",
+        "description": "Restore a killed agent back to active state. Owner only.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent reactivated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "containment_status": {"type": "string", "enum": ["active"]}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Agent is not killed"},
+          "403": {"description": "Insufficient permissions - owner only"},
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/containment": {
+      "get": {
+        "operationId": "getAgentContainment",
+        "summary": "Get agent containment status",
+        "description": "Returns the current containment status and recent audit log entries. Any org role.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Containment status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["active", "paused", "killed"]},
+                    "contained_at": {"type": "string", "format": "date-time", "nullable": true},
+                    "contained_by": {"type": "string", "nullable": true},
+                    "containment_reason": {"type": "string", "nullable": true},
+                    "auto_containment_threshold": {"type": "integer", "nullable": true},
+                    "log": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "string"},
+                          "action": {"type": "string"},
+                          "actor": {"type": "string"},
+                          "reason": {"type": "string", "nullable": true},
+                          "previous_status": {"type": "string"},
+                          "new_status": {"type": "string"},
+                          "created_at": {"type": "string", "format": "date-time"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
+      }
+    },
+    "/orgs/{org_id}/agents/{agent_id}/containment-policy": {
+      "put": {
+        "operationId": "updateContainmentPolicy",
+        "summary": "Update auto-containment policy",
+        "description": "Set or disable the auto-containment threshold. When set, the agent will be automatically paused after N consecutive boundary violations. Requires owner or admin role.",
+        "tags": ["Agent Containment"],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "agent_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["auto_containment_threshold"],
+                "properties": {
+                  "auto_containment_threshold": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "nullable": true,
+                    "description": "Number of consecutive boundary violations before auto-pause. Set to null to disable."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "auto_containment_threshold": {"type": "integer", "nullable": true}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Invalid threshold value"},
+          "403": {"description": "Insufficient permissions"},
+          "404": {"description": "Agent not found in organization"}
+        },
+        "security": [{"bearerAuth": []}]
       }
     },
     "/orgs/{org_id}/api-keys": {
