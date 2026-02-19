@@ -217,6 +217,45 @@ Admin export endpoints are available for organization-level data extraction, sup
 
 ---
 
+## Cryptographic Guarantees
+
+Beyond TLS encryption and HMAC authentication, the AIP attestation layer provides four independent layers of cryptographic evidence. Each layer addresses a distinct verification question.
+
+### Four Layers of Verification
+
+| Layer | Primitive | What It Proves | Verification Question |
+|-------|-----------|---------------|----------------------|
+| **Signatures** | Ed25519 | *Who signed this verdict* | Was this checkpoint signed by a Mnemom signing key? |
+| **Hash chains** | SHA-256 chain | *Ordering integrity* | Has the checkpoint sequence been reordered, modified, or had entries inserted/deleted? |
+| **Merkle trees** | SHA-256 binary tree | *Completeness* | Is this checkpoint part of the complete set of checkpoints for this agent? Has any checkpoint been omitted? |
+| **ZK proofs** | RISC Zero STARK | *Honest computation* | Was the verdict correctly derived from the analysis concerns according to protocol rules? |
+
+Each layer is independently verifiable. A verifier can check any combination of layers depending on their trust requirements.
+
+### Trust Assumptions
+
+The attestation system requires two trust assumptions:
+
+1. **Trust the signing key.** If the Ed25519 private key is compromised, an attacker can forge signatures on arbitrary checkpoints. Signing keys are managed in Cloudflare Workers secrets and are never exposed to client code. Key rotation is supported via the `key_id` field in certificates.
+
+2. **Trust the analysis model.** The ZK proof demonstrates that the verdict was correctly derived from the analysis LLM's output, but it does not prove the analysis output itself was correct. If the analysis LLM produces incorrect concerns (false positives or false negatives), the verdict will be derived correctly from incorrect inputs. Analysis quality remains bounded by the analysis model's capability.
+
+### Public Verifiability
+
+All verification endpoints are public and unauthenticated. Anyone can:
+
+- Fetch signing public keys via `GET /v1/keys`
+- Retrieve a certificate via `GET /v1/checkpoints/{id}/certificate`
+- Verify a certificate via `POST /v1/verify`
+- Check a Merkle root via `GET /v1/agents/{id}/merkle-root`
+- Generate an inclusion proof via `GET /v1/checkpoints/{id}/inclusion-proof`
+
+This means any third party -- auditors, regulators, downstream consumers of an agent's output -- can independently verify the integrity of an agent's analysis history without trusting Mnemom. The certificates are self-describing documents that contain all the information needed for offline verification (once the public key is obtained).
+
+For full details on the certificate format and verification steps, see [Integrity Certificates](/protocols/aip/certificates). For the ZK proof system, see [Verifiable Verdicts](/protocols/aip/verifiable-verdicts).
+
+---
+
 ## Responsible Disclosure
 
 If you discover a security vulnerability in any Mnemom component, please report it responsibly via GitHub Security Advisories on the relevant repository:

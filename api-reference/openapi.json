@@ -79,6 +79,10 @@
     {
       "name": "Webhook Notifications",
       "description": "Organization-level webhook endpoints for real-time HTTP POST notifications of integrity, drift, conscience, and billing events"
+    },
+    {
+      "name": "Verification",
+      "description": "Public cryptographic verification endpoints for integrity certificates, Merkle proofs, signing keys, and ZK verdict proofs"
     }
   ],
   "security": [],
@@ -5102,6 +5106,412 @@
           }
         }
       }
+    },
+    "/v1/keys": {
+      "get": {
+        "operationId": "getSigningKeys",
+        "summary": "List signing keys",
+        "description": "List all active Ed25519 signing public keys. Public endpoint, no authentication required. These keys are used to verify IntegrityCertificate signatures.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "responses": {
+          "200": {
+            "description": "List of active signing keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SigningKeyInfo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/verify": {
+      "post": {
+        "operationId": "verifyCertificate",
+        "summary": "Verify certificate",
+        "description": "Verify an IntegrityCertificate. Performs Ed25519 signature verification, chain hash verification, Merkle inclusion proof verification, input commitment check, and optional STARK proof verification. Public endpoint, no authentication required.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["certificate"],
+                "properties": {
+                  "certificate": {
+                    "$ref": "#/components/schemas/IntegrityCertificate"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyCertificateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or certificate structure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkpoints/{checkpoint_id}/certificate": {
+      "get": {
+        "operationId": "getCheckpointCertificate",
+        "summary": "Get integrity certificate",
+        "description": "Retrieve or reconstruct the IntegrityCertificate for a checkpoint. Includes signature, chain proof, Merkle inclusion proof (if available), and verdict derivation proof (if completed). Public endpoint, no authentication required.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "parameters": [
+          {
+            "name": "checkpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The checkpoint ID (ic-{uuid} format)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The integrity certificate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrityCertificate"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checkpoint not found or certificate not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkpoints/{checkpoint_id}/inclusion-proof": {
+      "get": {
+        "operationId": "getInclusionProof",
+        "summary": "Get inclusion proof",
+        "description": "Generate and return a Merkle inclusion proof for a checkpoint. The proof contains O(log N) sibling hashes sufficient to recompute the Merkle root, proving the checkpoint is included in the agent's complete checkpoint history. Public endpoint, no authentication required.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "parameters": [
+          {
+            "name": "checkpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The checkpoint ID (ic-{uuid} format)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merkle inclusion proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InclusionProofResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checkpoint not found or no Merkle proof available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Merkle leaf index out of bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkpoints/{checkpoint_id}/prove": {
+      "post": {
+        "operationId": "requestZkProof",
+        "summary": "Request ZK proof",
+        "description": "Request a zero-knowledge proof for a checkpoint's verdict derivation. If a proof already exists, returns its current status. Otherwise, creates a pending proof request and dispatches it to the RISC Zero prover service. Requires API key authentication.",
+        "tags": ["Verification"],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "checkpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The checkpoint ID (ic-{uuid} format)"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Proof request accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proof_id": {
+                      "type": "string",
+                      "description": "Proof identifier (prf-{8 random chars})"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["queued"],
+                      "description": "Initial status"
+                    },
+                    "estimated_completion_ms": {
+                      "type": "integer",
+                      "description": "Estimated time to completion in milliseconds"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Proof already exists for this checkpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proof_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Checkpoint not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to create proof request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checkpoints/{checkpoint_id}/proof": {
+      "get": {
+        "operationId": "getProofStatus",
+        "summary": "Get proof status",
+        "description": "Get the ZK proof status and data for a checkpoint. Returns the most recent proof record including status, proof type, verification result, and timing metadata. Public endpoint, no authentication required.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "parameters": [
+          {
+            "name": "checkpoint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The checkpoint ID (ic-{uuid} format)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proof status and data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No proof found for this checkpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agent_id}/merkle-root": {
+      "get": {
+        "operationId": "getAgentMerkleRoot",
+        "summary": "Get Merkle root",
+        "description": "Get the current Merkle tree root for an agent. The root is a SHA-256 hash that commits to the complete set of integrity checkpoints for this agent. Public endpoint, no authentication required.",
+        "tags": ["Verification"],
+        "security": [{}],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The agent ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merkle tree root and metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerkleRootResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No Merkle tree found for this agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6092,6 +6502,490 @@
             "format": "date-time"
           }
         }
+      },
+      "SigningKeyInfo": {
+        "type": "object",
+        "description": "Ed25519 signing key metadata. Public keys are used to verify IntegrityCertificate signatures.",
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "description": "Unique key identifier"
+          },
+          "public_key": {
+            "type": "string",
+            "description": "Hex-encoded Ed25519 public key"
+          },
+          "algorithm": {
+            "type": "string",
+            "description": "Signing algorithm (always Ed25519)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the key was created"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether the key is currently in use for new signatures"
+          }
+        },
+        "required": ["key_id", "public_key", "algorithm", "created_at", "is_active"]
+      },
+      "IntegrityCertificate": {
+        "type": "object",
+        "description": "Machine-readable cryptographic certificate for an integrity checkpoint. Modeled on C2PA content credentials and W3C Verifiable Credentials.",
+        "properties": {
+          "@context": {
+            "type": "string",
+            "description": "Namespace identifier",
+            "enum": ["https://mnemom.ai/aip/v1"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["IntegrityCertificate"]
+          },
+          "version": {
+            "type": "string",
+            "description": "Certificate format version"
+          },
+          "certificate_id": {
+            "type": "string",
+            "description": "Unique certificate identifier (cert-{8 random chars})"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of certificate issuance"
+          },
+          "subject": {
+            "type": "object",
+            "description": "Identifies the checkpoint this certificate attests to",
+            "properties": {
+              "checkpoint_id": {
+                "type": "string",
+                "description": "Integrity checkpoint ID (ic-{uuid})"
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              },
+              "card_id": {
+                "type": "string"
+              }
+            },
+            "required": ["checkpoint_id", "agent_id", "session_id", "card_id"]
+          },
+          "claims": {
+            "type": "object",
+            "description": "Analysis verdict and supporting evidence",
+            "properties": {
+              "verdict": {
+                "type": "string",
+                "enum": ["clear", "review_needed", "boundary_violation"]
+              },
+              "concerns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "category": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "confidence": {
+                "type": "number",
+                "description": "Extraction confidence (0.0-1.0)"
+              },
+              "reasoning_summary": {
+                "type": "string"
+              },
+              "analysis_model": {
+                "type": "string"
+              },
+              "analysis_duration_ms": {
+                "type": "number"
+              }
+            }
+          },
+          "input_commitments": {
+            "type": "object",
+            "description": "Cryptographic commitments to analysis inputs",
+            "properties": {
+              "thinking_block_hash": {
+                "type": "string",
+                "description": "SHA-256 hash of the thinking block"
+              },
+              "card_hash": {
+                "type": "string",
+                "description": "SHA-256 hash of the Alignment Card"
+              },
+              "values_hash": {
+                "type": "string",
+                "description": "SHA-256 hash of conscience values"
+              },
+              "context_hash": {
+                "type": "string",
+                "description": "SHA-256 hash of window context"
+              },
+              "model_version": {
+                "type": "string"
+              },
+              "combined_commitment": {
+                "type": "string",
+                "description": "SHA-256 of all input fields concatenated"
+              }
+            }
+          },
+          "proofs": {
+            "type": "object",
+            "description": "Cryptographic evidence supporting the claims",
+            "properties": {
+              "signature": {
+                "type": "object",
+                "properties": {
+                  "algorithm": {
+                    "type": "string",
+                    "enum": ["Ed25519"]
+                  },
+                  "key_id": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "Base64-encoded Ed25519 signature"
+                  },
+                  "signed_payload": {
+                    "type": "string",
+                    "description": "Deterministic JSON string that was signed"
+                  }
+                }
+              },
+              "chain": {
+                "type": "object",
+                "properties": {
+                  "chain_hash": {
+                    "type": "string"
+                  },
+                  "prev_chain_hash": {
+                    "type": ["string", "null"]
+                  },
+                  "position": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "merkle": {
+                "type": ["object", "null"],
+                "description": "Merkle inclusion proof. Null if not yet added to tree.",
+                "properties": {
+                  "leaf_hash": {
+                    "type": "string"
+                  },
+                  "leaf_index": {
+                    "type": "integer"
+                  },
+                  "root": {
+                    "type": "string"
+                  },
+                  "tree_size": {
+                    "type": "integer"
+                  },
+                  "inclusion_proof": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "hash": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "string",
+                          "enum": ["left", "right"]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "verdict_derivation": {
+                "type": ["object", "null"],
+                "description": "RISC Zero STARK proof. Null if not yet proven.",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": ["RISC-Zero-STARK"]
+                  },
+                  "image_id": {
+                    "type": "string"
+                  },
+                  "receipt": {
+                    "type": "string",
+                    "description": "Base64-encoded STARK proof receipt"
+                  },
+                  "journal": {
+                    "type": "string",
+                    "description": "Base64-encoded public journal"
+                  },
+                  "verified_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          },
+          "verification": {
+            "type": "object",
+            "description": "URLs for independent verification",
+            "properties": {
+              "keys_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "certificate_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "verify_url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        },
+        "required": ["@context", "type", "version", "certificate_id", "issued_at", "subject", "claims", "input_commitments", "proofs", "verification"]
+      },
+      "MerkleRootResponse": {
+        "type": "object",
+        "description": "Current Merkle tree root and metadata for an agent",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "The agent ID"
+          },
+          "merkle_root": {
+            "type": "string",
+            "description": "SHA-256 Merkle root hash (hex-encoded)"
+          },
+          "tree_depth": {
+            "type": "integer",
+            "description": "Depth of the Merkle tree (ceil(log2(leaf_count)))"
+          },
+          "leaf_count": {
+            "type": "integer",
+            "description": "Total number of checkpoint leaves in the tree"
+          },
+          "last_updated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the tree was last updated"
+          }
+        },
+        "required": ["agent_id", "merkle_root", "tree_depth", "leaf_count", "last_updated"]
+      },
+      "InclusionProofResponse": {
+        "type": "object",
+        "description": "Merkle inclusion proof for a checkpoint",
+        "properties": {
+          "checkpoint_id": {
+            "type": "string",
+            "description": "The checkpoint ID"
+          },
+          "leaf_hash": {
+            "type": "string",
+            "description": "SHA-256 leaf hash of this checkpoint"
+          },
+          "leaf_index": {
+            "type": "integer",
+            "description": "Index of this leaf in the tree"
+          },
+          "siblings": {
+            "type": "array",
+            "description": "O(log N) sibling hashes for proof verification",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hash": {
+                  "type": "string",
+                  "description": "Hex-encoded sibling hash"
+                },
+                "position": {
+                  "type": "string",
+                  "enum": ["left", "right"],
+                  "description": "Position of sibling relative to the path node"
+                }
+              },
+              "required": ["hash", "position"]
+            }
+          },
+          "root": {
+            "type": "string",
+            "description": "Current Merkle root (hex-encoded)"
+          },
+          "tree_size": {
+            "type": "integer",
+            "description": "Total number of leaves in the tree"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether the proof was verified against the stored root"
+          }
+        },
+        "required": ["checkpoint_id", "leaf_hash", "leaf_index", "siblings", "root", "tree_size", "verified"]
+      },
+      "ProofStatusResponse": {
+        "type": "object",
+        "description": "ZK proof status and metadata for a checkpoint",
+        "properties": {
+          "proof_id": {
+            "type": "string",
+            "description": "Proof identifier (prf-{8 random chars})"
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "description": "The checkpoint this proof is for"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "proving", "completed", "failed"],
+            "description": "Current proof status"
+          },
+          "proof_type": {
+            "type": "string",
+            "description": "Proof system (e.g., risc-zero-stark)"
+          },
+          "image_id": {
+            "type": ["string", "null"],
+            "description": "Guest program image ID (set when proving begins)"
+          },
+          "proving_duration_ms": {
+            "type": ["integer", "null"],
+            "description": "Wall-clock proving time in milliseconds (set when completed)"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether the proof has been verified"
+          },
+          "verified_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the proof was verified (null if not yet verified)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the proof request was created"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the proof record was last updated"
+          }
+        },
+        "required": ["proof_id", "checkpoint_id", "status", "proof_type", "verified", "created_at", "updated_at"]
+      },
+      "VerifyCertificateResponse": {
+        "type": "object",
+        "description": "Result of certificate verification",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "description": "Whether all verification checks passed"
+          },
+          "checks": {
+            "type": "object",
+            "description": "Individual verification check results",
+            "properties": {
+              "signature": {
+                "type": "object",
+                "properties": {
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "key_id": {
+                    "type": "string"
+                  }
+                },
+                "required": ["valid", "key_id"]
+              },
+              "chain": {
+                "type": "object",
+                "properties": {
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "chain_hash": {
+                    "type": "string"
+                  }
+                },
+                "required": ["valid", "chain_hash"]
+              },
+              "merkle": {
+                "type": ["object", "null"],
+                "description": "Null if Merkle proof was not present in the certificate",
+                "properties": {
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "root": {
+                    "type": "string"
+                  }
+                }
+              },
+              "input_commitment": {
+                "type": "object",
+                "properties": {
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "commitment": {
+                    "type": "string"
+                  }
+                },
+                "required": ["valid", "commitment"]
+              },
+              "verdict_derivation": {
+                "type": ["object", "null"],
+                "description": "Null if verdict derivation proof was not present",
+                "properties": {
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "method": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": ["signature", "chain", "input_commitment"]
+          },
+          "details": {
+            "type": "string",
+            "description": "Semicolon-separated human-readable verification details"
+          }
+        },
+        "required": ["valid", "checks", "details"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "Standard error response",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        },
+        "required": ["error"]
       }
     }
   }

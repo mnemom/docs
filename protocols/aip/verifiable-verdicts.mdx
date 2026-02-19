@@ -1,0 +1,178 @@
+---
+title: "Verifiable Verdicts"
+description: "Zero-knowledge proofs for verdict derivation, enabling cryptographic verification that an integrity verdict was computed correctly from its inputs."
+sidebarTitle: "ZK Proofs"
+icon: "cpu"
+---
+
+# Verifiable Verdicts
+
+Verifiable Verdicts extend the AIP attestation layer with **zero-knowledge proofs** that cryptographically demonstrate a verdict was derived correctly from its inputs. While [signatures](/protocols/aip/certificates) prove *who* signed a verdict and [hash chains](/protocols/aip/specification#15-attestation) prove *when* it was signed, ZK proofs prove *how* it was computed -- closing the remaining trust gap.
+
+---
+
+## What Gets Proven
+
+The ZK proof covers the **verdict derivation rules**: the deterministic mapping from analysis outputs to the final verdict. Specifically, the proof demonstrates:
+
+1. **Category-to-severity mapping**: Each concern category (e.g., `boundary_violation`, `prompt_injection`, `value_misalignment`) is mapped to the correct severity level (`low`, `medium`, `high`, `critical`) according to the protocol rules.
+
+2. **Severity-to-verdict escalation**: The most severe concern determines the checkpoint verdict:
+   - No concerns or all `low` severity results in `clear`
+   - `medium` severity results in `review_needed`
+   - `high` or `critical` severity results in `boundary_violation`
+
+3. **Concerns hash integrity**: The hash of the concerns array in the proof journal matches the hash in the certificate, proving the verdict was derived from the exact concerns that were reported.
+
+4. **Card constraint evaluation**: The verdict accounts for the agent's declared autonomy envelope -- bounded actions, forbidden actions, and escalation triggers -- as specified in the Alignment Card.
+
+## What Does NOT Get Proven
+
+The ZK proof intentionally excludes:
+
+- **LLM inference**: The analysis LLM's reasoning process is not proven. LLM inference is non-deterministic and computationally infeasible to prove inside a zkVM. The proof covers only the deterministic post-processing of the LLM's structured output.
+
+- **Thinking block content**: The raw thinking block is never included in the proof. Only the SHA-256 hash (`thinking_block_hash`) is referenced, preserving the agent's reasoning privacy.
+
+- **Analysis model selection**: The choice of which LLM to use for analysis is an operational decision outside the proof scope.
+
+<Warning>
+The ZK proof guarantees that the verdict was correctly derived from the analysis output, not that the analysis itself was correct. The analysis quality remains bounded by the analysis LLM's capability. See [Limitations](/protocols/aip/limitations).
+</Warning>
+
+---
+
+## Guest Program
+
+The verdict derivation logic runs inside a [RISC Zero](https://risczero.com/) zkVM guest program. The guest program is a deterministic Rust binary that takes structured inputs, applies the verdict rules, and produces public outputs.
+
+### Inputs (Private)
+
+These are provided to the guest program but are **not** revealed in the proof:
+
+| Input | Type | Description |
+|-------|------|-------------|
+| `concerns` | `Vec<Concern>` | The array of concerns from the analysis LLM, each with `category`, `severity`, and `description`. |
+| `card` | `CardSummary` | Compressed Alignment Card: values, bounded actions, forbidden actions, escalation triggers. |
+| `model` | `String` | Analysis model identifier. |
+
+### Computation
+
+The guest program executes the following deterministic steps:
+
+1. **Validate input structure**: Verify concerns array and card summary are well-formed.
+2. **Apply category mapping**: Map each concern's category to the protocol-defined severity rules.
+3. **Compute verdict**: Determine the final verdict from the highest severity across all concerns.
+4. **Compute concerns hash**: SHA-256 hash of the serialized concerns array (deterministic key ordering).
+5. **Write journal**: Output the verdict, concerns hash, and card ID as public commitments.
+
+### Outputs (Public Journal)
+
+These are committed to the proof's public journal and are visible to verifiers:
+
+| Output | Type | Description |
+|--------|------|-------------|
+| `verdict` | `String` | The computed verdict (`clear`, `review_needed`, `boundary_violation`). |
+| `concerns_hash` | `String` | SHA-256 of the serialized concerns array. Verifiers compare this to the certificate's concerns to confirm consistency. |
+| `card_id` | `String` | The Alignment Card ID, proving the verdict was derived against a specific card. |
+
+---
+
+## STARK Proof Format
+
+The proof is a RISC Zero STARK (Scalable Transparent ARgument of Knowledge), stored and transmitted in three components:
+
+| Component | Description |
+|-----------|-------------|
+| `receipt` | The STARK proof receipt. Contains the cryptographic proof data. Base64-encoded. |
+| `journal` | The public journal output. Contains the committed public values (verdict, concerns_hash, card_id). Base64-encoded. |
+| `image_id` | The hash of the guest program binary. Uniquely identifies which program was executed. Used to verify the proof was generated by the correct verdict derivation program. |
+
+The `image_id` is a content hash of the compiled guest program. It acts as a commitment to the exact computation that was proven. A verifier checks:
+
+1. The `image_id` matches the expected verdict derivation program (published in the Mnemom GitHub repository).
+2. The `receipt` is a valid STARK proof for the given `image_id` and `journal`.
+3. The `journal` outputs are consistent with the certificate's claims.
+
+---
+
+## Optimistic Proving Strategy
+
+Not every checkpoint receives a ZK proof. Proving has non-trivial cost and latency, so AIP uses an **optimistic proving strategy**:
+
+| Verdict | Proving Policy | Rationale |
+|---------|---------------|-----------|
+| `boundary_violation` | **Always proven** | Highest-consequence verdicts must be independently verifiable. A false boundary_violation can block an agent; a missed one can allow harm. |
+| `review_needed` | **10% stochastic sampling** | Sampled proofs provide statistical confidence without proving every checkpoint. |
+| `clear` | **10% stochastic sampling** | Same stochastic rate. Sampling clear verdicts catches systematic errors in the derivation logic. |
+
+The 10% sampling rate means that over a session of 100 checkpoints, approximately 10 will have ZK proofs. This provides strong probabilistic assurance that the derivation logic is functioning correctly, while keeping proving costs proportional to usage.
+
+### On-Demand Proving
+
+Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id}/prove`](/api-reference/endpoint/post-checkpoints-id-prove). This is useful when:
+
+- An operator wants to verify a specific `review_needed` verdict
+- An auditor requires proof for a specific checkpoint
+- The stochastic sample missed a checkpoint of interest
+
+---
+
+## Cost and Latency
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Proving cost** | ~$0.005/proof | RISC Zero Bonsai proving service pricing. Subject to change. |
+| **Proving latency** | 3-15 seconds | Wall-clock time from proof request to receipt. Depends on concern complexity and prover load. |
+| **Verification latency** | <100 milliseconds | STARK verification is fast. Local verification avoids network round-trips. |
+| **Proof size** | ~50-200 KB | Depends on computation complexity. Compressed receipt size. |
+
+Proving is asynchronous and fire-and-forget. The checkpoint verdict is returned immediately; the proof is generated in the background and attached to the certificate when complete. This means the ZK proof never adds latency to the critical path of integrity analysis.
+
+<Note>
+The fire-and-forget pattern means a proof might fail to generate (prover service unavailable, timeout, etc.) without affecting the checkpoint. In this case, `proofs.verdict_derivation` remains `null` in the certificate. The checkpoint is still valid -- it just lacks the additional computational integrity guarantee.
+</Note>
+
+---
+
+## Verification
+
+### Server-Side
+
+Submit the full certificate to [`POST /v1/verify`](/api-reference/endpoint/post-verify). The API delegates STARK verification to the prover service and returns a structured result including `checks.verdict_derivation.valid`.
+
+### Local Verification
+
+Use the RISC Zero verifier SDK to verify locally:
+
+```rust
+use risc0_zkvm::Receipt;
+
+let receipt: Receipt = deserialize(&cert.proofs.verdict_derivation.receipt);
+let image_id: [u32; 8] = parse_image_id(&cert.proofs.verdict_derivation.image_id);
+
+// Verify the proof
+receipt.verify(image_id).expect("Proof verification failed");
+
+// Read the public journal
+let journal = receipt.journal.decode::<VerdictJournal>().unwrap();
+assert_eq!(journal.verdict, cert.claims.verdict);
+```
+
+### Checking Proof Status
+
+For checkpoints where proving is in progress, query the status:
+
+```bash
+curl https://api.mnemom.ai/v1/checkpoints/{checkpoint_id}/proof
+```
+
+The `status` field progresses through: `pending` -> `proving` -> `completed` (or `failed`).
+
+---
+
+## Further Reading
+
+- [Integrity Certificates](/protocols/aip/certificates) -- The certificate format that contains ZK proofs
+- [AIP Specification -- Verification](/protocols/aip/specification#16-verification) -- Protocol-level verification specification
+- [RISC Zero Documentation](https://dev.risczero.com/) -- The zkVM platform used for proving

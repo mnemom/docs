@@ -29,8 +29,10 @@ icon: "book"
 12. [AAP Integration Specification](#12-aap-integration-specification)
 13. [Security Considerations](#13-security-considerations)
 14. [Limitations](#14-limitations)
-15. [IANA Considerations](#15-iana-considerations)
-16. [References](#16-references)
+15. [Attestation](#15-attestation)
+16. [Verification](#16-verification)
+17. [IANA Considerations](#17-iana-considerations)
+18. [References](#18-references)
 - [Appendix A: JSON Schemas](#appendix-a-json-schemas)
 - [Appendix B: Conscience Prompt Reference Implementation](#appendix-b-conscience-prompt-reference-implementation)
 - [Appendix C: Provider Adapter Reference Implementations](#appendix-c-provider-adapter-reference-implementations)
@@ -1395,9 +1397,97 @@ The HTTP signal path uses HMAC-SHA256 to authenticate webhook deliveries:
 
 ---
 
-## 15. IANA Considerations
+## 15. Attestation
 
-### 15.1 Media Type
+AIP provides cryptographic attestation for every integrity checkpoint. The attestation layer creates a tamper-evident, independently verifiable record of every analysis verdict.
+
+### 15.1 Ed25519 Signatures
+
+Every checkpoint is signed using Ed25519. The signed payload is a deterministic JSON string containing the checkpoint ID, agent ID, verdict, thinking block hash, input commitment, chain hash, and timestamp. Keys are sorted alphabetically to ensure deterministic output.
+
+```
+signed_payload = JSON.stringify({
+  agent_id, chain_hash, checkpoint_id,
+  input_commitment, thinking_block_hash,
+  timestamp, verdict
+}, sorted_keys)
+
+signature = Ed25519.sign(signed_payload, secret_key)
+```
+
+Signing keys are managed server-side and rotated periodically. Active public keys are published via `GET /v1/keys` for independent verification.
+
+### 15.2 Hash Chains
+
+Each checkpoint is linked to its predecessor within a session via SHA-256 hash chains. The chain hash preimage includes the previous chain hash (or `"genesis"` for the first checkpoint), the checkpoint ID, verdict, thinking block hash, input commitment, and timestamp, concatenated with pipe delimiters.
+
+```
+chain_hash = SHA-256(
+  (prev_chain_hash || "genesis") | checkpoint_id |
+  verdict | thinking_block_hash |
+  input_commitment | timestamp
+)
+```
+
+Hash chains provide **ordering guarantees**: any modification to a checkpoint or insertion/deletion of a checkpoint breaks the chain, making tampering detectable.
+
+### 15.3 Merkle Trees
+
+A per-agent append-only binary Merkle tree accumulates all checkpoint leaf hashes. The leaf hash preimage includes the checkpoint ID, verdict, thinking block hash, chain hash, and timestamp. Internal nodes are computed as `SHA-256(left || right)`. When the leaf count at a level is odd, the last leaf is duplicated before pairing.
+
+Merkle trees provide **completeness guarantees**: the published root commits to the full set of checkpoints. An inclusion proof (O(log N) sibling hashes) proves a specific checkpoint is part of the tree. If a checkpoint is deleted, the root changes and existing inclusion proofs fail.
+
+### 15.4 Integrity Certificates
+
+All attestation data is bundled into an **IntegrityCertificate** -- a self-describing, machine-readable document modeled on C2PA content credentials and W3C Verifiable Credentials. Certificates contain the verdict claims, input commitments, signature proof, chain proof, Merkle inclusion proof, and optional ZK verdict derivation proof. See the [Integrity Certificates](/protocols/aip/certificates) page for the full schema and verification instructions.
+
+### 15.5 Zero-Knowledge Verdict Proofs
+
+For high-consequence verdicts (`boundary_violation`) and a stochastic sample of other verdicts, a RISC Zero STARK proof demonstrates that the verdict was correctly derived from the analysis concerns according to the protocol rules. See [Verifiable Verdicts](/protocols/aip/verifiable-verdicts) for the guest program specification and proving strategy.
+
+---
+
+## 16. Verification
+
+AIP provides public endpoints for independent verification. All verification endpoints are unauthenticated -- any party can verify without trusting the Mnemom API.
+
+### 16.1 Public Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/keys` | GET | List active Ed25519 signing public keys |
+| `/v1/verify` | POST | Submit a certificate for server-side verification |
+| `/v1/checkpoints/{id}/certificate` | GET | Retrieve the integrity certificate for a checkpoint |
+| `/v1/checkpoints/{id}/inclusion-proof` | GET | Get the Merkle inclusion proof for a checkpoint |
+| `/v1/checkpoints/{id}/prove` | POST | Request ZK proof generation for a checkpoint |
+| `/v1/checkpoints/{id}/proof` | GET | Get ZK proof status and data |
+| `/v1/agents/{id}/merkle-root` | GET | Get the current Merkle tree root for an agent |
+
+### 16.2 Offline Verification
+
+Certificates are designed for offline verification. Given a certificate and the signing public key, a verifier can:
+
+1. Verify the Ed25519 signature against the signed payload.
+2. Recompute the chain hash and compare to the certificate.
+3. Walk the Merkle inclusion proof to recompute the root.
+4. (If present) Verify the STARK proof receipt using the RISC Zero verifier.
+
+No network access is required for steps 1-4. The only online step is fetching the public key, which can be cached.
+
+### 16.3 STARK Proof Verification
+
+STARK proofs can be verified in two ways:
+
+- **Server-side**: Submit the certificate to `POST /v1/verify`. The API delegates to the prover service.
+- **Local**: Use the RISC Zero verifier SDK with the `image_id` and `receipt` from the certificate.
+
+The `image_id` is published in the Mnemom GitHub repository and acts as a commitment to the exact guest program binary. Verifiers SHOULD compare the certificate's `image_id` against the published value to ensure the proof was generated by the correct program.
+
+---
+
+## 17. IANA Considerations
+
+### 17.1 Media Type
 
 AIP defines the following media type for IntegritySignal payloads:
 
@@ -1408,7 +1498,7 @@ AIP defines the following media type for IntegritySignal payloads:
 - **Encoding considerations:** UTF-8
 - **Security considerations:** See Section 13
 
-### 15.2 HTTP Headers
+### 17.2 HTTP Headers
 
 AIP defines the following HTTP headers for webhook delivery:
 
@@ -1417,9 +1507,9 @@ AIP defines the following HTTP headers for webhook delivery:
 
 ---
 
-## 16. References
+## 18. References
 
-### 16.1 Normative References
+### 18.1 Normative References
 
 - **[RFC 2119]** Bradner, S., "Key words for use in RFCs to Indicate Requirement Levels", BCP 14, RFC 2119, March 1997.
 - **[RFC 8174]** Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words", BCP 14, RFC 8174, May 2017.
@@ -1427,14 +1517,14 @@ AIP defines the following HTTP headers for webhook delivery:
 - **[RFC 3339]** Klyne, G. and C. Newman, "Date and Time on the Internet: Timestamps", RFC 3339, July 2002.
 - **[AAP SPEC]** Mnemom.ai, "Agent Alignment Protocol Specification", v0.1.5, 2026.
 
-### 16.2 Informative References
+### 18.2 Informative References
 
 - **[Anthropic Extended Thinking]** Anthropic, "Extended thinking with Claude", 2025.
 - **[Braid V2 Specification]** Mnemom.ai, "Braid V2 Specification -- Alignment Across Difference", 2026.
 - **[Daimonion Architecture]** Mnemom.ai, "Daimonion: Conscience-as-a-Service Architecture", 2026.
 - **[Smoltbot Architecture]** Mnemom.ai, "Smoltbot AAP Architecture v2", 2026.
 
-### 16.3 Standards and Regulatory References
+### 18.3 Standards and Regulatory References
 
 - **[ISO/IEC 42001:2023]** ISO/IEC, "Information technology -- Artificial Intelligence Management System", 2023. https://www.iso.org/standard/42001
 - **[ISO/IEC 42005:2025]** ISO/IEC, "Information technology -- Artificial intelligence -- AI system impact assessment", 2025. https://www.iso.org/standard/42005
