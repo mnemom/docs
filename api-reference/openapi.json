@@ -87,6 +87,10 @@
     {
       "name": "Agent Containment",
       "description": "Pause, resume, kill, and reactivate agents. Manage auto-containment policies and view containment audit logs."
+    },
+    {
+      "name": "Conscience Values",
+      "description": "Per-org custom conscience values for alignment policy injection (Enterprise)"
     }
   ],
   "security": [],
@@ -5774,6 +5778,258 @@
           }
         }
       }
+    },
+    "/orgs/{org_id}/conscience-values": {
+      "get": {
+        "operationId": "listOrgConscienceValues",
+        "summary": "List org conscience values",
+        "description": "Returns all conscience values for the org, along with mode and enabled status. Requires Enterprise plan with custom_conscience_values feature flag.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Conscience values list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["augment", "replace"]},
+                    "enabled": {"type": "boolean"},
+                    "values": {"type": "array", "items": {"$ref": "#/components/schemas/OrgConscienceValue"}}
+                  }
+                }
+              }
+            }
+          },
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      },
+      "post": {
+        "operationId": "createOrgConscienceValue",
+        "summary": "Create org conscience value",
+        "description": "Create a new custom conscience value. Max 20 per org. Requires owner or admin role.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "description", "type"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "maxLength": 50},
+                  "description": {"type": "string", "minLength": 1, "maxLength": 500},
+                  "type": {"type": "string", "enum": ["BOUNDARY", "FEAR", "COMMITMENT", "BELIEF", "HOPE"]},
+                  "severity": {"type": "string", "enum": ["advisory", "mandatory"], "default": "advisory"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/OrgConscienceValue"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/orgs/{org_id}/conscience-values/{value_id}": {
+      "patch": {
+        "operationId": "updateOrgConscienceValue",
+        "summary": "Update org conscience value",
+        "description": "Update fields on an existing conscience value. Requires owner or admin role.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "value_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "maxLength": 50},
+                  "description": {"type": "string", "minLength": 1, "maxLength": 500},
+                  "type": {"type": "string", "enum": ["BOUNDARY", "FEAR", "COMMITMENT", "BELIEF", "HOPE"]},
+                  "severity": {"type": "string", "enum": ["advisory", "mandatory"]},
+                  "is_active": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/OrgConscienceValue"}
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgConscienceValue",
+        "summary": "Delete org conscience value",
+        "description": "Permanently delete a conscience value. Requires owner or admin role.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "value_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"},
+                    "id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/orgs/{org_id}/conscience-values/order": {
+      "put": {
+        "operationId": "reorderOrgConscienceValues",
+        "summary": "Reorder org conscience values",
+        "description": "Set the sort order for all conscience values.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["order"],
+                "properties": {
+                  "order": {"type": "array", "items": {"type": "string"}}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reordered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reordered": {"type": "boolean"},
+                    "order": {"type": "array", "items": {"type": "string"}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/conscience-values/mode": {
+      "put": {
+        "operationId": "updateOrgConscienceMode",
+        "summary": "Update org conscience mode",
+        "description": "Set the conscience mode (augment/replace) and enabled flag.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {"type": "string", "enum": ["augment", "replace"]},
+                  "enabled": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["augment", "replace"]},
+                    "enabled": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/conscience-values/log": {
+      "get": {
+        "operationId": "getOrgConscienceAuditLog",
+        "summary": "Get conscience values audit log",
+        "description": "Returns the audit trail for conscience value changes. Requires owner, admin, or auditor role.",
+        "tags": ["Conscience Values"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {"type": "string"},
+                    "entries": {"type": "array", "items": {"$ref": "#/components/schemas/OrgConscienceAuditEntry"}}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7248,6 +7504,41 @@
           }
         },
         "required": ["error"]
+      },
+      "OrgConscienceValue": {
+        "type": "object",
+        "description": "A custom conscience value for an organization",
+        "properties": {
+          "id": {"type": "string", "description": "Value ID (cv-xxx)"},
+          "org_id": {"type": "string"},
+          "name": {"type": "string", "maxLength": 50},
+          "description": {"type": "string", "maxLength": 500},
+          "type": {"type": "string", "enum": ["BOUNDARY", "FEAR", "COMMITMENT", "BELIEF", "HOPE"]},
+          "severity": {"type": "string", "enum": ["advisory", "mandatory"]},
+          "scope": {"type": "string"},
+          "is_active": {"type": "boolean"},
+          "sort_order": {"type": "integer"},
+          "created_by": {"type": "string"},
+          "updated_by": {"type": "string"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "org_id", "name", "description", "type", "severity"]
+      },
+      "OrgConscienceAuditEntry": {
+        "type": "object",
+        "description": "Audit log entry for conscience value changes",
+        "properties": {
+          "id": {"type": "string"},
+          "org_id": {"type": "string"},
+          "value_id": {"type": ["string", "null"]},
+          "action": {"type": "string", "enum": ["create", "update", "delete", "activate", "deactivate", "reorder", "mode_change"]},
+          "actor": {"type": "string"},
+          "changes": {"type": "object"},
+          "metadata": {"type": "object"},
+          "created_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "org_id", "action", "actor", "created_at"]
       }
     }
   }

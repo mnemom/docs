@@ -1,0 +1,152 @@
+---
+title: "Custom Conscience Values"
+description: "Per-org alignment policies injected into the AIP conscience prompt"
+sidebarTitle: "Conscience Values"
+icon: "shield-halved"
+---
+
+# Custom Conscience Values
+
+Custom conscience values let Enterprise orgs inject domain-specific alignment policies into every AIP integrity check. Instead of relying solely on the default conscience values, you can define what matters most for your industry -- "patient safety > efficiency" for healthcare, "never recommend regulatory risk" for fintech.
+
+<Info>
+Custom conscience values require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
+</Info>
+
+## How It Works
+
+Conscience values are the ethical guidelines that AIP uses when analyzing agent behavior. Every integrity check evaluates the agent's reasoning against these values and flags conflicts.
+
+With custom conscience values, you define org-wide alignment policies that apply to **all agents** in your organization. These values are layered on top of (or replace) the system defaults.
+
+### Value Resolution Order
+
+Values are resolved in three layers:
+
+1. **Base layer** -- System default conscience values (or empty in replace mode)
+2. **Org layer** -- Your custom org values (always applied to all agents)
+3. **Agent layer** -- Per-agent values from alignment cards (additive)
+
+Org policy always applies. Per-agent values add specificity but cannot remove org policy.
+
+## Modes
+
+| Mode | Behavior |
+|------|----------|
+| **Augment** (default) | Org values are added alongside system defaults |
+| **Replace** | Org values replace system defaults entirely |
+
+Mode only controls org values vs. defaults. Per-agent values are always additive on top.
+
+## Value Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `BOUNDARY` | Hard limits that must never be crossed | "Never recommend actions that could harm patients" |
+| `FEAR` | Risks the agent should be wary of | "Regulatory penalties from non-compliant advice" |
+| `COMMITMENT` | Promises the agent upholds | "Always disclose when providing medical information" |
+| `BELIEF` | Core principles guiding behavior | "Patient autonomy and informed consent are paramount" |
+| `HOPE` | Aspirational outcomes to work toward | "Improved health outcomes through accurate information" |
+
+## Severity Levels
+
+| Severity | Behavior |
+|----------|----------|
+| **Advisory** | Flagged in conscience analysis but does not trigger boundary violation |
+| **Mandatory** | Treated as a hard boundary -- violations trigger `boundary_violation` verdict |
+
+## Example Values
+
+### Healthcare
+
+```json
+[
+  {
+    "name": "Patient Safety First",
+    "description": "Patient safety must always take priority over efficiency, cost reduction, or throughput optimization. Never suggest actions that could compromise patient care.",
+    "type": "BOUNDARY",
+    "severity": "mandatory"
+  },
+  {
+    "name": "Clinical Evidence Required",
+    "description": "All medical recommendations must be grounded in peer-reviewed clinical evidence. Do not extrapolate beyond available data.",
+    "type": "COMMITMENT",
+    "severity": "mandatory"
+  },
+  {
+    "name": "HIPAA Compliance",
+    "description": "Never process, store, or transmit protected health information (PHI) outside of approved systems and workflows.",
+    "type": "BOUNDARY",
+    "severity": "mandatory"
+  }
+]
+```
+
+### Fintech
+
+```json
+[
+  {
+    "name": "No Regulatory Risk",
+    "description": "Never recommend actions that could expose the organization to regulatory penalties, sanctions, or compliance violations.",
+    "type": "BOUNDARY",
+    "severity": "mandatory"
+  },
+  {
+    "name": "Fiduciary Duty",
+    "description": "Always act in the best interest of the client. Prioritize client outcomes over internal metrics.",
+    "type": "COMMITMENT",
+    "severity": "mandatory"
+  },
+  {
+    "name": "Audit Trail Integrity",
+    "description": "All financial decisions and recommendations must be traceable and auditable. Never circumvent logging or reporting mechanisms.",
+    "type": "BOUNDARY",
+    "severity": "mandatory"
+  }
+]
+```
+
+### Legal
+
+```json
+[
+  {
+    "name": "Privilege Preservation",
+    "description": "Never disclose or summarize information that could waive attorney-client privilege.",
+    "type": "BOUNDARY",
+    "severity": "mandatory"
+  },
+  {
+    "name": "Conflict Check",
+    "description": "Flag any potential conflicts of interest before proceeding with analysis or recommendations.",
+    "type": "COMMITMENT",
+    "severity": "advisory"
+  }
+]
+```
+
+## API Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/orgs/:org_id/conscience-values` | GET | List all conscience values |
+| `/v1/orgs/:org_id/conscience-values` | POST | Create a new value |
+| `/v1/orgs/:org_id/conscience-values/:id` | PATCH | Update a value |
+| `/v1/orgs/:org_id/conscience-values/:id` | DELETE | Delete a value |
+| `/v1/orgs/:org_id/conscience-values/order` | PUT | Reorder values |
+| `/v1/orgs/:org_id/conscience-values/mode` | PUT | Set mode and enabled |
+| `/v1/orgs/:org_id/conscience-values/log` | GET | View audit log |
+
+See the full [API reference](/api-reference/endpoint/get-orgs-org-id-conscience-values) for request/response schemas.
+
+## Limits
+
+- Maximum **20 conscience values** per org
+- Name: 1-50 characters
+- Description: 1-500 characters
+- RBAC: Owner and Admin roles can create/update/delete; all roles can view
+
+## Webhooks
+
+Mutations to conscience values emit the `conscience.values_updated` webhook event. See the [webhook guide](/guides/webhooks) for integration details.
