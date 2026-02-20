@@ -6030,6 +6030,134 @@
           }
         }
       }
+    },
+    "/admin/users/{userId}/impersonate": {
+      "post": {
+        "operationId": "startImpersonation",
+        "summary": "Start impersonation session",
+        "description": "Creates a session-based impersonation for viewing the dashboard as the target user. Returns an opaque token to include as X-Impersonate-Token header. Sessions expire after 1 hour.",
+        "tags": ["Admin"],
+        "security": [{"ServiceRole": []}],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Target user ID to impersonate"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {"type": "string", "description": "Optional reason for impersonation (audit trail)"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Impersonation session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_id": {"type": "string"},
+                    "token": {"type": "string", "description": "Opaque token for X-Impersonate-Token header"},
+                    "target_user_id": {"type": "string"},
+                    "target_email": {"type": "string"},
+                    "expires_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "403": {"description": "Cannot impersonate admin users"},
+          "404": {"description": "Target user not found"}
+        }
+      }
+    },
+    "/admin/impersonation/{sessionId}": {
+      "get": {
+        "operationId": "getImpersonationSession",
+        "summary": "Get impersonation session status",
+        "description": "Returns session details if active. Returns 410 Gone if expired or ended.",
+        "tags": ["Admin"],
+        "security": [{"ServiceRole": []}],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Impersonation session ID (ais-xxx)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active session details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "admin_user_id": {"type": "string"},
+                    "target_user_id": {"type": "string"},
+                    "target_email": {"type": "string"},
+                    "reason": {"type": "string", "nullable": true},
+                    "started_at": {"type": "string", "format": "date-time"},
+                    "expires_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "404": {"description": "Session not found"},
+          "410": {"description": "Session expired or ended"}
+        }
+      }
+    },
+    "/admin/impersonation/{sessionId}/end": {
+      "post": {
+        "operationId": "endImpersonation",
+        "summary": "End impersonation session",
+        "description": "Marks the impersonation session as ended. Audit-logged.",
+        "tags": ["Admin"],
+        "security": [{"ServiceRole": []}],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Impersonation session ID (ais-xxx)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ended": {"type": "boolean"},
+                    "session_id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "403": {"description": "Not your impersonation session"},
+          "404": {"description": "Session not found"}
+        }
+      }
     }
   },
   "components": {

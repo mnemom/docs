@@ -1,0 +1,98 @@
+---
+title: "Admin Impersonate Mode"
+description: "View the dashboard exactly as a customer sees it — read-only, fully audit-logged"
+sidebarTitle: "Impersonate Mode"
+icon: "user-secret"
+---
+
+# Admin Impersonate Mode
+
+Impersonate Mode lets enterprise admins view the Mnemom dashboard from a customer's perspective. This is essential for diagnosing issues, verifying what a customer sees, and providing support — without ever modifying their data.
+
+## How It Works
+
+<Steps>
+  <Step title="Start a Session">
+    An admin clicks **View as Customer** from the customer detail panel, or calls `POST /v1/admin/users/:userId/impersonate`. The backend creates a session record and returns a short-lived opaque token.
+  </Step>
+  <Step title="View as Customer">
+    The frontend stores the token and includes it as an `X-Impersonate-Token` header on all API calls. The backend resolves the target user's data instead of the admin's — agents, billing, org context, everything.
+  </Step>
+  <Step title="Read-Only Enforcement">
+    All write operations (POST, PUT, PATCH, DELETE) to non-admin endpoints are rejected with a `403` while the token is active. This is enforced server-side, not just in the UI.
+  </Step>
+  <Step title="Exit">
+    The admin clicks **Exit** in the amber banner, or the session expires after 1 hour. The token is cleared and the admin returns to the admin panel.
+  </Step>
+</Steps>
+
+## Security Model
+
+| Property | Detail |
+|----------|--------|
+| **Auth** | Admin's own Supabase JWT remains the auth credential — no JWT forgery |
+| **Token** | Opaque 32-byte hex, SHA-256 hashed before storage |
+| **Expiry** | 1 hour, enforced server-side |
+| **No nesting** | Cannot impersonate another admin |
+| **Read-only** | Centralized write guard rejects all mutations during active session |
+| **Storage** | `sessionStorage` — clears on tab close |
+| **API keys** | Already masked (`key_prefix` only) |
+| **Payment details** | Stripe never returns full card numbers |
+
+## Audit Trail
+
+Every impersonation session generates:
+
+- An `impersonate_user` entry in `admin_audit_log` at session start
+- Per-page visit records in `admin_impersonation_page_visits`
+- An `impersonation_end` entry in `admin_audit_log` at session end
+
+## API Endpoints
+
+### Start Impersonation
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/admin/users/{userId}/impersonate \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Customer reported missing agents"}'
+```
+
+**Response:**
+```json
+{
+  "session_id": "ais-a1b2c3d4",
+  "token": "64-char-hex-string",
+  "target_user_id": "uuid",
+  "target_email": "customer@example.com",
+  "expires_at": "2025-01-15T12:00:00Z"
+}
+```
+
+### Get Session Status
+
+```bash
+curl https://api.mnemom.ai/v1/admin/impersonation/{sessionId} \
+  -H "Authorization: Bearer $ADMIN_JWT"
+```
+
+Returns session details, or `410 Gone` if expired/ended.
+
+### End Impersonation
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/admin/impersonation/{sessionId}/end \
+  -H "Authorization: Bearer $ADMIN_JWT"
+```
+
+**Response:**
+```json
+{
+  "ended": true,
+  "session_id": "ais-a1b2c3d4"
+}
+```
+
+## RBAC
+
+Only users with `app_metadata.is_admin === true` can start impersonation sessions. The admin guard is the same one used for all admin endpoints.
