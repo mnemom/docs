@@ -73,8 +73,8 @@ In nudge mode, when a violation is detected, smoltbot creates a pending nudge re
 
 **How nudges work:**
 
-1. Observer detects a violation (e.g., `UNBOUNDED_ACTION`)
-2. A nudge record is created with the violation details
+1. The gateway detects a violation in real-time via streaming response analysis (`tee()` + background AIP check, ~3s latency)
+2. A pending nudge record is created immediately — ready before the agent's next turn
 3. On the agent's next API call, the gateway injects a system prompt addition:
    ```
    [INTEGRITY NOTICE] Your previous action was flagged for:
@@ -157,6 +157,57 @@ curl -X PUT https://api.mnemom.ai/v1/agents/agent_abc123/enforcement \
   -H "Content-Type: application/json" \
   -d '{"mode": "nudge"}'
 ```
+
+## Nudge Strategy
+
+When enforcement mode is `nudge` or `enforce`, you can further control *when* nudges are created using the nudge strategy setting:
+
+| Strategy | Behavior |
+|----------|----------|
+| `always` | Every boundary violation creates a nudge (default) |
+| `sampling` | Nudge on a percentage of violations (uses `proof_rate` or dedicated `nudge_rate`) |
+| `threshold` | Only nudge after N violations in the current session |
+| `off` | No nudging — violations are recorded but no correction is injected |
+
+**Configuration:**
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
+  -H "Content-Type: application/json" \
+  -d '{"nudge_strategy": "always"}'
+```
+
+<Tip>
+Use `threshold` mode to avoid alert fatigue. The agent only receives a nudge after repeated violations in the same session, giving it a chance to self-correct naturally first.
+</Tip>
+
+## Per-Agent Feature Toggles
+
+Each agent has independent controls for the transparency and integrity pipeline:
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `aap_enabled` | boolean | `true` | Enable AAP action traces |
+| `aip_enabled` | boolean | `true` | Enable AIP integrity analysis |
+| `proof_enabled` | boolean | `true` | Enable cryptographic attestation (Ed25519 + Merkle) |
+| `proof_rate` | integer | `100` | % of checkpoints that get full attestation |
+| `nudge_strategy` | string | `always` | When to create nudges (`always`, `sampling`, `threshold`, `off`) |
+
+**Configuration:**
+
+```bash
+# Disable AIP for an agent (AAP traces still flow)
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
+  -H "Content-Type: application/json" \
+  -d '{"aip_enabled": false}'
+
+# Set proof sampling to 50%
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
+  -H "Content-Type: application/json" \
+  -d '{"proof_rate": 50}'
+```
+
+These settings are also available in the **Agent Settings** panel on the web dashboard for claimed agents.
 
 ## Violation Types and Enforcement
 

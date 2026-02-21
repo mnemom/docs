@@ -219,15 +219,17 @@ AIP and AAP share infrastructure and data structures:
 | Drift alerts | AIP -> AAP | IntegrityDriftAlerts stored in same `drift_alerts` table |
 | Session identity | Shared | Both use Gateway Worker's session_id (hourly bucket hash) |
 
-### 4.4 Two Signal Paths
+### 4.4 Signal Paths
 
-AIP provides two first-class signal delivery paths. Neither is a fallback for the other -- they serve different deployment patterns.
+AIP supports three signal delivery paths, each serving different deployment patterns.
 
-**SDK Signal Path.** For agents running in a process where the AIP SDK is imported directly. Signals are delivered via callbacks (synchronous or async). This path has the lowest latency and is RECOMMENDED for new integrations.
+**Gateway Stream Interception (Primary).** The RECOMMENDED path for hosted deployments. The gateway proxy uses `tee()` to fork the streaming response — one fork goes to the client immediately, while the other is analyzed in background via `ctx.waitUntil()`. SSE events are parsed, thinking blocks extracted, and AIP analysis runs in ~3 seconds. Signals are delivered as attested checkpoints with full cryptographic attestation (Ed25519 + chain hash + Merkle tree). Nudges are created immediately, ready for injection on the agent's next request.
+
+**SDK Signal Path.** For agents running in a process where the AIP SDK is imported directly. Signals are delivered via callbacks (synchronous or async). This path is useful for custom integrations outside the hosted gateway.
 
 **HTTP Signal Path.** For agents where the runtime cannot import the SDK (e.g., hosted platforms, polyglot environments, or when AIP runs as a separate service). Signals are delivered via HTTP POST to a registered webhook URL. This path uses HMAC-SHA256 signatures for authentication.
 
-Both paths deliver identical `IntegritySignal` payloads (Section 10).
+All paths deliver identical `IntegritySignal` payloads (Section 10). The gateway stream interception path additionally includes cryptographic attestation data.
 
 ---
 
@@ -978,6 +980,31 @@ When displayed in a UI, IntegrityDriftAlerts SHOULD use Braid V2's divergence al
 ---
 
 ## 10. Signal Delivery Protocols
+
+### 10.0 Gateway Stream Interception
+
+The primary signal delivery path in production. The gateway proxy intercepts streaming responses using `ReadableStream.tee()`, parsing SSE events in a background task (`ctx.waitUntil`) while the client receives the response with zero added latency.
+
+```
+Agent → Gateway → AI Provider
+                ← SSE stream ←
+                    |
+                  tee()
+                 /     \
+          client       background
+       (immediate)    (ctx.waitUntil)
+                          |
+                    Parse SSE events
+                    Extract thinking
+                    AIP analysis (~3s)
+                          |
+                 checkpoint + attestation
+                          |
+                    if violation:
+                    create nudge
+```
+
+The analysis completes in ~3-5 seconds. In multi-turn agent conversations, the next request typically arrives 5-30 seconds later, ensuring the nudge is ready for injection. All attestation (Ed25519 signing, chain hashing, Merkle tree update) happens within the same background task.
 
 ### 10.1 SDK Signal Path
 
