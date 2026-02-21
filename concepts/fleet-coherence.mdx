@@ -1,0 +1,125 @@
+---
+title: "Fleet Coherence"
+description: "N-way value coherence analysis for agent fleets — aggregate scoring, outlier detection, cluster analysis, and divergence reporting."
+---
+
+## Overview
+
+While [pairwise value coherence](/concepts/value-coherence) checks compatibility between two agents, **fleet coherence** extends this to N agents simultaneously. It computes all C(n,2) pairwise scores and derives fleet-level insights:
+
+- **Fleet Score** — Mean of all pairwise coherence scores
+- **Outlier Detection** — Agents significantly below the fleet mean
+- **Cluster Analysis** — Groups of compatible agents
+- **Divergence Report** — Values where agents disagree
+
+## Fleet Score
+
+The fleet score is the mean of all pairwise coherence scores:
+
+```
+fleet_score = mean(score(A,B) for all pairs A,B in fleet)
+```
+
+Additionally, the **weakest link** (minimum pairwise score) identifies the most strained relationship in the fleet.
+
+| Fleet Score | Interpretation |
+|------------|----------------|
+| ≥ 0.85 | Strong fleet alignment — safe for autonomous coordination |
+| 0.70–0.85 | Good alignment with minor divergences |
+| 0.50–0.70 | Moderate alignment — review outliers before coordination |
+| < 0.50 | Poor alignment — significant value conflicts present |
+
+## Outlier Detection
+
+Per-agent mean pairwise scores are computed. An agent is flagged as an **outlier** if its mean score is more than 1 standard deviation below the fleet mean:
+
+```
+agent_mean = mean(score(agent, peer) for all peers)
+fleet_mean = mean(all agent_means)
+stddev = std(all agent_means)
+
+is_outlier = agent_mean < fleet_mean - 1.0 * stddev
+```
+
+Outlier agents are reported with their primary conflict values — the specific value disagreements causing friction.
+
+## Cluster Analysis
+
+Agents are grouped into clusters using connected components on a compatibility graph:
+
+1. Build adjacency graph where an edge exists if `compatible === true` (score ≥ 0.70, no conflicts)
+2. Find connected components via BFS
+3. For each cluster, compute internal coherence and shared values
+
+Clusters reveal natural groupings — for example, in an incident response fleet, monitoring and classification agents may form one cluster while remediation agents form another.
+
+## Divergence Report
+
+For each value in the union of all declared values, the report shows:
+- Which agents declare it
+- Which agents are missing it
+- Which agents have it in `conflicts_with`
+- Estimated impact on fleet score
+
+Values are sorted by impact, helping fleet operators prioritize alignment work.
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import { checkFleetCoherence } from '@mnemom/agent-alignment-protocol';
+import type { FleetCoherenceResult } from '@mnemom/agent-alignment-protocol';
+
+const result: FleetCoherenceResult = checkFleetCoherence([
+  { agentId: 'sentinel', card: sentinelCard },
+  { agentId: 'triage', card: triageCard },
+  { agentId: 'patch', card: patchCard },
+  { agentId: 'herald', card: heraldCard },
+]);
+
+console.log(`Fleet score: ${(result.fleet_score * 100).toFixed(1)}%`);
+console.log(`Weakest link: ${(result.min_pair_score * 100).toFixed(1)}%`);
+console.log(`Outliers: ${result.outliers.map(o => o.agent_id).join(', ') || 'none'}`);
+console.log(`Clusters: ${result.clusters.length}`);
+```
+
+### Python
+
+```python
+from aap import check_fleet_coherence
+
+result = check_fleet_coherence([
+    {"agent_id": "sentinel", "card": sentinel_card},
+    {"agent_id": "triage", "card": triage_card},
+    {"agent_id": "patch", "card": patch_card},
+    {"agent_id": "herald", "card": herald_card},
+])
+
+print(f"Fleet score: {result.fleet_score:.1%}")
+print(f"Outliers: {[o.agent_id for o in result.outliers]}")
+print(f"Clusters: {len(result.clusters)}")
+```
+
+## Enterprise API
+
+For enterprise organizations, fleet coherence is available via the REST API:
+
+```
+GET /v1/orgs/{org_id}/coherence
+Authorization: Bearer <token>
+```
+
+Results are cached for 5 minutes. Requires the `nway_coherence` feature flag (Enterprise plan).
+
+## Use Cases
+
+- **Fleet Management** — Monitor overall value alignment across all agents in an organization
+- **Compliance** — Identify agents whose values diverge from organizational standards
+- **Incident Response** — Verify response team coherence before coordinating autonomous actions
+- **Onboarding** — Assess how a new agent's alignment card fits with the existing fleet
+
+## See Also
+
+- [Value Coherence](/concepts/value-coherence) — Pairwise coherence between two agents
+- [Drift Detection](/concepts/drift-detection) — Detecting behavioral drift over time
