@@ -91,6 +91,10 @@
     {
       "name": "Conscience Values",
       "description": "Per-org custom conscience values for alignment policy injection (Enterprise)"
+    },
+    {
+      "name": "Card Templates",
+      "description": "Organization-level alignment card templates that all agents inherit (Enterprise)"
     }
   ],
   "security": [],
@@ -6158,6 +6162,146 @@
           "404": {"description": "Session not found"}
         }
       }
+    },
+    "/orgs/{org_id}/card-template": {
+      "get": {
+        "operationId": "getOrgCardTemplate",
+        "summary": "Get org card template",
+        "description": "Returns the organization's alignment card template, including enabled status and the template card JSON. Requires Enterprise plan.",
+        "tags": ["Card Templates"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Org card template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplate"
+                }
+              }
+            }
+          },
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "put": {
+        "operationId": "updateOrgCardTemplate",
+        "summary": "Update org card template",
+        "description": "Create or update the organization's alignment card template. All agents in the org will inherit this template. Requires owner or admin role. Requires Enterprise plan.",
+        "tags": ["Card Templates"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["enabled", "template"],
+                "properties": {
+                  "enabled": {"type": "boolean", "description": "Whether the org card template is active"},
+                  "template": {"$ref": "#/components/schemas/AlignmentCard", "description": "The alignment card template JSON"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplate"
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgCardTemplate",
+        "summary": "Delete org card template",
+        "description": "Delete the organization's alignment card template. All agents revert to using only their individual cards. Requires owner role. Requires Enterprise plan.",
+        "tags": ["Card Templates"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Template deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/agents/{agent_id}/org-card-exempt": {
+      "put": {
+        "operationId": "setAgentOrgCardExempt",
+        "summary": "Set agent org card exemption",
+        "description": "Set or remove an agent's exemption from the organization's card template. Exempt agents use only their individual card. Requires owner or admin role. Requires Enterprise plan.",
+        "tags": ["Card Templates"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["exempt"],
+                "properties": {
+                  "exempt": {"type": "boolean", "description": "Whether the agent is exempt from the org card template"},
+                  "reason": {"type": "string", "description": "Required when setting exempt=true. Stored in audit trail.", "maxLength": 500}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exemption updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "exempt": {"type": "boolean"},
+                    "reason": {"type": ["string", "null"]},
+                    "updated_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
     }
   },
   "components": {
@@ -7667,6 +7811,20 @@
           "created_at": {"type": "string", "format": "date-time"}
         },
         "required": ["id", "org_id", "action", "actor", "created_at"]
+      },
+      "OrgCardTemplate": {
+        "type": "object",
+        "description": "Organization alignment card template that all agents inherit",
+        "properties": {
+          "org_id": {"type": "string", "description": "Organization ID"},
+          "enabled": {"type": "boolean", "description": "Whether the template is active"},
+          "template": {"$ref": "#/components/schemas/AlignmentCard", "description": "The alignment card template JSON"},
+          "created_by": {"type": "string", "description": "User ID who created the template"},
+          "updated_by": {"type": "string", "description": "User ID who last updated the template"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["org_id", "enabled", "template"]
       }
     }
   }

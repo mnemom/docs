@@ -1,0 +1,175 @@
+---
+title: "Organization Card Templates"
+description: "Define alignment card policies that apply to all agents in your organization"
+sidebarTitle: "Org Card Templates"
+icon: "building"
+---
+
+# Organization Card Templates
+
+<Info>
+  Organization card templates require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
+</Info>
+
+Org card templates let you define a base [alignment card](/concepts/alignment-cards) that every agent in your organization inherits. The template is immutable from the agent's perspective -- agents can add to it but cannot remove anything the org defines. This ensures consistent alignment policy across your entire agent fleet.
+
+## How It Works
+
+The org card template establishes a floor for alignment policy. Every agent's canonical card is computed by composing the org template with the agent's individual card:
+
+```
+Org Template (base) + Agent Card (additive) = Canonical Card (used for verification)
+```
+
+The org template defines the non-negotiable alignment requirements. Individual agent cards add agent-specific values, actions, and triggers on top.
+
+This is similar to how an organization might have company-wide policies that every employee follows, while individual teams add their own domain-specific guidelines.
+
+## Setting Up
+
+<Steps>
+
+### Navigate to Organization Settings
+
+Open the [Mnemom dashboard](https://mnemom.ai/dashboard), click your organization name in the sidebar, and select **Settings**.
+
+### Open the Alignment Card Template section
+
+Scroll to the **Alignment Card Template** panel. If this is your first time, the template is disabled and empty.
+
+### Enable the template
+
+Toggle the **Enable org card template** switch. This activates template composition for all agents in the org.
+
+### Configure the template
+
+Use the **Visual editor** for a guided experience or switch to the **JSON editor** for full control.
+
+At minimum, define:
+- **Values**: Core organizational values that every agent must declare
+- **Forbidden actions**: Actions no agent in the org should ever take
+- **Audit commitment**: Minimum audit requirements (retention, queryability, tamper evidence)
+
+### Save and verify
+
+Click **Save**. The template is validated before saving. Once saved, all agents in the org immediately inherit the template values in their canonical cards.
+
+Verify by checking any agent's card via `smoltbot card show` or the dashboard -- you should see the org template values included.
+
+</Steps>
+
+### Visual Editor vs JSON Editor
+
+The visual editor provides form-based inputs for each card block with inline validation. Use it for initial setup and when making incremental changes.
+
+The JSON editor shows the raw template JSON. Use it for bulk edits, copying from a file, or when you need precise control over the template structure.
+
+<Tip>
+  Both editors validate on save. The JSON editor is faster for teams that maintain their org template in version control and paste updates from a file.
+</Tip>
+
+## Composition Rules
+
+When the org template is active, each field in the canonical card is computed according to these rules:
+
+| Card Field | Composition Rule | Example |
+|---|---|---|
+| `values.declared` | Union of org + agent values | Org: `[honesty, transparency]` + Agent: `[editorial_independence]` = `[honesty, transparency, editorial_independence]` |
+| `values.definitions` | Merged. Agent definitions cannot override org definitions | Org defines `honesty`; agent can define `editorial_independence` but not redefine `honesty` |
+| `values.hierarchy` | Org hierarchy takes precedence if defined | Org sets `lexicographic`; agent cannot change to `weighted` |
+| `values.conflicts_with` | Union of org + agent conflicts | Org: `[deception]` + Agent: `[upsell_pressure]` = `[deception, upsell_pressure]` |
+| `autonomy_envelope.bounded_actions` | Agent-specific (org does not restrict) | Agent defines its own bounded actions |
+| `autonomy_envelope.forbidden_actions` | Union of org + agent forbidden actions | Org: `[exfiltrate_data]` + Agent: `[delete_records]` = `[exfiltrate_data, delete_records]` |
+| `autonomy_envelope.escalation_triggers` | Union of org + agent triggers | Org triggers always apply; agent adds more |
+| `audit_commitment.retention_days` | Maximum of org and agent value | Org: 180 days, Agent: 365 days = 365 days |
+| `audit_commitment.queryable` | Org `true` cannot be overridden to `false` | If org requires queryable, all agents are queryable |
+| `audit_commitment.tamper_evidence` | Strongest mechanism wins (`merkle` > `signed` > `append_only`) | Org: `signed`, Agent: `merkle` = `merkle` |
+
+<Warning>
+  Composition is always additive from the agent's perspective. Agents can strengthen alignment requirements but never weaken them below the org floor.
+</Warning>
+
+## Agent Exemptions
+
+In rare cases, an agent may need to operate without the org template. For example, a testing agent that intentionally exercises boundary conditions, or an agent operating under a different regulatory framework.
+
+### Exemption Flow
+
+Exemptions require a double-confirm process:
+
+<Steps>
+
+### Request exemption
+
+Navigate to the agent's page in the dashboard. In the Alignment Card section, click **Request Org Template Exemption**.
+
+### Provide a reason
+
+Enter a written reason for the exemption. This is required and stored in the audit trail. Be specific -- "for testing" is less useful than "this agent runs adversarial alignment tests and needs to declare conflicting values."
+
+### Confirm
+
+A second confirmation dialog appears with a summary of what the exemption means:
+- The agent will no longer inherit org template values
+- The agent's individual card becomes its entire canonical card
+- The exemption is logged in the org's audit trail with your identity and reason
+
+Click **Confirm Exemption** to proceed.
+
+</Steps>
+
+### Requirements
+
+- **Role**: Owner or admin role required
+- **Audit trail**: Every exemption (grant and revoke) is logged with actor, reason, and timestamp
+- **Visibility**: Exempted agents are flagged in the dashboard and API responses
+
+### Revoking an Exemption
+
+To restore org template inheritance, navigate to the agent's page and click **Revoke Exemption** in the Alignment Card section. The agent's canonical card immediately recomposes with the org template.
+
+### API
+
+You can also manage exemptions via the API:
+
+```bash
+# Set exemption
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/org-card-exempt \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"exempt": true, "reason": "Adversarial alignment testing agent"}'
+
+# Remove exemption
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/org-card-exempt \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"exempt": false}'
+```
+
+See the [API reference](/api-reference/endpoint/put-agents-agent-id-org-card-exempt) for full details.
+
+## Relationship to Conscience Values
+
+Org card templates and [custom conscience values](/smoltbot/conscience-values) are complementary features that operate at different layers:
+
+| Feature | What It Controls | When It Applies |
+|---|---|---|
+| **Org card template** | The alignment card (values, boundaries, audit commitment) | At card composition time and during AAP verification |
+| **Custom conscience values** | The conscience prompt used by AIP for real-time integrity checks | At every AIP integrity checkpoint |
+
+Think of it this way:
+- The **org card template** defines what your agents declare they will do (their alignment posture)
+- **Custom conscience values** define what AIP looks for when evaluating whether agents are actually doing it (the evaluation criteria)
+
+Both work together to create a comprehensive organizational alignment policy. The card template sets the declared boundaries; conscience values ensure those boundaries are enforced during real-time analysis.
+
+<Note>
+  You can use one without the other. An org that only sets conscience values gets real-time evaluation policy without modifying agent cards. An org that only sets a card template gets consistent declared alignment without customizing the evaluation criteria.
+</Note>
+
+## Related
+
+- [Alignment Cards](/concepts/alignment-cards) -- Card structure and semantics
+- [Card Management guide](/guides/card-management) -- Creating, validating, and publishing cards
+- [Custom Conscience Values](/smoltbot/conscience-values) -- Per-org alignment policies for AIP evaluation
+- [CLI Reference](/smoltbot/cli) -- `smoltbot card show`, `card publish`, and `card validate` commands

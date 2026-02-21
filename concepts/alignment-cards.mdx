@@ -297,6 +297,42 @@ Cards are versioned through their `card_id` and `issued_at`/`expires_at` timesta
   Keep card lifetimes reasonable. A 6-month expiration is typical. Shorter lifetimes increase operational overhead; longer lifetimes risk the card becoming stale relative to actual behavior.
 </Tip>
 
+## Managing Your Card
+
+When you connect an agent via smoltbot, a default alignment card is created automatically. This default card uses generic values and minimal autonomy -- it is a starting point, not a finished card. To make the card meaningful, you should customize it to reflect your agent's actual values, boundaries, and capabilities.
+
+### Three Ways to Customize
+
+There are three ways to update your agent's alignment card:
+
+| Method | Best For |
+|---|---|
+| **CLI** (`smoltbot card publish`) | Local development, CI/CD pipelines, version-controlled card files |
+| **Dashboard** (agent page card editor) | Quick edits, visual exploration, teams that prefer a GUI |
+| **API** (`PATCH /v1/agents/:id/card`) | Programmatic updates, automation, custom tooling |
+
+See the [Card Management guide](/guides/card-management) for detailed walkthroughs of each method.
+
+### Validation
+
+Cards are validated against AAP spec requirements on publish. The validation checks required blocks, value definitions, bounded actions, escalation trigger evaluability, and expiry dates.
+
+Use `smoltbot card validate` for local pre-flight checks before publishing. This runs the same validation locally without making any API calls, and is CI-friendly (exit code 0 on pass, 1 on fail).
+
+See the [CLI reference](/smoltbot/cli) for full command documentation.
+
+### Organization Card Templates (Enterprise)
+
+<Info>
+  Organization card templates require an Enterprise plan.
+</Info>
+
+Organizations can define a base card template that all agents inherit. Agent cards layer on top of the org template -- org values cannot be removed by individual agents, ensuring consistent organizational alignment policy.
+
+This is similar to how [custom conscience values](/smoltbot/conscience-values) work at the org level, but applied to the full alignment card structure rather than just the conscience prompt.
+
+See the [Organization Card Templates guide](/smoltbot/org-card-templates) for setup and configuration details.
+
 ## Relationship to A2A Agent Cards
 
 If you use Google's A2A protocol for agent discovery, the Alignment Card extends the A2A Agent Card rather than replacing it. The A2A Agent Card describes capabilities (what the agent can do). The Alignment Card describes alignment (what the agent will and will not do, and why). The `extensions.a2a.agent_card_url` field links the two.

@@ -138,6 +138,98 @@ smoltbot logs -l 50
 2026-02-17 14:30:58  CLEAR      api_call    Claude Opus 4.6    "Draft email"
 ```
 
+### `smoltbot card show`
+
+Fetch your agent's active alignment card and display it with colored, structured output showing values, autonomy envelope, forbidden actions, escalation triggers, and audit commitment.
+
+```bash
+smoltbot card show
+```
+
+**Example output:**
+
+```
+═══════════════════════════════════════════════════
+  Alignment Card  ac-a4c12709-v2
+═══════════════════════════════════════════════════
+
+  Version    0.1.0
+  Issued     2026-02-21
+  Expires    2026-08-21
+
+  Values     transparency  honesty  harm_prevention
+             editorial_independence  source_attribution
+             investigative_rigor
+  Hierarchy  lexicographic
+
+  Bounded    inference  read  write  edit  exec
+             web_fetch  web_search
+  Forbidden  fabricate_sources  impersonate_human  ...
+  Escalation named_entity_critical → escalate
+             legal_claims_present → escalate
+
+  Audit      ap-trace-v1 · 365 days · queryable · append_only
+```
+
+### `smoltbot card publish <file>`
+
+Read a JSON alignment card file, validate it against the AAP spec, confirm before publishing, and upload to your agent's alignment card via the API. Optionally triggers re-verification of existing traces against the new card.
+
+```bash
+smoltbot card publish <file>
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--no-verify` | Skip re-verification prompt after publish |
+| `--yes` | Skip confirmation prompt |
+
+**Example:**
+
+```
+$ smoltbot card publish alignment-card.json
+
+  Validating alignment-card.json...
+  ✓ Valid JSON
+  ✓ Required blocks present (principal, values, autonomy, audit)
+  ✓ 6 declared values (3 standard, 3 custom with definitions)
+  ✓ 7 bounded actions
+  ✓ 2 escalation triggers (evaluable conditions)
+  ✓ Card not expired
+
+  Publish this card for agent smolt-a4c12709? (y/N) y
+
+  ✓ Card published: ac-a4c12709-v2
+  Re-verify existing traces against new card? (y/N) y
+  ✓ 247 traces re-verified
+```
+
+### `smoltbot card validate <file>`
+
+Local-only validation with no API call. Checks AAP spec compliance. CI-friendly: exit code 0 on pass, 1 on fail.
+
+```bash
+smoltbot card validate <file>
+```
+
+**Example:**
+
+```
+$ smoltbot card validate alignment-card.json
+
+  ✓ Valid JSON
+  ✓ Required blocks: principal, values, autonomy_envelope, audit_commitment
+  ✓ values.declared: 6 values (non-empty)
+  ✓ Custom values defined: editorial_independence, source_attribution, investigative_rigor
+  ✓ bounded_actions: 7 actions (non-empty)
+  ✓ escalation_triggers: 2 triggers (evaluable conditions)
+  ✓ expires_at: 2026-08-21 (valid)
+
+  Card is valid.
+```
+
 </Steps>
 
 ## Workflow
@@ -173,6 +265,17 @@ smoltbot integrity
 ```bash
 smoltbot logs -l 20
 ```
+
+### Customize your alignment card (optional)
+
+Create an alignment card JSON file and publish it:
+
+```bash
+smoltbot card validate my-card.json
+smoltbot card publish my-card.json
+```
+
+See the [Card Management guide](/guides/card-management) for how to build a card from scratch.
 
 ### Claim your agent (optional)
 

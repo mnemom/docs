@@ -1,0 +1,417 @@
+---
+title: "Alignment Card Management"
+description: "Create, validate, publish, and manage alignment cards for your AI agents"
+sidebarTitle: "Card Management"
+icon: "id-card-clip"
+---
+
+# Alignment Card Management
+
+[Alignment Cards](/concepts/alignment-cards) are structured declarations of your agent's values, boundaries, and behavioral commitments. Every agent connected via smoltbot gets a default card automatically -- but that default card uses generic values and minimal autonomy. It does not represent what your agent actually does or cares about.
+
+Customizing your card is how you make alignment verification meaningful. A card that accurately reflects your agent's real values and tools produces useful integrity scores. A generic card produces noise.
+
+## Creating a Card
+
+An alignment card is a JSON document that follows the [AAP specification](/protocols/aap/specification). Here is how to build one from scratch.
+
+### Start from the Template
+
+Every card requires five blocks: identity, principal, values, autonomy envelope, and audit commitment.
+
+```json
+{
+  "aap_version": "0.1.0",
+  "card_id": "ac-YOUR_CARD_ID",
+  "agent_id": "YOUR_AGENT_ID",
+  "issued_at": "2026-02-21T00:00:00Z",
+  "expires_at": "2026-08-21T00:00:00Z",
+
+  "principal": {
+    "type": "human",
+    "relationship": "delegated_authority",
+    "escalation_contact": "mailto:you@example.com"
+  },
+
+  "values": {
+    "declared": [],
+    "hierarchy": "lexicographic"
+  },
+
+  "autonomy_envelope": {
+    "bounded_actions": [],
+    "escalation_triggers": [],
+    "forbidden_actions": []
+  },
+
+  "audit_commitment": {
+    "trace_format": "ap-trace-v1",
+    "retention_days": 90,
+    "queryable": true,
+    "tamper_evidence": "append_only"
+  }
+}
+```
+
+### Choose Values
+
+Select from the standard value identifiers and add custom values as needed:
+
+| Standard Identifier | Description |
+|---|---|
+| `principal_benefit` | Prioritize principal's interests |
+| `transparency` | Disclose reasoning and limitations |
+| `minimal_data` | Collect only necessary information |
+| `harm_prevention` | Avoid actions causing harm |
+| `honesty` | Do not deceive or mislead |
+| `user_control` | Respect user autonomy and consent |
+| `privacy` | Protect personal information |
+| `fairness` | Avoid discriminatory outcomes |
+
+For custom values, add a `definitions` entry:
+
+```json
+{
+  "values": {
+    "declared": ["transparency", "honesty", "harm_prevention", "editorial_independence"],
+    "definitions": {
+      "editorial_independence": {
+        "name": "Editorial Independence",
+        "description": "Maintain independence from commercial interests when producing content",
+        "priority": 4
+      }
+    },
+    "hierarchy": "lexicographic"
+  }
+}
+```
+
+<Tip>
+  Only declare values your agent actually applies. Declaring `fairness` but never referencing it in decisions produces verification warnings.
+</Tip>
+
+### Define Autonomy Envelope
+
+List the actions your agent actually takes as `bounded_actions`. These should match your agent's real tools and capabilities:
+
+```json
+{
+  "autonomy_envelope": {
+    "bounded_actions": ["inference", "read", "write", "edit", "web_fetch", "web_search"],
+    "escalation_triggers": [
+      {
+        "condition": "named_entity_critical",
+        "action": "escalate",
+        "reason": "Critical claims about named entities require human review"
+      },
+      {
+        "condition": "legal_claims_present",
+        "action": "escalate",
+        "reason": "Legal assertions require legal review"
+      }
+    ],
+    "forbidden_actions": ["fabricate_sources", "impersonate_human", "exfiltrate_data"]
+  }
+}
+```
+
+**Escalation triggers** use evaluable conditions -- single-token identifiers or simple comparisons that the condition evaluator can process. Examples: `named_entity_critical`, `purchase_value > 100`, `shares_personal_data`.
+
+**Forbidden actions** are semantic identifiers, not prose descriptions. Use concrete action names like `delete_without_confirmation`, not vague phrases like "harmful behavior".
+
+### Set Audit Commitment
+
+Declare how your agent logs decisions and whether external parties can query traces:
+
+```json
+{
+  "audit_commitment": {
+    "trace_format": "ap-trace-v1",
+    "retention_days": 365,
+    "queryable": true,
+    "tamper_evidence": "append_only"
+  }
+}
+```
+
+### Full Example: Customer Support Agent
+
+```json
+{
+  "aap_version": "0.1.0",
+  "card_id": "ac-cs-agent-001-v1",
+  "agent_id": "smolt-cs-agent-001",
+  "issued_at": "2026-02-21T00:00:00Z",
+  "expires_at": "2026-08-21T00:00:00Z",
+
+  "principal": {
+    "type": "human",
+    "relationship": "delegated_authority",
+    "escalation_contact": "mailto:support-team@example.com"
+  },
+
+  "values": {
+    "declared": [
+      "principal_benefit",
+      "transparency",
+      "honesty",
+      "privacy",
+      "customer_satisfaction"
+    ],
+    "definitions": {
+      "customer_satisfaction": {
+        "name": "Customer Satisfaction",
+        "description": "Prioritize resolving customer issues efficiently and empathetically",
+        "priority": 5
+      }
+    },
+    "conflicts_with": ["upsell_pressure", "data_harvesting"],
+    "hierarchy": "lexicographic"
+  },
+
+  "autonomy_envelope": {
+    "bounded_actions": [
+      "inference",
+      "read",
+      "search_knowledge_base",
+      "create_ticket",
+      "update_ticket",
+      "send_response"
+    ],
+    "escalation_triggers": [
+      {
+        "condition": "refund_amount > 500",
+        "action": "escalate",
+        "reason": "Refunds over $500 require manager approval"
+      },
+      {
+        "condition": "legal_claims_present",
+        "action": "escalate",
+        "reason": "Legal claims require legal team review"
+      },
+      {
+        "condition": "customer_churn_risk",
+        "action": "escalate",
+        "reason": "High churn risk accounts need human intervention"
+      }
+    ],
+    "max_autonomous_value": {
+      "amount": 500,
+      "currency": "USD"
+    },
+    "forbidden_actions": [
+      "access_payment_credentials",
+      "modify_billing_without_consent",
+      "share_customer_data_externally",
+      "make_legal_commitments"
+    ]
+  },
+
+  "audit_commitment": {
+    "trace_format": "ap-trace-v1",
+    "retention_days": 365,
+    "queryable": true,
+    "tamper_evidence": "append_only"
+  }
+}
+```
+
+## Publishing via CLI
+
+<Steps>
+
+### Validate your card
+
+Run local validation to check AAP spec compliance before publishing:
+
+```bash
+smoltbot card validate my-card.json
+```
+
+This checks required blocks, value definitions, bounded actions, escalation trigger evaluability, and expiry dates. Exit code 0 means the card is valid; exit code 1 means there are errors.
+
+### Publish the card
+
+Upload the validated card to your agent:
+
+```bash
+smoltbot card publish my-card.json
+```
+
+The CLI validates again before uploading, asks for confirmation, and optionally re-verifies existing traces against the new card.
+
+### Verify publication
+
+Confirm the card is active:
+
+```bash
+smoltbot card show
+```
+
+### CI integration
+
+Add validation to your CI pipeline to catch card issues before deploy:
+
+```yaml
+# GitHub Actions example
+- name: Validate alignment card
+  run: npx smoltbot card validate alignment-card.json
+```
+
+```bash
+# Pre-commit hook
+#!/bin/sh
+npx smoltbot card validate alignment-card.json || exit 1
+```
+
+</Steps>
+
+## Publishing via Dashboard
+
+<Steps>
+
+### Navigate to your agent
+
+Open the [Mnemom dashboard](https://mnemom.ai/dashboard) and select your agent from the agents list.
+
+### Open the alignment card section
+
+Scroll to the Alignment Card panel on the agent page. Your current card (or the default) is displayed here.
+
+### Choose your editor
+
+Switch between the **Visual editor** (form-based, guided) and the **JSON editor** (raw JSON, full control) using the toggle at the top of the card panel.
+
+### Edit and save
+
+Make your changes, then click **Save**. The dashboard validates the card before saving and shows any errors inline.
+
+### Verify the update
+
+The card panel updates immediately after saving. You can also confirm via CLI with `smoltbot card show`.
+
+</Steps>
+
+<Tip>
+  For paste-from-file workflows, use the JSON editor. Copy your local card JSON and paste it directly into the editor, then save. This is faster than manually filling in the visual editor for complex cards.
+</Tip>
+
+## Publishing via API
+
+Update your agent's alignment card directly with a `PATCH` request:
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "card_json": {
+      "aap_version": "0.1.0",
+      "card_id": "ac-your-card-id",
+      "agent_id": "your-agent-id",
+      "issued_at": "2026-02-21T00:00:00Z",
+      "expires_at": "2026-08-21T00:00:00Z",
+      "principal": { "type": "human", "relationship": "delegated_authority" },
+      "values": { "declared": ["transparency", "honesty"], "hierarchy": "lexicographic" },
+      "autonomy_envelope": {
+        "bounded_actions": ["inference", "read"],
+        "escalation_triggers": [],
+        "forbidden_actions": ["exfiltrate_data"]
+      },
+      "audit_commitment": {
+        "trace_format": "ap-trace-v1",
+        "retention_days": 90,
+        "queryable": true,
+        "tamper_evidence": "append_only"
+      }
+    }
+  }'
+```
+
+See the [API reference](/api-reference/endpoint/patch-agents-agent-id-card) for full request/response details.
+
+## Organization Card Templates (Enterprise)
+
+<Info>
+  Organization card templates require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
+</Info>
+
+Org card templates let you define a base alignment card that all agents in your organization inherit. This ensures consistent alignment policy across your fleet -- every agent shares the same core values, forbidden actions, and audit requirements.
+
+### How Composition Works
+
+When an org template is active, the canonical card for each agent is computed by composing the org template with the agent's individual card:
+
+- **Values**: Org values are always included. Agent values are added on top. Agents cannot remove org values.
+- **Forbidden actions**: Org forbidden actions are always included. Agents can add more but cannot remove any.
+- **Bounded actions**: Agent-specific. The org template does not restrict which actions an agent can take.
+- **Escalation triggers**: Org triggers are always included. Agents can add more.
+- **Audit commitment**: Org audit commitment is the floor. Agents can increase retention or add capabilities but cannot weaken audit requirements.
+
+### Setting Up
+
+1. Navigate to **Organization Settings** in the dashboard
+2. Open the **Alignment Card Template** section
+3. Enable the org template toggle
+4. Configure your base card using the visual or JSON editor
+5. Save -- all agents in the org immediately inherit the template
+
+### Agent Exemptions
+
+In rare cases, an agent may need to be exempt from the org template. Exemptions require:
+
+1. A double-confirm flow in the dashboard (confirm intent, then confirm again with reason)
+2. A written reason that is stored in the audit trail
+3. Owner or admin role
+
+Exempted agents operate with only their individual card. Use exemptions sparingly -- they weaken organizational alignment guarantees.
+
+See the [Organization Card Templates guide](/smoltbot/org-card-templates) for the full setup walkthrough.
+
+## Validation Rules
+
+Reference table of all validation checks performed during `smoltbot card validate` and on publish:
+
+| Check | Rule | Severity |
+|---|---|---|
+| Valid JSON | Must parse without errors | Error |
+| Required blocks | `principal`, `values`, `autonomy_envelope`, `audit_commitment` must be present | Error |
+| Non-empty values | `values.declared` must have at least one entry | Error |
+| Custom definitions | Every non-standard value must have a `definitions` entry | Warning |
+| Bounded actions | Must list at least one action | Error |
+| Evaluable triggers | Condition must be a single-token identifier or comparison expression | Warning |
+| Expiry | `expires_at` must be in the future | Error |
+
+<Note>
+  Warnings do not prevent publishing but are reported in validation output. Fix warnings to improve verification quality.
+</Note>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Version control your cards" icon="code-branch">
+    Keep alignment card JSON files in your repository alongside your agent code. Use `smoltbot card validate` in CI to catch issues before deploy.
+  </Card>
+  <Card title="Match bounded actions to real tools" icon="wrench">
+    Your `bounded_actions` list should reflect your agent's actual tools and capabilities. Adding actions the agent never takes produces noise; missing actions the agent does take produces false violations.
+  </Card>
+  <Card title="Set meaningful expiry dates" icon="calendar">
+    A 6-month expiration is typical. Shorter lifetimes increase operational overhead; longer lifetimes risk the card becoming stale relative to actual behavior.
+  </Card>
+  <Card title="Use escalation triggers for real decisions" icon="arrow-up-from-bracket">
+    Escalation triggers are the card's most actionable component. Define triggers for situations where your agent genuinely needs human approval, not aspirational conditions.
+  </Card>
+  <Card title="Define custom values precisely" icon="pen-ruler">
+    Every custom value needs a clear `description` in the `definitions` block. Vague definitions lead to inconsistent verification results.
+  </Card>
+  <Card title="Review cards after capability changes" icon="rotate">
+    When you add or remove tools from your agent, update the alignment card to match. Stale cards produce misleading integrity scores.
+  </Card>
+</CardGroup>
+
+## Related
+
+- [Alignment Cards concept](/concepts/alignment-cards) -- Full specification of card structure and semantics
+- [CLI Reference](/smoltbot/cli) -- `smoltbot card show`, `card publish`, and `card validate` commands
+- [Organization Card Templates](/smoltbot/org-card-templates) -- Org-level card policies (Enterprise)
+- [AAP Specification](/protocols/aap/specification) -- Normative protocol specification
