@@ -29,10 +29,11 @@ icon: "book"
 12. [AAP Integration Specification](#12-aap-integration-specification)
 13. [Security Considerations](#13-security-considerations)
 14. [Limitations](#14-limitations)
-15. [Attestation](#15-attestation)
-16. [Verification](#16-verification)
-17. [IANA Considerations](#17-iana-considerations)
-18. [References](#18-references)
+15. [Disagreement-Driven Review](#15-disagreement-driven-review)
+16. [Attestation](#16-attestation)
+17. [Verification](#17-verification)
+18. [IANA Considerations](#18-iana-considerations)
+19. [References](#19-references)
 - [Appendix A: JSON Schemas](#appendix-a-json-schemas)
 - [Appendix B: Conscience Prompt Reference Implementation](#appendix-b-conscience-prompt-reference-implementation)
 - [Appendix C: Provider Adapter Reference Implementations](#appendix-c-provider-adapter-reference-implementations)
@@ -1425,7 +1426,91 @@ The HTTP signal path uses HMAC-SHA256 to authenticate webhook deliveries:
 
 ---
 
-## 15. Attestation
+## 15. Disagreement-Driven Review
+
+AIP (real-time thinking analysis) and the AAP observer (post-hoc action analysis) independently assess the same agent interactions. When these systems **disagree** — for example, AIP says "clear" but the observer flags a violation, or vice versa — that disagreement is the most valuable signal in the system. Disagreement-Driven Review (DDR) makes these disagreements visible, analyzable, and self-correcting.
+
+### 15.1 Detection Mechanism
+
+After each interaction where both an AIP checkpoint and an AAP trace are linked, the observer compares their verdicts:
+
+- **AIP verdict** (`clear` | `review_needed` | `boundary_violation`) from the integrity checkpoint
+- **Observer outcome** (`verified` | `violation`) from AAP trace verification against the alignment card
+
+If the verdicts agree (both clear or both flagged), no action is taken. If they disagree, a `disagreement_review` record is created.
+
+### 15.2 Feature Flag
+
+DDR is gated by the `reconciliation` feature flag on the account's plan:
+
+| Plan | `reconciliation` |
+|------|------------------|
+| Free | `false` |
+| Developer | `true` |
+| Team | `true` |
+| Enterprise | `true` |
+
+### 15.3 Agent Setting: `ddr_mode`
+
+Each agent has a `ddr_mode` setting that controls how disagreements are handled:
+
+| Mode | Behavior |
+|------|----------|
+| `off` | No disagreement detection |
+| `flag` | Create review records for manual inspection (default) |
+| `auto-suggest` | Run Sonnet reconciliation, surface proposed amendments for human approval |
+| `auto-apply` | Run reconciliation and automatically apply card amendments for `card_gap` outcomes |
+
+### 15.4 Reconciliation
+
+When `ddr_mode` is `auto-suggest` or `auto-apply`, a reconciliation analysis is performed using Claude Sonnet. The reconciliation receives:
+
+- The AIP checkpoint's reasoning summary and concerns
+- The observer trace's action, decision reasoning, and violations
+- The agent's alignment card
+
+The reconciliation produces one of three outcomes:
+
+1. **`card_gap`**: The agent acted appropriately, but its alignment card does not list this capability. The card needs updating. A proposed amendment is generated with a semantic capability name and description (not a raw tool name).
+
+2. **`aip_miss`**: AIP incorrectly cleared the interaction. The observer caught a genuine concern that real-time analysis missed. Escalated for human review.
+
+3. **`observer_noise`**: The observer flagged a false positive. AIP was correct. The review is auto-dismissed.
+
+### 15.5 Card Amendment Flow
+
+For `card_gap` outcomes with a proposed amendment:
+
+1. The amendment contains a semantic `action` name and `description` (e.g., `"analyze_content"` — "Text processing, cross-referencing, and fact-checking operations")
+2. In `auto-suggest` mode: the review enters `review` status, awaiting human approval in the dashboard
+3. In `auto-apply` mode: the amendment is immediately applied to the alignment card's `bounded_actions`
+4. Humans can also apply or dismiss reviews via the dashboard or API
+
+### 15.6 API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/agents/:id/reviews` | List disagreement reviews (optional `?status=` filter) |
+| `GET` | `/v1/agents/:id/reviews/:reviewId` | Get single review detail |
+| `POST` | `/v1/agents/:id/reviews/:reviewId/apply` | Apply the proposed card amendment |
+| `POST` | `/v1/agents/:id/reviews/:reviewId/dismiss` | Dismiss the review |
+
+### 15.7 Review Lifecycle
+
+```
+pending → analyzing → review → applied
+                            → dismissed
+```
+
+- `pending`: Disagreement detected, awaiting reconciliation
+- `analyzing`: Sonnet reconciliation in progress
+- `review`: Reconciliation complete, awaiting human action
+- `applied`: Card amendment applied (by human or auto-apply)
+- `dismissed`: Review dismissed (by human or auto-dismiss for observer noise)
+
+---
+
+## 16. Attestation
 
 AIP provides cryptographic attestation for every integrity checkpoint. The attestation layer creates a tamper-evident, independently verifiable record of every analysis verdict.
 
@@ -1475,7 +1560,7 @@ For high-consequence verdicts (`boundary_violation`) and a stochastic sample of 
 
 ---
 
-## 16. Verification
+## 17. Verification
 
 AIP provides public endpoints for independent verification. All verification endpoints are unauthenticated -- any party can verify without trusting the Mnemom API.
 
@@ -1513,7 +1598,7 @@ The `image_id` is published in the Mnemom GitHub repository and acts as a commit
 
 ---
 
-## 17. IANA Considerations
+## 18. IANA Considerations
 
 ### 17.1 Media Type
 
@@ -1535,7 +1620,7 @@ AIP defines the following HTTP headers for webhook delivery:
 
 ---
 
-## 18. References
+## 19. References
 
 ### 18.1 Normative References
 
