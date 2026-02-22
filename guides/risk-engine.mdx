@@ -1,0 +1,376 @@
+---
+title: "Risk Engine"
+description: "How to assess, gate, and monitor risk for individual agents and teams using the Mnemom Risk Engine"
+sidebarTitle: "Risk Engine"
+icon: "shield-halved"
+---
+
+The risk engine provides real-time, context-aware risk scoring for AI agent actions. This guide covers integration patterns for both individual and team assessments using the TypeScript and Python SDKs.
+
+## Quick Start
+
+### Individual Assessment
+
+Assess whether an agent should be allowed to perform a specific action:
+
+<CodeGroup>
+```typescript TypeScript
+import { assessRisk, financialContext } from '@mnemom/risk';
+
+const assessment = await assessRisk('agent-abc-123', {
+  action_type: 'financial_transaction',
+  risk_tolerance: 'conservative',
+  amount: 50000,
+  counterparty_id: 'vendor-xyz',
+});
+
+console.log(assessment.risk_level);      // 'low' | 'medium' | 'high' | 'critical'
+console.log(assessment.recommendation);  // 'approve' | 'review' | 'deny'
+console.log(assessment.risk_score);      // 0.0 – 1.0
+```
+
+```python Python
+from mnemom_risk import RiskClient
+
+client = RiskClient(api_key="your-api-key")
+
+assessment = await client.assess_risk("agent-abc-123", {
+    "action_type": "financial_transaction",
+    "risk_tolerance": "conservative",
+    "amount": 50000,
+    "counterparty_id": "vendor-xyz",
+})
+
+print(assessment.risk_level)      # 'low' | 'medium' | 'high' | 'critical'
+print(assessment.recommendation)  # 'approve' | 'review' | 'deny'
+```
+</CodeGroup>
+
+### Team Assessment
+
+Assess whether a group of agents is safe to operate together:
+
+<CodeGroup>
+```typescript TypeScript
+import { assessTeamRisk } from '@mnemom/risk';
+
+const teamAssessment = await assessTeamRisk(
+  ['agent-a', 'agent-b', 'agent-c'],
+  {
+    action_type: 'multi_agent_coordination',
+    risk_tolerance: 'moderate',
+    team_task: 'customer-support-pipeline',
+    coordination_mode: 'sequential',
+  }
+);
+
+console.log(teamAssessment.team_risk_level);       // 'low' | 'medium' | 'high' | 'critical'
+console.log(teamAssessment.team_recommendation);   // 'approve_team' | 'approve_individuals_only' | 'deny'
+console.log(teamAssessment.shapley_values);        // { 'agent-a': 0.12, 'agent-b': -0.03, ... }
+console.log(teamAssessment.synergy_type);          // 'synergistic' | 'neutral' | 'anti-synergistic'
+```
+
+```python Python
+from mnemom_risk import RiskClient
+
+client = RiskClient(api_key="your-api-key")
+
+team = await client.assess_team_risk(
+    agent_ids=["agent-a", "agent-b", "agent-c"],
+    context={
+        "action_type": "multi_agent_coordination",
+        "risk_tolerance": "moderate",
+        "team_task": "customer-support-pipeline",
+        "coordination_mode": "sequential",
+    }
+)
+
+print(team.team_recommendation)
+print(team.shapley_values)
+```
+</CodeGroup>
+
+## Risk Gates
+
+Risk gates are pre-configured decision functions that automatically approve, review, or deny actions based on risk thresholds. Use them to embed risk decisions directly into your agent pipelines.
+
+### Individual Gate
+
+<CodeGroup>
+```typescript TypeScript
+import { createRiskGate } from '@mnemom/risk';
+
+const gate = createRiskGate({
+  maxApproveScore: 0.30,   // auto-approve below this
+  maxReviewScore: 0.60,    // require review between 0.30–0.60
+  // above 0.60 → auto-deny
+});
+
+const decision = await gate.check('agent-abc-123', {
+  action_type: 'data_access',
+  risk_tolerance: 'moderate',
+});
+
+if (decision.allowed) {
+  // proceed with the action
+} else if (decision.requiresReview) {
+  // escalate to human supervisor
+} else {
+  // block the action
+  console.log(decision.reason);
+}
+```
+
+```python Python
+from mnemom_risk import RiskGate
+
+gate = RiskGate(
+    max_approve_score=0.30,
+    max_review_score=0.60,
+)
+
+decision = await gate.check("agent-abc-123", {
+    "action_type": "data_access",
+    "risk_tolerance": "moderate",
+})
+
+if decision.allowed:
+    pass  # proceed
+elif decision.requires_review:
+    pass  # escalate
+else:
+    print(decision.reason)  # blocked
+```
+</CodeGroup>
+
+### Team Gate
+
+<CodeGroup>
+```typescript TypeScript
+import { createTeamRiskGate } from '@mnemom/risk';
+
+const teamGate = createTeamRiskGate({
+  maxApproveScore: 0.25,
+  allowIndividualsOnly: true, // if team is denied but individuals pass, allow solo ops
+});
+
+const teamDecision = await teamGate.check(
+  ['agent-a', 'agent-b', 'agent-c'],
+  { action_type: 'task_delegation', risk_tolerance: 'conservative' }
+);
+
+switch (teamDecision.recommendation) {
+  case 'approve_team':
+    // full team operation allowed
+    break;
+  case 'approve_individuals_only':
+    // dispatch agents individually, no joint operations
+    break;
+  case 'deny':
+    // block everything
+    break;
+}
+```
+
+```python Python
+from mnemom_risk import TeamRiskGate
+
+gate = TeamRiskGate(
+    max_approve_score=0.25,
+    allow_individuals_only=True,
+)
+
+decision = await gate.check(
+    ["agent-a", "agent-b", "agent-c"],
+    {"action_type": "task_delegation", "risk_tolerance": "conservative"},
+)
+```
+</CodeGroup>
+
+## Context Builders
+
+Context builders provide convenience functions for common action types:
+
+<CodeGroup>
+```typescript TypeScript
+import { financialContext, delegationContext, dataAccessContext } from '@mnemom/risk';
+
+// Financial transaction with amount and counterparty
+const ctx1 = financialContext(50000, 'vendor-xyz', 'conservative');
+
+// Task delegation with team context
+const ctx2 = delegationContext('customer-support-pipeline', 'sequential');
+
+// Data access with use case
+const ctx3 = dataAccessContext('audit-report-generation');
+```
+
+```python Python
+from mnemom_risk import financial_context, delegation_context, data_access_context
+
+ctx1 = financial_context(amount=50000, counterparty="vendor-xyz", tolerance="conservative")
+ctx2 = delegation_context(task="customer-support-pipeline", mode="sequential")
+ctx3 = data_access_context(use_case="audit-report-generation")
+```
+</CodeGroup>
+
+## Understanding the Response
+
+### Individual Assessment Response
+
+```json
+{
+  "assessment_id": "ra_01HXY...",
+  "agent_id": "agent-abc-123",
+  "risk_score": 0.2847,
+  "risk_level": "medium",
+  "recommendation": "approve",
+  "confidence": 0.80,
+  "contributing_factors": [
+    {
+      "component": "compliance",
+      "label": "Compliance",
+      "weight": 0.30,
+      "raw_value": 720,
+      "risk_contribution": 0.084,
+      "explanation": "Compliance: score 720/1000, weight 0.30 → risk contribution 0.084"
+    }
+  ],
+  "suggested_thresholds": {
+    "low": 0.25,
+    "medium": 0.50,
+    "high": 0.75,
+    "critical": 0.75
+  },
+  "explanation": "Risk assessment for financial_transaction (moderate tolerance): score 0.2847 (medium), recommendation: approve. Top contributing factors: Compliance, Integrity Ratio, Drift Stability.",
+  "proof_id": "prf_01HXY...",
+  "proof_status": "pending",
+  "created_at": "2026-02-22T12:00:00Z"
+}
+```
+
+Key fields:
+
+| Field | Description |
+|-------|------------|
+| `risk_score` | 0–1 composite risk score |
+| `risk_level` | Classification: low, medium, high, critical |
+| `recommendation` | Action guidance: approve, review, deny |
+| `confidence` | How reliable the score is (based on data availability) |
+| `contributing_factors` | Breakdown of which reputation components drove the score |
+| `proof_status` | ZK proof lifecycle: none, pending, proving, verified, failed |
+
+### Team Assessment Response
+
+The team response includes everything from individual assessments plus team-specific analytics:
+
+| Field | Description |
+|-------|------------|
+| `team_risk_score` | 0–1 team composite risk |
+| `team_coherence_score` | 0–1 inverse of team risk (higher is better) |
+| `portfolio_risk` | Aggregate Quality pillar (tail-risk-weighted average) |
+| `coherence_risk` | 1 - Coherence Quality pillar (pairwise compatibility) |
+| `concentration_risk` | HHI of Shapley values (how concentrated contributions are) |
+| `weakest_link_risk` | Maximum individual risk in the team |
+| `shapley_values` | Per-agent marginal contribution to team coherence |
+| `outliers` | Agents flagged as statistical outliers |
+| `clusters` | Groups of agents with correlated risk |
+| `value_divergences` | Values not shared across all team members |
+| `synergy_type` | Whether the team is better or worse than its individuals |
+| `individual_assessments` | Full individual assessment for each team member |
+
+## Monitoring Risk Over Time
+
+Fetch risk assessment history for trend analysis:
+
+<CodeGroup>
+```typescript TypeScript
+import { getRiskHistory } from '@mnemom/risk';
+
+const history = await getRiskHistory('agent-abc-123', { limit: 50 });
+
+for (const assessment of history) {
+  console.log(`${assessment.created_at}: ${assessment.risk_score} (${assessment.risk_level})`);
+}
+```
+
+```python Python
+history = await client.get_risk_history("agent-abc-123", limit=50)
+
+for assessment in history:
+    print(f"{assessment.created_at}: {assessment.risk_score} ({assessment.risk_level})")
+```
+</CodeGroup>
+
+The [Risk Playground](/playground/risk) in the dashboard provides an interactive visualization of risk history with color-coded risk level bands.
+
+## Verifying ZK Proofs
+
+Once a proof is generated, retrieve and verify it:
+
+<CodeGroup>
+```typescript TypeScript
+import { getAssessment } from '@mnemom/risk';
+
+const assessment = await getAssessment('ra_01HXY...');
+
+if (assessment.proof_status === 'verified') {
+  console.log('Risk score is cryptographically proven correct');
+  console.log('Proof ID:', assessment.proof_id);
+}
+```
+
+```python Python
+assessment = await client.get_assessment("ra_01HXY...")
+
+if assessment.proof_status == "verified":
+    print("Risk score is cryptographically proven correct")
+```
+</CodeGroup>
+
+<Note>
+  Proofs are generated asynchronously. The risk score is returned immediately; the proof typically completes within seconds to minutes depending on complexity. Poll the assessment or use webhooks to get notified when the proof is ready.
+</Note>
+
+## Choosing Action Types
+
+Select the action type that best matches what the agent is about to do:
+
+| Action Type | When to Use | Emphasizes |
+|------------|------------|------------|
+| `financial_transaction` | Payments, transfers, purchases | Compliance, integrity |
+| `data_access` | Reading sensitive data, exports | Integrity, compliance |
+| `task_delegation` | Handing work to another agent | Coherence, integrity |
+| `tool_invocation` | Calling external APIs or tools | Integrity, drift stability |
+| `autonomous_operation` | Self-directed tasks without supervision | Integrity, compliance |
+| `multi_agent_coordination` | Joint operations with other agents | Coherence, integrity |
+
+## Choosing Risk Tolerance
+
+| Tolerance | Use Case | Effect |
+|-----------|---------|--------|
+| `conservative` | Financial services, healthcare, compliance-critical | Tighter thresholds, flags risk earlier |
+| `moderate` | General operations, standard business logic | Balanced thresholds (default) |
+| `aggressive` | Internal dev tools, non-critical pipelines | Wider thresholds, allows more latitude |
+
+<Warning>
+  Risk tolerance affects classification thresholds, not the underlying score. An agent with a 0.30 risk score gets classified as `medium` under conservative tolerance but `low` under moderate tolerance. The raw score is the same — the interpretation changes.
+</Warning>
+
+## Billing
+
+Risk assessments are metered events. See [Pricing](/pricing/overview) for current rates.
+
+| Plan | Individual | Team | Included Quota | ZK Proofs |
+|------|-----------|------|----------------|-----------|
+| Free | Included | Not available | 50/month | No |
+| Developer | $0.001/ea | $0.01/ea | None | Yes |
+| Team | $0.0008/ea | $0.008/ea | 5,000 + 500 | Yes |
+| Enterprise | Custom | Custom | Unlimited | Yes |
+
+## Further Reading
+
+- [Risk Assessment Concepts](/concepts/risk-assessment) — how the scoring model works
+- [Reputation Scores](/concepts/reputation-scores) — the data that feeds risk assessments
+- [Fleet Coherence](/concepts/fleet-coherence) — pairwise coherence data used for team risk
+- [Security & Trust Model](/guides/security-trust-model) — the full cryptographic verification pipeline

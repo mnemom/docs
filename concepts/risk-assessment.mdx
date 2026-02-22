@@ -1,0 +1,135 @@
+---
+title: "Risk Assessment"
+description: "Context-aware, real-time risk scoring for individual agents and teams — with optional zero-knowledge proofs"
+sidebarTitle: "Risk Assessment"
+icon: "gauge"
+---
+
+Risk assessment answers the question every platform operator asks before letting an agent act: **how dangerous is this, right now, in this context?**
+
+Unlike static reputation scores, risk assessments are dynamic. The same agent can be low-risk for a data access request and high-risk for a financial transaction — because different actions stress different capabilities. Risk assessments incorporate the agent's reputation, recent violation history, the specific action being attempted, and the operator's risk tolerance.
+
+For teams, the engine goes further: it evaluates whether a group of individually acceptable agents might still be dangerous when combined — through correlated failure, value divergence, or contagion dynamics.
+
+## Individual Risk
+
+Each individual risk assessment produces a score between 0 and 1, computed as:
+
+```
+R = 0.60 × R_context + 0.30 × R_recency + 0.10 × R_confidence
+```
+
+### Context-Aware Component Risk (60%)
+
+Five reputation components are weighted differently depending on the action type:
+
+| Component | What It Tracks |
+|-----------|---------------|
+| **Integrity Ratio** | How often behavior matches declared values |
+| **Compliance** | Adherence to organizational rules |
+| **Drift Stability** | Whether behavior is changing over time |
+| **Trace Completeness** | Whether full reasoning traces are provided |
+| **Coherence Compatibility** | How well the agent works with the fleet |
+
+Different actions weight these differently. A `financial_transaction` emphasizes compliance (0.30) and integrity (0.30). A `task_delegation` emphasizes coherence (0.35) — can this agent hand off work reliably? A `multi_agent_coordination` action weights coherence highest (0.40).
+
+<Info>
+  Six action types are supported: `financial_transaction`, `data_access`, `task_delegation`, `tool_invocation`, `autonomous_operation`, and `multi_agent_coordination`. Each has a distinct weight profile tuned to the risks specific to that action.
+</Info>
+
+### Recency Penalty (30%)
+
+Recent violations count more than old ones. The engine uses exponential decay with a 30-day half-life:
+
+```
+R_recency = sum(severity_weight x e^(-lambda x days_ago))
+```
+
+A critical violation yesterday contributes nearly 1.0. The same violation 30 days ago contributes 0.5. After 90 days, it is negligible. Severity weights range from 0.1 (low) to 1.0 (critical).
+
+### Confidence Penalty (10%)
+
+Agents with limited behavioral history receive an uncertainty premium: `insufficient` data adds 0.30, `low` adds 0.20, `medium` adds 0.10, and `high` confidence adds nothing.
+
+### Risk Levels and Recommendations
+
+The composite score maps to four risk levels. Thresholds shift based on the caller's risk tolerance:
+
+| Tolerance | Low | Medium | High | Critical |
+|-----------|-----|--------|------|----------|
+| Conservative | < 0.15 | < 0.35 | < 0.55 | >= 0.55 |
+| Moderate | < 0.25 | < 0.50 | < 0.75 | >= 0.75 |
+| Aggressive | < 0.35 | < 0.60 | < 0.85 | >= 0.85 |
+
+Each level maps to a recommendation: `approve` (low/medium), `review` (high, requires human approval), or `deny` (critical, block the action).
+
+## Team Risk
+
+Team risk assessment evaluates whether a group of agents is safe to operate together. A team of individually low-risk agents can still be dangerous.
+
+### Three-Pillar Model
+
+```
+TeamCoherence = 0.30 x (1 - AQ) + 0.45 x CQ + 0.25 x (1 - SR)
+TeamRisk = 1 - TeamCoherence
+```
+
+**Aggregate Quality (AQ)** uses tail-risk weighting inspired by CoVaR: agents with higher individual risk get exponentially more weight. One bad agent drags the score down far more than one good agent lifts it up.
+
+**Coherence Quality (CQ)** evaluates pairwise compatibility across four dimensions — value overlap, priority alignment, behavioral correlation, and boundary compatibility. CQ penalizes high variance: a uniformly moderate team beats a volatile one where some pairs are excellent and others are terrible.
+
+**Structural Risk (SR)** models failure contagion. For each pair of agents, SR estimates how much damage one agent's failure would cause to the other, based on their coherence gap and the "value at risk." The team's SR combines the worst single-agent vulnerability with the fleet average.
+
+### Shapley Attribution
+
+After computing team coherence, the engine attributes each agent's marginal contribution using leave-one-out (LOO) Shapley values:
+
+```
+MC_i = TeamCoherence(all) - TeamCoherence(all without agent i)
+```
+
+Positive values mean the agent improves the team. Negative values mean they drag it down. This tells operators exactly which agents to swap, add, or remove to optimize team composition.
+
+### Circuit Breakers
+
+Hard safety floors override the continuous score when conditions are extreme:
+- Any agent with reputation below 200 forces the team to critical/deny
+- Any pairwise boundary compatibility below 100 forces critical/deny
+
+### Additional Analytics
+
+| Analysis | What It Detects |
+|----------|----------------|
+| **Outlier Detection** | Agents whose risk exceeds the fleet mean by > 1 standard deviation |
+| **Cluster Detection** | Groups of agents with correlated risk (shared failure modes) |
+| **Value Divergence** | Values declared by some agents but missing in others |
+| **Synergy Detection** | Whether the team score is better or worse than the average of individual scores |
+
+### Team Recommendations
+
+| Score Range | Recommendation | Meaning |
+|-------------|---------------|---------|
+| < 0.20 | `approve_team` | Team operates as a unit |
+| < 0.40 | `approve_team` | Team operates with monitoring |
+| < 0.60 | `approve_individuals_only` | Individual actions allowed, joint operations blocked |
+| >= 0.60 | `deny` | All team operations blocked |
+
+## Zero-Knowledge Proofs
+
+Every risk assessment can be cryptographically proven correct without revealing the underlying reputation data. The entire risk computation is implemented in both TypeScript (for fast online use) and Rust (for ZK proof generation inside RISC Zero's zkVM).
+
+All arithmetic in the proving guest uses Q16.16 fixed-point integers — no floating-point operations exist in the proof circuit. This ensures perfect determinism across substrates.
+
+Proofs are generated asynchronously: the risk score is returned immediately, and the proof follows. Once available, any third party can verify the proof without seeing the input data.
+
+<Note>
+  ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier assessments do not include proofs.
+</Note>
+
+## Further Reading
+
+- [Reputation Scores](/concepts/reputation-scores) — the input data that feeds risk assessments
+- [Fleet Coherence](/concepts/fleet-coherence) — the pairwise coherence data used for team risk
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) — how violations are detected
+- [Risk Engine Guide](/guides/risk-engine) — step-by-step usage with SDK examples
+- [Security & Trust Model](/guides/security-trust-model) — the broader cryptographic verification pipeline

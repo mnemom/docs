@@ -1,0 +1,157 @@
+---
+title: "Risk API"
+description: "API reference for individual and team risk assessment endpoints"
+sidebarTitle: "Risk Overview"
+icon: "gauge"
+---
+
+The Risk API provides six endpoints for assessing, retrieving, and verifying risk scores for individual agents and teams.
+
+All endpoints require authentication via Bearer token or API key.
+
+## Endpoints
+
+### Assess Individual Risk
+
+```
+POST /v1/risk/assess
+```
+
+Compute a context-aware risk assessment for an individual agent.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | The agent to assess |
+| `context.action_type` | string | Yes | One of: `financial_transaction`, `data_access`, `task_delegation`, `tool_invocation`, `autonomous_operation`, `multi_agent_coordination` |
+| `context.risk_tolerance` | string | No | `conservative`, `moderate` (default), or `aggressive` |
+| `context.amount` | number | No | Transaction amount (for financial context) |
+| `context.counterparty_id` | string | No | Counterparty agent or entity |
+| `context.use_case` | string | No | Free-text description of the use case |
+
+**Example request:**
+
+```json
+{
+  "agent_id": "agent-abc-123",
+  "context": {
+    "action_type": "financial_transaction",
+    "risk_tolerance": "conservative",
+    "amount": 50000,
+    "counterparty_id": "vendor-xyz"
+  }
+}
+```
+
+**Response:** A `RiskAssessment` object with `risk_score`, `risk_level`, `recommendation`, `confidence`, `contributing_factors`, `suggested_thresholds`, `explanation`, `proof_id`, `proof_status`, and `created_at`.
+
+---
+
+### Assess Team Risk
+
+```
+POST /v1/risk/assess/team
+```
+
+Compute a risk assessment for a team of agents, including three-pillar analysis, Shapley attribution, outlier detection, and synergy classification.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_ids` | string[] | Yes | Array of agent IDs (minimum 2) |
+| `context.action_type` | string | Yes | Action type for the team operation |
+| `context.risk_tolerance` | string | No | Risk tolerance level |
+| `context.team_task` | string | No | Description of the team's task |
+| `context.coordination_mode` | string | No | `parallel`, `sequential`, `hierarchical`, or `consensus` |
+
+**Example request:**
+
+```json
+{
+  "agent_ids": ["agent-a", "agent-b", "agent-c"],
+  "context": {
+    "action_type": "multi_agent_coordination",
+    "risk_tolerance": "moderate",
+    "team_task": "customer-support-pipeline",
+    "coordination_mode": "sequential"
+  }
+}
+```
+
+**Response:** A `TeamRiskAssessment` object with `team_risk_score`, `team_risk_level`, `team_coherence_score`, `team_recommendation`, pillar breakdowns (`portfolio_risk`, `coherence_risk`, `concentration_risk`, `weakest_link_risk`), `shapley_values`, `outliers`, `clusters`, `value_divergences`, `synergy_type`, `individual_assessments`, `explanation`, and proof fields.
+
+---
+
+### Get Assessment
+
+```
+GET /v1/risk/assessments/:assessment_id
+```
+
+Retrieve a previously computed individual risk assessment by ID.
+
+---
+
+### Get Team Assessment
+
+```
+GET /v1/risk/team-assessments/:assessment_id
+```
+
+Retrieve a previously computed team risk assessment by ID.
+
+---
+
+### Get Risk History
+
+```
+GET /v1/risk/history/:agent_id
+```
+
+Retrieve risk assessment history for an agent, ordered by most recent first.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | number | 50 | Maximum number of assessments to return |
+
+---
+
+### Get Proof
+
+```
+GET /v1/risk/proofs/:proof_id
+```
+
+Retrieve the ZK proof status and receipt for a risk assessment.
+
+**Response includes:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `proof_id` | string | Proof identifier |
+| `status` | string | `pending`, `proving`, `verified`, or `failed` |
+| `assessment_id` | string | The linked risk assessment |
+| `receipt` | object | The STARK proof receipt (when verified) |
+| `created_at` | string | When the proof was requested |
+| `verified_at` | string | When verification completed (if applicable) |
+
+## Feature Gating
+
+Risk endpoints require the `risk_assessment` feature to be enabled on the caller's billing plan. Team risk requires the `team_risk_assessment` feature. ZK proofs require the `zk_proofs` feature.
+
+See [Pricing](/pricing/overview) for plan details.
+
+## Error Codes
+
+| Code | Meaning |
+|------|---------|
+| 401 | Missing or invalid authentication |
+| 403 | Feature not available on current plan |
+| 404 | Assessment or proof not found |
+| 422 | Invalid request body (missing required fields, invalid action type, etc.) |
+| 429 | Rate limit exceeded |
+| 500 | Internal server error |
