@@ -72,7 +72,7 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/whe-a1b2c3d4/test \
 
 ## Event Catalog
 
-Mnemom emits 12 event types across integrity, drift, conscience, billing, and containment domains.
+Mnemom emits 14 event types across integrity, drift, conscience, reputation, billing, and containment domains.
 
 | Event Type | Description | Trigger |
 |---|---|---|
@@ -82,6 +82,8 @@ Mnemom emits 12 event types across integrity, drift, conscience, billing, and co
 | `drift.resolved` | A drift alert was acknowledged | Org member acknowledges alert |
 | `conscience.escalation` | Conscience value conflict during analysis | Checkpoint has conscience conflicts |
 | `conscience.values_updated` | Org conscience values were modified | Create, update, delete, or mode change |
+| `reputation.score_changed` | Reputation score changed significantly | Score changed by more than 10 points |
+| `reputation.grade_changed` | Reputation letter grade changed | Grade transition (e.g., BBB to A) |
 | `quota.warning` | Usage approaching plan limit (80%+) | Cron check on billing period |
 | `quota.exceeded` | Usage has exceeded plan limit (100%+) | Cron check on billing period |
 | `subscription.status_changed` | Subscription status changed | Plan upgrade, downgrade, or cancellation |
@@ -112,7 +114,7 @@ Every webhook delivery uses the same envelope structure:
 | Field | Type | Description |
 |---|---|---|
 | `id` | string | Unique event ID (`evt-xxxxxxxx`). Use for idempotency. |
-| `type` | string | One of the 11 event types above |
+| `type` | string | One of the 14 event types above |
 | `created_at` | string | ISO 8601 timestamp |
 | `account_id` | string | Billing account that owns the resource |
 | `data` | object | Event-specific payload |
@@ -284,6 +286,47 @@ Every webhook delivery uses the same envelope structure:
     "action": "create",
     "value_id": "cv-def45678",
     "actor": "user-xyz789"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="reputation.score_changed">
+```json
+{
+  "id": "evt-rs4n8k2p",
+  "type": "reputation.score_changed",
+  "created_at": "2026-02-21T14:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "agent_id": "agent-xyz",
+    "score_before": 770,
+    "score_after": 782,
+    "grade": "A",
+    "components": {
+      "integrity_ratio": 920,
+      "violation_recency": 850,
+      "drift_stability": 700,
+      "trace_completeness": 650,
+      "coherence_compatibility": 390
+    }
+  }
+}
+```
+</Accordion>
+
+<Accordion title="reputation.grade_changed">
+```json
+{
+  "id": "evt-rg3k7m2x",
+  "type": "reputation.grade_changed",
+  "created_at": "2026-02-21T14:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "agent_id": "agent-xyz",
+    "grade_before": "BBB",
+    "grade_after": "A",
+    "score": 702
   }
 }
 ```
