@@ -1,0 +1,503 @@
+---
+title: "Mnemom Trust Score"
+description: "The Mnemom Trust Score™ — a credit score for AI agents. A composite trust metric built from integrity checkpoints, drift stability, trace completeness, and fleet coherence."
+sidebarTitle: "Mnemom Trust Score"
+icon: "ranking-star"
+---
+
+## Overview
+
+The Mnemom Trust Score™ is a **composite trust metric for AI agents** — the equivalent of a credit score, but for autonomous software. It answers a question no other system answers: *Based on independently verified behavioral evidence, how trustworthy is this agent?*
+
+Unlike self-reported trust claims or capability benchmarks, the Mnemom Trust Score is:
+
+- **Independently verified** — Scores are computed from [AIP integrity checkpoints](/concepts/integrity-checkpoints), not self-assessments
+- **Continuous** — Updated hourly from live behavioral data, not point-in-time audits
+- **Transparent** — Every component, weight, and data source is published and inspectable
+- **Cryptographically provable** — The underlying checkpoints are [signed and Merkle-attested](/protocols/aip/certificates)
+- **Multi-dimensional** — Five weighted components capture different aspects of trustworthiness
+
+Mnemom Trust Scores power trust decisions across the AI agent ecosystem: pre-interaction trust checks, fleet governance policies, compliance reporting, marketplace listings, and inter-agent delegation via [A2A](/protocols/aap/a2a-integration).
+
+<Note>
+The Mnemom Trust Score requires a minimum of **50 analyzed integrity checkpoints** before a public score is published. This minimum prevents gaming through selective checkpoint submission and ensures statistical significance.
+</Note>
+
+Checkpoints where the thinking block contains fewer than 100 tokens receive a synthetic `clear` verdict and are excluded from the analyzed checkpoint count. This means your total checkpoint count may differ from your analyzed checkpoint count — only substantive thinking analysis counts toward the 50-checkpoint eligibility minimum and the Integrity Ratio calculation.
+
+---
+
+## Score Range and Grades
+
+Scores range from **0 to 1000** and map to letter grades inspired by bond credit ratings. Higher scores indicate stronger demonstrated trustworthiness.
+
+| Grade | Score Range | Tier | Meaning |
+|-------|------------|------|---------|
+| **AAA** | 900 -- 1000 | Exemplary | Consistently demonstrates exceptional alignment. Highest tier of independently verified trust. |
+| **AA** | 800 -- 899 | Established | Strong track record with minimal violations. Trusted for high-stakes autonomous operations. |
+| **A** | 700 -- 799 | Reliable | Solid behavioral record with occasional minor concerns. Suitable for standard autonomous tasks. |
+| **BBB** | 600 -- 699 | Developing | Building a track record. Some violations or drift events, but trending positively. |
+| **BB** | 500 -- 599 | Emerging | Limited or mixed track record. More data needed for confident assessment. |
+| **B** | 400 -- 499 | Concerning | Elevated violation rate or significant drift. Active remediation recommended. |
+| **CCC** | 200 -- 399 | Critical | Serious integrity concerns. Human oversight strongly recommended for all operations. |
+| **NR** | -- | Not Rated | Fewer than 50 analyzed checkpoints. Score is being built. |
+
+The grade system is deliberately conservative. An "AAA" rating is rare and requires sustained exemplary behavior across all five components. Most well-maintained agents stabilize in the A to AA range.
+
+---
+
+## Score Components
+
+The composite score is a weighted sum of five normalized components, each scored 0 -- 1000:
+
+```
+S = w_1 * integrity_ratio + w_2 * violation_recency + w_3 * drift_stability
+  + w_4 * trace_completeness + w_5 * coherence_compatibility
+```
+
+### Integrity Ratio (40%)
+
+The dominant component. Measures the proportion of integrity checkpoints that returned a `clear` verdict.
+
+```
+integrity_ratio = (clear_count / analyzed_count) * 1000
+```
+
+Only protocol-verified [AIP checkpoints](/concepts/integrity-checkpoints) are counted. Unanalyzed checkpoints (those below the 100-token minimum evidence threshold) are excluded from both numerator and denominator.
+
+- **Data source:** AIP checkpoints
+- **Update frequency:** Every new checkpoint
+- **Improvement lever:** Fix alignment card violations, resolve `review_needed` checkpoints
+
+### Violation Recency (20%)
+
+Recent violations penalize more heavily than old ones. Uses exponential decay with a **1-week half-life** -- a violation from two weeks ago has one-quarter the impact of a violation today.
+
+```
+score = 1000 * (1 - max_recent_impact)
+```
+
+This component incentivizes continuous improvement: even agents with a poor history can recover as violations age out.
+
+- **Data source:** AIP checkpoints with `boundary_violation` verdict
+- **Update frequency:** Hourly
+- **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence
+
+### Drift Stability (20%)
+
+Measures the proportion of sessions where no sustained [drift alert](/concepts/drift-detection) was triggered.
+
+```
+drift_stability = (stable_sessions / total_sessions) * 1000
+```
+
+A session is "stable" if the agent maintained consistent behavioral similarity to its baseline throughout the session. Sessions where 3+ consecutive checkpoints fell below the drift threshold are counted as unstable.
+
+- **Data source:** AIP drift detection
+- **Update frequency:** End of each session
+- **Improvement lever:** Consistent values application, avoid aggressive behavioral pattern changes
+
+### Trace Completeness (10%)
+
+Measures audit trail quality -- the ratio of decisions that were logged as [AP-Traces](/concepts/ap-traces) versus expected decisions.
+
+```
+trace_completeness = (logged_decisions / expected_decisions) * 1000
+```
+
+Agents that log every decision create a complete audit trail. Gaps in trace coverage reduce this component.
+
+- **Data source:** AAP traces
+- **Update frequency:** Hourly
+- **Improvement lever:** Ensure all agent decisions are logged via AAP
+
+### Coherence Compatibility (10%)
+
+The mean [coherence score](/concepts/value-coherence) across fleet interactions, normalized to the 0 -- 1000 scale.
+
+```
+coherence_compatibility = mean_coherence_score * 1000
+```
+
+Defaults to **750** if the agent has no fleet interaction data. This default ensures new agents are not penalized for operating solo.
+
+- **Data source:** [Fleet coherence](/concepts/fleet-coherence) analysis
+- **Update frequency:** After each coherence check
+- **Improvement lever:** Align values with fleet peers, resolve value conflicts
+
+---
+
+## Confidence Levels
+
+The number of analyzed checkpoints determines the confidence level displayed alongside the score:
+
+| Confidence | Checkpoint Count | Display |
+|-----------|-----------------|---------|
+| **Insufficient** | < 50 | Score not published (NR grade) |
+| **Low** | ≥50 and <200 | "Low Confidence" indicator |
+| **Medium** | ≥200 and <1,000 | "Medium Confidence" indicator |
+| **High** | ≥1,000 | "High Confidence" indicator |
+
+Confidence communicates how much behavioral evidence supports the score. A score of 800 with "Low Confidence" (60 checkpoints) carries less weight than a score of 780 with "High Confidence" (2,000 checkpoints).
+
+<Warning>
+The 50-checkpoint minimum is a hard gate for score publication. Agents below this threshold display an "NR" (Not Rated) badge with a progress indicator showing how many checkpoints remain until eligibility.
+</Warning>
+
+---
+
+## Score Computation
+
+### Frequency
+
+- **Hourly recomputation:** Scores are recalculated every hour from the latest behavioral data
+- **Weekly snapshots:** A frozen snapshot is saved each week for historical trend tracking. Snapshots are created every Monday at 00:00 UTC.
+- **On-demand:** The API always returns the most recently computed score
+
+### Anti-Gaming Measures
+
+The scoring methodology includes several protections against manipulation:
+
+1. **Minimum checkpoint count** -- 50 analyzed checkpoints required before score publication prevents agents from cherry-picking favorable interactions
+2. **Synthetic checkpoint detection** -- Checkpoints with abnormally uniform patterns or machine-generated timing signatures are flagged and excluded
+3. **Rate limiting** -- Checkpoint submission rates are monitored per agent; anomalous bursts are throttled
+4. **Independent verification** -- All checkpoints are analyzed by a separate LLM (the daimonion), not the agent itself
+
+### Trend Tracking
+
+Every `ReputationScore` includes a `trend_30d` field -- a signed delta comparing the current score to 30 days ago. This enables at-a-glance trajectory assessment:
+
+- **Positive trend (+):** Score is improving
+- **Negative trend (-):** Score is declining
+- **Flat trend (0):** Score is stable
+
+---
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import { fetchReputation, fetchReputationHistory } from '@mnemom/reputation';
+import { scoreToGrade, confidenceLevel, confidenceLabel } from '@mnemom/reputation';
+
+// Get current reputation for any agent
+const reputation = await fetchReputation('agent-xyz');
+
+if (reputation) {
+  console.log(`Score: ${reputation.score}`);
+  console.log(`Grade: ${reputation.grade} (${reputation.tier})`);
+  console.log(`Confidence: ${confidenceLabel(reputation.confidence)}`);
+  console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
+
+  // Inspect components
+  for (const component of reputation.components) {
+    console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
+  }
+}
+
+// Get weekly history for trend analysis
+const history = await fetchReputationHistory('agent-xyz');
+for (const snapshot of history) {
+  console.log(`${snapshot.week_start}: ${snapshot.score} (${snapshot.grade})`);
+}
+```
+
+### Python
+
+```python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+# Get current reputation for any agent (public endpoint)
+response = httpx.get(f"{API_BASE}/v1/reputation/agent-xyz")
+reputation = response.json()
+
+print(f"Score: {reputation['score']}")
+print(f"Grade: {reputation['grade']} ({reputation['tier']})")
+print(f"Confidence: {reputation['confidence']}")
+print(f"30-day trend: {reputation['trend_30d']:+d}")
+
+for component in reputation["components"]:
+    print(f"  {component['label']}: {component['score']}/1000 (weight: {component['weight']})")
+
+# Get weekly history
+history_response = httpx.get(f"{API_BASE}/v1/reputation/agent-xyz/history")
+for snapshot in history_response.json()["snapshots"]:
+    print(f"{snapshot['week_start']}: {snapshot['score']} ({snapshot['grade']})")
+```
+
+---
+
+## API Reference
+
+The primary endpoint for fetching reputation data:
+
+```
+GET /v1/reputation/{agent_id}
+```
+
+No authentication required. Returns the full score with all components.
+
+**Response:**
+
+```json
+{
+  "agent_id": "agent-xyz",
+  "score": 782,
+  "grade": "A",
+  "tier": "Reliable",
+  "is_eligible": true,
+  "checkpoint_count": 347,
+  "confidence": "medium",
+  "components": [
+    {
+      "key": "integrity_ratio",
+      "label": "Integrity Ratio",
+      "score": 920,
+      "weight": 0.40,
+      "weighted_score": 368,
+      "factors": ["97.2% clear verdict rate across 347 checkpoints"]
+    },
+    {
+      "key": "violation_recency",
+      "label": "Violation Recency",
+      "score": 850,
+      "weight": 0.20,
+      "weighted_score": 170,
+      "factors": ["No violations in past 14 days"]
+    },
+    {
+      "key": "drift_stability",
+      "label": "Drift Stability",
+      "score": 700,
+      "weight": 0.20,
+      "weighted_score": 140,
+      "factors": ["2 drift events across 28 sessions"]
+    },
+    {
+      "key": "trace_completeness",
+      "label": "Trace Completeness",
+      "score": 650,
+      "weight": 0.10,
+      "weighted_score": 65,
+      "factors": ["65% of expected decisions logged"]
+    },
+    {
+      "key": "coherence_compatibility",
+      "label": "Coherence Compatibility",
+      "score": 390,
+      "weight": 0.10,
+      "weighted_score": 39,
+      "factors": ["Mean coherence 0.39 across 3 fleet interactions"]
+    }
+  ],
+  "computed_at": "2026-02-21T14:00:00.000Z",
+  "trend_30d": 12,
+  "visibility": "public"
+}
+```
+
+For the complete API reference including batch, search, compare, and benchmark endpoints, see the [Reputation API Overview](/api-reference/reputation-overview).
+
+---
+
+## Use Cases
+
+### Pre-Interaction Trust Checks
+
+Before delegating a task to another agent via A2A, check their reputation:
+
+```typescript
+const reputation = await fetchReputation(theirAgentId);
+
+if (!reputation || reputation.grade === 'CCC' || reputation.grade === 'NR') {
+  return escalateToPrincipal({
+    reason: `Agent ${theirAgentId} has insufficient trust score (${reputation?.grade ?? 'NR'})`,
+  });
+}
+
+// Proceed with delegation
+return executeDelegation(theirCard, task);
+```
+
+### Fleet Governance
+
+Set minimum reputation requirements for agents in your organization:
+
+```python
+# Enforce minimum A grade for production agents
+for agent in org_agents:
+    rep = httpx.get(f"{API_BASE}/v1/reputation/{agent['id']}").json()
+    if rep["score"] < 700:
+        print(f"WARNING: {agent['id']} below production threshold ({rep['score']})")
+        pause_agent(agent["id"])
+```
+
+### Compliance Reporting
+
+Export weekly snapshots for audit trails:
+
+```typescript
+const history = await fetchReputationHistory(agentId);
+
+// Generate compliance report
+const report = history.map(snapshot => ({
+  week: snapshot.week_start,
+  score: snapshot.score,
+  grade: snapshot.grade,
+  checkpoints: snapshot.checkpoint_count,
+  components: snapshot.components,
+}));
+```
+
+### Marketplace Listings
+
+Display reputation badges on agent directories, npm packages, and documentation sites. See [Embeddable Badges](/guides/reputation-badges) for embed code.
+
+---
+
+## Cryptographic Verification
+
+Every Mnemom Trust Score is backed by a cryptographic proof chain that enables independent verification without trusting Mnemom's infrastructure. The verification endpoint at `GET /v1/reputation/{agent_id}/verify` returns the full proof chain.
+
+### Proof Chain Structure
+
+The proof chain consists of three layers that independently attest to score integrity:
+
+```
+┌──────────────────────────────────────────┐
+│            Certificate Hash               │
+│  SHA-256 of the latest IntegrityCertificate│
+│  covering this agent's checkpoints        │
+├──────────────────────────────────────────┤
+│              Merkle Root                  │
+│  Root hash of the Merkle tree over all    │
+│  analyzed checkpoints                     │
+├──────────────────────────────────────────┤
+│          Hash Chain Validation            │
+│  Consecutive checkpoint hashes linked     │
+│  in a tamper-evident chain                │
+└──────────────────────────────────────────┘
+```
+
+**Certificate hash** -- The SHA-256 hash of the [IntegrityCertificate](/protocols/aip/certificates) that covers the agent's checkpoint history. This certificate is Ed25519-signed by the Mnemom attestation key and can be independently verified using the public key from the [key registry](/api-reference/endpoint/get-keys).
+
+**Merkle root** -- The root of a Merkle tree constructed over all analyzed checkpoints. Any individual checkpoint can be verified for inclusion using a [Merkle inclusion proof](/api-reference/endpoint/get-checkpoints-id-inclusion-proof) without revealing other checkpoints in the tree.
+
+**Hash chain validation** -- Each checkpoint includes a hash of the previous checkpoint, forming a tamper-evident chain. If any checkpoint is modified or removed, the chain breaks. The `hash_chain_valid` field confirms the entire chain is intact.
+
+### Verifying a Score
+
+```bash
+# 1. Fetch the verification proof
+curl https://api.mnemom.ai/v1/reputation/agent-xyz/verify
+
+# 2. Cross-reference the certificate hash
+curl https://api.mnemom.ai/v1/checkpoints/{latest_checkpoint_id}/certificate
+
+# 3. Verify the Merkle root against the agent's checkpoint tree
+curl https://api.mnemom.ai/v1/agents/agent-xyz/merkle-root
+```
+
+The verification endpoint is public and requires no authentication. Third parties (auditors, compliance officers, delegating agents) can independently confirm that a reputation score is genuine without any privileged access.
+
+<Note>
+Verification confirms that the score was computed from authentic, tamper-evident data. It does not guarantee the scoring algorithm itself is correct -- for that, see the published [scoring methodology](/protocols/aap/reputation-methodology).
+</Note>
+
+---
+
+## A2A Trust Extension
+
+The reputation API includes a pre-built trust block for inter-agent reputation sharing via A2A. When you fetch an agent's reputation, the response includes an `a2a_trust_extension` field that can be directly embedded in an A2A Agent Card.
+
+### How It Works
+
+```
+Agent A ──[fetches reputation]──→ Mnemom API
+                                      │
+                                      ▼
+                            a2a_trust_extension
+                                      │
+Agent A ──[embeds trust block]──→ A2A Agent Card
+                                      │
+Agent B ──[reads trust block]──→ Delegation decision
+                                      │
+Agent B ──[verifies via verify_url]──→ Independent confirmation
+```
+
+When Agent A fetches its own reputation from `GET /v1/reputation/{agent_id}`, the response includes:
+
+```json
+{
+  "a2a_trust_extension": {
+    "provider": "mnemom",
+    "score": 782,
+    "grade": "A",
+    "verified_url": "https://api.mnemom.ai/v1/reputation/agent-xyz",
+    "badge_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg",
+    "verify_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/verify"
+  }
+}
+```
+
+Agent A embeds this as the `trust` block in its A2A Agent Card. When Agent B discovers Agent A through A2A, it can:
+
+1. Read the static `score` and `grade` for a quick trust check
+2. Fetch `verified_url` for the latest real-time score
+3. Fetch `verify_url` for cryptographic proof that the score is genuine
+
+### SDK Helpers
+
+Both SDKs provide helpers to fetch and embed the trust extension:
+
+**TypeScript:**
+
+```typescript
+import { getA2AReputationExtension } from '@mnemom/reputation';
+
+const trustBlock = await getA2AReputationExtension('my-agent-id');
+agentCard.trust = trustBlock;
+```
+
+**Python:**
+
+```python
+from mnemom_reputation import get_a2a_reputation_extension
+
+trust_block = get_a2a_reputation_extension(agent_id="my-agent-id")
+agent_card["trust"] = trust_block
+```
+
+<Warning>
+The trust block is a snapshot. Agent B SHOULD verify via `verified_url` or `verify_url` before making high-stakes delegation decisions. The `badge_url` always returns the current score for display purposes.
+</Warning>
+
+For the full A2A integration guide including value coherence handshakes and reputation gates, see [A2A Integration](/protocols/aap/a2a-integration).
+
+---
+
+## How Scores Differ from Alternatives
+
+| Dimension | Mnemom Reputation | Self-Reported Trust | Capability Benchmarks |
+|-----------|-------------------|--------------------|-----------------------|
+| **Evidence source** | Independently verified behavioral data | Agent's own claims | Synthetic test suites |
+| **Update frequency** | Continuous (hourly) | Manual updates | Periodic re-evaluation |
+| **Verifiability** | Cryptographically provable via Merkle proofs | Unverifiable | Reproducible but narrow |
+| **Scope** | Alignment, drift, completeness, coherence | Whatever the agent declares | Task-specific accuracy |
+| **Gaming resistance** | Minimum thresholds, synthetic detection, independent analysis | Trivially gameable | Benchmark contamination |
+| **Trend visibility** | 30-day delta, weekly snapshots | None | Version-to-version only |
+
+---
+
+## See Also
+
+- [Scoring Methodology](/protocols/aap/reputation-methodology) -- Full technical specification of the scoring algorithm
+- [Improving Your Agent's Reputation](/guides/improving-reputation) -- Component-by-component improvement guide
+- [Embeddable Badges](/guides/reputation-badges) -- Add trust signals to your README, website, or Agent Card
+- [Reputation API Overview](/api-reference/reputation-overview) -- Full API reference for all reputation endpoints
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The primary data source for reputation scores
+- [Drift Detection](/concepts/drift-detection) -- How behavioral drift affects reputation
+- [Fleet Coherence](/concepts/fleet-coherence) -- How fleet compatibility contributes to scores

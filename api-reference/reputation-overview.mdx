@@ -1,0 +1,719 @@
+---
+title: "Mnemom Trust Score API"
+description: "Complete API reference for the Mnemom Trust Score™ — score retrieval, history, badges, batch lookup, directory search, comparison, and benchmarks."
+sidebarTitle: "Trust Score API"
+icon: "ranking-star"
+---
+
+# Mnemom Trust Score API
+
+The Trust Score API provides programmatic access to Mnemom Trust Scores, historical trends, embeddable badges, directory search, bulk lookups, and aggregate benchmarks. All reputation data is computed from independently verified [AIP integrity checkpoints](/concepts/integrity-checkpoints).
+
+**Base URL:** `https://api.mnemom.ai/v1/reputation`
+
+---
+
+## Authentication
+
+| Endpoint | Auth Required | Notes |
+|----------|--------------|-------|
+| `GET /v1/reputation/{agent_id}` | No | Public score retrieval |
+| `GET /v1/reputation/{agent_id}/history` | No | Public history |
+| `GET /v1/reputation/{agent_id}/badge.svg` | No | Public badge |
+| `GET /v1/reputation/{agent_id}/verify` | No | Cryptographic verification |
+| `POST /v1/reputation/batch` | API key | Bulk score retrieval |
+| `GET /v1/reputation/search` | API key | Directory search |
+| `GET /v1/reputation/compare` | API key | Side-by-side comparison |
+| `GET /v1/reputation/benchmarks` | No | Aggregate statistics |
+
+**API key authentication:** Pass in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
+
+---
+
+## Rate Limits
+
+| Endpoint | Rate Limit | Window |
+|----------|-----------|--------|
+| `GET /reputation/{agent_id}` | 100 requests | per minute |
+| `GET /reputation/{agent_id}/history` | 60 requests | per minute |
+| `GET /reputation/{agent_id}/badge.svg` | 300 requests | per minute |
+| `GET /reputation/{agent_id}/verify` | 30 requests | per minute |
+| `POST /reputation/batch` | 30 requests | per minute |
+| `GET /reputation/search` | 60 requests | per minute |
+| `GET /reputation/compare` | 60 requests | per minute |
+| `GET /reputation/benchmarks` | 30 requests | per minute |
+
+Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+---
+
+## Endpoints
+
+### GET /v1/reputation/{agent_id}
+
+Retrieve the full reputation score for an agent, including all five component scores, trend data, and confidence level.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-xyz",
+  "score": 782,
+  "grade": "A",
+  "tier": "Reliable",
+  "is_eligible": true,
+  "checkpoint_count": 347,
+  "confidence": "medium",
+  "components": [
+    {
+      "key": "integrity_ratio",
+      "label": "Integrity Ratio",
+      "score": 920,
+      "weight": 0.40,
+      "weighted_score": 368,
+      "factors": ["97.2% clear verdict rate across 347 checkpoints"]
+    },
+    {
+      "key": "violation_recency",
+      "label": "Violation Recency",
+      "score": 850,
+      "weight": 0.20,
+      "weighted_score": 170,
+      "factors": ["No violations in past 14 days"]
+    },
+    {
+      "key": "drift_stability",
+      "label": "Drift Stability",
+      "score": 700,
+      "weight": 0.20,
+      "weighted_score": 140,
+      "factors": ["2 drift events across 28 sessions"]
+    },
+    {
+      "key": "trace_completeness",
+      "label": "Trace Completeness",
+      "score": 650,
+      "weight": 0.10,
+      "weighted_score": 65,
+      "factors": ["65% of expected decisions logged"]
+    },
+    {
+      "key": "coherence_compatibility",
+      "label": "Coherence Compatibility",
+      "score": 390,
+      "weight": 0.10,
+      "weighted_score": 39,
+      "factors": ["Mean coherence 0.39 across 3 fleet interactions"]
+    }
+  ],
+  "computed_at": "2026-02-21T14:00:00.000Z",
+  "trend_30d": 12,
+  "visibility": "public",
+  "a2a_trust_extension": {
+    "provider": "mnemom",
+    "score": 782,
+    "grade": "A",
+    "verified_url": "https://api.mnemom.ai/v1/reputation/agent-xyz",
+    "badge_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg",
+    "verify_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/verify"
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `score` | number | Composite score (0 -- 1000) |
+| `grade` | string | Letter grade: `AAA`, `AA`, `A`, `BBB`, `BB`, `B`, `CCC`, or `NR` |
+| `tier` | string | Human-readable tier label |
+| `is_eligible` | boolean | Whether the agent has met the 50-checkpoint minimum |
+| `checkpoint_count` | number | Total analyzed checkpoints |
+| `confidence` | string | `insufficient`, `low`, `medium`, or `high` |
+| `components` | array | Five component scores with keys, weights, and factors |
+| `computed_at` | string | ISO 8601 timestamp of last computation |
+| `trend_30d` | number | Signed delta vs. 30 days ago |
+| `visibility` | string | `public`, `unlisted`, or `private` |
+| `a2a_trust_extension` | object | Pre-built trust block for [A2A Agent Cards](/protocols/aap/a2a-integration#reputation-in-a2a-agent-cards) |
+
+**`a2a_trust_extension` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | string | Trust provider identifier (always `"mnemom"`) |
+| `score` | number | Current reputation score |
+| `grade` | string | Current letter grade |
+| `verified_url` | string | API endpoint returning the full reputation response |
+| `badge_url` | string | Dynamic SVG badge URL |
+| `verify_url` | string | Cryptographic verification endpoint |
+
+**Component object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Component identifier |
+| `label` | string | Human-readable name |
+| `score` | number | Component score (0 -- 1000) |
+| `weight` | number | Weight in composite formula (0 -- 1) |
+| `weighted_score` | number | `score * weight` contribution to composite |
+| `factors` | string[] | Human-readable factors affecting this component |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Agent not found |
+
+---
+
+### GET /v1/reputation/{agent_id}/history
+
+Retrieve weekly reputation snapshots for trend analysis.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "snapshots": [
+    {
+      "week_start": "2026-02-17",
+      "score": 782,
+      "grade": "A",
+      "checkpoint_count": 347,
+      "components": {
+        "integrity_ratio": 920,
+        "violation_recency": 850,
+        "drift_stability": 700,
+        "trace_completeness": 650,
+        "coherence_compatibility": 390
+      }
+    },
+    {
+      "week_start": "2026-02-10",
+      "score": 770,
+      "grade": "A",
+      "checkpoint_count": 312,
+      "components": {
+        "integrity_ratio": 910,
+        "violation_recency": 800,
+        "drift_stability": 700,
+        "trace_completeness": 620,
+        "coherence_compatibility": 390
+      }
+    }
+  ]
+}
+```
+
+**Snapshot object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `week_start` | string | ISO date for the start of the snapshot week (Sunday) |
+| `score` | number | Composite score at time of snapshot |
+| `grade` | string | Letter grade at time of snapshot |
+| `checkpoint_count` | number | Cumulative checkpoint count at snapshot time |
+| `components` | object | Component scores keyed by component identifier |
+
+---
+
+### GET /v1/reputation/{agent_id}/badge.svg
+
+Dynamic SVG badge showing the agent's current reputation score.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+| `variant` | query | string | No | Badge variant: `score` (default), `score_tier`, `score_trend`, `compact` |
+
+**Response:** `200 OK` with `Content-Type: image/svg+xml`
+
+```
+Cache-Control: public, max-age=3600
+```
+
+Badge variants:
+
+| Variant | Display |
+|---------|---------|
+| `score` | `[ Mnemom Trust \| 782 ]` |
+| `score_tier` | `[ Mnemom Trust \| 782 Established ]` |
+| `score_trend` | `[ Mnemom Trust \| 782 ↑ ]` |
+| `compact` | `[ 782 ]` |
+
+For agents below the 50-checkpoint minimum:
+
+```
+[ Mnemom | Building... 23/50 ]
+```
+
+See [Embeddable Badges](/guides/reputation-badges) for embed code in Markdown, HTML, React, and A2A formats.
+
+---
+
+### GET /v1/reputation/{agent_id}/verify
+
+Cryptographic verification of a reputation score. Returns the proof chain that independently confirms the score was computed from authentic, tamper-evident integrity checkpoints.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "agent-xyz",
+  "score": 782,
+  "grade": "A",
+  "verified": true,
+  "verification": {
+    "certificate_hash": "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    "merkle_root": "sha256:f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
+    "hash_chain_valid": true,
+    "checkpoint_count": 347,
+    "latest_checkpoint_id": "ic-abc12345",
+    "latest_checkpoint_at": "2026-02-21T13:45:00.000Z",
+    "proof_generated_at": "2026-02-21T14:00:00.000Z"
+  },
+  "computed_at": "2026-02-21T14:00:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `score` | number | Composite score at time of verification |
+| `grade` | string | Letter grade at time of verification |
+| `verified` | boolean | Whether the proof chain validates successfully |
+| `verification` | object | Cryptographic proof chain details |
+| `computed_at` | string | ISO 8601 timestamp of score computation |
+
+**`verification` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `certificate_hash` | string | SHA-256 hash of the latest integrity certificate covering this agent's checkpoints |
+| `merkle_root` | string | Merkle tree root hash over all analyzed checkpoints |
+| `hash_chain_valid` | boolean | Whether the hash chain linking consecutive checkpoints is intact and tamper-free |
+| `checkpoint_count` | number | Number of checkpoints included in the proof |
+| `latest_checkpoint_id` | string | ID of the most recent checkpoint in the chain |
+| `latest_checkpoint_at` | string | Timestamp of the most recent checkpoint |
+| `proof_generated_at` | string | When this proof was generated |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Agent not found |
+| `422` | Agent has insufficient checkpoints for verification (below 50-checkpoint minimum) |
+
+<Tip>
+Use the verification endpoint to independently confirm that a reputation score is backed by real integrity data. The `certificate_hash` can be cross-referenced with the [certificate endpoint](/api-reference/endpoint/get-checkpoints-id-certificate) and the `merkle_root` can be verified via the [Merkle root endpoint](/api-reference/endpoint/get-agents-id-merkle-root).
+</Tip>
+
+---
+
+### POST /v1/reputation/batch
+
+Retrieve reputation scores for multiple agents in a single request. Requires API key authentication.
+
+**Request body:**
+
+```json
+{
+  "agent_ids": ["agent-xyz", "agent-abc", "agent-def"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_ids` | string[] | Yes | List of agent identifiers (max 50) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "scores": [
+    {
+      "agent_id": "agent-xyz",
+      "score": 782,
+      "grade": "A",
+      "tier": "Reliable",
+      "confidence": "medium",
+      "trend_30d": 12
+    },
+    {
+      "agent_id": "agent-abc",
+      "score": 650,
+      "grade": "BBB",
+      "tier": "Developing",
+      "confidence": "low",
+      "trend_30d": -8
+    },
+    {
+      "agent_id": "agent-def",
+      "score": null,
+      "grade": "NR",
+      "tier": "Not Rated",
+      "confidence": "insufficient",
+      "trend_30d": 0
+    }
+  ]
+}
+```
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | `agent_ids` missing or exceeds 50 |
+| `401` | API key required |
+
+---
+
+### GET /v1/reputation/search
+
+Search the reputation directory for agents by name, grade, or confidence level. Requires API key authentication.
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `q` | string | No | Search query (matches agent name/ID) |
+| `grade` | string | No | Filter by grade (`AAA`, `AA`, `A`, `BBB`, `BB`, `B`, `CCC`) |
+| `confidence` | string | No | Filter by confidence level (`low`, `medium`, `high`) |
+| `sort` | string | No | Sort field: `score` (default), `name`, `trend`, `checkpoints` |
+| `page` | number | No | Page number (default: 1) |
+| `per_page` | number | No | Results per page (default: 20, max: 100) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agents": [
+    {
+      "agent_id": "agent-xyz",
+      "agent_name": "Shopping Assistant",
+      "score": 782,
+      "grade": "A",
+      "tier": "Reliable",
+      "confidence": "medium",
+      "checkpoint_count": 347,
+      "trend_30d": 12,
+      "visibility": "public",
+      "claimed": true
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+**Directory agent object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `agent_name` | string | Display name |
+| `score` | number | Composite score |
+| `grade` | string | Letter grade |
+| `tier` | string | Tier label |
+| `confidence` | string | Confidence level |
+| `checkpoint_count` | number | Analyzed checkpoint count |
+| `trend_30d` | number | 30-day trend delta |
+| `visibility` | string | `public` or `unlisted` |
+| `claimed` | boolean | Whether the agent has been claimed by an owner |
+
+---
+
+### GET /v1/reputation/compare
+
+Side-by-side comparison of 2 to 10 agents. Requires API key authentication.
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_ids` | string | Yes | Comma-separated agent IDs (2 -- 10) |
+
+**Example:**
+
+```
+GET /v1/reputation/compare?agent_ids=agent-xyz,agent-abc,agent-def
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "agents": [
+    {
+      "agent_id": "agent-xyz",
+      "score": 782,
+      "grade": "A",
+      "components": {
+        "integrity_ratio": 920,
+        "violation_recency": 850,
+        "drift_stability": 700,
+        "trace_completeness": 650,
+        "coherence_compatibility": 390
+      }
+    },
+    {
+      "agent_id": "agent-abc",
+      "score": 650,
+      "grade": "BBB",
+      "components": {
+        "integrity_ratio": 780,
+        "violation_recency": 600,
+        "drift_stability": 550,
+        "trace_completeness": 700,
+        "coherence_compatibility": 500
+      }
+    }
+  ]
+}
+```
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Fewer than 2 or more than 10 agent IDs |
+| `401` | API key required |
+
+---
+
+### GET /v1/reputation/benchmarks
+
+Aggregate statistics across all publicly scored agents. Useful for understanding where an agent stands relative to the ecosystem.
+
+**Response:** `200 OK`
+
+```json
+{
+  "total_scored": 1247,
+  "mean_score": 672,
+  "median_score": 695,
+  "distribution": [
+    { "grade": "AAA", "count": 23, "percentage": 1.8 },
+    { "grade": "AA", "count": 89, "percentage": 7.1 },
+    { "grade": "A", "count": 312, "percentage": 25.0 },
+    { "grade": "BBB", "count": 408, "percentage": 32.7 },
+    { "grade": "BB", "count": 215, "percentage": 17.2 },
+    { "grade": "B", "count": 134, "percentage": 10.7 },
+    { "grade": "CCC", "count": 66, "percentage": 5.3 }
+  ],
+  "percentiles": {
+    "p10": 420,
+    "p25": 560,
+    "p50": 695,
+    "p75": 780,
+    "p90": 860
+  }
+}
+```
+
+**Benchmark fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_scored` | number | Total agents with published scores |
+| `mean_score` | number | Arithmetic mean of all scores |
+| `median_score` | number | Median score (p50) |
+| `distribution` | array | Count and percentage per grade |
+| `percentiles` | object | Score at each percentile (p10, p25, p50, p75, p90) |
+
+---
+
+## Webhook Events
+
+Subscribe to reputation-related webhook events via [Webhook Notifications](/guides/webhooks):
+
+| Event Type | Trigger | Payload |
+|-----------|---------|---------|
+| `reputation.score_changed` | Score changed by more than 10 points | `{ agent_id, score_before, score_after, grade, components }` |
+| `reputation.grade_changed` | Letter grade changed | `{ agent_id, grade_before, grade_after, score }` |
+
+<AccordionGroup>
+<Accordion title="reputation.score_changed">
+Fires when an agent's reputation score changes by more than 10 points (positive or negative) during hourly recomputation.
+
+```json
+{
+  "id": "evt-rs4n8k2p",
+  "type": "reputation.score_changed",
+  "created_at": "2026-02-21T14:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "agent_id": "agent-xyz",
+    "score_before": 770,
+    "score_after": 782,
+    "grade": "A",
+    "components": {
+      "integrity_ratio": 920,
+      "violation_recency": 850,
+      "drift_stability": 700,
+      "trace_completeness": 650,
+      "coherence_compatibility": 390
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `score_before` | number | Previous composite score |
+| `score_after` | number | New composite score |
+| `grade` | string | Current letter grade (after the change) |
+| `components` | object | Component scores at time of change, keyed by component identifier |
+</Accordion>
+
+<Accordion title="reputation.grade_changed">
+Fires when an agent's letter grade changes (e.g., from BBB to A). Always accompanied by a `reputation.score_changed` event.
+
+```json
+{
+  "id": "evt-rg3k7m2x",
+  "type": "reputation.grade_changed",
+  "created_at": "2026-02-21T14:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "agent_id": "agent-xyz",
+    "grade_before": "BBB",
+    "grade_after": "A",
+    "score": 702
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `grade_before` | string | Previous letter grade |
+| `grade_after` | string | New letter grade |
+| `score` | number | Current composite score at time of grade change |
+</Accordion>
+</AccordionGroup>
+```
+
+---
+
+## Error Codes
+
+| Status | Code | Description |
+|--------|------|-------------|
+| `400` | `invalid_request` | Missing or invalid parameters |
+| `401` | `unauthorized` | API key required but not provided or invalid |
+| `404` | `agent_not_found` | Agent ID does not exist |
+| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
+| `500` | `internal_error` | Server error; retry with exponential backoff |
+
+All error responses follow the standard envelope:
+
+```json
+{
+  "error": "agent_not_found",
+  "message": "No agent found with ID 'agent-xyz'"
+}
+```
+
+---
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import {
+  fetchReputation,
+  fetchReputationHistory,
+  fetchReputationBenchmarks,
+  searchDirectory,
+} from '@mnemom/reputation';
+
+// Single agent score
+const score = await fetchReputation('agent-xyz');
+
+// Historical trend
+const history = await fetchReputationHistory('agent-xyz');
+
+// Ecosystem benchmarks
+const benchmarks = await fetchReputationBenchmarks();
+
+// Directory search
+const results = await searchDirectory({
+  grade: 'A',
+  confidence: 'high',
+  sort: 'score',
+  per_page: 50,
+});
+```
+
+### Python
+
+```python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+# Single agent score (public, no auth)
+score = httpx.get(f"{API_BASE}/v1/reputation/agent-xyz").json()
+
+# Batch lookup (requires API key)
+batch = httpx.post(
+    f"{API_BASE}/v1/reputation/batch",
+    headers={"Authorization": f"Bearer {api_key}"},
+    json={"agent_ids": ["agent-xyz", "agent-abc"]},
+).json()
+
+# Directory search (requires API key)
+results = httpx.get(
+    f"{API_BASE}/v1/reputation/search",
+    headers={"Authorization": f"Bearer {api_key}"},
+    params={"grade": "A", "confidence": "high", "sort": "score"},
+).json()
+
+# Benchmarks (public)
+benchmarks = httpx.get(f"{API_BASE}/v1/reputation/benchmarks").json()
+print(f"Ecosystem median: {benchmarks['median_score']}")
+print(f"Total scored agents: {benchmarks['total_scored']}")
+```
+
+---
+
+## See Also
+
+- [Understanding Reputation Scores](/concepts/reputation-scores) -- What scores mean
+- [Scoring Methodology](/protocols/aap/reputation-methodology) -- How scores are computed
+- [Improving Your Agent's Reputation](/guides/improving-reputation) -- How to improve scores
+- [Embeddable Badges](/guides/reputation-badges) -- Badge variants and embed code
+- [Webhook Notifications](/guides/webhooks) -- Real-time event delivery

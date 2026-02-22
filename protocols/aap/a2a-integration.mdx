@@ -789,12 +789,247 @@ Use these standard identifiers where applicable:
 
 Custom values MUST be defined in the `definitions` block of your alignment card.
 
+## Reputation in A2A Agent Cards
+
+Beyond value coherence, agents can advertise their [Mnemom Trust Score](/concepts/reputation-scores) directly in A2A Agent Cards. This enables programmatic trust decisions before delegation -- an agent can refuse to work with peers below a certain trust score threshold.
+
+### The Trust Block
+
+Add a `trust` block to your A2A Agent Card:
+
+```json
+{
+  "id": "shopping-assistant",
+  "name": "shopping-assistant",
+  "skills": ["..."],
+  "alignment": { "...": "existing alignment block" },
+
+  "trust": {
+    "provider": "mnemom",
+    "score": 847,
+    "grade": "AA",
+    "verified_url": "https://api.mnemom.ai/v1/reputation/shopping-assistant",
+    "badge_url": "https://api.mnemom.ai/v1/reputation/shopping-assistant/badge.svg"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | string | Trust provider identifier (`"mnemom"`) |
+| `score` | number | Current reputation score (0 -- 1000) |
+| `grade` | string | Letter grade (`AAA`, `AA`, `A`, `BBB`, `BB`, `B`, `CCC`, `NR`) |
+| `verified_url` | string | API endpoint for real-time score verification |
+| `badge_url` | string | Dynamic SVG badge URL |
+
+<Warning>
+The `score` and `grade` in the trust block are snapshots. Always verify via `verified_url` for real-time scores before making high-stakes delegation decisions. The badge URL always serves the current score.
+</Warning>
+
+### Programmatic Trust Thresholds
+
+Agents can use the trust block to enforce minimum reputation requirements before accepting delegation:
+
+**Python:**
+
+```python
+import httpx
+
+MINIMUM_GRADE = "A"  # Only delegate to agents with grade A or above
+GRADE_ORDER = ["NR", "CCC", "B", "BB", "BBB", "A", "AA", "AAA"]
+
+def should_delegate(their_agent_card: dict) -> bool:
+    """Decide whether to delegate based on reputation."""
+    trust = their_agent_card.get("trust")
+
+    if not trust or trust.get("provider") != "mnemom":
+        # No Mnemom reputation -- fall back to alignment-only check
+        return check_alignment_only(their_agent_card)
+
+    # Verify real-time score (don't trust static snapshot)
+    verified = httpx.get(trust["verified_url"]).json()
+    grade = verified.get("grade", "NR")
+
+    if GRADE_ORDER.index(grade) < GRADE_ORDER.index(MINIMUM_GRADE):
+        print(f"Rejected: {their_agent_card['id']} has grade {grade} (minimum: {MINIMUM_GRADE})")
+        return False
+
+    print(f"Accepted: {their_agent_card['id']} has grade {grade} ({verified['score']}/1000)")
+    return True
+```
+
+**TypeScript:**
+
+```typescript
+import { fetchReputation } from '@mnemom/reputation';
+
+const MINIMUM_SCORE = 700; // Grade A threshold
+
+interface A2AAgentCard {
+  id: string;
+  trust?: {
+    provider: string;
+    score: number;
+    grade: string;
+    verified_url: string;
+  };
+  alignment?: unknown;
+  [key: string]: unknown;
+}
+
+async function shouldDelegate(theirCard: A2AAgentCard): Promise<boolean> {
+  const trust = theirCard.trust;
+
+  if (!trust || trust.provider !== 'mnemom') {
+    return checkAlignmentOnly(theirCard);
+  }
+
+  // Verify real-time score
+  const verified = await fetchReputation(theirCard.id);
+
+  if (!verified || verified.score < MINIMUM_SCORE) {
+    console.log(`Rejected: ${theirCard.id} score ${verified?.score ?? 'NR'} < ${MINIMUM_SCORE}`);
+    return false;
+  }
+
+  console.log(`Accepted: ${theirCard.id} score ${verified.score} (${verified.grade})`);
+  return true;
+}
+```
+
+### ReputationGate Middleware
+
+For agents that process many delegation requests, implement a `ReputationGate` middleware that checks reputation before any task execution:
+
+**Python (Flask):**
+
+```python
+from functools import wraps
+import httpx
+
+MINIMUM_SCORE = 700
+API_BASE = "https://api.mnemom.ai"
+
+def reputation_gate(min_score=MINIMUM_SCORE):
+    """Middleware that rejects requests from agents below a reputation threshold."""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            requester_id = request.headers.get("X-Agent-Id")
+            if not requester_id:
+                return jsonify({"error": "X-Agent-Id header required"}), 400
+
+            rep = httpx.get(f"{API_BASE}/v1/reputation/{requester_id}").json()
+
+            if rep.get("score", 0) < min_score:
+                return jsonify({
+                    "error": "reputation_insufficient",
+                    "message": f"Minimum score {min_score} required, agent has {rep.get('score', 'NR')}",
+                    "reputation": {
+                        "score": rep.get("score"),
+                        "grade": rep.get("grade"),
+                        "verified_url": f"{API_BASE}/v1/reputation/{requester_id}",
+                    },
+                }), 403
+
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+@app.route("/a2a/tasks/execute", methods=["POST"])
+@reputation_gate(min_score=700)
+def execute_task():
+    """Only agents with grade A or above can execute tasks."""
+    # ... task execution logic
+```
+
+**TypeScript (Express):**
+
+```typescript
+import { fetchReputation } from '@mnemom/reputation';
+import type { Request, Response, NextFunction } from 'express';
+
+function reputationGate(minScore = 700) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const requesterId = req.headers['x-agent-id'] as string;
+
+    if (!requesterId) {
+      return res.status(400).json({ error: 'X-Agent-Id header required' });
+    }
+
+    const rep = await fetchReputation(requesterId);
+
+    if (!rep || rep.score < minScore) {
+      return res.status(403).json({
+        error: 'reputation_insufficient',
+        message: `Minimum score ${minScore} required, agent has ${rep?.score ?? 'NR'}`,
+        reputation: {
+          score: rep?.score,
+          grade: rep?.grade,
+          verified_url: `https://api.mnemom.ai/v1/reputation/${requesterId}`,
+        },
+      });
+    }
+
+    next();
+  };
+}
+
+// Apply to A2A task execution endpoint
+app.post('/a2a/tasks/execute', reputationGate(700), (req, res) => {
+  // Only agents with grade A or above reach here
+});
+```
+
+### SDK Helper: getA2AReputationExtension()
+
+Both SDKs provide a helper to generate the trust block for your Agent Card:
+
+**Python:**
+
+```python
+from mnemom_reputation import get_a2a_reputation_extension
+
+trust_block = get_a2a_reputation_extension(agent_id="shopping-assistant")
+# Returns:
+# {
+#   "provider": "mnemom",
+#   "score": 847,
+#   "grade": "AA",
+#   "verified_url": "https://api.mnemom.ai/v1/reputation/shopping-assistant",
+#   "badge_url": "https://api.mnemom.ai/v1/reputation/shopping-assistant/badge.svg"
+# }
+
+# Add to your A2A Agent Card
+agent_card["trust"] = trust_block
+```
+
+**TypeScript:**
+
+```typescript
+import { getA2AReputationExtension } from '@mnemom/reputation';
+
+const trustBlock = await getA2AReputationExtension('shopping-assistant');
+// Returns the trust block with current score and grade
+
+// Add to your A2A Agent Card
+agentCard.trust = trustBlock;
+```
+
+<Tip>
+The `getA2AReputationExtension()` helper fetches the latest score from the API, so the trust block always contains current data. Call it when serving your Agent Card, not just once at startup.
+</Tip>
+
+---
+
 ## What's Next?
 
 - **[quickstart](/protocols/aap/quickstart)** -- Core AAP concepts and API
 - **[specification](/protocols/aap/specification)** -- Full protocol specification
 - **[limitations](/protocols/aap/limitations)** -- What AAP can and cannot guarantee
 - **[EU compliance](/guides/eu-compliance)** -- EU AI Act Article 50 compliance guide
+- **[reputation scores](/concepts/reputation-scores)** -- Understanding the behavioral reputation store
+- **[reputation badges](/guides/reputation-badges)** -- Embeddable trust badges for Agent Cards
 - **[examples](https://github.com/mnemom/aap/tree/main/examples/a2a-integration/)** -- Working example code (Python + TypeScript)
 
 ---

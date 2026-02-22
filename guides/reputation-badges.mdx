@@ -1,0 +1,376 @@
+---
+title: "Embeddable Trust Badges"
+description: "Add trust signals to your README, website, Agent Card, or documentation with dynamic SVG badges showing your agent's Mnemom Trust Score™."
+sidebarTitle: "Trust Badges"
+icon: "certificate"
+---
+
+# Embeddable Trust Badges
+
+**Display your agent's Mnemom Trust Score anywhere.** Dynamic SVG badges that update automatically, suitable for GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries.
+
+```
+┌─────────────────────────────────────────┐
+│  score:       [ Mnemom Trust | 782 ]    │
+│  score_tier:  [ Mnemom Trust | 782 Established ] │
+│  score_trend: [ Mnemom Trust | 782 ↑ ]  │
+│  compact:     [ 782 ]                   │
+└─────────────────────────────────────────┘
+```
+
+Badges are served as SVGs from a public endpoint. No authentication required. Cached for 60 minutes.
+
+---
+
+## Badge Endpoint
+
+```
+GET https://api.mnemom.ai/v1/reputation/{agent_id}/badge.svg?variant={variant}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_id` | path | Yes | The agent identifier |
+| `variant` | query | No | Badge variant (default: `score`) |
+
+**Response:** `image/svg+xml` with `Cache-Control: public, max-age=3600` (60-minute cache).
+
+---
+
+## Badge Variants
+
+### 1. `score` (default)
+
+Displays the Mnemom label and numeric score.
+
+```
+[ Mnemom Trust | 782 ]
+```
+
+Best for: GitHub READMEs, documentation sites, anywhere you want a clean trust signal.
+
+```
+https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score
+```
+
+### 2. `score_tier`
+
+Displays the score with the human-readable tier label.
+
+```
+[ Mnemom Trust | 782 Established ]
+```
+
+Best for: Marketing pages, product listings, anywhere non-technical audiences will see it.
+
+```
+https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier
+```
+
+### 3. `score_trend`
+
+Displays the score with a directional trend arrow showing 30-day movement.
+
+```
+[ Mnemom Trust | 782 ↑ ]
+```
+
+Best for: Dashboards, monitoring pages, anywhere trajectory matters.
+
+```
+https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_trend
+```
+
+Trend arrows:
+- **↑** (up arrow): Score improved over the past 30 days
+- **↓** (down arrow): Score declined over the past 30 days
+- **→** (right arrow): Score unchanged
+
+### 4. `compact`
+
+Displays only the numeric score, no labels.
+
+```
+[ 782 ]
+```
+
+Best for: Tight layouts, inline badges, status bars, bot profile pictures.
+
+```
+https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=compact
+```
+
+### Pre-Eligible Agents
+
+Agents that have not yet reached the 50-checkpoint minimum display a progress badge instead of a score:
+
+```
+[ Mnemom | Building... 23/50 ]
+```
+
+This badge automatically transitions to the scored variant once the agent becomes eligible.
+
+### Not Rated Agents
+
+Agents with no reputation record at all (never registered with Mnemom) display a neutral "Not Rated" badge instead of a broken image:
+
+```
+[ Mnemom Trust | Not Rated ]
+```
+
+This ensures badge embeds degrade gracefully. The badge links to the Mnemom claim page so the agent owner can register.
+
+```
+https://api.mnemom.ai/v1/reputation/unknown-agent/badge.svg
+```
+
+<Info>
+The "Not Rated" badge is returned with the same `Cache-Control: public, max-age=3600` header as scored badges. Once the agent is registered and earns a score, the badge automatically updates.
+</Info>
+
+---
+
+## Embed Code
+
+### GitHub README (Markdown)
+
+The most common use case. Add a clickable badge that links to the agent's reputation page.
+
+```markdown
+[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+```
+
+With tier label:
+
+```markdown
+[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+```
+
+### HTML Websites
+
+Standard HTML embed with link to the full reputation page.
+
+```html
+<a href="https://www.mnemom.ai/agents/agent-xyz/reputation"
+   target="_blank"
+   rel="noopener">
+  <img
+    src="https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score"
+    alt="Mnemom Trust Score"
+  />
+</a>
+```
+
+### React / JSX
+
+```jsx
+function TrustBadge({ agentId }) {
+  const badgeUrl = `https://api.mnemom.ai/v1/reputation/${agentId}/badge.svg?variant=score`;
+  const pageUrl = `https://www.mnemom.ai/agents/${agentId}/reputation`;
+
+  return (
+    <a href={pageUrl} target="_blank" rel="noopener noreferrer">
+      <img src={badgeUrl} alt="Mnemom Trust Score" />
+    </a>
+  );
+}
+```
+
+### A2A Agent Cards
+
+Add a `trust` block to your A2A Agent Card for programmatic trust discovery:
+
+```json
+{
+  "id": "agent-xyz",
+  "name": "My Agent",
+  "skills": ["..."],
+  "trust": {
+    "provider": "mnemom",
+    "score": 782,
+    "grade": "A",
+    "verified_url": "https://api.mnemom.ai/v1/reputation/agent-xyz",
+    "badge_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg"
+  }
+}
+```
+
+Other agents can programmatically read the `trust` block to make delegation decisions. See [Reputation in A2A Agent Cards](/protocols/aap/a2a-integration#reputation-in-a2a-agent-cards) for the full integration guide.
+
+<Warning>
+The `score` and `grade` in the A2A trust block are static snapshots that may become stale. Consumers SHOULD verify by fetching the `verified_url` for the latest score. The `badge_url` always returns the current score.
+</Warning>
+
+### npm / PyPI Package READMEs
+
+For agents distributed as packages, add the badge to your package README:
+
+**npm (package.json README):**
+
+```markdown
+## Trust Score
+
+This agent is verified by [Mnemom](https://mnemom.ai):
+
+[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+```
+
+**PyPI (setup.cfg / pyproject.toml README):**
+
+```markdown
+## Trust Score
+
+[![Mnemom Trust](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+
+Independently verified Mnemom Trust Score. [Learn more](https://docs.mnemom.ai/concepts/reputation-scores).
+```
+
+### Documentation Sites
+
+For Mintlify, Docusaurus, GitBook, or other documentation platforms:
+
+```markdown
+## Trust Verification
+
+This agent maintains a public Mnemom Trust Score:
+
+[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_trend)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+
+The score is computed from independently verified integrity checkpoints.
+See the [scoring methodology](https://docs.mnemom.ai/protocols/aap/reputation-methodology) for details.
+```
+
+### Slack / Teams Bot Profiles
+
+For conversational agents deployed in Slack or Microsoft Teams:
+
+1. Use the `compact` variant for profile images or status indicators
+2. Include the full reputation URL in the bot's profile description
+3. Reference the score in bot introduction messages:
+
+```
+Hi, I'm AgentBot. My Mnemom Trust Score is 782/1000 (A - Reliable).
+Verify: https://www.mnemom.ai/agents/agent-xyz/reputation
+```
+
+---
+
+## Caching Behavior
+
+Badges are cached at multiple levels:
+
+| Layer | TTL | Description |
+|-------|-----|-------------|
+| CDN edge cache | 60 minutes | `Cache-Control: public, max-age=3600` |
+| API cache | 5 minutes | Score recomputation cache |
+| Browser cache | 60 minutes | Standard HTTP caching |
+
+**Implication:** After a score change, badges may take up to 60 minutes to reflect the new value. This is intentional -- frequent badge updates would increase CDN costs without meaningful benefit (scores change incrementally).
+
+For real-time score data, use the API endpoint directly:
+
+```bash
+curl https://api.mnemom.ai/v1/reputation/agent-xyz
+```
+
+---
+
+## Dark and Light Mode
+
+Badge SVGs use neutral colors that work on both light and dark backgrounds:
+
+- **Score label:** Dark gray text on light gray background
+- **Score value:** White text on color-coded background (green for A+, amber for B+, red for C)
+- **Border:** Subtle border for contrast on both backgrounds
+
+The color coding follows the [grade scale](/concepts/reputation-scores#score-range-and-grades):
+
+| Grade Range | Badge Color |
+|-------------|-------------|
+| AAA, AA, A | Green |
+| BBB, BB | Amber |
+| B | Orange |
+| CCC | Red |
+| NR | Gray |
+
+<Tip>
+If the default badge styling does not work on your background, you can use the API response to render a custom badge. Fetch `GET /v1/reputation/{agent_id}` and use the `grade`, `score`, and `tier` fields to render your own component.
+</Tip>
+
+---
+
+## GitHub Action: CI/CD Reputation Gates
+
+Use the `mnemom/reputation-check` GitHub Action to gate deployments on minimum reputation scores. If an agent's score drops below the configured threshold, the workflow step fails.
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy with Reputation Check
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check agent reputation
+        uses: mnemom/reputation-check@v1
+        with:
+          agent-id: 'my-agent-id'
+          min-score: 700          # Minimum score (default: 600)
+          min-grade: 'A'          # Minimum grade (optional, alternative to min-score)
+          fail-on-not-rated: true # Fail if agent has no score yet (default: false)
+
+      - name: Deploy
+        run: npm run deploy
+```
+
+**Action inputs:**
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `agent-id` | Yes | -- | Agent identifier to check |
+| `min-score` | No | `600` | Minimum acceptable score (0 -- 1000) |
+| `min-grade` | No | -- | Minimum acceptable grade (e.g., `A`, `BBB`). Overrides `min-score` if set. |
+| `fail-on-not-rated` | No | `false` | Whether to fail if the agent has no published score |
+
+**Action outputs:**
+
+| Output | Description |
+|--------|-------------|
+| `score` | Current reputation score |
+| `grade` | Current letter grade |
+| `tier` | Current tier label |
+| `passed` | Whether the check passed (`true`/`false`) |
+
+<Tip>
+Combine the reputation check with deployment protection rules to prevent deploying agents that have dropped below your organization's trust threshold.
+</Tip>
+
+---
+
+## One-Click Copy from Dashboard
+
+The easiest way to get embed code is from your agent's reputation page:
+
+1. Navigate to your agent's dashboard
+2. Click the reputation score card
+3. Click "Embed Badge"
+4. Select a variant and format
+5. Click copy -- the embed code is on your clipboard
+
+The embed modal supports all four variants and four formats (Markdown, HTML, React, A2A).
+
+---
+
+## See Also
+
+- [Understanding Reputation Scores](/concepts/reputation-scores) -- What the score means
+- [Improving Your Agent's Reputation](/guides/improving-reputation) -- How to improve it
+- [Scoring Methodology](/protocols/aap/reputation-methodology) -- Full technical specification
+- [Reputation API Overview](/api-reference/reputation-overview) -- API reference for all endpoints
+- [A2A Integration](/protocols/aap/a2a-integration) -- Trust block in Agent Cards

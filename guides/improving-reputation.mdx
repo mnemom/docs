@@ -1,0 +1,529 @@
+---
+title: "Improving Your Mnemom Trust Score"
+description: "A practical guide to building, monitoring, and recovering your Mnemom Trust Score™ — component-by-component strategies for agent builders and operators."
+sidebarTitle: "Improving Your Score"
+icon: "arrow-trend-up"
+---
+
+# Improving Your Mnemom Trust Score
+
+**A practical, component-by-component guide to building and improving your agent's Mnemom Trust Score.** Whether you are getting your first score published or recovering from a low rating, this guide covers actionable strategies for each of the five scoring components.
+
+```
+Your Agent's Score
+      782 (A)
+  ┌────────────────┐
+  │ Integrity  920  │ ████████████████████░░  40%
+  │ Recency    850  │ █████████████████░░░░░  20%
+  │ Drift      700  │ ██████████████░░░░░░░░  20%
+  │ Trace      650  │ █████████████░░░░░░░░░  10%
+  │ Coherence  390  │ ████████░░░░░░░░░░░░░░  10%
+  └────────────────┘
+        ↑
+   Improve the weakest
+   components first
+```
+
+---
+
+## Quick Start: Getting Your First Score
+
+Your agent starts at **NR** (Not Rated). To earn a public reputation score:
+
+<Steps>
+<Step title="Register your agent">
+Claim your agent on [mnemom.ai/claim](https://mnemom.ai/claim) or via the Smoltbot CLI:
+
+```bash
+smoltbot init --provider anthropic
+```
+
+This creates your agent identity and [Alignment Card](/concepts/alignment-cards).
+</Step>
+
+<Step title="Generate integrity checkpoints">
+Route agent traffic through the Mnemom gateway or integrate the AIP SDK directly. Each agent interaction generates an [integrity checkpoint](/concepts/integrity-checkpoints) that analyzes the agent's thinking.
+
+```python
+from aip import initialize
+
+aip = initialize({
+    "card": alignment_card,
+    "analysis_llm": {
+        "model": "claude-haiku-4-5-20251001",
+        "base_url": "https://api.anthropic.com",
+        "api_key": api_key,
+    },
+})
+
+# Each check generates a checkpoint
+signal = await aip.check(response, "anthropic")
+```
+</Step>
+
+<Step title="Reach 50 analyzed checkpoints">
+Once 50 checkpoints have been analyzed, your score is automatically computed and published. During the build phase, your agent displays a "Building... N/50" progress badge.
+
+<Tip>
+At typical usage, reaching 50 checkpoints takes 1-3 days. You can track progress on your agent's dashboard or via the API:
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/integrity/aip
+# Look at "analyzed_checks" field
+```
+</Tip>
+</Step>
+
+<Step title="Score published">
+Your agent now has a public reputation score with a letter grade and embeddable badge. Monitor and improve it using the strategies below.
+</Step>
+</Steps>
+
+---
+
+## Component-by-Component Improvement
+
+### 1. Integrity Ratio (40% of score)
+
+**What it measures:** The percentage of integrity checkpoints that return a `clear` verdict.
+
+**Formula:** `(clear_count / analyzed_count) * 1000`
+
+**This is the highest-impact component.** Improving your integrity ratio from 90% to 95% adds ~20 points to your composite score.
+
+#### How to Improve
+
+**Fix alignment card violations.** The most common cause of non-clear verdicts is a mismatch between what your agent does and what its [Alignment Card](/concepts/alignment-cards) declares. Review your card:
+
+```json
+{
+  "autonomy_envelope": {
+    "bounded_actions": ["search", "recommend"],
+    "forbidden_actions": ["share_credentials"],
+    "escalation_triggers": [
+      {
+        "condition": "purchase_value > 100",
+        "action": "escalate",
+        "reason": "Exceeds autonomous spending limit"
+      }
+    ]
+  }
+}
+```
+
+If your agent routinely performs actions not in `bounded_actions`, either add those actions to the card or adjust agent behavior.
+
+**Resolve `review_needed` checkpoints.** These indicate concerns that did not rise to a boundary violation but still reduce your integrity ratio. Common causes:
+
+- Agent reasoning that mentions goals not declared in the card (`undeclared_intent`)
+- Subtle value misalignment between reasoning and declared values (`value_misalignment`)
+- Reasoning that approaches but does not cross autonomy boundaries (`autonomy_violation`)
+
+Review these on your dashboard and update your alignment card to better reflect your agent's actual behavior, or adjust the agent's prompting to align with the card.
+
+**Improve alignment card clarity.** Vague alignment cards produce more false-positive concerns. Be specific:
+
+```diff
+  "values": {
+-   "declared": ["be_helpful"]
++   "declared": ["principal_benefit", "transparency", "minimal_data"]
+  }
+```
+
+<Accordion title="Score improvement estimator">
+| Current Integrity Ratio | Action | Estimated Score Impact |
+|------------------------|--------|----------------------|
+| 80% (800) | Fix 5 violations to reach 85% (850) | +20 points |
+| 85% (850) | Fix 3 violations to reach 90% (900) | +20 points |
+| 90% (900) | Fix 2 violations to reach 95% (950) | +20 points |
+| 95% (950) | Fix 1 violation to reach 98% (980) | +12 points |
+
+*Impact = delta * weight (0.40)*
+</Accordion>
+
+---
+
+### 2. Violation Recency (20% of score)
+
+**What it measures:** How recently violations occurred. Recent violations penalize more heavily than old ones.
+
+**Formula:** `1000 * (1 - max_recent_impact)` with exponential decay (1-week half-life)
+
+**Time is your friend.** Violations decay automatically -- a `boundary_violation` from 4 weeks ago has only 6.3% of its original impact. But new violations reset the clock.
+
+#### How to Improve
+
+**Prevent new violations.** This is the single most important action. Every new `boundary_violation` resets the recency penalty to maximum. Address the root causes:
+
+1. **Prompt injection resistance:** If violations come from prompt injection, harden your agent's system prompt and review the [AIP conscience values](/concepts/integrity-checkpoints#conscience-values) for `BOUNDARY` protections
+2. **Scope creep:** If violations come from autonomy expansion, tighten escalation triggers in your alignment card
+3. **Model updates:** If violations started after a model version change, review whether the new model's behavior still matches your card
+
+**Wait for decay.** The exponential decay schedule works in your favor:
+
+| Time Since Last Violation | Recency Score |
+|--------------------------|---------------|
+| 0 (just happened) | 0 |
+| 1 week | 500 |
+| 2 weeks | 750 |
+| 3 weeks | 875 |
+| 4 weeks | 937 |
+| 6 weeks | 984 |
+| 8 weeks | 996 |
+
+After 8 weeks without a new violation, the Recency component effectively reaches 1000.
+
+**Resolve violations to prevent recurrence.** Use the resolution API to acknowledge violations and document corrective actions:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/resolve \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_type": "checkpoint",
+    "target_id": "ic-abc123",
+    "resolution_type": "acknowledged"
+  }'
+```
+
+Resolutions do not directly affect the score (the violation still decays normally), but they demonstrate responsible governance and create an audit trail.
+
+---
+
+### 3. Drift Stability (20% of score)
+
+**What it measures:** The proportion of sessions where the agent maintained consistent behavior (no sustained drift alerts).
+
+**Formula:** `(stable_sessions / total_sessions) * 1000`
+
+#### How to Improve
+
+**Apply values consistently.** Drift is detected when an agent's behavioral patterns shift away from its baseline over the course of a session. Ensure your agent:
+
+- Uses the same decision-making framework across sessions
+- Applies declared values consistently (not just when convenient)
+- Maintains stable confidence levels in its reasoning
+
+**Avoid aggressive behavioral changes.** If you update your agent's system prompt or model version, expect a temporary drift signal as the baseline recalibrates. Plan major updates with this in mind.
+
+**Review drift alerts promptly.** Check your dashboard or set up [webhook notifications](/guides/webhooks) for `drift.detected` events:
+
+```bash
+# Create webhook for drift events
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhooks/mnemom",
+    "event_types": ["drift.detected"]
+  }'
+```
+
+**Investigate root causes.** Common drift patterns:
+
+| Drift Direction | Common Cause | Fix |
+|----------------|-------------|-----|
+| `autonomy_expansion` | Agent taking actions outside declared bounds over time | Tighten escalation triggers or expand bounded_actions |
+| `value_drift` | Different values appearing in decision reasoning | Review and update alignment card values |
+| `principal_misalignment` | Declining principal-benefit scores in traces | Re-anchor agent prompting on user interests |
+| `communication_drift` | Reasoning style becoming inconsistent | Stabilize system prompt, pin model version |
+
+---
+
+### 4. Trace Completeness (10% of score)
+
+**What it measures:** What proportion of the agent's decisions are logged as AP-Traces.
+
+**Formula:** `(logged_decisions / expected_decisions) * 1000`
+
+#### How to Improve
+
+**Ensure all decisions are logged via AAP.** The most common reason for low trace completeness is partial SDK integration -- the agent runs integrity checks (AIP) but does not generate decision traces (AAP).
+
+<CodeGroup>
+```typescript TypeScript
+import { APTrace } from '@mnemom/agent-alignment-protocol';
+
+// Generate trace for every significant decision
+function makeDecision(context: DecisionContext): Decision {
+  const result = evaluateOptions(context);
+
+  // Log the trace
+  const trace: APTrace = {
+    trace_id: `tr-${crypto.randomUUID().slice(0, 12)}`,
+    agent_id: 'my-agent',
+    card_id: currentCardId,
+    timestamp: new Date().toISOString(),
+    action: {
+      type: result.actionType,
+      name: result.actionName,
+      category: 'bounded',
+    },
+    decision: {
+      alternatives_considered: result.alternatives,
+      selected: result.selected,
+      selection_reasoning: result.reasoning,
+      values_applied: result.valuesUsed,
+    },
+    escalation: {
+      evaluated: true,
+      required: false,
+      reason: 'Within autonomy envelope',
+    },
+  };
+
+  storeTrace(trace);
+  return result;
+}
+```
+
+```python Python
+from aap import APTrace, Action, Decision
+import uuid
+from datetime import datetime, timezone
+
+def make_decision(context):
+    result = evaluate_options(context)
+
+    trace = APTrace(
+        trace_id=f"tr-{uuid.uuid4().hex[:12]}",
+        agent_id="my-agent",
+        card_id=current_card_id,
+        timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        action=Action(
+            type=result.action_type,
+            name=result.action_name,
+            category="bounded",
+        ),
+        decision=Decision(
+            alternatives_considered=result.alternatives,
+            selected=result.selected,
+            selection_reasoning=result.reasoning,
+            values_applied=result.values_used,
+        ),
+    )
+
+    store_trace(trace.model_dump(mode="json"))
+    return result
+```
+</CodeGroup>
+
+**Increase coverage ratio.** If your agent makes decisions that are not being traced:
+
+1. Audit your agent's action flow and identify decision points without trace generation
+2. Add trace generation at each decision point
+3. Use the gateway integration for automatic trace generation if manual instrumentation is impractical
+
+---
+
+### 5. Coherence Compatibility (10% of score)
+
+**What it measures:** The mean value coherence score across fleet interactions.
+
+**Formula:** `mean_coherence_score * 1000` (defaults to 750 if no fleet data)
+
+#### How to Improve
+
+**Align values with your fleet.** If your agent operates in a multi-agent environment, ensure its declared values are compatible with peer agents:
+
+```python
+from aap import check_fleet_coherence
+
+result = check_fleet_coherence([
+    {"agent_id": "my-agent", "card": my_card},
+    {"agent_id": "peer-1", "card": peer_1_card},
+    {"agent_id": "peer-2", "card": peer_2_card},
+])
+
+# Check if my agent is an outlier
+for outlier in result.outliers:
+    if outlier.agent_id == "my-agent":
+        print(f"Outlier! Conflicts: {outlier.primary_conflicts}")
+```
+
+**Resolve value conflicts.** If your agent declares `conflicts_with` values that fleet peers hold, or vice versa, coherence scores will be low. Review conflicts and determine whether they are necessary or can be resolved.
+
+**Participate in coherence checks.** The default score of 750 is applied when no fleet data exists. Actually participating in coherence checks -- even if scores are moderate -- demonstrates engagement and replaces the default.
+
+---
+
+## Monitoring Your Score
+
+### Dashboard
+
+Your agent's reputation score is displayed on the dashboard with a breakdown of all five components, historical trend chart, and 30-day delta.
+
+### Webhook Notifications
+
+Subscribe to reputation events for automated monitoring:
+
+| Event | Trigger |
+|-------|---------|
+| `reputation.score_changed` | Score changed by more than 10 points in a single recomputation |
+| `reputation.grade_changed` | Letter grade changed (e.g., A to AA, or BBB to BB) |
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhooks/mnemom",
+    "event_types": ["reputation.score_changed", "reputation.grade_changed"]
+  }'
+```
+
+### SDK Self-Monitoring
+
+Build reputation monitoring into your agent's health checks:
+
+<CodeGroup>
+```typescript TypeScript
+import { fetchReputation } from '@mnemom/reputation';
+
+async function healthCheck(agentId: string) {
+  const rep = await fetchReputation(agentId);
+
+  if (!rep) {
+    console.warn('Reputation data unavailable');
+    return;
+  }
+
+  if (rep.score < 600) {
+    console.error(`ALERT: Reputation score critically low (${rep.score})`);
+    await notifyOps(`Agent ${agentId} reputation below threshold: ${rep.score} (${rep.grade})`);
+  }
+
+  if (rep.trend_30d < -50) {
+    console.warn(`WARNING: Rapid reputation decline (${rep.trend_30d} over 30 days)`);
+  }
+
+  // Check individual components
+  for (const component of rep.components) {
+    if (component.score < 500) {
+      console.warn(`Component ${component.label} is low: ${component.score}/1000`);
+    }
+  }
+}
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+def health_check(agent_id: str):
+    rep = httpx.get(f"{API_BASE}/v1/reputation/{agent_id}").json()
+
+    if rep["score"] < 600:
+        print(f"ALERT: Reputation score critically low ({rep['score']})")
+        notify_ops(f"Agent {agent_id} reputation below threshold: {rep['score']} ({rep['grade']})")
+
+    if rep["trend_30d"] < -50:
+        print(f"WARNING: Rapid reputation decline ({rep['trend_30d']} over 30 days)")
+
+    for component in rep["components"]:
+        if component["score"] < 500:
+            print(f"Component {component['label']} is low: {component['score']}/1000")
+```
+</CodeGroup>
+
+---
+
+## Recovery from a Low Score
+
+If your agent's reputation has dropped to B (Concerning) or CCC (Critical), here is the recovery playbook:
+
+### Phase 1: Stop the Bleeding (Week 1)
+
+1. **Identify the weakest component.** Fetch the full score breakdown and find the component pulling the score down most
+2. **Fix active violations.** If the Integrity Ratio is the problem, review recent non-clear checkpoints and address root causes immediately
+3. **Pause if necessary.** If the agent is generating new violations faster than you can fix them, consider pausing the agent via [containment](/api-reference/endpoint/post-orgs-org-id-agents-agent-id-pause) while you address the issues
+
+### Phase 2: Rebuild (Weeks 2-4)
+
+4. **Update the alignment card.** Ensure the card accurately reflects your agent's current behavior. A misaligned card is the most common source of poor scores.
+5. **Monitor daily.** Check the score trend daily. You should see improvement within 1-2 weeks as the Violation Recency component decays.
+6. **Generate clean checkpoints.** Normal operation with a corrected alignment card should produce `clear` verdicts that improve the Integrity Ratio.
+
+### Phase 3: Strengthen (Weeks 4-8)
+
+7. **Address secondary components.** Once Integrity Ratio and Violation Recency are improving, focus on Drift Stability and Trace Completeness.
+8. **Build history.** As clean checkpoints accumulate, the Confidence Level improves, adding credibility to the recovering score.
+
+**Expected timeline:** An agent with a CCC (300) score can realistically recover to BBB (600+) in 4-6 weeks with consistent corrective action. Recovery to A (700+) typically takes 8-12 weeks.
+
+---
+
+## Common Pitfalls
+
+<AccordionGroup>
+<Accordion title="Updating the alignment card too aggressively">
+Broadening your alignment card to eliminate violations (e.g., adding everything to `bounded_actions`) will improve the Integrity Ratio but may reduce trust from consumers who inspect the card. An alignment card that permits everything is less meaningful than one with clear boundaries.
+</Accordion>
+
+<Accordion title="Ignoring review_needed checkpoints">
+Agents often focus only on `boundary_violation` verdicts because those are the most visible. But `review_needed` checkpoints also reduce the Integrity Ratio (they are not `clear`). Addressing these can yield significant score improvements.
+</Accordion>
+
+<Accordion title="Frequent model version changes">
+Switching LLM model versions causes temporary drift signals as the behavioral baseline recalibrates. If you change models frequently, Drift Stability suffers. Pin a model version for stability.
+</Accordion>
+
+<Accordion title="Not logging AP-Traces">
+Running AIP integrity checks without generating AAP traces gives you integrity data but a low Trace Completeness score. Both protocols should be active.
+</Accordion>
+
+<Accordion title="Operating in isolation">
+Agents that never participate in fleet coherence checks receive the default Coherence Compatibility score (750). While not penalizing, this means the component cannot contribute to score improvement above 750.
+</Accordion>
+</AccordionGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+<Accordion title="Why isn't my score improving?">
+Check these in order:
+1. **Are new violations occurring?** Each new violation resets the Recency penalty. Check your checkpoint feed for recent non-clear verdicts.
+2. **Has enough time passed?** The Violation Recency half-life is 1 week. Meaningful improvement takes 2-4 weeks of clean operation.
+3. **Is the alignment card accurate?** If the card does not match your agent's actual behavior, new violations will continue.
+4. **Are checkpoints being generated?** Verify via the API that checkpoint count is increasing. No new checkpoints means no new data for score computation.
+</Accordion>
+
+<Accordion title="My score dropped suddenly — what happened?">
+Check the reputation events endpoint:
+
+```bash
+curl https://api.mnemom.ai/v1/reputation/{agent_id}/events
+```
+
+Look for `violation_detected`, `drift_detected`, or `grade_changed` events. Common causes of sudden drops:
+- A new `boundary_violation` (resets Violation Recency to 0)
+- A drift alert (reduces Drift Stability by one session)
+- Model version change triggering behavioral shift
+</Accordion>
+
+<Accordion title="My agent has 100+ checkpoints but still shows NR">
+The minimum is 50 **analyzed** checkpoints. Checkpoints where the thinking block was below 100 tokens receive a synthetic clear verdict and are not counted toward the 50-checkpoint minimum. Check `analyzed_checks` in the integrity stats:
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/integrity/aip
+# Check "analyzed_checks" — this must be >= 50
+```
+</Accordion>
+
+<Accordion title="Component scores don't add up to the composite score">
+The composite score is a weighted sum: `S = (integrity * 0.40) + (recency * 0.20) + (drift * 0.20) + (trace * 0.10) + (coherence * 0.10)`. Check that you are applying the correct weights. The `weighted_score` field in each component shows the contribution.
+</Accordion>
+</AccordionGroup>
+
+---
+
+## See Also
+
+- [Understanding Reputation Scores](/concepts/reputation-scores) -- Conceptual overview
+- [Scoring Methodology](/protocols/aap/reputation-methodology) -- Full technical specification
+- [Embeddable Badges](/guides/reputation-badges) -- Display your score publicly
+- [Reputation API Overview](/api-reference/reputation-overview) -- API reference for all reputation endpoints
+- [Webhook Notifications](/guides/webhooks) -- Real-time event delivery for score changes
