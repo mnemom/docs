@@ -9,6 +9,20 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
+## Self-Healing ZK Proof Pipeline
+<sub>February 2026</sub>
+
+**Proof inputs are now persisted and the retry loop actually proves.** Three interacting bugs caused the ZK proof pipeline to silently stop generating proofs: Fly.io auto-stopped prover machines despite configuration, the retry loop was a no-op that logged warnings but never called the prover, and the gateway's fire-and-forget pattern lost proof inputs when the prover was unavailable.
+
+- **Proof input persistence**: Gateway now stores `analysis_json`, `thinking_hash`, `card_hash`, `values_hash`, and `model` in `verdict_proofs` on INSERT
+- **Self-healing retry loop**: Prover fetches stored inputs from DB and spawns `prove_verdict_derivation()` directly -- no longer depends on the original HTTP request
+- **Auto-stop prevention**: Retry loop self-pings `/health` every 30s to maintain HTTP activity; machine-level `autostop=off` set on both prover machines
+- **Orphan cleanup**: All pre-fix pending proofs marked as permanently failed (inputs were never persisted)
+- **Updated `get_pending_proofs()`**: Returns input columns, filters out rows without stored inputs
+- [Verifiable Verdicts -- Proof Input Persistence](/protocols/aip/verifiable-verdicts#proof-input-persistence)
+
+---
+
 ## N-Way Fleet Coherence (E-05)
 <sub>February 2026</sub>
 

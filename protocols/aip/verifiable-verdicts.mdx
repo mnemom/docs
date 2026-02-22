@@ -127,10 +127,36 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 | **Verification latency** | &lt;100 milliseconds | STARK verification is fast. Local verification avoids network round-trips. |
 | **Proof size** | ~50-200 KB | Depends on computation complexity. Compressed receipt size. |
 
-Proving is asynchronous and fire-and-forget. The checkpoint verdict is returned immediately; the proof is generated in the background and attached to the certificate when complete. This means the ZK proof never adds latency to the critical path of integrity analysis.
+Proving is asynchronous. The checkpoint verdict is returned immediately; the proof is generated in the background and attached to the certificate when complete. This means the ZK proof never adds latency to the critical path of integrity analysis.
+
+### Proof Input Persistence
+
+When the gateway creates a proof request, it stores the full proving inputs alongside the `verdict_proofs` row:
+
+| Column | Description |
+|--------|-------------|
+| `analysis_json` | The full analysis response text from the AIP observer |
+| `thinking_hash` | SHA-256 hash of the thinking block |
+| `card_hash` | SHA-256 hash of the Alignment Card at the time of analysis |
+| `values_hash` | SHA-256 hash of the conscience values at the time of analysis |
+| `model` | The analysis model identifier |
+
+This ensures that proof inputs survive prover restarts, network failures, and machine stops. If the initial proving attempt fails, the retry loop can reconstruct the full proof request from the database without needing the original HTTP payload.
+
+### Self-Healing Retry Loop
+
+The prover service runs a background retry loop every 30 seconds that:
+
+1. Queries `get_pending_proofs()` for proofs with status `pending` or `failed` (up to 5 retries)
+2. Filters out proofs without stored input data (legacy orphans)
+3. Sets status to `proving` and spawns `prove_verdict_derivation()` with the stored inputs
+4. On success, calls `complete_proof()` to persist the receipt, journal, and verification result
+5. On failure, calls `fail_proof()` to increment the retry counter
+
+This makes the proving pipeline self-healing: transient failures (prover unavailable, machine restarts, OOM) are automatically recovered without operator intervention.
 
 <Note>
-The fire-and-forget pattern means a proof might fail to generate (prover service unavailable, timeout, etc.) without affecting the checkpoint. In this case, `proofs.verdict_derivation` remains `null` in the certificate. The checkpoint is still valid -- it just lacks the additional computational integrity guarantee.
+If a proof fails to generate after 5 retries, it remains in `failed` status. The checkpoint is still valid -- it just lacks the additional computational integrity guarantee. Proofs without stored inputs (created before input persistence was added) are skipped by the retry loop and marked as permanently failed.
 </Note>
 
 ---
