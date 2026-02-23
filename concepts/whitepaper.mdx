@@ -22,7 +22,7 @@ We present three complementary layers of infrastructure that together make auton
 
 As AI agents transition from assistants to autonomous actors — negotiating, transacting, and coordinating on behalf of humans — the question of alignment becomes infrastructure-critical. Current agent coordination protocols (A2A, MCP, AP2) address capability discovery, tool integration, and payment authorization, but none address the fundamental question: *Is this agent serving its principal's interests?*
 
-AAP provides **transparency**: Alignment Cards declare an agent's alignment posture, AP-Traces create auditable records of decisions, and Value Coherence Handshakes verify compatibility before multi-agent coordination. AIP provides **integrity**: thinking blocks are analyzed between turns, before actions execute, producing Integrity Checkpoints with structured verdicts that enable side-channel intervention. The cryptographic attestation layer provides **proof**: Ed25519 signatures, SHA-256 hash chains, Merkle accumulator trees, and zero-knowledge proofs via RISC Zero zkVM that make integrity verdicts independently verifiable without requiring trust in the attestation service.
+AAP provides **transparency**: Alignment Cards declare an agent's alignment posture, AP-Traces create auditable records of decisions, and Value Coherence Handshakes verify compatibility before multi-agent coordination. AIP provides **integrity**: thinking blocks are analyzed between turns, before actions execute, producing Integrity Checkpoints with structured verdicts that enable side-channel intervention. The cryptographic attestation layer provides **proof**: Ed25519 signatures, SHA-256 hash chains, Merkle accumulator trees, and zero-knowledge proofs via SP1 zkVM that make integrity verdicts independently verifiable without requiring trust in the attestation service.
 
 The three layers share a single Alignment Card, a single session identity, and a single drift detection framework. AAP answers *what did this agent do?* AIP answers *what is this agent thinking?* The proof layer answers *can we verify the oversight itself?* Together they close the loop from observation through analysis to cryptographic evidence — defense in depth on a shared behavioral contract.
 
@@ -429,7 +429,7 @@ The attestation architecture comprises four independent layers, each providing a
 | 1. **Signatures** | Ed25519 | Verdict was issued by a known key | Fully offline |
 | 2. **Hash Chains** | SHA-256 preimage | Checkpoint sequence is tamper-evident | Fully offline |
 | 3. **Merkle Trees** | Binary Merkle tree | Checkpoint exists in the complete log | Online (root lookup) |
-| 4. **ZK Proofs** | RISC Zero STARK | Verdict rules were applied correctly | Fully offline |
+| 4. **ZK Proofs** | SP1 STARK | Verdict rules were applied correctly | Fully offline |
 
 Each layer is independently valuable:
 
@@ -578,7 +578,7 @@ The integrity certificate is the proof layer's primary data structure — a self
       ]
     },
     "verdict_derivation": {
-      "method": "RISC-Zero-STARK",
+      "method": "SP1-STARK",
       "image_id": "hex:...",
       "receipt": "<base64 receipt>",
       "journal": "<base64 journal>",
@@ -621,7 +621,7 @@ Stage 1 is prohibitively expensive to prove cryptographically. Stage 2 is approx
 - That the LLM response was unmodified (Phase 1 attestation handles this).
 - That the LLM correctly identified all concerns (this is honestly acknowledged as a remaining trust assumption — see Section 11.9).
 
-**Implementation**: A RISC Zero zkVM (v1.2) guest program written in Rust, targeting the RISC-V architecture. The guest program deserializes the analysis JSON, normalizes concern evidence to 200 characters, re-derives the verdict using the same deterministic rules as the TypeScript implementation, maps the verdict to an action, hashes the concerns for integrity binding, and commits the output to the proof journal. Cross-language conformance tests ensure both implementations produce identical outputs for identical inputs.
+**Implementation**: An SP1 zkVM (v6.0.1) guest program written in Rust, targeting the RISC-V architecture. The guest program deserializes the analysis JSON, normalizes concern evidence to 200 characters, re-derives the verdict using the same deterministic rules as the TypeScript implementation, maps the verdict to an action, hashes the concerns for integrity binding, and commits the output to the proof journal. Cross-language conformance tests ensure both implementations produce identical outputs for identical inputs.
 
 **The verdict derivation rules** (executed inside the zkVM):
 
@@ -677,7 +677,7 @@ Seven public endpoints enable independent verification. The verification endpoin
 2. **Chain**: Recompute chain hash from the preimage fields and compare to the stored hash.
 3. **Merkle**: Recompute the Merkle root from the leaf hash and inclusion proof siblings; compare to the published root.
 4. **Commitment**: Verify that `combined_commitment` matches the hash of individual input hashes.
-5. **Verdict derivation** (when available): Verify the RISC Zero STARK receipt against the expected image ID and confirm the journal output matches the certificate's verdict and concerns.
+5. **Verdict derivation** (when available): Verify the SP1 STARK receipt against the expected image ID and confirm the journal output matches the certificate's verdict and concerns.
 
 Each check reports independently. A certificate with a valid signature but a pending ZK proof is reported as partially verified — not rejected.
 
@@ -1126,7 +1126,7 @@ Publish Merkle roots to a Layer 2 blockchain (e.g., Base, Arbitrum, or a dedicat
 
 ### 13.7 Recursive Proofs
 
-RISC Zero supports proof composition, where one proof can verify another proof. This enables aggregate verification: a single proof attesting that all N checkpoints in a session were derived correctly, rather than N individual proofs. Recursive proofs would reduce storage costs and enable session-level attestation certificates.
+SP1 supports proof composition, where one proof can verify another proof. This enables aggregate verification: a single proof attesting that all N checkpoints in a session were derived correctly, rather than N individual proofs. Recursive proofs would reduce storage costs and enable session-level attestation certificates.
 
 ### 13.8 Threshold Signatures
 
@@ -1148,7 +1148,7 @@ This paper presents three complementary layers of infrastructure that address th
 
 **Integrity** (AIP): Integrity Checkpoints reveal what agents think. Conscience prompts analyze reasoning against declared values. Side-channel signals enable intervention before harm occurs. This layer makes intent *analyzable* — but the analysis engine becomes a new trust dependency.
 
-**Proof** (Cryptographic Attestation): Ed25519 signatures prevent verdict fabrication. Hash chains prevent retroactive modification. Merkle trees prevent selective deletion. Zero-knowledge proofs via RISC Zero zkVM prove that verdict derivation rules were applied correctly. This layer makes oversight *verifiable* — removing the need to trust the oversight service itself.
+**Proof** (Cryptographic Attestation): Ed25519 signatures prevent verdict fabrication. Hash chains prevent retroactive modification. Merkle trees prevent selective deletion. Zero-knowledge proofs via SP1 zkVM prove that verdict derivation rules were applied correctly. This layer makes oversight *verifiable* — removing the need to trust the oversight service itself.
 
 Together, the three layers close a loop that begins with observation and ends with cryptographic evidence. Each layer addresses the trust gap introduced by the one before it. AAP introduces the need for independent analysis. AIP introduces the need for verifiable oversight. The proof layer delivers that verification — and is honest about the boundary it cannot cross: the LLM analysis stage remains a trust assumption, clearly delineated and openly stated.
 
@@ -1178,7 +1178,7 @@ What remains is the work of building alignment infrastructure that scales with t
 14. BCP 14 (RFC 2119, RFC 8174). Key words for use in RFCs.
 15. NIST SP 800-207. Zero Trust Architecture. August 2020.
 16. NIST SP 800-63-4. Digital Identity Guidelines. 2024.
-17. RISC Zero. "RISC Zero zkVM Documentation." 2025.
+17. Succinct Labs. "SP1 zkVM Documentation." 2025.
 18. Paulmillr. "@noble/ed25519: Fastest JS implementation of Ed25519." 2024.
 19. C2PA (Coalition for Content Provenance and Authenticity). "C2PA Technical Specification v2.1." 2025.
 20. W3C. "Verifiable Credentials Data Model v2.0." W3C Recommendation. 2024.
@@ -1269,7 +1269,7 @@ What remains is the work of building alignment infrastructure that scales with t
 
 **SSM (Self-Similarity Matrix)**: A computational structure measuring similarity between messages across a conversation.
 
-**STARK Proof**: A Scalable Transparent Argument of Knowledge generated by RISC Zero zkVM, proving that verdict derivation rules were applied correctly.
+**STARK Proof**: A Scalable Transparent Argument of Knowledge generated by SP1 zkVM, proving that verdict derivation rules were applied correctly.
 
 **Thinking Block**: The internal reasoning content produced by an LLM before or alongside its visible response.
 

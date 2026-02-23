@@ -44,7 +44,7 @@ The ZK proof guarantees that the verdict was correctly derived from the analysis
 
 ## Guest Program
 
-The verdict derivation logic runs inside a [RISC Zero](https://risczero.com/) zkVM guest program. The guest program is a deterministic Rust binary that takes structured inputs, applies the verdict rules, and produces public outputs.
+The verdict derivation logic runs inside an [SP1](https://docs.succinct.xyz/) zkVM guest program. The guest program is a deterministic Rust binary that takes structured inputs, applies the verdict rules, and produces public outputs.
 
 ### Inputs (Private)
 
@@ -80,7 +80,7 @@ These are committed to the proof's public journal and are visible to verifiers:
 
 ## STARK Proof Format
 
-The proof is a RISC Zero STARK (Scalable Transparent ARgument of Knowledge), stored and transmitted in three components:
+The proof is an SP1 STARK (Scalable Transparent ARgument of Knowledge), stored and transmitted in three components:
 
 | Component | Description |
 |-----------|-------------|
@@ -169,19 +169,21 @@ Submit the full certificate to [`POST /v1/verify`](/api-reference/endpoint/post-
 
 ### Local Verification
 
-Use the RISC Zero verifier SDK to verify locally:
+Use the SP1 verifier SDK to verify locally:
 
 ```rust
-use risc0_zkvm::Receipt;
+use sp1_sdk::{ProverClient, SP1ProofWithPublicValues};
 
-let receipt: Receipt = deserialize(&cert.proofs.verdict_derivation.receipt);
-let image_id: [u32; 8] = parse_image_id(&cert.proofs.verdict_derivation.image_id);
+let client = ProverClient::from_env();
+let (_, vk) = client.setup(ELF);
+
+let proof: SP1ProofWithPublicValues = deserialize(&cert.proofs.verdict_derivation.receipt);
 
 // Verify the proof
-receipt.verify(image_id).expect("Proof verification failed");
+client.verify(&proof, &vk).expect("Proof verification failed");
 
-// Read the public journal
-let journal = receipt.journal.decode::<VerdictJournal>().unwrap();
+// Read the public values
+let journal = proof.public_values.read::<VerdictJournal>();
 assert_eq!(journal.verdict, cert.claims.verdict);
 ```
 
@@ -201,4 +203,4 @@ The `status` field progresses through: `pending` -> `proving` -> `completed` (or
 
 - [Integrity Certificates](/protocols/aip/certificates) -- The certificate format that contains ZK proofs
 - [AIP Specification -- Verification](/protocols/aip/specification#16-verification) -- Protocol-level verification specification
-- [RISC Zero Documentation](https://dev.risczero.com/) -- The zkVM platform used for proving
+- [SP1 Documentation](https://docs.succinct.xyz/) -- The zkVM platform used for proving
