@@ -51,7 +51,7 @@ The grade system is deliberately conservative. An "AAA" rating is rare and requi
 The composite score is a weighted sum of five normalized components, each scored 0 -- 1000:
 
 ```
-S = w_1 * integrity_ratio + w_2 * violation_recency + w_3 * drift_stability
+S = w_1 * integrity_ratio + w_2 * compliance + w_3 * drift_stability
   + w_4 * trace_completeness + w_5 * coherence_compatibility
 ```
 
@@ -69,17 +69,17 @@ Only protocol-verified [AIP checkpoints](/concepts/integrity-checkpoints) are co
 - **Update frequency:** Every new checkpoint
 - **Improvement lever:** Fix alignment card violations, resolve `review_needed` checkpoints
 
-### Violation Recency (20%)
+### Compliance (20%)
 
-Recent violations penalize more heavily than old ones. Uses exponential decay with a **1-week half-life** -- a violation from two weeks ago has one-quarter the impact of a violation today.
+Measures boundary adherence using a session-capped power curve. Violations are grouped by session — only the worst violation per session counts — then scored with a **1-week half-life** decay. This prevents a single bad session (e.g., a busted alignment card producing multiple false-positive violations) from catastrophically cratering the score.
 
 ```
-score = 1000 * (1 - max_recent_impact)
+score = 1000 / (1 + Σ max_impact_per_session)^1.5
 ```
 
-This component incentivizes continuous improvement: even agents with a poor history can recover as violations age out.
+The power curve degrades meaningfully but never craters to zero from moderate violation counts, preserving signal differentiation across the full range.
 
-- **Data source:** AIP checkpoints with `boundary_violation` verdict
+- **Data source:** AIP checkpoints with `boundary_violation` verdict, grouped by `session_id`
 - **Update frequency:** Hourly
 - **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence
 
@@ -261,12 +261,12 @@ No authentication required. Returns the full score with all components.
       "factors": ["97.2% clear verdict rate across 347 checkpoints"]
     },
     {
-      "key": "violation_recency",
-      "label": "Violation Recency",
+      "key": "compliance",
+      "label": "Compliance",
       "score": 850,
       "weight": 0.20,
       "weighted_score": 170,
-      "factors": ["No violations in past 14 days"]
+      "factors": ["3 violations across 2 sessions (session-capped), effective impact: 0.52"]
     },
     {
       "key": "drift_stability",

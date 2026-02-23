@@ -7,9 +7,9 @@ icon: "calculator"
 
 # Mnemom Trust Score™ Methodology
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 **Status**: Stable
-**Date**: 2026-02-21
+**Date**: 2026-02-23
 **Authors**: Mnemom Research
 
 ---
@@ -50,14 +50,14 @@ Where each component `c_i` is normalized to the range [0, 1000] and each weight 
 | Component | Key | Weight (w) |
 |-----------|-----|------------|
 | Integrity Ratio | `integrity_ratio` | 0.40 |
-| Violation Recency | `violation_recency` | 0.20 |
+| Compliance | `compliance` | 0.20 |
 | Drift Stability | `drift_stability` | 0.20 |
 | Trace Completeness | `trace_completeness` | 0.10 |
 | Coherence Compatibility | `coherence_compatibility` | 0.10 |
 
 **Result**: S is in the range [0, 1000], rounded to the nearest integer.
 
-**Weight rationale**: Integrity Ratio receives the highest weight (40%) because it directly measures the agent's core behavioral alignment. Violation Recency and Drift Stability share 20% each because they measure temporal patterns that are strong predictors of future behavior. Trace Completeness and Coherence Compatibility receive 10% each as supporting signals.
+**Weight rationale**: Integrity Ratio receives the highest weight (40%) because it directly measures the agent's core behavioral alignment. Compliance and Drift Stability share 20% each because they measure temporal patterns that are strong predictors of future behavior. Trace Completeness and Coherence Compatibility receive 10% each as supporting signals.
 
 ---
 
@@ -84,34 +84,33 @@ integrity_ratio = (clear_count / analyzed_count) × 1000
 
 **Data source:** `GET /v1/agents/{agent_id}/integrity/aip` -- the `clear_count` and `analyzed_checks` fields.
 
-### 2.2 Violation Recency (w = 0.20)
+### 2.2 Compliance (w = 0.20)
 
-Penalizes recent violations more heavily than older ones using exponential decay.
+Measures how well an agent stays within its declared boundaries. Violations are grouped by session and scored using a session-capped power curve with exponential decay.
 
 **Formula:**
 
 ```
-score = 1000 × (1 - max_recent_impact)
+score = 1000 / (1 + Σ max_impact_per_session)^1.5
 ```
 
-Where `max_recent_impact` is the maximum impact value across all violations within the scoring window:
+Where `max_impact_per_session` is the highest decayed impact among all violations within a single session:
 
 ```
-impact(violation) = severity_weight × 2^(-age_weeks / half_life)
+impact(violation) = 2^(-age_hours / 168)
 ```
+
+Violations are grouped by `session_id`. Within each session, only the violation with the highest decayed impact is counted (capped at 1.0). This prevents a single bad session — such as a busted alignment card producing multiple false-positive violations in rapid succession — from compounding unfairly.
 
 **Parameters:**
-- `half_life`: 1 week (7 days). A violation's impact halves every week.
-- `severity_weight`:
-  - `boundary_violation`: 1.0
-  - `review_needed` with `severity = "high"` or `"critical"`: 0.5
-  - Other `review_needed`: 0.2
-- `age_weeks`: `(now - violation_timestamp) / (7 × 24 × 60 × 60 × 1000)` in fractional weeks
+- `half_life`: 1 week (168 hours). A violation's impact halves every week.
+- `scoring_window`: 90 days. Violations older than 90 days are excluded entirely.
+- Session grouping: violations within the same `session_id` are collapsed to their maximum impact.
 
-**Decay schedule:**
+**Decay schedule (per session):**
 
-| Age | Impact (boundary_violation) |
-|-----|---------------------------|
+| Age of Session's Worst Violation | Session Impact |
+|----------------------------------|---------------|
 | Today | 1.000 |
 | 1 week | 0.500 |
 | 2 weeks | 0.250 |
@@ -119,12 +118,21 @@ impact(violation) = severity_weight × 2^(-age_weeks / half_life)
 | 4 weeks | 0.063 |
 | 8 weeks | 0.004 |
 
+**Score examples:**
+
+| Scenario | Total Session Impact | Score |
+|----------|---------------------|-------|
+| 0 violation sessions | 0.00 | 1000 |
+| 1 recent session | 1.00 | 354 |
+| 3 sessions over 30 days | ~1.37 | 267 |
+| 7 sessions over 60 days | ~1.56 | 181 |
+
 **Edge cases:**
 - If no violations exist: component score = 1000
-- If the most recent violation is > 8 weeks old: effective impact < 0.004, score rounds to 1000
-- Multiple simultaneous violations: only the maximum impact is used (not cumulative)
+- Multiple violations in the same session: only the maximum impact for that session is counted
+- Re-evaluated violations (`re_evaluated_at IS NOT NULL`) are excluded from scoring
 
-**Data source:** AIP checkpoints with `verdict != "clear"`, filtered by timestamp.
+**Data source:** AIP checkpoints with `verdict = "boundary_violation"`, grouped by `session_id`, filtered by 90-day window.
 
 ### 2.3 Drift Stability (w = 0.20)
 
@@ -299,9 +307,9 @@ Agents without fleet interaction data receive a default Coherence Compatibility 
 
 At 40% weight, the Integrity Ratio disproportionately determines the composite score. An agent with a perfect integrity ratio but poor scores on all other components can still achieve a BBB grade. This is intentional -- integrity is the most important signal -- but consumers should inspect individual components for a complete picture.
 
-### 8.4 Temporal Bias in Violation Recency
+### 8.4 Temporal Bias in Compliance
 
-The 1-week half-life means violations are effectively forgiven after 8 weeks. An agent with a history of serious violations that occurred 3 months ago will show a perfect Violation Recency score. Historical snapshots (available via the history endpoint) provide the full longitudinal record.
+The 1-week half-life and 90-day scoring window mean violations are effectively forgiven after ~8 weeks. An agent with a history of serious violations that occurred 3 months ago will show a perfect Compliance score. Session capping also means that agents with many violations concentrated in few sessions score better than agents with the same number of violations spread across many sessions. Historical snapshots (available via the history endpoint) provide the full longitudinal record.
 
 ### 8.5 Trace Completeness Estimation
 
@@ -343,6 +351,7 @@ curl https://api.mnemom.ai/v1/checkpoints/{checkpoint_id}/certificate
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2026-02-23 | Compliance scoring: session-capped power curve replaces per-violation exponential. Renamed "Violation Recency" to "Compliance". |
 | 1.0.0 | 2026-02-21 | Initial stable release. Five components, bond-rating grade scale, confidence levels, anti-gaming measures. |
 
 ---

@@ -143,35 +143,32 @@ Review these on your dashboard and update your alignment card to better reflect 
 
 ---
 
-### 2. Violation Recency (20% of score)
+### 2. Compliance (20% of score)
 
-**What it measures:** How recently violations occurred. Recent violations penalize more heavily than old ones.
+**What it measures:** How well your agent stays within its declared boundaries. Uses a session-capped power curve — violations are grouped by session, only the worst per session counts.
 
-**Formula:** `1000 * (1 - max_recent_impact)` with exponential decay (1-week half-life)
+**Formula:** `1000 / (1 + Σ max_impact_per_session)^1.5` with 1-week half-life decay
 
-**Time is your friend.** Violations decay automatically -- a `boundary_violation` from 4 weeks ago has only 6.3% of its original impact. But new violations reset the clock.
+**Time is your friend.** Violation impact decays automatically — a `boundary_violation` from 4 weeks ago has only 6.3% of its original impact. Session capping also means a burst of violations in a single bad session counts as one event, not many.
 
 #### How to Improve
 
-**Prevent new violations.** This is the single most important action. Every new `boundary_violation` resets the recency penalty to maximum. Address the root causes:
+**Prevent new violations.** This is the single most important action. Each new violation session adds to the cumulative impact. Address the root causes:
 
 1. **Prompt injection resistance:** If violations come from prompt injection, harden your agent's system prompt and review the [AIP conscience values](/concepts/integrity-checkpoints#conscience-values) for `BOUNDARY` protections
 2. **Scope creep:** If violations come from autonomy expansion, tighten escalation triggers in your alignment card
 3. **Model updates:** If violations started after a model version change, review whether the new model's behavior still matches your card
 
-**Wait for decay.** The exponential decay schedule works in your favor:
+**Wait for decay.** The decay schedule works in your favor:
 
-| Time Since Last Violation | Recency Score |
-|--------------------------|---------------|
-| 0 (just happened) | 0 |
-| 1 week | 500 |
-| 2 weeks | 750 |
-| 3 weeks | 875 |
-| 4 weeks | 937 |
-| 6 weeks | 984 |
-| 8 weeks | 996 |
+| Violation Sessions | Score (all recent) | Score (4 weeks old) |
+|-------------------|-------------------|---------------------|
+| 0 | 1000 | 1000 |
+| 1 | 354 | 957 |
+| 2 | 192 | 917 |
+| 3 | 125 | 878 |
 
-After 8 weeks without a new violation, the Recency component effectively reaches 1000.
+After 8 weeks without a new violation, session impacts decay to near-zero and the Compliance component effectively reaches 1000.
 
 **Resolve violations to prevent recurrence.** Use the resolution API to acknowledge violations and document corrective actions:
 
@@ -442,12 +439,12 @@ If your agent's reputation has dropped to B (Concerning) or CCC (Critical), here
 ### Phase 2: Rebuild (Weeks 2-4)
 
 4. **Update the alignment card.** Ensure the card accurately reflects your agent's current behavior. A misaligned card is the most common source of poor scores.
-5. **Monitor daily.** Check the score trend daily. You should see improvement within 1-2 weeks as the Violation Recency component decays.
+5. **Monitor daily.** Check the score trend daily. You should see improvement within 1-2 weeks as the Compliance component decays.
 6. **Generate clean checkpoints.** Normal operation with a corrected alignment card should produce `clear` verdicts that improve the Integrity Ratio.
 
 ### Phase 3: Strengthen (Weeks 4-8)
 
-7. **Address secondary components.** Once Integrity Ratio and Violation Recency are improving, focus on Drift Stability and Trace Completeness.
+7. **Address secondary components.** Once Integrity Ratio and Compliance are improving, focus on Drift Stability and Trace Completeness.
 8. **Build history.** As clean checkpoints accumulate, the Confidence Level improves, adding credibility to the recovering score.
 
 **Expected timeline:** An agent with a CCC (300) score can realistically recover to BBB (600+) in 4-6 weeks with consistent corrective action. Recovery to A (700+) typically takes 8-12 weeks.
@@ -486,7 +483,7 @@ Agents that never participate in fleet coherence checks receive the default Cohe
 <Accordion title="Why isn't my score improving?">
 Check these in order:
 1. **Are new violations occurring?** Each new violation resets the Recency penalty. Check your checkpoint feed for recent non-clear verdicts.
-2. **Has enough time passed?** The Violation Recency half-life is 1 week. Meaningful improvement takes 2-4 weeks of clean operation.
+2. **Has enough time passed?** The Compliance decay half-life is 1 week. Meaningful improvement takes 2-4 weeks of clean operation.
 3. **Is the alignment card accurate?** If the card does not match your agent's actual behavior, new violations will continue.
 4. **Are checkpoints being generated?** Verify via the API that checkpoint count is increasing. No new checkpoints means no new data for score computation.
 </Accordion>
@@ -499,7 +496,7 @@ curl https://api.mnemom.ai/v1/reputation/{agent_id}/events
 ```
 
 Look for `violation_detected`, `drift_detected`, or `grade_changed` events. Common causes of sudden drops:
-- A new `boundary_violation` (resets Violation Recency to 0)
+- A new `boundary_violation` in a new session (adds to cumulative Compliance impact)
 - A drift alert (reduces Drift Stability by one session)
 - Model version change triggering behavioral shift
 </Accordion>
