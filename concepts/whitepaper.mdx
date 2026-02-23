@@ -26,7 +26,7 @@ AAP provides **transparency**: Alignment Cards declare an agent's alignment post
 
 The three layers share a single Alignment Card, a single session identity, and a single drift detection framework. AAP answers *what did this agent do?* AIP answers *what is this agent thinking?* The proof layer answers *can we verify the oversight itself?* Together they close the loop from observation through analysis to cryptographic evidence — defense in depth on a shared behavioral contract.
 
-The critical contribution of the proof layer is the distinction between proving *model inference* and proving *auditor judgment*. Rather than attempting to prove that an LLM was called correctly (prohibitively expensive at current technology levels), we prove that the deterministic verdict derivation rules were applied honestly to the LLM's analysis output. This makes the system practical: ~$0.005 per proof, 3–15 seconds proving time, under 100ms verification — while providing a meaningful cryptographic guarantee that the oversight process was not fabricated, modified, or selectively applied.
+The critical contribution of the proof layer is the distinction between proving *model inference* and proving *auditor judgment*. Rather than attempting to prove that an LLM was called correctly (prohibitively expensive at current technology levels), we prove that the deterministic verdict derivation rules were applied honestly to the LLM's analysis output. This makes the system practical: ~$0.001 per proof, sub-second proving time (GPU-accelerated), under 100ms verification — while providing a meaningful cryptographic guarantee that the oversight process was not fabricated, modified, or selectively applied.
 
 AAP, AIP, and the proof layer are transparency and verification infrastructure, not trust infrastructure. They make agent behavior observable, they make oversight integrity verifiable, and they are honest about what they cannot prove. This distinction is fundamental.
 
@@ -639,10 +639,10 @@ Not every checkpoint requires a STARK proof. The attestation layer uses a hybrid
 | Mode | When | Cost |
 |------|------|------|
 | **Immediate** | Every checkpoint | ~0ms additional — commitment, signature, chain, Merkle (Layers 1–3) |
-| **Always** | Every `boundary_violation` checkpoint | ~$0.005 — STARK proof generated automatically |
-| **Stochastic** | Random 10% of other checkpoints | ~$0.0005 amortized — random sampling |
-| **On-demand** | Any checkpoint, upon request | ~$0.005 — third party requests proof via API |
-| **Enterprise** | Every checkpoint (enterprise tier) | ~$0.005 — all checkpoints proven |
+| **Always** | Every `boundary_violation` checkpoint | ~$0.001 — STARK proof generated automatically |
+| **Stochastic** | Random 10% of other checkpoints | ~$0.0001 amortized — random sampling |
+| **On-demand** | Any checkpoint, upon request | ~$0.001 — third party requests proof via API |
+| **Enterprise** | Every checkpoint (enterprise tier) | ~$0.001 — all checkpoints proven |
 
 This strategy ensures the highest-stakes verdicts (`boundary_violation`) always receive cryptographic proof, while managing costs for routine `clear` verdicts. The stochastic sampling means an attacker cannot predict which checkpoints will be proven, maintaining deterrence without proving every one.
 
@@ -651,11 +651,11 @@ This strategy ensures the highest-stakes verdicts (`boundary_violation`) always 
 | Operation | Latency | Threshold |
 |-----------|---------|-----------|
 | Full attestation pipeline (Layers 1–3) | ~5–10ms | &lt;10ms |
-| STARK proof generation (Layer 4) | 3–15 seconds | Async, non-blocking |
+| STARK proof generation (Layer 4) | ~700ms (H100 GPU) | &lt;1s |
 | STARK proof verification | &lt;100ms | &lt;100ms |
-| Cost per STARK proof | ~$0.005 | — |
+| Cost per STARK proof | ~$0.001 | — |
 
-The full attestation pipeline adds approximately 5–10ms to each integrity checkpoint. Given that AIP analysis itself takes 800–2000ms (dominated by the LLM inference call), the attestation overhead is less than 1% of total checkpoint latency. STARK proving is asynchronous — the integrity verdict is delivered immediately with Layers 1–3, and the ZK proof is appended to the certificate when ready.
+The full attestation pipeline adds approximately 5–10ms to each integrity checkpoint. Given that AIP analysis itself takes 800–2000ms (dominated by the LLM inference call), the attestation overhead is less than 1% of total checkpoint latency. STARK proving completes in ~700ms on GPU (H100) — fast enough to be near-synchronous. The integrity verdict is delivered immediately with Layers 1–3, and the ZK proof is appended to the certificate when ready.
 
 ### 5.10 Verification API and Offline Verification
 
@@ -694,7 +694,7 @@ The competitive landscape illustrates why this matters:
 | Full inference proofs (Modulus Labs, Giza) | Neural network forward pass | $10–100+ | Hours | Research stage for frontier models |
 | Hardware attestation (EQTY Lab, Intel SGX) | Code executed in secure enclave | ~$0 | &lt;1ms | Requires specific hardware + trust in manufacturer |
 | Signature-only attestation (C2PA, W3C VC) | Issuer signed a claim | ~$0 | &lt;1ms | Proves authorship, not computation |
-| **Verdict derivation proof (this work)** | **Deterministic rules applied honestly** | **$0.005** | **3–15s** | **Production, operational** |
+| **Verdict derivation proof (this work)** | **Deterministic rules applied honestly** | **$0.001** | **~700ms** | **Production, operational** |
 
 Our approach occupies a practical middle ground: stronger than signature-only attestation because we prove computation, not just sign claims; far cheaper than full inference proofs because we prove only the deterministic judgment layer; and complementary to hardware attestation which could cover the LLM analysis stage we do not prove.
 
@@ -784,9 +784,9 @@ Smoltbot is Mnemom's zero-configuration transparency infrastructure, implementin
               ▼          ▼
      ┌──────────────────┐    ┌──────────────────┐
      │   Supabase        │    │  Proving Service  │
-     │                   │    │  (Fly.io)         │
+     │                   │    │  (Modal, H100 GPU) │
      │  ap_traces        │    │                   │
-     │  drift_alerts     │    │  RISC Zero zkVM   │
+     │  drift_alerts     │    │  SP1 zkVM (GPU)    │
      │  checkpoints      │    │  → STARK receipt   │
      │  certificates     │    │  → journal          │
      │  signing_keys     │    │  → writes to DB    │
@@ -1152,7 +1152,7 @@ This paper presents three complementary layers of infrastructure that address th
 
 Together, the three layers close a loop that begins with observation and ends with cryptographic evidence. Each layer addresses the trust gap introduced by the one before it. AAP introduces the need for independent analysis. AIP introduces the need for verifiable oversight. The proof layer delivers that verification — and is honest about the boundary it cannot cross: the LLM analysis stage remains a trust assumption, clearly delineated and openly stated.
 
-The critical contribution of the proof layer is the auditor-model distinction. By proving the deterministic judgment rules rather than the LLM inference, we achieve a system that is practical ($0.005 per proof), fast (3–15 seconds), and meaningful (the verdict derivation was honest) — without waiting for the still-distant day when full inference proofs become viable for frontier models. This is, to our knowledge, the first operational system that provides zero-knowledge proofs of AI safety judgment.
+The critical contribution of the proof layer is the auditor-model distinction. By proving the deterministic judgment rules rather than the LLM inference, we achieve a system that is practical (~$0.001 per proof), fast (~700ms on GPU), and meaningful (the verdict derivation was honest) — without waiting for the still-distant day when full inference proofs become viable for frontier models. This is, to our knowledge, the first operational system that provides zero-knowledge proofs of AI safety judgment.
 
 The infrastructure is open. The implementations are available. The certificates are publicly verifiable. The limitations are stated.
 
@@ -1207,7 +1207,7 @@ What remains is the work of building alignment infrastructure that scales with t
 | AIP Verifier | TypeScript | `npm install @mnemom/aip-verifier` (offline certificate verification) |
 | AIP OTel Exporter | TypeScript | `npm install @mnemom/aip-otel-exporter` (27 span attributes) |
 | AIP OTel Exporter | Python | `pip install aip-otel-exporter` |
-| zkVM Guest Program | Rust (no_std) | `aip-zkvm-core`, `aip-zkvm-methods` (RISC Zero v1.2) |
+| zkVM Guest Program | Rust (no_std) | `aip-zkvm-core`, `aip-zkvm-methods` (SP1 v6.0.1, H100 GPU) |
 | JSON Schemas | JSON Schema | `github.com/mnemom-ai/aap/schemas` |
 | Reference Implementations | Python, TypeScript | `github.com/mnemom-ai/aap/examples` |
 | Smoltbot (Reference Deployment) | TypeScript (Cloudflare Workers) | `github.com/mnemom-ai/smoltbot` |
