@@ -12,7 +12,7 @@ The `smoltbot` CLI configures your local environment for transparent AI agent tr
 ## Installation
 
 ```bash
-npm install -g smoltbot
+npm install -g @mnemom/smoltbot
 ```
 
 ## Commands
@@ -230,7 +230,99 @@ $ smoltbot card validate alignment-card.json
   Card is valid.
 ```
 
+### `smoltbot register <name>`
+
+Register a new named agent. Each named agent gets its own distinct identity and trace history, even when sharing the same API key. The name is stored on the server on first traced API call and displayed on the dashboard.
+
+```bash
+smoltbot register my-coder
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--openclaw` | Configure using OpenClaw |
+| `--standalone` | Configure standalone mode |
+| `--set-default` | Set the new agent as default |
+
+**Example:**
+
+```bash
+# Register a new agent for coding tasks
+smoltbot register my-coder --openclaw
+
+# Register and set as default
+smoltbot register my-researcher --set-default
+```
+
+### `smoltbot agents`
+
+List all registered agents with their IDs, providers, and creation dates.
+
+```bash
+smoltbot agents
+```
+
+**Example output:**
+
+```
+  default (default)
+    Agent ID:  smolt-a4c12709
+    Provider:  openclaw
+    Created:   2/7/2026
+
+  my-coder
+    Agent ID:  smolt-b8e34f21
+    Provider:  openclaw
+    Created:   2/23/2026
+
+  Total: 2 agent(s)
+```
+
+### `smoltbot agents default <name>`
+
+Set the default agent used when no `--agent` flag is provided.
+
+```bash
+smoltbot agents default my-coder
+```
+
+### `smoltbot agents remove <name>`
+
+Remove a registered agent from the local configuration.
+
+```bash
+smoltbot agents remove my-coder
+```
+
 </Steps>
+
+## Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Select which agent to use for the command |
+| `--version` | Show CLI version |
+| `--help` | Show help text |
+
+**Agent selection priority:**
+1. `--agent <name>` flag
+2. `SMOLTBOT_AGENT` environment variable
+3. Default agent from config
+
+**Example:**
+
+```bash
+# Check status of a specific agent
+smoltbot status --agent my-coder
+
+# Use environment variable
+SMOLTBOT_AGENT=my-coder smoltbot logs
+
+# Default agent (no flag needed)
+smoltbot status
+```
 
 ## Workflow
 
@@ -260,6 +352,13 @@ Your API calls are automatically traced through the gateway. No code changes req
 smoltbot integrity
 ```
 
+### Register additional agents (optional)
+
+```bash
+smoltbot register my-researcher --openclaw
+smoltbot status --agent my-researcher
+```
+
 ### Review recent activity
 
 ```bash
@@ -277,13 +376,13 @@ smoltbot card publish my-card.json
 
 See the [Card Management guide](/guides/card-management) for how to build a card from scratch.
 
-### Claim your agent (optional)
+### Link to your Mnemom account (optional)
 
-Link your agent to your Mnemom account for a private dashboard:
+Associate your agent with your Mnemom account for a private dashboard:
 
 1. Run `smoltbot status` to get your agent ID
-2. Go to [mnemom.ai/claim](https://mnemom.ai/claim)
-3. Paste your agent ID and prove ownership
+2. Visit [mnemom.ai/claim](https://mnemom.ai/claim) and sign in (or create a free account)
+3. The CLI will also offer to open this page for you after `smoltbot register`
 
 </Steps>
 

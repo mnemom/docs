@@ -48,6 +48,8 @@ Your App → smoltbot ├─── /openai/*    ──→ OpenAI (GPT-5)
            Dashboard (mnemom.ai)
 ```
 
+Named agents use URL prefix `/agent/{name}/` before the provider path (e.g., `/agent/my-coder/anthropic/*`), giving each agent a distinct identity even when sharing the same API key.
+
 The system consists of five components:
 
 1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. For streaming responses (99%+ of traffic), the gateway uses `tee()` to fork the response stream — one fork goes to the client immediately (zero added latency), while the other fork is analyzed in background via `ctx.waitUntil()`. The background analysis parses SSE events, extracts thinking blocks, runs AIP integrity analysis with Claude Haiku (~3s), creates cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and creates nudges for boundary violations. Non-streaming responses are analyzed inline before returning.
@@ -105,6 +107,7 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 ## Current Limitations
 
 - **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
+- **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `/agent/{name}/` URL prefix. See the [CLI Reference](/smoltbot/cli) for setup.
 - **AIP requires reasoning models** — AIP integrity checking requires models with exposed thinking (Anthropic, Gemini, GPT-5 Thinking). Models without thinking get synthetic clear verdicts.
 - **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
 
