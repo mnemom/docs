@@ -1,13 +1,13 @@
 ---
 title: "Embeddable Trust Badges"
-description: "Add trust signals to your README, website, Agent Card, or documentation with dynamic SVG badges showing your agent's Mnemom Trust Score™."
+description: "Add trust signals to your README, website, Agent Card, or documentation with dynamic SVG badges showing your agent's Mnemom Trust Rating™."
 sidebarTitle: "Trust Badges"
 icon: "certificate"
 ---
 
 # Embeddable Trust Badges
 
-**Display your agent's Mnemom Trust Score anywhere.** Dynamic SVG badges that update automatically, suitable for GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries.
+**Display your agent's Mnemom Trust Rating anywhere.** Dynamic SVG badges that update automatically, suitable for GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -137,13 +137,13 @@ The "Not Rated" badge is returned with the same `Cache-Control: public, max-age=
 The most common use case. Add a clickable badge that links to the agent's reputation page.
 
 ```markdown
-[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+[![Mnemom Trust Rating](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score)](https://www.mnemom.ai/agents/agent-xyz/reputation)
 ```
 
 With tier label:
 
 ```markdown
-[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+[![Mnemom Trust Rating](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
 ```
 
 ### HTML Websites
@@ -156,7 +156,7 @@ Standard HTML embed with link to the full reputation page.
    rel="noopener">
   <img
     src="https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score"
-    alt="Mnemom Trust Score"
+    alt="Mnemom Trust Rating"
   />
 </a>
 ```
@@ -170,7 +170,7 @@ function TrustBadge({ agentId }) {
 
   return (
     <a href={pageUrl} target="_blank" rel="noopener noreferrer">
-      <img src={badgeUrl} alt="Mnemom Trust Score" />
+      <img src={badgeUrl} alt="Mnemom Trust Rating" />
     </a>
   );
 }
@@ -208,21 +208,21 @@ For agents distributed as packages, add the badge to your package README:
 **npm (package.json README):**
 
 ```markdown
-## Trust Score
+## Trust Rating
 
 This agent is verified by [Mnemom](https://mnemom.ai):
 
-[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+[![Mnemom Trust Rating](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_tier)](https://www.mnemom.ai/agents/agent-xyz/reputation)
 ```
 
 **PyPI (setup.cfg / pyproject.toml README):**
 
 ```markdown
-## Trust Score
+## Trust Rating
 
 [![Mnemom Trust](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score)](https://www.mnemom.ai/agents/agent-xyz/reputation)
 
-Independently verified Mnemom Trust Score. [Learn more](https://docs.mnemom.ai/concepts/reputation-scores).
+Independently verified Mnemom Trust Rating. [Learn more](https://docs.mnemom.ai/concepts/reputation-scores).
 ```
 
 ### Documentation Sites
@@ -232,9 +232,9 @@ For Mintlify, Docusaurus, GitBook, or other documentation platforms:
 ```markdown
 ## Trust Verification
 
-This agent maintains a public Mnemom Trust Score:
+This agent maintains a public Mnemom Trust Rating:
 
-[![Mnemom Trust Score](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_trend)](https://www.mnemom.ai/agents/agent-xyz/reputation)
+[![Mnemom Trust Rating](https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg?variant=score_trend)](https://www.mnemom.ai/agents/agent-xyz/reputation)
 
 The score is computed from independently verified integrity checkpoints.
 See the [scoring methodology](https://docs.mnemom.ai/protocols/aap/reputation-methodology) for details.
@@ -249,7 +249,7 @@ For conversational agents deployed in Slack or Microsoft Teams:
 3. Reference the score in bot introduction messages:
 
 ```
-Hi, I'm AgentBot. My Mnemom Trust Score is 782/1000 (A - Reliable).
+Hi, I'm AgentBot. My Mnemom Trust Rating is 782/1000 (A - Reliable).
 Verify: https://www.mnemom.ai/agents/agent-xyz/reputation
 ```
 
@@ -296,6 +296,73 @@ The color coding follows the [grade scale](/concepts/reputation-scores#score-ran
 <Tip>
 If the default badge styling does not work on your background, you can use the API response to render a custom badge. Fetch `GET /v1/reputation/{agent_id}` and use the `grade`, `score`, and `tier` fields to render your own component.
 </Tip>
+
+---
+
+## Team Badges
+
+Teams have their own badge endpoint that works identically to agent badges:
+
+```
+GET https://api.mnemom.ai/v1/teams/{team_id}/badge.svg?variant={variant}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `team_id` | path | Yes | The team identifier |
+| `variant` | query | No | Badge variant (default: `grade`) |
+| `style` | query | No | `light` (default) or `dark` |
+
+**Available variants:** `score`, `grade`, `score_grade`, `score_trend`, `score_tier`, `compact`
+
+| Variant | Display |
+|---------|---------|
+| `score` | `[ Team Trust \| 812 ]` |
+| `grade` | `[ Team Trust \| AA ]` |
+| `score_grade` | `[ Team Trust \| AA 812 ]` |
+| `score_trend` | `[ Team Trust \| AA 812 ↑ ]` |
+| `score_tier` | `[ Mnemom Team \| 812 Established ]` |
+| `compact` | `[ AA ]` |
+
+Pre-eligible teams (fewer than 10 assessments) show a progress badge instead of a score:
+
+```
+[ Team Trust | Building 4/10 ]
+```
+
+Teams need only 10 team risk assessments for eligibility (vs. 50 integrity checkpoints for individual agents).
+
+**Markdown:**
+
+```markdown
+[![Team Trust Rating](https://api.mnemom.ai/v1/teams/team-abc123/badge.svg?variant=score)](https://www.mnemom.ai/teams/team-abc123/reputation)
+```
+
+**HTML:**
+
+```html
+<a href="https://www.mnemom.ai/teams/team-abc123/reputation">
+  <img src="https://api.mnemom.ai/v1/teams/team-abc123/badge.svg?variant=score"
+       alt="Team Trust Rating" />
+</a>
+```
+
+**React:**
+
+```jsx
+function TeamBadge({ teamId }) {
+  const badgeUrl = `https://api.mnemom.ai/v1/teams/${teamId}/badge.svg?variant=score`;
+  const pageUrl = `https://www.mnemom.ai/teams/${teamId}/reputation`;
+
+  return (
+    <a href={pageUrl} target="_blank" rel="noopener noreferrer">
+      <img src={badgeUrl} alt="Team Trust Rating" />
+    </a>
+  );
+}
+```
+
+Team badges use the same 60-minute CDN caching behavior as agent badges.
 
 ---
 

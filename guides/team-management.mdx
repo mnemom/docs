@@ -1,0 +1,306 @@
+---
+title: "Team Management"
+description: "Create teams, manage rosters, derive alignment cards, and monitor team reputation"
+sidebarTitle: "Team Management"
+icon: "people-group"
+---
+
+# Team Management
+
+**Teams are first-class meta-agents in Mnemom.** Create a team, add agents, derive a collective alignment card, and monitor team reputation — all through the API or dashboard.
+
+This guide covers the full team lifecycle: creation, roster management, alignment cards, reputation monitoring, and team badges.
+
+<Info>
+Team operations require the `team_reputation` feature flag, available on Team and Enterprise plans. See [Pricing](/pricing/overview) for details.
+</Info>
+
+---
+
+## Quick Start
+
+Create a team, add members, and derive a card in three API calls:
+
+<CodeGroup>
+```typescript TypeScript
+import { createTeam, deriveTeamCard } from '@mnemom/teams';
+
+// 1. Create a team with initial members
+const team = await createTeam({
+  org_id: 'org-abc123',
+  name: 'Support Pipeline Alpha',
+  description: 'Customer support agent team',
+  agent_ids: ['agent-a', 'agent-b', 'agent-c'],
+});
+
+console.log(`Team created: ${team.team.id}`);
+console.log(`Members: ${team.members.length}`);
+
+// 2. Derive a team alignment card from member cards
+const derived = await deriveTeamCard(team.team.id);
+console.log(`Card derived from ${derived.members_with_cards} members`);
+console.log(`Card source: ${derived.card_source}`);
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+HEADERS = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+# 1. Create a team with initial members
+response = httpx.post(f"{API_BASE}/v1/teams", headers=HEADERS, json={
+    "org_id": "org-abc123",
+    "name": "Support Pipeline Alpha",
+    "description": "Customer support agent team",
+    "agent_ids": ["agent-a", "agent-b", "agent-c"],
+})
+team = response.json()
+team_id = team["team"]["id"]
+print(f"Team created: {team_id}")
+
+# 2. Derive a team alignment card from member cards
+card = httpx.post(f"{API_BASE}/v1/teams/{team_id}/card/derive", headers=HEADERS)
+print(f"Card derived from {card.json()['members_with_cards']} members")
+```
+</CodeGroup>
+
+---
+
+## Team Lifecycle
+
+```
+Create → Add Members → Derive Card → Monitor Reputation → Archive
+  │          │              │               │                 │
+  ▼          ▼              ▼               ▼                 ▼
+POST      POST           POST           GET              DELETE
+/teams    /members       /card/derive   /reputation      /teams/{id}
+```
+
+### 1. Create a Team
+
+Teams require an organization, a name, and at least 2 initial members (max 50).
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/teams \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "org_id": "org-abc123",
+    "name": "Support Pipeline Alpha",
+    "description": "Customer support agent team",
+    "agent_ids": ["agent-a", "agent-b", "agent-c"],
+    "metadata": { "environment": "production", "domain": "support" }
+  }'
+```
+
+Team names must be unique within an organization. The response includes the team object and the initial member list.
+
+### 2. Manage Roster
+
+Add or remove members as your team evolves. Every roster change is logged in the audit trail.
+
+**Add members:**
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/teams/{team_id}/members \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "agent_ids": ["agent-d", "agent-e"] }'
+```
+
+The response tells you which agents were added and which were already members (idempotent).
+
+**Remove a member:**
+
+```bash
+curl -X DELETE https://api.mnemom.ai/v1/teams/{team_id}/members/{agent_id} \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+<Warning>
+Teams must have at least 2 members. Removing the second-to-last member will fail with a 400 error. Archive the team instead if it's no longer needed.
+</Warning>
+
+**View roster history:**
+
+```bash
+curl https://api.mnemom.ai/v1/teams/{team_id}/roster-history \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Returns a paginated audit trail of all roster changes with timestamps, change types, and actors.
+
+### 3. Team Alignment Cards
+
+Team alignment cards declare the team's collective values, autonomy boundaries, and coordination mode. There are two approaches:
+
+**Auto-derive from members** (recommended):
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/teams/{team_id}/card/derive \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+The derivation algorithm merges member cards:
+- Values are unioned and ordered by frequency
+- Forbidden actions from any member apply to the team
+- The strictest audit retention policy wins
+- Requires at least 2 members with active alignment cards
+
+**Set manually:**
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/teams/{team_id}/card \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": {
+      "type": "organization",
+      "identifier": "org-abc123",
+      "relationship": "delegated_authority"
+    },
+    "values": {
+      "declared": ["reliability", "transparency", "user_safety"]
+    },
+    "autonomy_envelope": {
+      "bounded_actions": ["respond_to_customer", "escalate_ticket"],
+      "forbidden_actions": ["delete_customer_data", "modify_billing"],
+      "escalation_triggers": ["customer_complaint", "refund_request_over_100"]
+    },
+    "audit_commitment": {
+      "retention_days": 90
+    }
+  }'
+```
+
+**View card history:**
+
+```bash
+curl https://api.mnemom.ai/v1/teams/{team_id}/card/history \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 4. Monitor Reputation
+
+Once your team has 10+ risk assessments, a Team Trust Rating is published.
+
+```bash
+curl https://api.mnemom.ai/v1/teams/{team_id}/reputation
+```
+
+Track score trends over time:
+
+```bash
+curl https://api.mnemom.ai/v1/teams/{team_id}/reputation/history
+```
+
+See [Team Trust Rating](/concepts/team-reputation) for details on the 5-component scoring model.
+
+### 5. Archive a Team
+
+Archiving soft-deletes the team. Historical data and reputation scores are preserved.
+
+```bash
+curl -X DELETE https://api.mnemom.ai/v1/teams/{team_id} \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Team Badges
+
+Embed team reputation badges anywhere — READMEs, documentation, dashboards.
+
+```
+GET https://api.mnemom.ai/v1/teams/{team_id}/badge.svg?variant={variant}
+```
+
+Six badge variants are available:
+
+| Variant | Display |
+|---------|---------|
+| `score` | `[ Team Trust \| 812 ]` |
+| `grade` | `[ Team Trust \| AA ]` |
+| `score_grade` | `[ Team Trust \| AA 812 ]` |
+| `score_trend` | `[ Team Trust \| AA 812 ↑ ]` |
+| `score_tier` | `[ Mnemom Team \| 812 Established ]` |
+| `compact` | `[ AA ]` |
+
+Pre-eligible teams (fewer than 10 assessments) show a progress badge:
+
+```
+[ Team Trust | Building 4/10 ]
+```
+
+**Markdown embed:**
+
+```markdown
+[![Team Trust Rating](https://api.mnemom.ai/v1/teams/team-abc123/badge.svg?variant=score)](https://www.mnemom.ai/teams/team-abc123/reputation)
+```
+
+**HTML embed:**
+
+```html
+<a href="https://www.mnemom.ai/teams/team-abc123/reputation">
+  <img src="https://api.mnemom.ai/v1/teams/team-abc123/badge.svg?variant=score"
+       alt="Team Trust Rating" />
+</a>
+```
+
+**React:**
+
+```jsx
+function TeamBadge({ teamId }) {
+  const badgeUrl = `https://api.mnemom.ai/v1/teams/${teamId}/badge.svg?variant=score`;
+  const pageUrl = `https://www.mnemom.ai/teams/${teamId}/reputation`;
+
+  return (
+    <a href={pageUrl} target="_blank" rel="noopener noreferrer">
+      <img src={badgeUrl} alt="Team Trust Rating" />
+    </a>
+  );
+}
+```
+
+Badges are cached for 60 minutes at the CDN edge. For real-time data, use the API directly.
+
+---
+
+## RBAC Requirements
+
+| Operation | Required Role |
+|-----------|--------------|
+| Create team | `owner` or `admin` |
+| Update team | `owner` or `admin` |
+| Archive team | `owner` or `admin` |
+| Add/remove members | `owner` or `admin` |
+| Set team card | `owner` or `admin` |
+| Derive team card | `owner` or `admin` |
+| View team details | Any org member |
+| View roster history | Any org member |
+| View card history | Any org member |
+| View reputation | Public (no auth for public teams) |
+
+---
+
+## Feature Requirements
+
+Team operations require the `team_reputation` feature flag:
+
+| Plan | Team Features |
+|------|--------------|
+| Free | Not available |
+| Developer | Not available |
+| Team | 200 team reputation computations included/mo ($0.005/ea overage) |
+| Enterprise | Unlimited |
+
+---
+
+## See Also
+
+- [Team Trust Rating](/concepts/team-reputation) -- How team reputation scoring works
+- [Risk Assessment](/concepts/risk-assessment) -- Team risk model (feeds team reputation)
+- [Teams API](/api-reference/team-overview) -- Full API reference
+- [Embeddable Badges](/guides/reputation-badges) -- Badge variants and caching
+- [Pricing](/pricing/overview) -- Plan details and feature comparison

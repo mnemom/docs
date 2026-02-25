@@ -95,6 +95,14 @@
     {
       "name": "Card Templates",
       "description": "Organization-level alignment card templates that all agents inherit (Enterprise)"
+    },
+    {
+      "name": "Teams",
+      "description": "Team CRUD, member management, roster history, and team alignment cards"
+    },
+    {
+      "name": "Team Reputation",
+      "description": "Team reputation scores, history, cryptographic verification, and embeddable badges"
     }
   ],
   "security": [{"BearerAuth": []}],
@@ -6304,6 +6312,662 @@
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
+    },
+    "/teams": {
+      "post": {
+        "operationId": "createTeam",
+        "summary": "Create a team",
+        "description": "Create a new team with at least 2 agent members. Team names must be unique within the organization.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["org_id", "name", "agent_ids"],
+                "properties": {
+                  "org_id": {"type": "string", "description": "Organization that owns this team"},
+                  "name": {"type": "string", "maxLength": 100, "description": "Display name"},
+                  "description": {"type": "string", "description": "Optional description"},
+                  "agent_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 50, "description": "Agent IDs to add as initial members"},
+                  "metadata": {"type": "object", "additionalProperties": true, "description": "Freeform metadata"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Team created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {"$ref": "#/components/schemas/Team"},
+                    "members": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/TeamMember"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {
+            "description": "Team name already taken within the organization",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teams/{team_id}": {
+      "get": {
+        "operationId": "getTeam",
+        "summary": "Get team by ID",
+        "description": "Retrieve a team and its current members.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Team details with members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team": {"$ref": "#/components/schemas/Team"},
+                    "members": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/TeamMember"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "patch": {
+        "operationId": "updateTeam",
+        "summary": "Update team",
+        "description": "Update a team's name, description, or metadata.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "maxLength": 100, "description": "Display name"},
+                  "description": {"type": ["string", "null"], "description": "Optional description"},
+                  "metadata": {"type": "object", "additionalProperties": true, "description": "Freeform metadata"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated team",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Team"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {
+            "description": "Team name already taken within the organization",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "archiveTeam",
+        "summary": "Archive team",
+        "description": "Archive a team. Archived teams are soft-deleted and can be listed with status=archived.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Team archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "archived": {"type": "boolean"},
+                    "team_id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/members": {
+      "post": {
+        "operationId": "addTeamMembers",
+        "summary": "Add members to team",
+        "description": "Add one or more agents to a team. Teams have a maximum of 50 members.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["agent_ids"],
+                "properties": {
+                  "agent_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Agent IDs to add"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Members added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "added": {"type": "array", "items": {"type": "string"}},
+                    "already_members": {"type": "array", "items": {"type": "string"}},
+                    "members": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/TeamMember"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Exceeds 50-member maximum",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/members/{agent_id}": {
+      "delete": {
+        "operationId": "removeTeamMember",
+        "summary": "Remove member from team",
+        "description": "Remove an agent from a team. Teams must retain a minimum of 2 members.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"},
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {"type": "boolean"},
+                    "agent_id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot remove member: team requires minimum 2 members",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/roster-history": {
+      "get": {
+        "operationId": "getTeamRosterHistory",
+        "summary": "Get team roster history",
+        "description": "Retrieve the history of member additions and removals for a team.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"},
+          {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}, "description": "Page number"},
+          {"name": "per_page", "in": "query", "schema": {"type": "integer", "default": 50, "maximum": 200}, "description": "Results per page (max 200)"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Roster change history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "changes": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/TeamRosterChange"}
+                    },
+                    "total": {"type": "integer"},
+                    "page": {"type": "integer"},
+                    "per_page": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/orgs/{org_id}/teams": {
+      "get": {
+        "operationId": "listOrgTeams",
+        "summary": "List teams in organization",
+        "description": "List all teams belonging to an organization, filtered by status.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/OrgId"},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["active", "archived"], "default": "active"}, "description": "Filter by team status"},
+          {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}, "description": "Page number"},
+          {"name": "per_page", "in": "query", "schema": {"type": "integer", "default": 50, "maximum": 200}, "description": "Results per page (max 200)"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of teams",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "teams": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/Team"}
+                    },
+                    "total": {"type": "integer"},
+                    "page": {"type": "integer"},
+                    "per_page": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/card": {
+      "get": {
+        "operationId": "getTeamCard",
+        "summary": "Get team alignment card",
+        "description": "Retrieve the active alignment card for a team, or null if no card is set.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Team alignment card or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "card_id": {"type": "string"},
+                    "team_id": {"type": "string"},
+                    "card_json": {"type": "object"},
+                    "card_source": {"type": "string", "enum": ["manual", "auto_derived", "hybrid"]},
+                    "issued_at": {"type": "string", "format": "date-time"},
+                    "is_active": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "put": {
+        "operationId": "setTeamCard",
+        "summary": "Set team alignment card",
+        "description": "Manually set an alignment card for a team. The card must include principal, values, autonomy_envelope, and audit_commitment sections.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["principal", "values", "autonomy_envelope", "audit_commitment"],
+                "properties": {
+                  "principal": {"type": "object", "description": "Principal section of the alignment card"},
+                  "values": {
+                    "type": "object",
+                    "required": ["declared"],
+                    "properties": {
+                      "declared": {"type": "array", "items": {"type": "object"}}
+                    },
+                    "description": "Values section with declared values array"
+                  },
+                  "autonomy_envelope": {"type": "object", "description": "Autonomy envelope section"},
+                  "audit_commitment": {"type": "object", "description": "Audit commitment section"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Card set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "card_id": {"type": "string"},
+                    "team_id": {"type": "string"},
+                    "card_source": {"type": "string", "enum": ["manual"]},
+                    "issued_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid alignment card",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/card/derive": {
+      "post": {
+        "operationId": "deriveTeamCard",
+        "summary": "Derive team alignment card from members",
+        "description": "Automatically derive a team alignment card from the individual cards of team members. Requires at least 2 members with active alignment cards.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Derived card",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "derived_card": {"type": "object"},
+                    "card_source": {"type": "string", "enum": ["auto_derived"]},
+                    "member_count": {"type": "integer"},
+                    "members_with_cards": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Requires at least 2 members with alignment cards",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/card/history": {
+      "get": {
+        "operationId": "getTeamCardHistory",
+        "summary": "Get team card history",
+        "description": "Retrieve the history of alignment cards for a team.",
+        "tags": ["Teams"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Card history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cards": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "card_id": {"type": "string"},
+                          "card_source": {"type": "string", "enum": ["manual", "auto_derived", "hybrid"]},
+                          "issued_at": {"type": "string", "format": "date-time"},
+                          "is_active": {"type": "boolean"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/reputation": {
+      "get": {
+        "operationId": "getTeamReputation",
+        "summary": "Get team reputation score",
+        "description": "Retrieve the current reputation score for a team, including component breakdown and A2A trust extension.",
+        "tags": ["Team Reputation"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Team reputation score",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/TeamReputationScore"}
+              }
+            }
+          },
+          "403": {
+            "description": "Team reputation is private",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/reputation/history": {
+      "get": {
+        "operationId": "getTeamReputationHistory",
+        "summary": "Get team reputation history",
+        "description": "Retrieve weekly reputation score snapshots for a team.",
+        "tags": ["Team Reputation"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Reputation history snapshots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "snapshots": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/TeamReputationSnapshot"}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/reputation/verify": {
+      "get": {
+        "operationId": "verifyTeamReputation",
+        "summary": "Verify team reputation cryptographically",
+        "description": "Public endpoint. Returns the team's reputation score with a cryptographic proof hash for independent verification.",
+        "tags": ["Team Reputation"],
+        "security": [],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Reputation with verification proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team_id": {"type": "string"},
+                    "score": {"type": "number"},
+                    "grade": {"type": "string"},
+                    "computed_at": {"type": "string", "format": "date-time"},
+                    "verification": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "proof_hash": {"type": "string"},
+                        "computed_at": {"type": "string", "format": "date-time"},
+                        "total_assessments": {"type": "integer"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Team reputation is private",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/teams/{team_id}/badge.svg": {
+      "get": {
+        "operationId": "getTeamBadge",
+        "summary": "Get embeddable team reputation badge",
+        "description": "Public endpoint. Returns an SVG badge displaying the team's reputation score or grade. Returns a 'Not Rated' badge for unknown teams.",
+        "tags": ["Team Reputation"],
+        "security": [],
+        "parameters": [
+          {"$ref": "#/components/parameters/TeamId"},
+          {"name": "variant", "in": "query", "schema": {"type": "string", "enum": ["score", "grade", "score_grade", "score_trend", "score_tier", "compact"], "default": "grade"}, "description": "Badge variant"},
+          {"name": "style", "in": "query", "schema": {"type": "string", "enum": ["light", "dark"], "default": "light"}, "description": "Badge color scheme"}
+        ],
+        "responses": {
+          "200": {
+            "description": "SVG badge image",
+            "headers": {
+              "Cache-Control": {
+                "schema": {"type": "string"},
+                "description": "public, max-age=3600"
+              }
+            },
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6354,6 +7018,15 @@
           "type": "string"
         },
         "description": "Webhook endpoint identifier (e.g. whe-abc12345)"
+      },
+      "TeamId": {
+        "name": "team_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Team identifier (UUID)"
       }
     },
     "responses": {
@@ -7827,6 +8500,100 @@
           "updated_at": {"type": "string", "format": "date-time"}
         },
         "required": ["org_id", "enabled", "template"]
+      },
+      "Team": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "Team identifier (UUID)"},
+          "org_id": {"type": "string", "description": "Organization that owns this team"},
+          "name": {"type": "string", "description": "Display name"},
+          "description": {"type": ["string", "null"], "description": "Optional description"},
+          "status": {"type": "string", "enum": ["active", "archived"], "description": "Team status"},
+          "metadata": {"type": "object", "additionalProperties": true, "description": "Freeform metadata"},
+          "member_count": {"type": "integer", "description": "Number of active members"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TeamMember": {
+        "type": "object",
+        "properties": {
+          "team_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "agent_name": {"type": "string"},
+          "added_at": {"type": "string", "format": "date-time"},
+          "removed_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "TeamRosterChange": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "team_id": {"type": "string"},
+          "change_type": {"type": "string", "enum": ["agent_added", "agent_removed"]},
+          "agent_id": {"type": "string"},
+          "actor_id": {"type": ["string", "null"]},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TeamReputationScore": {
+        "type": "object",
+        "properties": {
+          "team_id": {"type": "string"},
+          "team_name": {"type": "string"},
+          "score": {"type": "number", "description": "0-1000"},
+          "grade": {"type": "string", "enum": ["AAA", "AA", "A", "BBB", "BB", "B", "CCC", "NR"]},
+          "confidence": {"type": "string", "enum": ["insufficient", "low", "medium", "high"]},
+          "is_eligible": {"type": "boolean", "description": "true when total_assessments >= 10"},
+          "components": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/TeamReputationComponent"}
+          },
+          "total_assessments": {"type": "integer"},
+          "last_assessed": {"type": ["string", "null"], "format": "date-time"},
+          "trend_30d": {"type": "number"},
+          "visibility": {"type": "string", "enum": ["public", "unlisted", "private"]},
+          "computed_at": {"type": "string", "format": "date-time"},
+          "member_count": {"type": "integer"},
+          "a2a_trust_extension": {"$ref": "#/components/schemas/A2ATeamTrustExtension"}
+        }
+      },
+      "TeamReputationComponent": {
+        "type": "object",
+        "properties": {
+          "key": {"type": "string", "enum": ["coherence_history", "member_quality", "operational_record", "structural_stability", "assessment_density"]},
+          "label": {"type": "string"},
+          "score": {"type": "number", "description": "Raw score 0-1000"},
+          "weight": {"type": "number", "description": "Weight 0-1"},
+          "weighted_score": {"type": "number", "description": "score * weight"},
+          "factors": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "A2ATeamTrustExtension": {
+        "type": "object",
+        "properties": {
+          "extension_uri": {"type": "string"},
+          "provider": {"type": "string"},
+          "score": {"type": "number"},
+          "grade": {"type": "string"},
+          "confidence": {"type": "string"},
+          "member_count": {"type": "integer"},
+          "verified_url": {"type": "string", "format": "uri"},
+          "badge_url": {"type": "string", "format": "uri"},
+          "methodology_url": {"type": "string", "format": "uri"},
+          "last_updated": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TeamReputationSnapshot": {
+        "type": "object",
+        "properties": {
+          "team_id": {"type": "string"},
+          "week_start": {"type": "string", "format": "date"},
+          "score": {"type": "number"},
+          "grade": {"type": "string"},
+          "components": {"type": "object", "additionalProperties": {"type": "number"}},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
       }
     }
   }

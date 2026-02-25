@@ -72,7 +72,7 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/whe-a1b2c3d4/test \
 
 ## Event Catalog
 
-Mnemom emits 14 event types across integrity, drift, conscience, reputation, billing, and containment domains.
+Mnemom emits 23 event types across integrity, drift, conscience, reputation, teams, billing, and containment domains.
 
 | Event Type | Description | Trigger |
 |---|---|---|
@@ -90,6 +90,15 @@ Mnemom emits 14 event types across integrity, drift, conscience, reputation, bil
 | `agent.paused` | Agent was paused (manually or by auto-containment) | Containment pause action |
 | `agent.resumed` | Agent was resumed or reactivated | Containment resume/reactivate action |
 | `agent.killed` | Agent was killed | Containment kill action |
+| `team.created` | Team was created | Team CRUD |
+| `team.archived` | Team was archived | Team CRUD |
+| `team.member_added` | Agent added to team | Roster change |
+| `team.member_removed` | Agent removed from team | Roster change |
+| `team.card_updated` | Team alignment card changed | Card update |
+| `team_reputation.score_changed` | Team score changed significantly | Score delta > 10 points |
+| `team_reputation.grade_changed` | Team letter grade changed | Grade transition |
+| `quota.team_reputation_exceeded` | Team reputation usage exceeded plan limit | Cron billing check |
+| `quota.team_reputation_warning` | Team reputation usage approaching limit (80%+) | Cron billing check |
 
 Subscribe to specific event types when creating an endpoint, or leave `event_types` empty to receive all events.
 
@@ -327,6 +336,164 @@ Every webhook delivery uses the same envelope structure:
     "grade_before": "BBB",
     "grade_after": "A",
     "score": 702
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team.created">
+```json
+{
+  "id": "evt-tc1m4k7x",
+  "type": "team.created",
+  "created_at": "2026-02-25T10:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "org_id": "org-xyz789",
+    "name": "Support Pipeline Alpha",
+    "member_count": 3,
+    "agent_ids": ["agent-a", "agent-b", "agent-c"]
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team.archived">
+```json
+{
+  "id": "evt-ta2n5j8w",
+  "type": "team.archived",
+  "created_at": "2026-02-25T12:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "org_id": "org-xyz789",
+    "name": "Support Pipeline Alpha"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team.member_added">
+```json
+{
+  "id": "evt-ma3p6h9v",
+  "type": "team.member_added",
+  "created_at": "2026-02-25T10:15:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "agent_id": "agent-d",
+    "actor_id": "user-xyz789",
+    "member_count": 4
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team.member_removed">
+```json
+{
+  "id": "evt-mr4q7g1u",
+  "type": "team.member_removed",
+  "created_at": "2026-02-25T11:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "agent_id": "agent-b",
+    "actor_id": "user-xyz789",
+    "member_count": 3
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team.card_updated">
+```json
+{
+  "id": "evt-cu5r8f2t",
+  "type": "team.card_updated",
+  "created_at": "2026-02-25T10:30:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "card_id": "card-def456",
+    "card_source": "auto_derived",
+    "actor_id": "user-xyz789"
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team_reputation.score_changed">
+```json
+{
+  "id": "evt-ts6s9e3r",
+  "type": "team_reputation.score_changed",
+  "created_at": "2026-02-25T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "score_before": 790,
+    "score_after": 812,
+    "grade": "AA",
+    "components": {
+      "coherence_history": 880,
+      "member_quality": 790,
+      "operational_record": 850,
+      "structural_stability": 720,
+      "assessment_density": 640
+    }
+  }
+}
+```
+</Accordion>
+
+<Accordion title="team_reputation.grade_changed">
+```json
+{
+  "id": "evt-tg7t1d4q",
+  "type": "team_reputation.grade_changed",
+  "created_at": "2026-02-25T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "team_id": "team-abc123",
+    "grade_before": "A",
+    "grade_after": "AA",
+    "score": 812
+  }
+}
+```
+</Accordion>
+
+<Accordion title="quota.team_reputation_exceeded">
+```json
+{
+  "id": "evt-qe8u2c5p",
+  "type": "quota.team_reputation_exceeded",
+  "created_at": "2026-02-25T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "usage_percent": 110,
+    "computations_used": 220,
+    "computations_included": 200
+  }
+}
+```
+</Accordion>
+
+<Accordion title="quota.team_reputation_warning">
+```json
+{
+  "id": "evt-qw9v3b6n",
+  "type": "quota.team_reputation_warning",
+  "created_at": "2026-02-25T06:00:00.000Z",
+  "account_id": "ba-x1y2z3w4",
+  "data": {
+    "usage_percent": 85,
+    "computations_used": 170,
+    "computations_included": 200
   }
 }
 ```

@@ -1,0 +1,388 @@
+---
+title: "Team Trust Rating"
+description: "The Team Trust Rating — a composite trust metric for teams of AI agents. Built from coherence history, member quality, operational record, structural stability, and assessment density."
+sidebarTitle: "Team Trust Rating"
+icon: "users-gear"
+---
+
+## Overview
+
+The Team Trust Rating extends the [Mnemom Trust Rating](/concepts/reputation-scores) to **teams of AI agents**. While individual Trust Ratings measure a single agent's trustworthiness, the Team Trust Rating evaluates whether a group of agents operates reliably *together* — accounting for coherence dynamics, roster stability, and collective operational history.
+
+Teams are first-class meta-agents in Mnemom. They have persistent identity, their own alignment cards, accumulated reputation, and cryptographic proofs — independent of any individual member.
+
+Key properties:
+
+- **Persistent identity** — A team's reputation persists across roster changes. Adding or removing a member adjusts the score incrementally, not from scratch.
+- **Compositional but independent** — Team scores are informed by member scores (via the Member Quality component) but are not a simple average. Teams with identical members can have different scores based on their operational history.
+- **Same grade scale** — Teams use the same AAA–NR grade scale and 0–1000 score range as individuals, enabling direct comparison.
+- **Lower eligibility bar** — Teams need 10 team risk assessments for eligibility (vs. 50 integrity checkpoints for individuals), reflecting their inherently collaborative, less frequent evaluation cycles.
+
+<Note>
+The Team Trust Rating requires a minimum of **10 team risk assessments** before a public score is published. This threshold prevents gaming through selective assessment submission while remaining achievable for active teams.
+</Note>
+
+---
+
+## Score Range and Grades
+
+Team scores use the same grade scale as individual agents:
+
+| Grade | Score Range | Tier | Meaning |
+|-------|------------|------|---------|
+| **AAA** | 900 -- 1000 | Exemplary | Consistently demonstrates exceptional team alignment and coordination. |
+| **AA** | 800 -- 899 | Established | Strong team track record with minimal operational issues. |
+| **A** | 700 -- 799 | Reliable | Solid team performance with occasional minor concerns. |
+| **BBB** | 600 -- 699 | Developing | Building a track record. Some team-level issues but trending positively. |
+| **BB** | 500 -- 599 | Emerging | Limited or mixed team history. More assessments needed. |
+| **B** | 400 -- 499 | Concerning | Elevated team risk or significant roster instability. |
+| **CCC** | 200 -- 399 | Critical | Serious team-level concerns. Human oversight recommended. |
+| **NR** | -- | Not Rated | Fewer than 10 team risk assessments. Score is being built. |
+
+---
+
+## Score Components
+
+The Team Trust Rating is a weighted sum of five normalized components, each scored 0–1000:
+
+```
+TeamTrustScore = 0.35 × coherence_history
+               + 0.25 × member_quality
+               + 0.20 × operational_record
+               + 0.10 × structural_stability
+               + 0.10 × assessment_density
+```
+
+The score is clamped to the 0–1000 range.
+
+### Coherence History (35%)
+
+The dominant component. Tracks historical trends in the team's Coherence Quality (CQ) pillar from [team risk assessments](/concepts/risk-assessment#team-risk).
+
+CQ measures pairwise compatibility across four dimensions — value overlap, priority alignment, behavioral correlation, and boundary compatibility. The coherence history component smooths CQ over time, rewarding teams that maintain or improve their internal alignment.
+
+- **Data source:** CQ pillar values from team risk assessments
+- **Update frequency:** Every team risk assessment
+- **Improvement lever:** Align member values, resolve pairwise conflicts, maintain consistent team composition
+
+### Member Quality (25%)
+
+Tail-risk-weighted aggregate of individual member Trust Ratings, using the same CoVaR-inspired weighting from the [team risk engine](/concepts/risk-assessment#team-risk). Members with lower individual scores receive exponentially more weight — one poorly-rated member drags the team score down more than one highly-rated member lifts it up.
+
+- **Data source:** Individual [Mnemom Trust Ratings](/concepts/reputation-scores) (read-only — team scoring never modifies individual scores)
+- **Update frequency:** When individual member scores change
+- **Improvement lever:** Ensure all members maintain strong individual Trust Ratings; address the weakest member first
+
+<Info>
+Member Quality is a read-only consumer of individual Trust Ratings. A team's Member Quality component cannot affect or modify any individual agent's score.
+</Info>
+
+### Operational Record (20%)
+
+Measures the proportion of team risk assessments that resulted in low or medium risk levels. Teams that consistently pass risk assessments with favorable outcomes build a strong operational record.
+
+```
+operational_record = (low_and_medium_assessments / total_assessments) × 1000
+```
+
+- **Data source:** Historical team risk assessment results
+- **Update frequency:** Every team risk assessment
+- **Improvement lever:** Address root causes of high-risk assessments; improve team coherence before requesting new assessments
+
+### Structural Stability (10%)
+
+Tracks two factors: Structural Risk (SR) pillar trends from risk assessments and roster churn rate. Teams with stable membership and low contagion risk score higher.
+
+A roster churn penalty is applied when members are frequently added or removed. The penalty decays over time — a team that stabilizes its roster recovers within weeks.
+
+- **Data source:** SR pillar values + roster change frequency
+- **Update frequency:** Every risk assessment and roster change
+- **Improvement lever:** Minimize unnecessary roster changes; maintain consistent team composition
+
+### Assessment Density (10%)
+
+A logarithmic count of team risk assessments weighted by recency. More recent assessments count more. This component rewards teams that are actively assessed rather than scoring high on a small, stale data set.
+
+```
+assessment_density = log(1 + recent_weighted_count) × recency_multiplier × 1000
+```
+
+- **Data source:** Team risk assessment timestamps
+- **Update frequency:** Every team risk assessment
+- **Improvement lever:** Request regular risk assessments for the team, especially during active operational periods
+
+---
+
+## Confidence Levels
+
+The number of team risk assessments determines the confidence level:
+
+| Confidence | Assessment Count | Display |
+|-----------|-----------------|---------|
+| **Insufficient** | < 10 | Score not published (NR grade) |
+| **Low** | 10 -- 29 | "Low Confidence" indicator |
+| **Medium** | 30 -- 99 | "Medium Confidence" indicator |
+| **High** | ≥ 100 | "High Confidence" indicator |
+
+<Warning>
+The 10-assessment minimum is a hard gate for score publication. Teams below this threshold display an "NR" (Not Rated) badge with a progress indicator showing assessments remaining until eligibility.
+</Warning>
+
+---
+
+## Score Computation
+
+### Frequency
+
+- **6-hour cron:** Team scores are recomputed every 6 hours from the latest data
+- **On-demand triggers:** Score recomputation is also triggered by roster changes and new risk assessments
+- **Weekly snapshots:** A frozen snapshot is saved each Monday at 00:00 UTC for historical trend tracking
+
+### Anti-Gaming Measures
+
+1. **Minimum assessment count** — 10 team risk assessments required before score publication
+2. **Tail-risk weighting** — Member Quality uses CoVaR weighting, preventing a team from hiding a weak member behind strong ones
+3. **Roster churn penalty** — Rapidly cycling members to game the composition is penalized via the Structural Stability component
+4. **Independent assessment** — All team risk assessments are computed by the Mnemom risk engine, not self-reported
+
+### Trend Tracking
+
+Every `TeamReputationScore` includes a `trend_30d` field — a signed delta comparing the current score to 30 days ago:
+
+- **Positive trend (+):** Score is improving
+- **Negative trend (-):** Score is declining
+- **Flat trend (0):** Score is stable
+
+---
+
+## Team Alignment Cards
+
+Teams have their own [alignment cards](/concepts/alignment-cards) that declare the team's collective values, autonomy boundaries, and coordination mode.
+
+### Auto-Derivation
+
+The most common approach is auto-deriving the team card from member cards:
+
+```
+POST /v1/teams/{team_id}/card/derive
+```
+
+The derivation algorithm:
+- **Values:** Union of all member values, ordered by frequency (most common first)
+- **Bounded actions:** Union of all member bounded actions
+- **Forbidden actions:** Union of all member forbidden actions (strictest wins)
+- **Escalation triggers:** Union of all member escalation triggers
+- **Audit retention:** Maximum of all member audit retention days (strictest wins)
+
+Auto-derived cards are tagged with `card_source: "auto_derived"`. You can also set cards manually (`"manual"`) or start from an auto-derived base and customize (`"hybrid"`).
+
+### Card Inheritance
+
+When a team's card changes, it does not retroactively modify member cards. Team cards and individual cards are independent — the team card represents the team's collective posture, which may differ from any individual member's card.
+
+### Card History
+
+Every card change is versioned. Retrieve the full history via:
+
+```
+GET /v1/teams/{team_id}/card/history
+```
+
+---
+
+## Relationship to Individual Agent Scores
+
+Team Trust Ratings and individual Trust Ratings are related but independent:
+
+| Aspect | Individual Trust Rating | Team Trust Rating |
+|--------|----------------------|-----------------|
+| **Unit** | Single agent | Team of 2--50 agents |
+| **Eligibility** | 50 integrity checkpoints | 10 team risk assessments |
+| **Components** | Integrity ratio, compliance, drift, traces, coherence | Coherence history, member quality, ops record, stability, density |
+| **Data source** | AIP checkpoints | Team risk assessments |
+| **Update frequency** | Hourly | Every 6 hours + on-demand |
+| **Mutual dependency** | None (individual scores are independent) | Member Quality reads individual scores (read-only) |
+
+The Member Quality component creates a one-way dependency: team scores read individual scores, but never write to them. Improving an individual member's score will improve the team's Member Quality component.
+
+---
+
+## ZK Proofs for Team Reputation
+
+Team reputation scores support the same cryptographic verification as individual scores. The verification endpoint returns proof data that independently confirms the score was computed correctly:
+
+```
+GET /v1/teams/{team_id}/reputation/verify
+```
+
+Team proofs chain individual proof attestations — the team's proof references the proof hashes of member scores used in the Member Quality computation, creating a verifiable dependency tree.
+
+<Note>
+ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier team assessments do not include proofs.
+</Note>
+
+---
+
+## A2A Trust Extension for Teams
+
+The team reputation API includes a pre-built trust block for inter-team reputation sharing via A2A:
+
+```json
+{
+  "a2a_trust_extension": {
+    "extension_uri": "https://mnemom.ai/ext/team-trust/v1",
+    "provider": "mnemom",
+    "score": 812,
+    "grade": "AA",
+    "confidence": "medium",
+    "member_count": 5,
+    "verified_url": "https://api.mnemom.ai/v1/teams/team-xyz/reputation/verify",
+    "badge_url": "https://api.mnemom.ai/v1/teams/team-xyz/badge.svg",
+    "methodology_url": "https://docs.mnemom.ai/concepts/team-reputation",
+    "last_updated": "2026-02-25T06:00:00.000Z"
+  }
+}
+```
+
+Embed this in your team's A2A Agent Card to enable other agents and teams to make trust decisions about your team programmatically.
+
+---
+
+## API Reference
+
+The primary endpoint for fetching team reputation data:
+
+```
+GET /v1/teams/{team_id}/reputation
+```
+
+No authentication required for public teams. Returns the full score with all components.
+
+**Response:**
+
+```json
+{
+  "team_id": "team-abc123",
+  "team_name": "Support Pipeline Alpha",
+  "score": 812,
+  "grade": "AA",
+  "confidence": "medium",
+  "is_eligible": true,
+  "components": [
+    {
+      "key": "coherence_history",
+      "label": "Coherence History",
+      "score": 880,
+      "weight": 0.35,
+      "weighted_score": 308,
+      "factors": ["CQ trending upward over 12 assessments"]
+    },
+    {
+      "key": "member_quality",
+      "label": "Member Quality",
+      "score": 790,
+      "weight": 0.25,
+      "weighted_score": 198,
+      "factors": ["Tail-risk-weighted average across 5 members"]
+    },
+    {
+      "key": "operational_record",
+      "label": "Operational Record",
+      "score": 850,
+      "weight": 0.20,
+      "weighted_score": 170,
+      "factors": ["85% of assessments resulted in low/medium risk"]
+    },
+    {
+      "key": "structural_stability",
+      "label": "Structural Stability",
+      "score": 720,
+      "weight": 0.10,
+      "weighted_score": 72,
+      "factors": ["Low SR trend, 1 roster change in 30 days"]
+    },
+    {
+      "key": "assessment_density",
+      "label": "Assessment Density",
+      "score": 640,
+      "weight": 0.10,
+      "weighted_score": 64,
+      "factors": ["32 assessments, most recent 2 days ago"]
+    }
+  ],
+  "total_assessments": 32,
+  "last_assessed": "2026-02-23T10:00:00.000Z",
+  "trend_30d": 18,
+  "visibility": "public",
+  "computed_at": "2026-02-25T06:00:00.000Z",
+  "member_count": 5
+}
+```
+
+For the complete API reference, see the [Teams API](/api-reference/team-overview).
+
+---
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import { fetchTeamReputation, fetchTeamReputationHistory } from '@mnemom/reputation';
+
+// Get current team reputation
+const reputation = await fetchTeamReputation('team-abc123');
+
+if (reputation) {
+  console.log(`Score: ${reputation.score}`);
+  console.log(`Grade: ${reputation.grade}`);
+  console.log(`Confidence: ${reputation.confidence}`);
+  console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
+
+  for (const component of reputation.components) {
+    console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
+  }
+}
+
+// Get weekly history for trend analysis
+const history = await fetchTeamReputationHistory('team-abc123');
+for (const snapshot of history) {
+  console.log(`${snapshot.week_start}: ${snapshot.score} (${snapshot.grade})`);
+}
+```
+
+### Python
+
+```python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+# Get current team reputation (public endpoint)
+response = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation")
+reputation = response.json()
+
+print(f"Score: {reputation['score']}")
+print(f"Grade: {reputation['grade']}")
+print(f"Confidence: {reputation['confidence']}")
+print(f"30-day trend: {reputation['trend_30d']:+d}")
+
+for component in reputation["components"]:
+    print(f"  {component['label']}: {component['score']}/1000 (weight: {component['weight']})")
+
+# Get weekly history
+history = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation/history")
+for snapshot in history.json()["snapshots"]:
+    print(f"{snapshot['week_start']}: {snapshot['score']} ({snapshot['grade']})")
+```
+
+---
+
+## See Also
+
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- Individual agent reputation scoring
+- [Risk Assessment](/concepts/risk-assessment) -- Risk scoring model (input to team reputation)
+- [Team Management Guide](/guides/team-management) -- Practical guide for creating and managing teams
+- [Teams API](/api-reference/team-overview) -- Full API reference for team endpoints
+- [Embeddable Badges](/guides/reputation-badges) -- Badge variants including team badges
+- [Fleet Coherence](/concepts/fleet-coherence) -- Pairwise coherence data used in team scoring
