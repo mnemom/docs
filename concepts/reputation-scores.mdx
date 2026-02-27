@@ -79,9 +79,11 @@ score = 1000 / (1 + Σ max_impact_per_session)^1.5
 
 The power curve degrades meaningfully but never craters to zero from moderate violation counts, preserving signal differentiation across the full range.
 
+After [reclassification](/concepts/card-lifecycle), violations classified as `card_gap` are **excluded** from the compliance calculation. Only `behavior_gap` violations (genuine behavioral errors) count. This enables [trust recovery](/guides/trust-recovery) when violations were caused by configuration drift rather than agent misbehavior.
+
 - **Data source:** AIP checkpoints with `boundary_violation` verdict, grouped by `session_id`
 - **Update frequency:** Hourly
-- **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence
+- **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence; [reclassify card-gap violations](/guides/trust-recovery)
 
 ### Drift Stability (20%)
 
@@ -505,6 +507,34 @@ Key differences from individual scoring:
 
 ---
 
+## Trust Recovery
+
+When violations are caused by **card gaps** (configuration errors) rather than genuine agent misbehavior, scores can be recovered through [reclassification](/concepts/card-lifecycle). The workflow:
+
+1. Identify violations caused by missing card capabilities (e.g., agent used a tool correctly but the card didn't declare it)
+2. Submit a reclassification request marking the violation as `card_gap`
+3. Amend the alignment card to include the missing capability
+4. Trigger score recomputation — `card_gap` violations are excluded from Compliance and Drift Stability components
+5. Score recovers on the next hourly recomputation cycle
+
+Trust graph propagation ensures related agents (team members, fleet peers) also benefit from the correction, with a 0.85 decay factor per hop up to 3 hops deep.
+
+See the [Trust Recovery Guide](/guides/trust-recovery) for step-by-step instructions and the [Reclassification API](/api-reference/reclassification-overview) for endpoint details.
+
+---
+
+## On-Chain Verification
+
+Reputation scores can be anchored on-chain via the [MnemoReputationRegistry](/concepts/on-chain-verification) smart contract on Base L2. On-chain anchoring provides:
+
+- **Immutability** — Published scores cannot be altered after anchoring
+- **Independent verification** — Anyone can query the contract directly without trusting Mnemom infrastructure
+- **Tamper evidence** — Merkle roots anchored on-chain prove the integrity of the full checkpoint tree
+
+See [On-Chain Verification](/concepts/on-chain-verification) for architecture details and the [On-Chain API](/api-reference/on-chain-overview) for publishing endpoints.
+
+---
+
 ## See Also
 
 - [Team Trust Rating](/concepts/team-reputation) -- Team-level reputation scoring
@@ -515,3 +545,5 @@ Key differences from individual scoring:
 - [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The primary data source for reputation scores
 - [Drift Detection](/concepts/drift-detection) -- How behavioral drift affects reputation
 - [Fleet Coherence](/concepts/fleet-coherence) -- How fleet compatibility contributes to scores
+- [Card Lifecycle](/concepts/card-lifecycle) -- How reclassification enables trust recovery
+- [On-Chain Verification](/concepts/on-chain-verification) -- Immutable score anchoring on Base L2

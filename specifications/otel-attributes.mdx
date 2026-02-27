@@ -89,6 +89,42 @@ Span for AAP behavioral drift detection results.
 
 - `aap.drift_alert` — One event per alert. Includes `drift_direction`, `integrity_similarity`, and `sustained_checks`.
 
+### `policy.evaluate` — 8 attributes
+
+Span for policy evaluation results. Created when the [Policy Engine](/concepts/policy-engine) evaluates a request against the active policy.
+
+| Attribute | Type | Source | Description |
+|---|---|---|---|
+| `policy.agent_id` | string | input | Agent being evaluated |
+| `policy.policy_id` | string | policy | Policy identifier |
+| `policy.policy_version` | int | policy | Policy version number |
+| `policy.verdict` | string | result | Evaluation verdict: `pass`, `warn`, `fail` |
+| `policy.violations_count` | int | result | Number of violations detected |
+| `policy.warnings_count` | int | result | Number of warnings detected |
+| `policy.coverage_pct` | float | result | Percentage of card actions mapped by policy |
+| `policy.context` | string | input | Evaluation context: `cicd`, `gateway`, `observer` |
+| `policy.duration_ms` | float | measured | Evaluation duration in milliseconds |
+| `policy.enforcement_mode` | string | policy | Active enforcement mode: `warn`, `enforce`, `off` |
+
+**Events emitted on this span:**
+
+- `policy.violation` — One event per violation. Includes `type` (forbidden/capability_exceeded/unmapped_denied), `tool`, `severity`, and `reason`.
+
+### `reclassification.process` — 8 attributes
+
+Span for violation reclassification. Created when a checkpoint is reclassified via the [Reclassification API](/api-reference/reclassification-overview).
+
+| Attribute | Type | Source | Description |
+|---|---|---|---|
+| `reclassification.agent_id` | string | input | Agent whose violation is reclassified |
+| `reclassification.checkpoint_id` | string | input | Checkpoint being reclassified |
+| `reclassification.original_type` | string | checkpoint | Original violation type (e.g., `UNMAPPED_TOOL`) |
+| `reclassification.new_type` | string | result | New classification: `card_gap` or `behavior_gap` |
+| `reclassification.reason` | string | input | Human-provided reclassification reason |
+| `reclassification.card_amendment_id` | string | input | Linked card amendment ID (if any) |
+| `reclassification.score_before` | int | computed | Agent score before reclassification |
+| `reclassification.score_after` | int | computed | Agent score after recomputation |
+
 ## Span Hierarchy
 
 Spans are created as children of the current active span via `context.active()`:
@@ -98,6 +134,9 @@ your_application_span
   ├── aip.integrity_check
   │    ├── event: aip.concern (one per concern)
   │    └── event: aip.drift_alert (when drift active)
+  ├── policy.evaluate
+  │    └── event: policy.violation (one per violation)
+  ├── reclassification.process
   ├── aap.verify_trace
   │    └── event: aap.violation (one per violation)
   ├── aap.check_coherence
@@ -107,7 +146,7 @@ your_application_span
 
 ## Metrics
 
-9 metric instruments for aggregate monitoring:
+13 metric instruments for aggregate monitoring:
 
 ### AIP Metrics
 
@@ -127,6 +166,20 @@ your_application_span
 | `aap.violations.total` | Counter | `type`, `severity` | Total number of violations detected |
 | `aap.verification.duration_ms` | Histogram | — | Distribution of verification durations |
 | `aap.coherence.score` | Histogram | `compatible` | Distribution of coherence scores |
+
+### Policy Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `policy.evaluations.total` | Counter | `verdict`, `context` | Total number of policy evaluations |
+| `policy.violations.total` | Counter | `type`, `severity` | Total number of policy violations detected |
+| `policy.evaluation.duration_ms` | Histogram | `verdict` | Distribution of policy evaluation durations |
+
+### Reclassification Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `reclassification.total` | Counter | `new_type` | Total reclassifications (card_gap vs behavior_gap) |
 
 ## GenAI SIG Forward Compatibility
 
@@ -150,5 +203,7 @@ Pre-built Grafana and Datadog dashboards that consume these attributes and metri
 ## Related
 
 - [Observability Guide](/guides/observability) — Full integration guide for the aip-otel-exporter
+- [Policy Engine](/concepts/policy-engine) — Policy evaluation concepts
+- [Card Lifecycle](/concepts/card-lifecycle) — Reclassification and trust recovery
 - [AIP Specification](/protocols/aip/specification) — Protocol specification for Integrity Checkpoints
 - [AAP Specification](/protocols/aap/specification) — Protocol specification for AP-Traces and verification

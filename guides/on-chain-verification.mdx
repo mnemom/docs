@@ -1,0 +1,459 @@
+---
+title: "On-Chain Verification"
+description: "Anchor Merkle roots, publish scores, and verify agent reputation on Base L2"
+sidebarTitle: "On-Chain Verification"
+icon: "link"
+---
+
+# On-Chain Verification Guide
+
+**Step-by-step instructions for anchoring Merkle roots, publishing reputation scores, and verifying agent trust on Base L2.** This guide covers the full on-chain verification workflow using the Mnemom API.
+
+For the conceptual overview of how on-chain verification works, see [On-Chain Verification](/concepts/on-chain-verification).
+
+---
+
+## Prerequisites
+
+Before using on-chain verification features, ensure you have:
+
+1. **A Mnemom API key** -- Create one in your dashboard under Settings or via `POST /v1/api-keys`
+2. **Agents with computed reputation scores** -- Agents must have at least 50 analyzed integrity checkpoints and a published [Mnemom Trust Rating](/concepts/reputation-scores)
+
+**API key authentication:** Pass your key in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+---
+
+## Anchoring Merkle Roots
+
+Anchor a Merkle root from your agent's integrity checkpoint tree to the `MnemoMerkleAnchor` contract on Base L2. This creates an immutable, tamper-evident reference point for the underlying checkpoint data.
+
+**Endpoint:** `POST /v1/on-chain/anchor-root`
+
+**Request body:**
+
+```json
+{
+  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+  "leaf_count": 347,
+  "tree_depth": 9
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `merkle_root` | string | Yes | The Merkle root hash to anchor (hex-encoded, 32 bytes) |
+| `leaf_count` | number | Yes | Number of leaves (checkpoints) in the Merkle tree |
+| `tree_depth` | number | Yes | Depth of the Merkle tree |
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.mnemom.ai/v1/on-chain/anchor-root \
+  -H "Authorization: Bearer $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+    "leaf_count": 347,
+    "tree_depth": 9
+  }'
+```
+
+```typescript TypeScript
+import { anchorMerkleRoot } from '@mnemom/on-chain';
+
+const result = await anchorMerkleRoot({
+  merkleRoot: '0xabc123def456789012345678901234567890123456789012345678901234abcd',
+  leafCount: 347,
+  treeDepth: 9,
+});
+
+console.log(`Anchored in tx: ${result.tx_hash}`);
+console.log(`Block: ${result.block_number}`);
+console.log(`Gas used: ${result.gas_used}`);
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+response = httpx.post(
+    f"{API_BASE}/v1/on-chain/anchor-root",
+    headers={"Authorization": f"Bearer {api_key}"},
+    json={
+        "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+        "leaf_count": 347,
+        "tree_depth": 9,
+    },
+)
+
+result = response.json()
+print(f"Anchored in tx: {result['tx_hash']}")
+print(f"Block: {result['block_number']}")
+print(f"Gas used: {result['gas_used']}")
+```
+</CodeGroup>
+
+**Response:** `200 OK`
+
+```json
+{
+  "anchor_id": "anc-7f8a9b2c",
+  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+  "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "block_number": 18234567,
+  "gas_used": 48732,
+  "chain": "base",
+  "anchored_at": "2026-02-26T10:30:00.000Z"
+}
+```
+
+---
+
+## Publishing Scores
+
+Publish one or more agent reputation scores to the `MnemoReputationRegistry` contract on Base L2. Published scores become immutably queryable by any contract or external observer.
+
+**Endpoint:** `POST /v1/on-chain/publish-scores`
+
+**Request body:**
+
+```json
+{
+  "publications": [
+    {
+      "agent_id": "smolt-a4c12709",
+      "score": 782,
+      "grade": "A"
+    },
+    {
+      "agent_id": "smolt-b8e34f21",
+      "score": 650,
+      "grade": "BBB"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `publications` | array | Yes | Array of score publications (max 200) |
+| `publications[].agent_id` | string | Yes | Agent identifier |
+| `publications[].score` | number | Yes | Composite reputation score (0-1000) |
+| `publications[].grade` | string | Yes | Letter grade (`AAA`, `AA`, `A`, `BBB`, `BB`, `B`, `CCC`) |
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.mnemom.ai/v1/on-chain/publish-scores \
+  -H "Authorization: Bearer $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "publications": [
+      {"agent_id": "smolt-a4c12709", "score": 782, "grade": "A"},
+      {"agent_id": "smolt-b8e34f21", "score": 650, "grade": "BBB"}
+    ]
+  }'
+```
+
+```typescript TypeScript
+import { publishScores } from '@mnemom/on-chain';
+
+const result = await publishScores({
+  publications: [
+    { agentId: 'smolt-a4c12709', score: 782, grade: 'A' },
+    { agentId: 'smolt-b8e34f21', score: 650, grade: 'BBB' },
+  ],
+});
+
+console.log(`Published ${result.agent_count} agents in tx: ${result.tx_hash}`);
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+response = httpx.post(
+    f"{API_BASE}/v1/on-chain/publish-scores",
+    headers={"Authorization": f"Bearer {api_key}"},
+    json={
+        "publications": [
+            {"agent_id": "smolt-a4c12709", "score": 782, "grade": "A"},
+            {"agent_id": "smolt-b8e34f21", "score": 650, "grade": "BBB"},
+        ]
+    },
+)
+
+result = response.json()
+print(f"Published {result['agent_count']} agents in tx: {result['tx_hash']}")
+```
+</CodeGroup>
+
+**Response:** `200 OK`
+
+```json
+{
+  "publication_id": "pub-3e4f5a6b",
+  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "block_number": 18234589,
+  "gas_used": 142350,
+  "agent_count": 2,
+  "published_at": "2026-02-26T10:35:00.000Z"
+}
+```
+
+---
+
+## Verifying Scores
+
+Verify an agent's on-chain reputation score and retrieve the cryptographic proof linking the on-chain record to the underlying integrity data.
+
+**Endpoint:** `GET /v1/on-chain/verify-proof/{agent_id}`
+
+<CodeGroup>
+```bash cURL
+curl https://api.mnemom.ai/v1/on-chain/verify-proof/smolt-a4c12709 \
+  -H "Authorization: Bearer $MNEMOM_API_KEY"
+```
+
+```typescript TypeScript
+import { verifyOnChainScore } from '@mnemom/on-chain';
+
+const proof = await verifyOnChainScore('smolt-a4c12709');
+
+if (proof.verified) {
+  console.log(`On-chain score: ${proof.on_chain_score} (${proof.grade})`);
+  console.log(`Published at block: ${proof.block_number}`);
+} else {
+  console.warn('On-chain score could not be verified');
+}
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+response = httpx.get(
+    f"{API_BASE}/v1/on-chain/verify-proof/smolt-a4c12709",
+    headers={"Authorization": f"Bearer {api_key}"},
+)
+
+proof = response.json()
+if proof["verified"]:
+    print(f"On-chain score: {proof['on_chain_score']} ({proof['grade']})")
+    print(f"Published at block: {proof['block_number']}")
+```
+</CodeGroup>
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "on_chain_score": 782,
+  "grade": "A",
+  "metadata_hash": "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba",
+  "published_at": "2026-02-26T10:35:00.000Z",
+  "block_number": 18234589,
+  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "verified": true
+}
+```
+
+---
+
+## Checking On-Chain Status
+
+Check whether an agent has an on-chain score and view the current on-chain state.
+
+**Endpoint:** `GET /v1/on-chain/status/{agent_id}`
+
+<CodeGroup>
+```bash cURL
+curl https://api.mnemom.ai/v1/on-chain/status/smolt-a4c12709 \
+  -H "Authorization: Bearer $MNEMOM_API_KEY"
+```
+
+```typescript TypeScript
+import { getOnChainStatus } from '@mnemom/on-chain';
+
+const status = await getOnChainStatus('smolt-a4c12709');
+
+if (status.has_on_chain_score) {
+  console.log(`Latest on-chain score: ${status.latest_score.score}`);
+  console.log(`Last updated: ${status.last_updated}`);
+}
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+response = httpx.get(
+    f"{API_BASE}/v1/on-chain/status/smolt-a4c12709",
+    headers={"Authorization": f"Bearer {api_key}"},
+)
+
+status = response.json()
+if status["has_on_chain_score"]:
+    print(f"Latest on-chain score: {status['latest_score']['score']}")
+    print(f"Last updated: {status['last_updated']}")
+```
+</CodeGroup>
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "has_on_chain_score": true,
+  "latest_score": {
+    "score": 782,
+    "grade": "A",
+    "block_number": 18234589,
+    "published_at": "2026-02-26T10:35:00.000Z"
+  },
+  "latest_anchor": {
+    "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+    "block_number": 18234567,
+    "anchored_at": "2026-02-26T10:30:00.000Z"
+  },
+  "last_updated": "2026-02-26T10:35:00.000Z"
+}
+```
+
+---
+
+## Viewing History
+
+Retrieve the history of on-chain anchoring and score publishing events.
+
+**Endpoint:** `GET /v1/on-chain/history`
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page` | number | No | Page number (default: 1) |
+| `per_page` | number | No | Results per page (default: 20, max: 100) |
+
+<CodeGroup>
+```bash cURL
+curl "https://api.mnemom.ai/v1/on-chain/history?page=1&per_page=10" \
+  -H "Authorization: Bearer $MNEMOM_API_KEY"
+```
+
+```typescript TypeScript
+import { getOnChainHistory } from '@mnemom/on-chain';
+
+const history = await getOnChainHistory({ page: 1, perPage: 10 });
+
+for (const anchor of history.anchors) {
+  console.log(`Root anchored at block ${anchor.block_number}: ${anchor.merkle_root}`);
+}
+
+for (const pub of history.publications) {
+  console.log(`${pub.agent_count} scores published at block ${pub.block_number}`);
+}
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+
+response = httpx.get(
+    f"{API_BASE}/v1/on-chain/history",
+    headers={"Authorization": f"Bearer {api_key}"},
+    params={"page": 1, "per_page": 10},
+)
+
+history = response.json()
+for anchor in history["anchors"]:
+    print(f"Root anchored at block {anchor['block_number']}: {anchor['merkle_root']}")
+
+for pub in history["publications"]:
+    print(f"{pub['agent_count']} scores published at block {pub['block_number']}")
+```
+</CodeGroup>
+
+**Response:** `200 OK`
+
+```json
+{
+  "anchors": [
+    {
+      "anchor_id": "anc-7f8a9b2c",
+      "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+      "leaf_count": 347,
+      "tree_depth": 9,
+      "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "block_number": 18234567,
+      "anchored_at": "2026-02-26T10:30:00.000Z"
+    }
+  ],
+  "publications": [
+    {
+      "publication_id": "pub-3e4f5a6b",
+      "agent_count": 2,
+      "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+      "block_number": 18234589,
+      "published_at": "2026-02-26T10:35:00.000Z"
+    }
+  ],
+  "page": 1,
+  "per_page": 10,
+  "total_anchors": 42,
+  "total_publications": 18
+}
+```
+
+---
+
+## Contract Addresses
+
+| Contract | Base Sepolia (Testnet) | Base (Mainnet) |
+|----------|----------------------|----------------|
+| `MnemoReputationRegistry` | `0x1234...abcd` | `0x5678...efgh` |
+| `MnemoMerkleAnchor` | `0x9abc...def0` | `0x1357...2468` |
+
+<Tip>
+View contract source and transactions on Basescan:
+- **Testnet:** [sepolia.basescan.org](https://sepolia.basescan.org)
+- **Mainnet:** [basescan.org](https://basescan.org)
+</Tip>
+
+<Warning>
+Use Base Sepolia (testnet) for development and testing. Testnet contracts use test ETH with no real value. Switch to Base mainnet only for production deployments.
+</Warning>
+
+---
+
+## Cost Estimates
+
+| Operation | Approximate Gas | Approximate USD (Base L2) |
+|-----------|----------------|--------------------------|
+| Anchor single Merkle root | ~50,000 | $0.01 - $0.02 |
+| Publish single score | ~80,000 | $0.02 - $0.03 |
+| Batch publish (50 agents) | ~200,000 | $0.03 - $0.05 |
+| Batch publish (200 agents) | ~600,000 | $0.08 - $0.15 |
+| Verify score (view call) | 0 | Free |
+| Check anchor status (view call) | 0 | Free |
+
+All write operations are submitted by Mnemom's relayer and the gas cost is included in your API plan. You do not need to hold ETH on Base to use the on-chain verification API.
+
+---
+
+## See Also
+
+- [On-Chain Verification Concepts](/concepts/on-chain-verification) -- How on-chain anchoring and publishing work
+- [On-Chain API Reference](/api-reference/on-chain-overview) -- Full API reference for all on-chain endpoints
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- Understanding reputation scores
+- [Cryptographic Verification](/concepts/reputation-scores#cryptographic-verification) -- Off-chain proof chain structure
+- [Improving Your Score](/guides/improving-reputation) -- Strategies for improving your Trust Rating

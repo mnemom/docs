@@ -1,0 +1,213 @@
+---
+title: "Policy CLI Reference"
+description: "CLI commands for policy management — init, validate, publish, list, test, and evaluate"
+sidebarTitle: "Policy CLI"
+icon: "shield-check"
+---
+
+# Policy CLI Reference
+
+The `smoltbot policy` commands manage governance policies for your agents. Policies define which tools an agent can use, how unmapped tools are handled, and what actions are forbidden — bridging the gap between abstract alignment card declarations and concrete tool usage.
+
+## Commands
+
+<Steps>
+
+### `smoltbot policy init`
+
+Generate a starter policy.yaml file with commented examples.
+
+```bash
+smoltbot policy init
+```
+
+**What it does:**
+
+- Creates a `policy.yaml` in the current directory
+- Includes commented examples for capability_mappings, forbidden rules, escalation_triggers, and defaults
+- Pre-fills with sensible defaults (warn mode, 24h grace period, deny unmapped tools)
+
+**Example output:**
+
+```
+✓ Created policy.yaml
+  Edit the file to define your capability mappings and forbidden rules.
+  Run 'smoltbot policy validate policy.yaml' to check your policy.
+```
+
+### `smoltbot policy validate <file>`
+
+Local-only schema validation. No API call. CI-friendly exit codes.
+
+```bash
+smoltbot policy validate policy.yaml
+```
+
+**Exit codes:**
+
+- `0` — Valid policy
+- `1` — Validation errors
+
+**Example output (success):**
+
+```
+Validating policy.yaml...
+  ✓ Schema version: 1.0
+  ✓ Meta: name="support-agent-policy", scope=agent
+  ✓ Capability mappings: 4 capabilities, 12 tool patterns
+  ✓ Forbidden rules: 3 rules
+  ✓ Escalation triggers: 2 triggers
+  ✓ Defaults: unmapped=deny, enforcement=warn, grace=24h
+
+Policy is valid.
+```
+
+**Example output (failure):**
+
+```
+Validating policy.yaml...
+  ✗ forbidden[1].severity: must be one of: critical, high, medium, low
+  ✗ defaults.unmapped_tool_action: required field missing
+
+2 errors found. Policy is invalid.
+```
+
+### `smoltbot policy publish <file>`
+
+Upload a policy to an agent. Validates locally first.
+
+```bash
+smoltbot policy publish policy.yaml
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Target agent (default: current agent) |
+| `--yes` | Skip confirmation prompt |
+
+**Example output:**
+
+```
+Validating policy.yaml...
+  ✓ Valid (4 capabilities, 3 forbidden rules)
+
+Publish this policy for agent smolt-a4c12709? (y/N) y
+
+  ✓ Policy published (version 3)
+  Previous policy archived.
+```
+
+### `smoltbot policy list`
+
+List published policies for your agent and organization.
+
+```bash
+smoltbot policy list
+```
+
+**Example output:**
+
+```
+Organization Policy:
+  Name:     org-default-policy
+  Scope:    org
+  Version:  2
+  Updated:  2026-02-20
+
+Agent Policy (smolt-a4c12709):
+  Name:     support-agent-policy
+  Scope:    agent
+  Version:  3
+  Updated:  2026-02-25
+
+Resolved policy: org + agent merged (agent strengthens org defaults)
+```
+
+### `smoltbot policy test <file>`
+
+Dry-run a policy against historical traces. Shows what violations WOULD have been flagged.
+
+```bash
+smoltbot policy test policy.yaml
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Target agent |
+| `--limit <N>` | Number of recent traces to test (default: 50) |
+
+**Example output:**
+
+```
+Testing policy.yaml against 50 recent traces...
+
+  Trace tr-abc123 (2026-02-25 14:32):
+    ⚠ UNMAPPED_TOOL: mcp__slack__post_message (warn)
+    ⚠ UNMAPPED_TOOL: mcp__slack__read_channel (warn)
+
+  Trace tr-def456 (2026-02-25 14:28):
+    ✗ FORBIDDEN: mcp__filesystem__delete (critical)
+      Reason: File deletion not permitted
+
+Summary:
+  50 traces analyzed
+  1 would fail, 1 would warn, 48 would pass
+  2 unmapped tools discovered
+```
+
+### `smoltbot policy evaluate`
+
+Run policy evaluation as a CI/CD gate. Evaluates the agent's current resolved policy against recent activity.
+
+```bash
+smoltbot policy evaluate
+```
+
+**Exit codes:**
+
+- `0` — All evaluations pass
+- `1` — One or more evaluations fail
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Target agent |
+| `--format <json\|text>` | Output format (default: text) |
+
+**Example output:**
+
+```
+Evaluating policy for agent smolt-a4c12709...
+
+  Verdict: PASS
+  Violations: 0
+  Warnings: 2
+  Coverage: 85% (17/20 card actions mapped)
+
+  Warnings:
+    ⚠ 2 unmapped tools in grace period (expires in 18h)
+```
+
+</Steps>
+
+## Global Options
+
+All policy commands support:
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Select which agent to use for the command |
+| `--help` | Show help for the subcommand |
+
+## See Also
+
+- [Policy Engine](/concepts/policy-engine) — How policies work
+- [Policy DSL Specification](/specifications/policy-dsl) — Full schema reference
+- [Policy Management Guide](/guides/policy-management) — Step-by-step workflows
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — Integrating policy into CI/CD
+- [CLI Reference](/smoltbot/cli) — All smoltbot commands

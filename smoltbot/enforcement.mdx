@@ -215,7 +215,9 @@ These settings are also available in the **Agent Settings** panel on the web das
 
 ## Violation Types and Enforcement
 
-Enforcement applies to all violation types detected by the AAP verification engine and AIP integrity checks:
+Enforcement applies to all violation types detected by the AAP verification engine, AIP integrity checks, and the policy engine:
+
+### Alignment Violations
 
 | Violation Type | Severity | Enforcement Behavior |
 |----------------|----------|---------------------|
@@ -226,8 +228,38 @@ Enforcement applies to all violation types detected by the AAP verification engi
 | `CARD_EXPIRED` | HIGH | Blocked in enforce mode; nudged in nudge mode |
 | `UNDECLARED_VALUE` | MEDIUM | Nudged in nudge/enforce mode (not blocked) |
 
+### Policy Violations
+
+Policy enforcement operates as a **parallel system** alongside alignment enforcement. While alignment enforcement checks agent behavior against card values, policy enforcement checks tool usage against governance rules.
+
+| Violation Type | Severity | Enforcement Behavior |
+|----------------|----------|---------------------|
+| `POLICY_VIOLATION` | HIGH | Blocked when policy enforcement mode is `enforce`; logged when `warn` |
+| `UNMAPPED_TOOL` | MEDIUM | Logged as warning; behavior depends on `defaults.unmapped_tool_action` |
+| `CAPABILITY_MISMATCH` | HIGH | Blocked when policy enforcement mode is `enforce`; logged when `warn` |
+
+Policy enforcement is controlled independently via the `enforcement_mode` field in the [Policy DSL](/specifications/policy-dsl):
+
+- **`warn`** — Log violations, return `X-Policy-Verdict: warn` header, allow request to proceed
+- **`enforce`** — Block requests with violations (HTTP 403), return `X-Policy-Verdict: fail` header
+- **`off`** — Skip policy evaluation entirely
+
+The `X-Policy-Verdict` response header is always present when a policy is active:
+
+| Header Value | Meaning |
+|-------------|---------|
+| `pass` | All tools mapped and permitted |
+| `warn` | Violations detected but not blocking |
+| `fail` | Violations detected and request blocked (enforce mode only) |
+
+<Tip>
+Alignment enforcement (observe/nudge/enforce) and policy enforcement (off/warn/enforce) can be configured independently. For example, you might use `nudge` for alignment violations while using `enforce` for policy violations, or vice versa.
+</Tip>
+
+See [Policy Engine](/concepts/policy-engine) for full details on how policies are evaluated, and [Policy Management](/guides/policy-management) for setup instructions.
+
 <Note>
-In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode.
+In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode. This applies to both alignment and policy violations.
 </Note>
 
 ## Conscience Timeline

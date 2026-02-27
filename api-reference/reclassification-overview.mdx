@@ -1,0 +1,419 @@
+---
+title: "Reclassification API"
+description: "API reference for violation reclassification, score recomputation, card amendments, and compliance export"
+sidebarTitle: "Reclassification API"
+icon: "arrows-rotate"
+---
+
+# Reclassification API
+
+The Reclassification API enables operators to reclassify checkpoint violations as card gaps or behavior gaps, trigger score recomputation, review amendment history, and export full compliance records for audit purposes. All reclassification data feeds into the [Trust Rating](/api-reference/reputation-overview) pipeline and is reflected in the agent's integrity chain.
+
+**Base URL:** `https://api.mnemom.ai/v1`
+
+---
+
+## Authentication
+
+All reclassification endpoints require API key authentication. Pass your key in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
+
+| Endpoint | Auth Required | Notes |
+|----------|--------------|-------|
+| `POST /v1/agents/{agent_id}/reclassify` | API key | Reclassify a checkpoint violation |
+| `POST /v1/reputation/{agent_id}/recompute` | API key | Trigger score recomputation |
+| `GET /v1/agents/{agent_id}/compliance-export` | API key | Export compliance record |
+| `GET /v1/agents/{agent_id}/reclassifications` | API key | List reclassification history |
+| `GET /v1/agents/{agent_id}/card-amendments` | API key | List card amendment history |
+
+---
+
+## Rate Limits
+
+| Endpoint | Rate Limit | Window |
+|----------|-----------|--------|
+| `POST /agents/{agent_id}/reclassify` | 30 requests | per minute |
+| `POST /reputation/{agent_id}/recompute` | 10 requests | per minute |
+| `GET /agents/{agent_id}/compliance-export` | 10 requests | per minute |
+| Other endpoints | 60 requests | per minute |
+
+Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+---
+
+## Endpoints
+
+### POST /v1/agents/{agent_id}/reclassify
+
+Reclassify a checkpoint violation as `card_gap` or `behavior_gap`. Card-gap reclassifications indicate that the agent behaved correctly but the card definition was incomplete. Behavior-gap reclassifications indicate a genuine agent misbehavior that should remain on record.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Request body:**
+
+```json
+{
+  "checkpoint_id": "ic-abc12345",
+  "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
+  "card_amendment_id": "amend-xyz789"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `checkpoint_id` | string | Yes | ID of the checkpoint to reclassify |
+| `reason` | string | Yes | Human-readable explanation for the reclassification |
+| `card_amendment_id` | string | No | Link to a card amendment that fixes the gap |
+
+**Response:** `200 OK`
+
+```json
+{
+  "reclassification_id": "rcl-def456",
+  "checkpoint_id": "ic-abc12345",
+  "agent_id": "smolt-a4c12709",
+  "original_type": "UNMAPPED_TOOL",
+  "new_type": "card_gap",
+  "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
+  "card_amendment_id": "amend-xyz789",
+  "approved_by": "user-abc123",
+  "created_at": "2026-02-25T14:00:00.000Z",
+  "score_impact": {
+    "score_before": 650,
+    "score_after": null,
+    "recomputation_pending": true
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reclassification_id` | string | Unique identifier for this reclassification |
+| `checkpoint_id` | string | The checkpoint that was reclassified |
+| `agent_id` | string | Agent identifier |
+| `original_type` | string | Original violation type before reclassification |
+| `new_type` | string | New classification: `card_gap` or `behavior_gap` |
+| `reason` | string | Human-readable explanation |
+| `card_amendment_id` | string | Linked card amendment ID, if provided |
+| `approved_by` | string | User who approved the reclassification |
+| `created_at` | string | ISO 8601 timestamp |
+| `score_impact` | object | Score impact summary |
+
+**`score_impact` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `score_before` | number | Score at time of reclassification |
+| `score_after` | number \| null | Score after recomputation, or `null` if pending |
+| `recomputation_pending` | boolean | Whether a recomputation is needed to reflect this change |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Missing or invalid parameters |
+| `401` | API key required |
+| `404` | Checkpoint or agent not found |
+| `409` | Checkpoint has already been reclassified |
+
+---
+
+### POST /v1/reputation/{agent_id}/recompute
+
+Trigger score recomputation after reclassification. Scores are recomputed with `card_gap` violations excluded from the compliance and drift stability components. Recomputation propagates through the agent's delegation graph using the configured decay factor.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "score_before": 650,
+  "score_after": 782,
+  "grade_before": "BBB",
+  "grade_after": "A",
+  "reclassifications_applied": 3,
+  "propagation": {
+    "agents_affected": 5,
+    "max_depth": 2,
+    "decay_factor": 0.85
+  },
+  "recomputed_at": "2026-02-25T14:01:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `score_before` | number | Composite score before recomputation |
+| `score_after` | number | Composite score after recomputation |
+| `grade_before` | string | Letter grade before recomputation |
+| `grade_after` | string | Letter grade after recomputation |
+| `reclassifications_applied` | number | Number of reclassifications factored into this recomputation |
+| `propagation` | object | Delegation graph propagation details |
+| `recomputed_at` | string | ISO 8601 timestamp of recomputation |
+
+**`propagation` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agents_affected` | number | Total agents whose scores were updated via delegation propagation |
+| `max_depth` | number | Maximum depth reached in the delegation graph |
+| `decay_factor` | number | Decay factor applied at each delegation hop |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required |
+| `404` | Agent not found |
+
+---
+
+### GET /v1/agents/{agent_id}/compliance-export
+
+Export the full compliance record for an agent, including all violations, reclassifications, card amendments, and score history. Designed for audit purposes and regulatory compliance workflows.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "export_date": "2026-02-25T14:00:00.000Z",
+  "violations": [...],
+  "reclassifications": [...],
+  "card_amendments": [...],
+  "score_history": [...],
+  "integrity_chain_valid": true
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `export_date` | string | ISO 8601 timestamp of the export |
+| `violations` | array | All recorded violations for this agent |
+| `reclassifications` | array | All reclassification records |
+| `card_amendments` | array | All card amendment records |
+| `score_history` | array | Historical score snapshots |
+| `integrity_chain_valid` | boolean | Whether the integrity chain is intact and tamper-free |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required |
+| `404` | Agent not found |
+
+---
+
+### GET /v1/agents/{agent_id}/reclassifications
+
+List reclassification history for an agent. Returns paginated results ordered by creation date (newest first).
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+| `page` | query | number | No | Page number (default: 1) |
+| `per_page` | query | number | No | Results per page (default: 20, max: 100) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "reclassifications": [
+    {
+      "reclassification_id": "rcl-def456",
+      "checkpoint_id": "ic-abc12345",
+      "original_type": "UNMAPPED_TOOL",
+      "new_type": "card_gap",
+      "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
+      "card_amendment_id": "amend-xyz789",
+      "approved_by": "user-abc123",
+      "created_at": "2026-02-25T14:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required |
+| `404` | Agent not found |
+
+---
+
+### GET /v1/agents/{agent_id}/card-amendments
+
+List card amendment history for an agent. Returns paginated results ordered by creation date (newest first).
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+| `page` | query | number | No | Page number (default: 1) |
+| `per_page` | query | number | No | Results per page (default: 20, max: 100) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "card_amendments": [
+    {
+      "amendment_id": "amend-xyz789",
+      "agent_id": "smolt-a4c12709",
+      "field_changed": "bounded_actions",
+      "previous_value": ["mcp__browser__click", "mcp__browser__type"],
+      "new_value": ["mcp__browser__click", "mcp__browser__type", "mcp__browser__navigate"],
+      "reason": "Added mcp__browser__navigate to bounded_actions to reflect legitimate research workflow",
+      "linked_reclassification_id": "rcl-def456",
+      "created_at": "2026-02-25T13:55:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required |
+| `404` | Agent not found |
+
+---
+
+## Error Codes
+
+| Status | Code | Description |
+|--------|------|-------------|
+| `400` | `invalid_request` | Missing or invalid parameters |
+| `401` | `unauthorized` | API key required but not provided or invalid |
+| `404` | `checkpoint_not_found` | Checkpoint ID does not exist |
+| `404` | `agent_not_found` | Agent ID does not exist |
+| `409` | `already_reclassified` | Checkpoint has already been reclassified |
+| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
+| `500` | `internal_error` | Server error; retry with exponential backoff |
+
+All error responses follow the standard envelope:
+
+```json
+{
+  "error": "checkpoint_not_found",
+  "message": "No checkpoint found with ID 'ic-abc12345'"
+}
+```
+
+---
+
+## SDK Usage
+
+<CodeGroup>
+
+```typescript TypeScript
+import { MnemomClient } from '@mnemom/sdk';
+
+const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+
+// Reclassify a checkpoint violation
+const reclassification = await client.agents.reclassify('smolt-a4c12709', {
+  checkpoint_id: 'ic-abc12345',
+  reason: 'Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions',
+  card_amendment_id: 'amend-xyz789',
+});
+console.log(`Reclassified: ${reclassification.reclassification_id}`);
+
+// Trigger score recomputation
+const result = await client.reputation.recompute('smolt-a4c12709');
+console.log(`Score: ${result.score_before} → ${result.score_after}`);
+console.log(`Grade: ${result.grade_before} → ${result.grade_after}`);
+
+// Export compliance record
+const exportData = await client.agents.complianceExport('smolt-a4c12709');
+console.log(`Chain valid: ${exportData.integrity_chain_valid}`);
+console.log(`Violations: ${exportData.violations.length}`);
+console.log(`Reclassifications: ${exportData.reclassifications.length}`);
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+headers = {"Authorization": f"Bearer {api_key}"}
+
+# Reclassify a checkpoint violation
+reclassification = httpx.post(
+    f"{API_BASE}/v1/agents/smolt-a4c12709/reclassify",
+    headers=headers,
+    json={
+        "checkpoint_id": "ic-abc12345",
+        "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
+        "card_amendment_id": "amend-xyz789",
+    },
+).json()
+print(f"Reclassified: {reclassification['reclassification_id']}")
+
+# Trigger score recomputation
+result = httpx.post(
+    f"{API_BASE}/v1/reputation/smolt-a4c12709/recompute",
+    headers=headers,
+).json()
+print(f"Score: {result['score_before']} → {result['score_after']}")
+print(f"Grade: {result['grade_before']} → {result['grade_after']}")
+
+# Export compliance record
+export_data = httpx.get(
+    f"{API_BASE}/v1/agents/smolt-a4c12709/compliance-export",
+    headers=headers,
+).json()
+print(f"Chain valid: {export_data['integrity_chain_valid']}")
+print(f"Violations: {len(export_data['violations'])}")
+print(f"Reclassifications: {len(export_data['reclassifications'])}")
+```
+
+</CodeGroup>
+
+---
+
+## See Also
+
+- [Card Lifecycle](/concepts/card-lifecycle) -- Reclassification concepts
+- [Trust Recovery Guide](/guides/trust-recovery) -- Step-by-step workflow
+- [Reputation Scores](/concepts/reputation-scores) -- Score computation
+- [Policy API](/api-reference/policy-overview) -- Policy management

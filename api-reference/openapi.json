@@ -103,6 +103,22 @@
     {
       "name": "Team Reputation",
       "description": "Team reputation scores, history, cryptographic verification, and embeddable badges"
+    },
+    {
+      "name": "Policy",
+      "description": "Policy management endpoints for agents and organizations. Define capability mappings, forbidden tools, escalation triggers, and enforcement defaults."
+    },
+    {
+      "name": "Reclassification",
+      "description": "Violation reclassification and trust recovery. Reclassify checkpoint violations, trigger score recomputation, and export compliance records."
+    },
+    {
+      "name": "Intelligence",
+      "description": "Fault line analysis, risk forecasting, and policy recommendations. Analyze team alignment gaps, forecast failure modes, and generate policy suggestions."
+    },
+    {
+      "name": "On-Chain",
+      "description": "On-chain Merkle root anchoring and score publishing. Anchor integrity proofs to blockchain, publish scores, and verify on-chain proofs."
     }
   ],
   "security": [{"BearerAuth": []}],
@@ -6968,6 +6984,1138 @@
           }
         }
       }
+    },
+
+    "/agents/{agent_id}/policy": {
+      "get": {
+        "operationId": "getAgentPolicy",
+        "summary": "Get agent policy",
+        "description": "Retrieve the CLPI policy currently assigned to the specified agent. Returns the full policy document including capability mappings, forbidden rules, escalation triggers, and enforcement defaults.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent policy document",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Policy"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "put": {
+        "operationId": "setAgentPolicy",
+        "summary": "Set agent policy",
+        "description": "Create or replace the CLPI policy for the specified agent. The policy defines which tools map to which capabilities, forbidden tool patterns, escalation triggers, and enforcement defaults. Agent-level policies override org-level policies when merged.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/Policy"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy saved successfully",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Policy"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteAgentPolicy",
+        "summary": "Delete agent policy",
+        "description": "Remove the agent-level CLPI policy. After deletion the agent will inherit the org-level policy (if any) or operate with no policy constraints.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Policy deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/agents/{agent_id}/policy/resolved": {
+      "get": {
+        "operationId": "getAgentPolicyResolved",
+        "summary": "Get merged org+agent policy",
+        "description": "Returns the effective policy for the agent after merging the org-level policy with any agent-level overrides. This is the policy that the enforcement engine actually applies at runtime. Org defaults are used for any field not overridden at the agent level.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Merged effective policy",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Policy"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/orgs/{org_id}/policy": {
+      "get": {
+        "operationId": "getOrgPolicy",
+        "summary": "Get org policy",
+        "description": "Retrieve the CLPI policy defined at the organization level. All agents in the org inherit this policy unless they have agent-level overrides.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/OrgId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization policy document",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Policy"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "put": {
+        "operationId": "setOrgPolicy",
+        "summary": "Set org policy",
+        "description": "Create or replace the CLPI policy at the organization level. This policy applies to all agents in the org as the base layer, which agent-level policies can override.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/OrgId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/Policy"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Organization policy saved",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Policy"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgPolicy",
+        "summary": "Delete org policy",
+        "description": "Remove the organization-level CLPI policy. All agents in the org will lose their inherited policy defaults and rely solely on agent-level policies (if any).",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/OrgId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization policy deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/orgs/{org_id}/policy/history": {
+      "get": {
+        "operationId": "getOrgPolicyHistory",
+        "summary": "Get org policy version history",
+        "description": "Retrieve the version history of the organization's CLPI policy. Each entry includes the full policy snapshot, who made the change, and when. Useful for auditing policy evolution over time.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/OrgId"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of versions to return"},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}, "description": "Number of versions to skip for pagination"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Policy version history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "version": {"type": "integer"},
+                          "policy": {"$ref": "#/components/schemas/Policy"},
+                          "changed_by": {"type": "string"},
+                          "changed_at": {"type": "string", "format": "date-time"},
+                          "change_summary": {"type": "string"}
+                        }
+                      }
+                    },
+                    "total": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/policies/evaluate": {
+      "post": {
+        "operationId": "evaluatePolicy",
+        "summary": "Evaluate policy against tools",
+        "description": "Evaluate a CLPI policy against a list of tools to determine which are allowed, forbidden, or unmapped. Returns a verdict with detailed violations, warnings, card coverage gaps, and overall coverage percentage. Useful for dry-run validation before deploying a policy.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["policy", "tools"],
+                "properties": {
+                  "policy": {"$ref": "#/components/schemas/Policy"},
+                  "tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of tool identifiers to evaluate against the policy"
+                  },
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Optional agent ID to include agent-specific context in evaluation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy evaluation result",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/PolicyEvaluationResult"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/policies/evaluate/historical": {
+      "post": {
+        "operationId": "evaluatePolicyHistorical",
+        "summary": "Evaluate policy against historical traces",
+        "description": "Evaluate a CLPI policy against historical AIP traces for an agent. Replays past tool invocations through the policy to identify what would have been blocked, escalated, or flagged. Useful for understanding the impact of a policy change before rolling it out.",
+        "tags": ["Policy"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["policy", "agent_id"],
+                "properties": {
+                  "policy": {"$ref": "#/components/schemas/Policy"},
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Agent whose historical traces will be evaluated"
+                  },
+                  "from": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Start of time range for historical traces"
+                  },
+                  "to": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "End of time range for historical traces"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Maximum number of traces to evaluate"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Historical evaluation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "evaluation": {"$ref": "#/components/schemas/PolicyEvaluationResult"},
+                    "traces_evaluated": {"type": "integer"},
+                    "time_range": {
+                      "type": "object",
+                      "properties": {
+                        "from": {"type": "string", "format": "date-time"},
+                        "to": {"type": "string", "format": "date-time"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+
+    "/agents/{agent_id}/reclassify": {
+      "post": {
+        "operationId": "reclassifyViolation",
+        "summary": "Reclassify a checkpoint violation",
+        "description": "Reclassify a previously recorded AIP checkpoint violation. This allows operators to correct false positives or adjust severity after manual review. The reclassification is recorded in the audit trail and can trigger a score recomputation.",
+        "tags": ["Reclassification"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/ReclassificationRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reclassification result with score impact",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ReclassificationResult"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/reputation/{agent_id}/recompute": {
+      "post": {
+        "operationId": "recomputeReputationScore",
+        "summary": "Trigger score recomputation",
+        "description": "Trigger a full recomputation of the agent's reputation and compliance scores. This re-evaluates all checkpoints, reclassifications, and card amendments to produce an updated score. Useful after bulk reclassifications or policy changes.",
+        "tags": ["Reclassification"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Agent identifier"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for triggering recomputation"
+                  },
+                  "include_reclassifications": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether to include pending reclassifications in the recomputation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recomputation result with new scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "previous_score": {"type": "number"},
+                    "new_score": {"type": "number"},
+                    "delta": {"type": "number"},
+                    "reclassifications_applied": {"type": "integer"},
+                    "recomputed_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/agents/{agent_id}/compliance-export": {
+      "get": {
+        "operationId": "exportComplianceRecord",
+        "summary": "Export compliance record",
+        "description": "Export a comprehensive compliance record for the agent including all checkpoints, reclassifications, card amendments, and score history. Returns a structured document suitable for regulatory audits and compliance reviews.",
+        "tags": ["Reclassification"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"},
+          {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["json", "csv"], "default": "json"}, "description": "Export format"},
+          {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "Start of time range"},
+          {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "End of time range"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Compliance export data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "export_id": {"type": "string"},
+                    "generated_at": {"type": "string", "format": "date-time"},
+                    "period": {
+                      "type": "object",
+                      "properties": {
+                        "from": {"type": "string", "format": "date-time"},
+                        "to": {"type": "string", "format": "date-time"}
+                      }
+                    },
+                    "checkpoints": {"type": "array", "items": {"type": "object"}},
+                    "reclassifications": {"type": "array", "items": {"$ref": "#/components/schemas/ReclassificationResult"}},
+                    "card_amendments": {"type": "array", "items": {"type": "object"}},
+                    "score_history": {"type": "array", "items": {"type": "object"}}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/agents/{agent_id}/reclassifications": {
+      "get": {
+        "operationId": "listReclassifications",
+        "summary": "List reclassification history",
+        "description": "Retrieve the history of all checkpoint reclassifications for the specified agent. Each entry includes the original and reclassified type, reason, and score impact.",
+        "tags": ["Reclassification"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of records to return"},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}, "description": "Number of records to skip for pagination"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Reclassification history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reclassifications": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/ReclassificationResult"}
+                    },
+                    "total": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/agents/{agent_id}/card-amendments": {
+      "get": {
+        "operationId": "listCardAmendments",
+        "summary": "List card amendment history",
+        "description": "Retrieve the history of all alignment card amendments for the specified agent. Card amendments are changes to the agent's alignment card that were triggered by reclassifications, policy changes, or manual edits.",
+        "tags": ["Reclassification"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of amendments to return"},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}, "description": "Number of amendments to skip for pagination"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Card amendment history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "amendments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "amendment_id": {"type": "string"},
+                          "agent_id": {"type": "string"},
+                          "field_changed": {"type": "string"},
+                          "old_value": {},
+                          "new_value": {},
+                          "reason": {"type": "string"},
+                          "triggered_by": {"type": "string", "enum": ["reclassification", "policy_change", "manual"]},
+                          "created_at": {"type": "string", "format": "date-time"}
+                        }
+                      }
+                    },
+                    "total": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+
+    "/teams/fault-lines": {
+      "post": {
+        "operationId": "analyzeTeamFaultLines",
+        "summary": "Analyze team fault lines",
+        "description": "Analyze alignment fault lines across a team of agents. Identifies capabilities, values, or constraints that some agents declare but others miss, creating potential alignment gaps. Returns a fleet-wide score with individual fault line details and resolution hints.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["team_id"],
+                "properties": {
+                  "team_id": {
+                    "type": "string",
+                    "description": "Team identifier to analyze"
+                  },
+                  "agent_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional subset of agent IDs to analyze. If omitted, all team members are analyzed."
+                  },
+                  "dimensions": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["capabilities", "values", "constraints", "tools", "policies"]},
+                    "description": "Dimensions to analyze for fault lines"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fault line analysis result",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/FaultLineAnalysis"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/teams/forecast": {
+      "post": {
+        "operationId": "forecastTeamRisks",
+        "summary": "Forecast team risks",
+        "description": "Forecast potential risks and failure modes for a team based on current alignment state, historical trends, and known fault lines. Returns ranked failure modes with probability estimates, impact assessments, and mitigation suggestions.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["team_id"],
+                "properties": {
+                  "team_id": {
+                    "type": "string",
+                    "description": "Team identifier to forecast"
+                  },
+                  "horizon_days": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Forecast horizon in days"
+                  },
+                  "include_mitigations": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether to include mitigation suggestions"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Risk forecast result",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/RiskForecast"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/teams/recommend-policy": {
+      "post": {
+        "operationId": "recommendTeamPolicy",
+        "summary": "Generate policy recommendation",
+        "description": "Generate a recommended CLPI policy for a team based on current agent capabilities, alignment cards, historical violations, and known fault lines. The recommendation aims to close coverage gaps while minimizing disruption to existing workflows.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["team_id"],
+                "properties": {
+                  "team_id": {
+                    "type": "string",
+                    "description": "Team identifier to generate recommendation for"
+                  },
+                  "strictness": {
+                    "type": "string",
+                    "enum": ["permissive", "balanced", "strict"],
+                    "default": "balanced",
+                    "description": "Desired strictness level for the recommended policy"
+                  },
+                  "existing_policy": {
+                    "$ref": "#/components/schemas/Policy",
+                    "description": "Optional existing policy to use as a starting point"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy recommendation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recommended_policy": {"$ref": "#/components/schemas/Policy"},
+                    "rationale": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "field": {"type": "string"},
+                          "reason": {"type": "string"},
+                          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                        }
+                      }
+                    },
+                    "expected_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+                    "fault_lines_addressed": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/transactions": {
+      "post": {
+        "operationId": "createTransaction",
+        "summary": "Create transaction with guardrails",
+        "description": "Create a new guarded transaction. The transaction wraps one or more agent actions with CLPI policy guardrails, ensuring all tool invocations are evaluated against the effective policy before execution. Returns the transaction ID and initial evaluation status.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["agent_id", "actions"],
+                "properties": {
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Agent performing the transaction"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tool": {"type": "string", "description": "Tool identifier"},
+                        "parameters": {"type": "object", "description": "Tool parameters"},
+                        "justification": {"type": "string", "description": "Why this action is needed"}
+                      }
+                    },
+                    "description": "List of actions to execute within the transaction"
+                  },
+                  "policy_override": {
+                    "$ref": "#/components/schemas/Policy",
+                    "description": "Optional policy to use instead of the agent's effective policy"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transaction created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "agent_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pending", "approved", "blocked", "escalated"]},
+                    "evaluation": {"$ref": "#/components/schemas/PolicyEvaluationResult"},
+                    "created_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/transactions/{id}": {
+      "get": {
+        "operationId": "getTransaction",
+        "summary": "Get transaction details",
+        "description": "Retrieve the details of a guarded transaction including its current status, policy evaluation result, and action outcomes.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Transaction identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transaction details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "agent_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pending", "approved", "blocked", "escalated", "completed", "failed"]},
+                    "actions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tool": {"type": "string"},
+                          "status": {"type": "string"},
+                          "result": {}
+                        }
+                      }
+                    },
+                    "evaluation": {"$ref": "#/components/schemas/PolicyEvaluationResult"},
+                    "created_at": {"type": "string", "format": "date-time"},
+                    "completed_at": {"type": ["string", "null"], "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteTransaction",
+        "summary": "Delete transaction",
+        "description": "Delete a guarded transaction. Only transactions in pending or completed status can be deleted. Active transactions must be completed or cancelled first.",
+        "tags": ["Intelligence"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"},
+            "description": "Transaction identifier"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transaction deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"},
+                    "id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+
+    "/on-chain/anchor-root": {
+      "post": {
+        "operationId": "anchorMerkleRoot",
+        "summary": "Anchor Merkle root on-chain",
+        "description": "Anchor a Merkle root hash on-chain for a batch of integrity proofs. This creates an immutable, publicly verifiable record of the integrity state at a point in time. Returns the transaction hash, block number, and gas used.",
+        "tags": ["On-Chain"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["merkle_root", "agent_ids"],
+                "properties": {
+                  "merkle_root": {
+                    "type": "string",
+                    "description": "Hex-encoded Merkle root hash to anchor"
+                  },
+                  "agent_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent IDs included in this Merkle tree"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {
+                      "batch_size": {"type": "integer"},
+                      "tree_depth": {"type": "integer"},
+                      "algorithm": {"type": "string", "default": "keccak256"}
+                    },
+                    "description": "Optional metadata about the Merkle tree"
+                  },
+                  "chain": {
+                    "type": "string",
+                    "enum": ["ethereum", "polygon", "base"],
+                    "default": "base",
+                    "description": "Target blockchain network"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Anchor result with transaction details",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/OnChainAnchorResult"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/on-chain/publish-scores": {
+      "post": {
+        "operationId": "publishScoresOnChain",
+        "summary": "Publish scores on-chain",
+        "description": "Publish agent integrity or reputation scores on-chain for public verifiability. Scores are batched into a Merkle tree and the root is anchored. Individual scores can later be verified using Merkle proofs.",
+        "tags": ["On-Chain"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["scores"],
+                "properties": {
+                  "scores": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["agent_id", "score", "score_type"],
+                      "properties": {
+                        "agent_id": {"type": "string"},
+                        "score": {"type": "number"},
+                        "score_type": {"type": "string", "enum": ["integrity", "reputation", "compliance"]},
+                        "timestamp": {"type": "string", "format": "date-time"}
+                      }
+                    },
+                    "description": "Scores to publish on-chain"
+                  },
+                  "chain": {
+                    "type": "string",
+                    "enum": ["ethereum", "polygon", "base"],
+                    "default": "base",
+                    "description": "Target blockchain network"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Score publishing result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "anchor": {"$ref": "#/components/schemas/OnChainAnchorResult"},
+                    "scores_published": {"type": "integer"},
+                    "proofs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agent_id": {"type": "string"},
+                          "proof": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Merkle proof hashes"
+                          },
+                          "leaf_index": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/on-chain/verify-proof/{agent_id}": {
+      "get": {
+        "operationId": "verifyOnChainProof",
+        "summary": "Verify on-chain proof",
+        "description": "Verify an agent's integrity or score proof against the on-chain Merkle root. Checks that the provided proof correctly links the agent's data to an anchored root, confirming the data has not been tampered with since anchoring.",
+        "tags": ["On-Chain"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"},
+          {"name": "anchor_id", "in": "query", "schema": {"type": "string"}, "description": "Specific anchor ID to verify against. If omitted, verifies against the most recent anchor."},
+          {"name": "score_type", "in": "query", "schema": {"type": "string", "enum": ["integrity", "reputation", "compliance"]}, "description": "Type of score proof to verify"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Proof verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "valid": {"type": "boolean"},
+                    "agent_id": {"type": "string"},
+                    "anchor_id": {"type": "string"},
+                    "merkle_root": {"type": "string"},
+                    "proof": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    },
+                    "score": {"type": "number"},
+                    "score_type": {"type": "string"},
+                    "anchored_at": {"type": "string", "format": "date-time"},
+                    "tx_hash": {"type": "string"},
+                    "chain": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/on-chain/status/{agent_id}": {
+      "get": {
+        "operationId": "getOnChainStatus",
+        "summary": "Get on-chain status",
+        "description": "Get the current on-chain anchoring status for an agent. Returns the most recent anchor, pending publications, and overall on-chain coverage statistics.",
+        "tags": ["On-Chain"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "On-chain status for the agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agent_id": {"type": "string"},
+                    "latest_anchor": {"$ref": "#/components/schemas/OnChainAnchorResult"},
+                    "total_anchors": {"type": "integer"},
+                    "pending_publications": {"type": "integer"},
+                    "coverage": {
+                      "type": "object",
+                      "properties": {
+                        "integrity_anchored": {"type": "boolean"},
+                        "reputation_anchored": {"type": "boolean"},
+                        "last_anchored_at": {"type": "string", "format": "date-time"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/on-chain/history": {
+      "get": {
+        "operationId": "getOnChainHistory",
+        "summary": "Get on-chain history",
+        "description": "Retrieve the history of on-chain Merkle root anchoring events. Returns a paginated list of all anchors with their transaction details, included agents, and verification status.",
+        "tags": ["On-Chain"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "chain", "in": "query", "schema": {"type": "string", "enum": ["ethereum", "polygon", "base"]}, "description": "Filter by blockchain network"},
+          {"name": "agent_id", "in": "query", "schema": {"type": "string"}, "description": "Filter anchors that include this agent"},
+          {"name": "from", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "Start of time range"},
+          {"name": "to", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "End of time range"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of records to return"},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}, "description": "Number of records to skip for pagination"}
+        ],
+        "responses": {
+          "200": {
+            "description": "On-chain anchoring history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "anchors": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/OnChainAnchorResult"}
+                    },
+                    "total": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
     }
   },
   "components": {
@@ -8593,6 +9741,449 @@
           "grade": {"type": "string"},
           "components": {"type": "object", "additionalProperties": {"type": "number"}},
           "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "PolicyMeta": {
+        "type": "object",
+        "description": "Metadata for a CLPI policy including schema version, name, description, and scope.",
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "description": "Semantic version of the policy schema (e.g. '1.0.0')"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name of the policy"
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of the policy's purpose"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["agent", "org", "global"],
+            "description": "Scope at which the policy applies"
+          }
+        }
+      },
+      "CapabilityMapping": {
+        "type": "object",
+        "description": "Maps a named capability to specific tools and alignment card actions.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of what this capability represents"
+          },
+          "tools": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List of tool identifiers that belong to this capability"
+          },
+          "card_actions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Alignment card action types associated with this capability"
+          }
+        }
+      },
+      "ForbiddenRule": {
+        "type": "object",
+        "description": "A rule that forbids tools matching a specific pattern.",
+        "required": ["pattern", "reason"],
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob or regex pattern matching tool identifiers to forbid"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable reason why these tools are forbidden"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "default": "high",
+            "description": "Severity level when a forbidden tool is invoked"
+          }
+        }
+      },
+      "EscalationTrigger": {
+        "type": "object",
+        "description": "Defines a condition that triggers an escalation action.",
+        "required": ["condition", "action"],
+        "properties": {
+          "condition": {
+            "type": "string",
+            "description": "Expression or rule describing when this trigger fires (e.g. 'violation_count > 3')"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["notify", "pause", "block", "require_approval"],
+            "description": "Action to take when the condition is met"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable explanation of why this escalation exists"
+          }
+        }
+      },
+      "PolicyDefaults": {
+        "type": "object",
+        "description": "Default enforcement behavior for tools and situations not explicitly covered by the policy.",
+        "properties": {
+          "unmapped_tool_action": {
+            "type": "string",
+            "enum": ["allow", "warn", "block", "escalate"],
+            "default": "warn",
+            "description": "Action to take when a tool is not mapped to any capability"
+          },
+          "unmapped_severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "default": "medium",
+            "description": "Severity level assigned to unmapped tool invocations"
+          },
+          "fail_open": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, allow actions when the policy engine is unavailable. If false, block by default."
+          },
+          "enforcement_mode": {
+            "type": "string",
+            "enum": ["observe", "enforce", "nudge"],
+            "default": "observe",
+            "description": "Default enforcement mode for the policy"
+          },
+          "grace_period_hours": {
+            "type": "integer",
+            "default": 0,
+            "description": "Number of hours to allow violations before enforcement kicks in (for new policy rollouts)"
+          }
+        }
+      },
+      "Policy": {
+        "type": "object",
+        "description": "A complete CLPI policy document defining capability mappings, forbidden tools, escalation triggers, and enforcement defaults.",
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/PolicyMeta"
+          },
+          "capability_mappings": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CapabilityMapping"
+            },
+            "description": "Map of capability names to their definitions"
+          },
+          "forbidden": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForbiddenRule"
+            },
+            "description": "List of forbidden tool rules"
+          },
+          "escalation_triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EscalationTrigger"
+            },
+            "description": "List of escalation trigger definitions"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/PolicyDefaults"
+          }
+        }
+      },
+      "PolicyViolation": {
+        "type": "object",
+        "description": "A single policy violation detected during evaluation.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["forbidden", "unmapped", "escalation", "capability_mismatch"],
+            "description": "Type of policy violation"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool identifier that triggered the violation"
+          },
+          "capability": {
+            "type": ["string", "null"],
+            "description": "Capability the tool was mapped to, if any"
+          },
+          "rule": {
+            "type": ["string", "null"],
+            "description": "The specific rule or pattern that was matched"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable explanation of the violation"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Severity level of the violation"
+          }
+        }
+      },
+      "PolicyEvaluationResult": {
+        "type": "object",
+        "description": "Result of evaluating a CLPI policy against a set of tools or traces.",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail"],
+            "description": "Overall evaluation verdict"
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PolicyViolation"
+            },
+            "description": "List of policy violations detected"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {"type": "string"},
+                "message": {"type": "string"}
+              }
+            },
+            "description": "Non-blocking warnings about potential issues"
+          },
+          "card_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "capability": {"type": "string"},
+                "missing_card_field": {"type": "string"},
+                "suggestion": {"type": "string"}
+              }
+            },
+            "description": "Gaps between the policy and the alignment card"
+          },
+          "coverage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Fraction of tools covered by the policy (0.0 to 1.0)"
+          }
+        }
+      },
+      "ReclassificationRequest": {
+        "type": "object",
+        "description": "Request to reclassify a checkpoint violation.",
+        "required": ["checkpoint_id", "reason"],
+        "properties": {
+          "checkpoint_id": {
+            "type": "string",
+            "description": "Identifier of the checkpoint to reclassify"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable justification for the reclassification"
+          },
+          "card_amendment_id": {
+            "type": ["string", "null"],
+            "description": "Optional ID of an alignment card amendment that triggered this reclassification"
+          }
+        }
+      },
+      "ReclassificationResult": {
+        "type": "object",
+        "description": "Result of a checkpoint violation reclassification.",
+        "properties": {
+          "reclassification_id": {
+            "type": "string",
+            "description": "Unique identifier for this reclassification"
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "description": "Identifier of the reclassified checkpoint"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent whose checkpoint was reclassified"
+          },
+          "original_type": {
+            "type": "string",
+            "description": "Original violation type before reclassification"
+          },
+          "new_type": {
+            "type": "string",
+            "description": "New violation type after reclassification"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Justification provided for the reclassification"
+          },
+          "score_impact": {
+            "type": "object",
+            "properties": {
+              "previous_score": {"type": "number"},
+              "new_score": {"type": "number"},
+              "delta": {"type": "number"}
+            },
+            "description": "Impact of the reclassification on the agent's score"
+          }
+        }
+      },
+      "FaultLine": {
+        "type": "object",
+        "description": "A single fault line identified in team alignment analysis.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for this fault line"
+          },
+          "value": {
+            "type": "string",
+            "description": "The specific value, capability, or constraint that constitutes the fault line"
+          },
+          "classification": {
+            "type": "string",
+            "enum": ["capability_gap", "value_mismatch", "constraint_inconsistency", "tool_divergence", "policy_conflict"],
+            "description": "Classification of the fault line type"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Severity of the fault line"
+          },
+          "agents_declaring": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Agent IDs that declare or satisfy this requirement"
+          },
+          "agents_missing": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Agent IDs that are missing this requirement"
+          },
+          "impact_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Estimated impact of this fault line on team alignment (0.0 to 1.0)"
+          },
+          "resolution_hint": {
+            "type": "string",
+            "description": "Suggested action to resolve this fault line"
+          }
+        }
+      },
+      "FaultLineAnalysis": {
+        "type": "object",
+        "description": "Complete fault line analysis result for a team.",
+        "properties": {
+          "team_id": {
+            "type": "string",
+            "description": "Team that was analyzed"
+          },
+          "analysis_id": {
+            "type": "string",
+            "description": "Unique identifier for this analysis run"
+          },
+          "fleet_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Overall fleet alignment score (0-100)"
+          },
+          "fault_lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FaultLine"
+            },
+            "description": "Identified fault lines sorted by severity"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Human-readable summary of the analysis findings"
+          }
+        }
+      },
+      "RiskForecast": {
+        "type": "object",
+        "description": "Risk forecast for a team based on alignment trends and fault lines.",
+        "properties": {
+          "forecast_id": {
+            "type": "string",
+            "description": "Unique identifier for this forecast"
+          },
+          "failure_modes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "mode": {"type": "string", "description": "Description of the potential failure mode"},
+                "probability": {"type": "number", "minimum": 0, "maximum": 1, "description": "Estimated probability of occurrence"},
+                "impact": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Estimated impact if the failure occurs"},
+                "contributing_factors": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Factors contributing to this risk"
+                },
+                "mitigation": {"type": "string", "description": "Suggested mitigation action"}
+              }
+            },
+            "description": "Ranked list of potential failure modes"
+          },
+          "overall_risk_level": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Overall risk level for the team"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence level of the forecast (0.0 to 1.0)"
+          }
+        }
+      },
+      "OnChainAnchorResult": {
+        "type": "object",
+        "description": "Result of an on-chain Merkle root anchoring operation.",
+        "properties": {
+          "anchor_id": {
+            "type": "string",
+            "description": "Unique identifier for this anchor"
+          },
+          "merkle_root": {
+            "type": "string",
+            "description": "Hex-encoded Merkle root hash that was anchored"
+          },
+          "tx_hash": {
+            "type": "string",
+            "description": "Blockchain transaction hash"
+          },
+          "block_number": {
+            "type": "integer",
+            "description": "Block number in which the transaction was included"
+          },
+          "gas_used": {
+            "type": "integer",
+            "description": "Gas consumed by the anchoring transaction"
+          },
+          "chain": {
+            "type": "string",
+            "enum": ["ethereum", "polygon", "base"],
+            "description": "Blockchain network where the anchor was created"
+          },
+          "agent_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Agent IDs included in this anchor"
+          },
+          "anchored_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when the anchor was created"
+          }
         }
       }
     }

@@ -386,6 +386,20 @@ Reference table of all validation checks performed during `smoltbot card validat
   Warnings do not prevent publishing but are reported in validation output. Fix warnings to improve verification quality.
 </Note>
 
+## Policy Integration
+
+Alignment cards and [policies](/concepts/policy-engine) work together. The card declares *what* an agent can do (bounded_actions), while the policy defines *which tools* map to those capabilities:
+
+1. **Card defines capabilities**: Your card's `bounded_actions` lists semantic categories like `web_fetch`, `read`, `write`
+2. **Policy maps tools**: Your [policy](/guides/policy-management) maps concrete tool names (like `mcp__browser__*`) to those card categories
+3. **Evaluation bridges both**: The policy engine checks that every tool the agent uses maps to a declared bounded action
+
+When adding new tools, update both the card (add the capability to `bounded_actions`) and the policy (add the tool-to-capability mapping). The 24-hour grace period gives you time to make these updates after new tools are first observed.
+
+### Amendment Tracking
+
+Every card update creates a formal amendment with version history and diffs. Amendments can be linked to [reclassification requests](/guides/trust-recovery) — proving that a violation was caused by a card gap rather than agent misbehavior. See [Card Lifecycle](/concepts/card-lifecycle) for details.
+
 ## Best Practices
 
 <CardGroup cols={2}>
@@ -405,13 +419,15 @@ Reference table of all validation checks performed during `smoltbot card validat
     Every custom value needs a clear `description` in the `definitions` block. Vague definitions lead to inconsistent verification results.
   </Card>
   <Card title="Review cards after capability changes" icon="rotate">
-    When you add or remove tools from your agent, update the alignment card to match. Stale cards produce misleading integrity scores.
+    When you add or remove tools from your agent, update the alignment card and [policy](/guides/policy-management) to match. Stale cards produce misleading integrity scores.
   </Card>
 </CardGroup>
 
 ## Related
 
 - [Alignment Cards concept](/concepts/alignment-cards) -- Full specification of card structure and semantics
+- [Card Lifecycle](/concepts/card-lifecycle) -- Amendment tracking, reclassification, and trust recovery
+- [Policy Management](/guides/policy-management) -- Policy setup alongside card management
 - [CLI Reference](/smoltbot/cli) -- `smoltbot card show`, `card publish`, and `card validate` commands
 - [Organization Card Templates](/smoltbot/org-card-templates) -- Org-level card policies (Enterprise)
 - [AAP Specification](/protocols/aap/specification) -- Normative protocol specification

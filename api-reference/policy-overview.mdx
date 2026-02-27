@@ -1,0 +1,806 @@
+---
+title: "Policy API"
+description: "API reference for policy management — CRUD, evaluation, and resolved policy retrieval"
+sidebarTitle: "Policy API"
+icon: "shield-halved"
+---
+
+# Policy API
+
+The Policy API provides programmatic access to policy management for agents and organizations — create, read, update, and delete policies, evaluate tool usage against policy rules, retrieve merged (resolved) policies, and inspect policy version history. Policies define what tools an agent may use, which are forbidden, and how unmapped actions are handled.
+
+**Base URL:** `https://api.mnemom.ai/v1`
+
+---
+
+## Authentication
+
+| Endpoint | Auth Required | Notes |
+|----------|--------------|-------|
+| `GET /v1/agents/{agent_id}/policy` | API key | Get agent policy |
+| `PUT /v1/agents/{agent_id}/policy` | API key | Set agent policy |
+| `DELETE /v1/agents/{agent_id}/policy` | API key | Delete agent policy |
+| `GET /v1/agents/{agent_id}/policy/resolved` | API key | Get merged org+agent policy |
+| `GET /v1/orgs/{org_id}/policy` | API key | Get org policy |
+| `PUT /v1/orgs/{org_id}/policy` | API key | Set org policy |
+| `DELETE /v1/orgs/{org_id}/policy` | API key | Delete org policy |
+| `GET /v1/orgs/{org_id}/policy/history` | API key | Get org policy version history |
+| `POST /v1/policies/evaluate` | API key | Evaluate policy against tools |
+| `POST /v1/policies/evaluate/historical` | API key | Evaluate against historical traces |
+
+**API key authentication:** Pass in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
+
+---
+
+## Rate Limits
+
+| Endpoint | Rate Limit | Window |
+|----------|-----------|--------|
+| `GET /agents/{agent_id}/policy` | 60 requests | per minute |
+| `PUT /agents/{agent_id}/policy` | 30 requests | per minute |
+| `POST /policies/evaluate` | 60 requests | per minute |
+| All other policy endpoints | 30 requests | per minute |
+
+Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+---
+
+## Endpoints
+
+### GET /v1/agents/{agent_id}/policy
+
+Retrieve the policy currently assigned to an agent. Returns the full policy document including metadata, capability mappings, forbidden rules, escalation triggers, and defaults.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "pol-abc123",
+  "version": 3,
+  "meta": {
+    "schema_version": "1.0",
+    "name": "support-agent-policy",
+    "scope": "agent"
+  },
+  "capability_mappings": {
+    "web_browsing": {
+      "tools": ["mcp__browser__*"],
+      "card_actions": ["web_fetch", "web_search"]
+    }
+  },
+  "forbidden": [
+    {
+      "pattern": "mcp__filesystem__delete*",
+      "reason": "Deletion not permitted",
+      "severity": "critical"
+    }
+  ],
+  "escalation_triggers": [],
+  "defaults": {
+    "unmapped_tool_action": "warn",
+    "unmapped_severity": "medium",
+    "fail_open": true,
+    "enforcement_mode": "warn",
+    "grace_period_hours": 24
+  },
+  "created_at": "2026-02-20T10:00:00.000Z",
+  "updated_at": "2026-02-25T14:00:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique policy identifier |
+| `version` | number | Monotonically increasing version number |
+| `meta` | object | Policy metadata (schema version, name, scope) |
+| `capability_mappings` | object | Maps capability names to tool patterns and card actions |
+| `forbidden` | array | List of forbidden tool patterns with reasons and severity |
+| `escalation_triggers` | array | Conditions that trigger escalation to a human or supervisor |
+| `defaults` | object | Default behavior for unmapped tools and enforcement mode |
+| `created_at` | string | ISO 8601 timestamp of initial creation |
+| `updated_at` | string | ISO 8601 timestamp of last update |
+
+**`meta` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema_version` | string | Policy DSL schema version (e.g., `"1.0"`) |
+| `name` | string | Human-readable policy name |
+| `scope` | string | Policy scope: `"agent"` or `"org"` |
+
+**`defaults` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `unmapped_tool_action` | string | Action for tools not covered by any mapping: `"allow"`, `"warn"`, or `"block"` |
+| `unmapped_severity` | string | Severity assigned to unmapped tool usage: `"low"`, `"medium"`, `"high"`, or `"critical"` |
+| `fail_open` | boolean | If `true`, allow tool execution when policy evaluation fails; if `false`, block on error |
+| `enforcement_mode` | string | `"enforce"` blocks violations, `"warn"` logs without blocking |
+| `grace_period_hours` | number | Hours after policy change before enforcement begins |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Agent not found or no policy assigned |
+
+---
+
+### PUT /v1/agents/{agent_id}/policy
+
+Create or replace the policy for an agent. The policy version is incremented automatically on each update.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Request body:**
+
+```json
+{
+  "meta": {
+    "schema_version": "1.0",
+    "name": "support-agent-policy",
+    "scope": "agent"
+  },
+  "capability_mappings": {
+    "web_browsing": {
+      "tools": ["mcp__browser__*"],
+      "card_actions": ["web_fetch", "web_search"]
+    }
+  },
+  "forbidden": [
+    {
+      "pattern": "mcp__filesystem__delete*",
+      "reason": "Deletion not permitted",
+      "severity": "critical"
+    }
+  ],
+  "escalation_triggers": [],
+  "defaults": {
+    "unmapped_tool_action": "warn",
+    "unmapped_severity": "medium",
+    "fail_open": true,
+    "enforcement_mode": "warn",
+    "grace_period_hours": 24
+  }
+}
+```
+
+**Request body fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `meta` | object | Yes | Policy metadata including `schema_version`, `name`, and `scope` |
+| `capability_mappings` | object | No | Maps capability names to tool patterns and card actions |
+| `forbidden` | array | No | Forbidden tool patterns; each entry has `pattern`, `reason`, and `severity` |
+| `escalation_triggers` | array | No | Conditions that trigger escalation |
+| `defaults` | object | No | Default behavior configuration |
+
+**Forbidden rule object:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pattern` | string | Yes | Glob pattern matching tool names (e.g., `"mcp__filesystem__delete*"`) |
+| `reason` | string | Yes | Human-readable reason for the restriction |
+| `severity` | string | Yes | Severity level: `"low"`, `"medium"`, `"high"`, or `"critical"` |
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "pol-abc123",
+  "version": 3,
+  "meta": {
+    "schema_version": "1.0",
+    "name": "support-agent-policy",
+    "scope": "agent"
+  },
+  "capability_mappings": {
+    "web_browsing": {
+      "tools": ["mcp__browser__*"],
+      "card_actions": ["web_fetch", "web_search"]
+    }
+  },
+  "forbidden": [
+    {
+      "pattern": "mcp__filesystem__delete*",
+      "reason": "Deletion not permitted",
+      "severity": "critical"
+    }
+  ],
+  "escalation_triggers": [],
+  "defaults": {
+    "unmapped_tool_action": "warn",
+    "unmapped_severity": "medium",
+    "fail_open": true,
+    "enforcement_mode": "warn",
+    "grace_period_hours": 24
+  },
+  "created_at": "2026-02-20T10:00:00.000Z",
+  "updated_at": "2026-02-25T14:00:00.000Z"
+}
+```
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid policy document (schema validation failed) |
+| `401` | API key required or invalid |
+| `422` | Semantic validation error (e.g., conflicting rules) |
+
+---
+
+### DELETE /v1/agents/{agent_id}/policy
+
+Delete the policy assigned to an agent. After deletion, the agent falls back to the org-level policy (if one exists) or operates with no policy constraints.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `204 No Content`
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Agent not found or no policy assigned |
+
+---
+
+### GET /v1/agents/{agent_id}/policy/resolved
+
+Retrieve the resolved (merged) policy for an agent. The resolved policy is the result of merging the org-level policy with the agent-level policy. Agent-level rules take precedence over org-level rules where conflicts exist.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "org_id": "org-7b3e1f",
+  "resolved_policy": {
+    "id": "pol-resolved-xyz",
+    "version": 5,
+    "meta": {
+      "schema_version": "1.0",
+      "name": "support-agent-policy (resolved)",
+      "scope": "resolved"
+    },
+    "capability_mappings": {
+      "web_browsing": {
+        "tools": ["mcp__browser__*"],
+        "card_actions": ["web_fetch", "web_search"]
+      },
+      "data_access": {
+        "tools": ["mcp__db__read*"],
+        "card_actions": ["read"]
+      }
+    },
+    "forbidden": [
+      {
+        "pattern": "mcp__filesystem__delete*",
+        "reason": "Deletion not permitted",
+        "severity": "critical"
+      },
+      {
+        "pattern": "mcp__admin__*",
+        "reason": "Admin tools restricted at org level",
+        "severity": "high"
+      }
+    ],
+    "escalation_triggers": [],
+    "defaults": {
+      "unmapped_tool_action": "warn",
+      "unmapped_severity": "medium",
+      "fail_open": true,
+      "enforcement_mode": "warn",
+      "grace_period_hours": 24
+    }
+  },
+  "sources": {
+    "org_policy_version": 2,
+    "agent_policy_version": 3,
+    "merge_strategy": "agent_overrides_org"
+  },
+  "resolved_at": "2026-02-25T14:00:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `org_id` | string | Organization identifier |
+| `resolved_policy` | object | The merged policy document |
+| `sources` | object | Provenance of the resolved policy |
+| `resolved_at` | string | ISO 8601 timestamp of when the merge was computed |
+
+**`sources` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `org_policy_version` | number | Version of the org-level policy used in the merge |
+| `agent_policy_version` | number | Version of the agent-level policy used in the merge |
+| `merge_strategy` | string | Merge strategy applied (e.g., `"agent_overrides_org"`) |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Agent not found or no policy exists at any level |
+
+---
+
+### GET /v1/orgs/{org_id}/policy
+
+Retrieve the org-level policy. Org policies serve as the baseline for all agents within the organization.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `org_id` | path | string | Yes | Organization identifier |
+
+**Response:** `200 OK`
+
+Returns a Policy object with the same structure as the agent policy response (see [GET /v1/agents/{agent_id}/policy](#get-v1agentsagent_idpolicy)), with `meta.scope` set to `"org"`.
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Organization not found or no policy assigned |
+
+---
+
+### PUT /v1/orgs/{org_id}/policy
+
+Create or replace the org-level policy. This policy serves as the baseline for all agents within the organization. Each update increments the version number.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `org_id` | path | string | Yes | Organization identifier |
+
+**Request body:** Same structure as the agent policy request body (see [PUT /v1/agents/{agent_id}/policy](#put-v1agentsagent_idpolicy)), with `meta.scope` set to `"org"`.
+
+**Response:** `200 OK` with the saved policy including `id`, `version`, `created_at`, and `updated_at`.
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid policy document (schema validation failed) |
+| `401` | API key required or invalid |
+| `422` | Semantic validation error |
+
+---
+
+### DELETE /v1/orgs/{org_id}/policy
+
+Delete the org-level policy. After deletion, agents that relied on this org policy as their baseline will operate with only their agent-level policy (if one exists) or no policy constraints.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `org_id` | path | string | Yes | Organization identifier |
+
+**Response:** `204 No Content`
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Organization not found or no policy assigned |
+
+---
+
+### GET /v1/orgs/{org_id}/policy/history
+
+Retrieve the version history of an org-level policy. Each entry represents a previous version of the policy document.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `org_id` | path | string | Yes | Organization identifier |
+| `page` | query | number | No | Page number (default: 1) |
+| `per_page` | query | number | No | Results per page (default: 20, max: 100) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "versions": [
+    {
+      "version": 3,
+      "meta": {
+        "schema_version": "1.0",
+        "name": "org-baseline-policy",
+        "scope": "org"
+      },
+      "updated_at": "2026-02-25T14:00:00.000Z",
+      "updated_by": "user-abc123"
+    },
+    {
+      "version": 2,
+      "meta": {
+        "schema_version": "1.0",
+        "name": "org-baseline-policy",
+        "scope": "org"
+      },
+      "updated_at": "2026-02-20T10:00:00.000Z",
+      "updated_by": "user-abc123"
+    }
+  ],
+  "total": 3,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+**Version object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | number | Version number |
+| `meta` | object | Policy metadata at time of this version |
+| `updated_at` | string | ISO 8601 timestamp of when this version was created |
+| `updated_by` | string | User identifier who made the change |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Organization not found or no policy history |
+
+---
+
+### POST /v1/policies/evaluate
+
+Evaluate a policy against a set of tools. Returns a verdict indicating whether the tools are permitted, any violations or warnings, and coverage analysis against the agent's card actions.
+
+**Request body:**
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
+  "context": "gateway"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent identifier whose resolved policy will be evaluated |
+| `tools` | string[] | Yes | List of tool names to evaluate against the policy |
+| `context` | string | No | Evaluation context: `"gateway"`, `"runtime"`, or `"audit"` (default: `"gateway"`) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "verdict": "fail",
+  "violations": [
+    {
+      "type": "forbidden",
+      "tool": "mcp__filesystem__delete",
+      "reason": "Deletion not permitted",
+      "severity": "critical"
+    }
+  ],
+  "warnings": [],
+  "card_gaps": [],
+  "coverage": {
+    "total_card_actions": 5,
+    "mapped_card_actions": ["web_fetch", "web_search"],
+    "unmapped_card_actions": ["read", "write", "send_response"],
+    "coverage_pct": 40
+  },
+  "policy_id": "pol-abc123",
+  "policy_version": 3,
+  "evaluated_at": "2026-02-25T14:00:00.000Z",
+  "context": "gateway",
+  "duration_ms": 12
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `verdict` | string | Overall result: `"pass"`, `"fail"`, or `"warn"` |
+| `violations` | array | Policy violations found during evaluation |
+| `warnings` | array | Non-blocking warnings (e.g., unmapped tools in `"warn"` mode) |
+| `card_gaps` | array | Card actions that are declared but have no tool mapping |
+| `coverage` | object | Coverage analysis of card actions vs. capability mappings |
+| `policy_id` | string | ID of the policy that was evaluated |
+| `policy_version` | number | Version of the policy that was evaluated |
+| `evaluated_at` | string | ISO 8601 timestamp of evaluation |
+| `context` | string | Evaluation context used |
+| `duration_ms` | number | Time taken for evaluation in milliseconds |
+
+**Violation object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Violation type: `"forbidden"`, `"unmapped"`, or `"escalation"` |
+| `tool` | string | Tool name that triggered the violation |
+| `reason` | string | Human-readable explanation |
+| `severity` | string | Severity level: `"low"`, `"medium"`, `"high"`, or `"critical"` |
+
+**`coverage` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_card_actions` | number | Total number of card actions declared for the agent |
+| `mapped_card_actions` | string[] | Card actions that have at least one tool mapping |
+| `unmapped_card_actions` | string[] | Card actions with no tool mapping |
+| `coverage_pct` | number | Percentage of card actions covered by capability mappings (0 -- 100) |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid request body (missing `agent_id` or `tools`) |
+| `401` | API key required or invalid |
+| `404` | Agent not found or no policy exists |
+
+---
+
+### POST /v1/policies/evaluate/historical
+
+Evaluate a policy against historical traces for an agent. Replays past tool invocations through the current policy to surface retroactive violations. Useful for auditing policy changes before enforcement.
+
+**Request body:**
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "time_range": {
+    "start": "2026-02-18T00:00:00.000Z",
+    "end": "2026-02-25T23:59:59.000Z"
+  },
+  "context": "audit"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent identifier |
+| `time_range` | object | Yes | Time range with `start` and `end` ISO 8601 timestamps |
+| `context` | string | No | Evaluation context (default: `"audit"`) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "traces_evaluated": 142,
+  "verdict": "fail",
+  "violation_count": 7,
+  "violations": [
+    {
+      "type": "forbidden",
+      "tool": "mcp__filesystem__delete",
+      "reason": "Deletion not permitted",
+      "severity": "critical",
+      "trace_id": "tr-abc123",
+      "occurred_at": "2026-02-22T09:15:00.000Z"
+    }
+  ],
+  "summary": {
+    "pass": 135,
+    "warn": 0,
+    "fail": 7
+  },
+  "policy_id": "pol-abc123",
+  "policy_version": 3,
+  "evaluated_at": "2026-02-25T14:05:00.000Z",
+  "duration_ms": 340
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `traces_evaluated` | number | Number of historical traces evaluated |
+| `verdict` | string | Overall result: `"pass"`, `"fail"`, or `"warn"` |
+| `violation_count` | number | Total number of violations found |
+| `violations` | array | Violation details including `trace_id` and `occurred_at` |
+| `summary` | object | Breakdown of trace verdicts: `pass`, `warn`, and `fail` counts |
+| `policy_id` | string | ID of the policy evaluated against |
+| `policy_version` | number | Version of the policy evaluated against |
+| `evaluated_at` | string | ISO 8601 timestamp of evaluation |
+| `duration_ms` | number | Time taken for evaluation in milliseconds |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid request body or time range |
+| `401` | API key required or invalid |
+| `404` | Agent not found or no policy exists |
+| `422` | Time range exceeds maximum (30 days) |
+
+---
+
+## Error Codes
+
+| Status | Code | Description |
+|--------|------|-------------|
+| `400` | `invalid_request` | Missing or invalid parameters |
+| `401` | `unauthorized` | API key required but not provided or invalid |
+| `404` | `not_found` | Agent, org, or policy not found |
+| `422` | `validation_error` | Semantic validation failed (e.g., conflicting rules, invalid time range) |
+| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
+| `500` | `internal_error` | Server error; retry with exponential backoff |
+
+All error responses follow the standard envelope:
+
+```json
+{
+  "error": "not_found",
+  "message": "No policy found for agent 'smolt-a4c12709'"
+}
+```
+
+---
+
+## SDK Usage
+
+<CodeGroup>
+
+```typescript TypeScript
+import { MnemomClient } from '@mnemom/sdk';
+
+const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+
+// Set an agent policy
+const policy = await client.policies.set('smolt-a4c12709', {
+  meta: {
+    schema_version: '1.0',
+    name: 'support-agent-policy',
+    scope: 'agent',
+  },
+  capability_mappings: {
+    web_browsing: {
+      tools: ['mcp__browser__*'],
+      card_actions: ['web_fetch', 'web_search'],
+    },
+  },
+  forbidden: [
+    {
+      pattern: 'mcp__filesystem__delete*',
+      reason: 'Deletion not permitted',
+      severity: 'critical',
+    },
+  ],
+  defaults: {
+    unmapped_tool_action: 'warn',
+    enforcement_mode: 'warn',
+    fail_open: true,
+  },
+});
+
+// Get the resolved (merged) policy
+const resolved = await client.policies.getResolved('smolt-a4c12709');
+
+// Evaluate tools against the policy
+const result = await client.policies.evaluate({
+  agent_id: 'smolt-a4c12709',
+  tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
+  context: 'gateway',
+});
+
+console.log(result.verdict);       // "fail"
+console.log(result.violations);    // [{ tool: "mcp__filesystem__delete", ... }]
+console.log(result.coverage.coverage_pct); // 40
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+headers = {"Authorization": f"Bearer {api_key}"}
+
+# Set an agent policy
+policy = httpx.put(
+    f"{API_BASE}/v1/agents/smolt-a4c12709/policy",
+    headers=headers,
+    json={
+        "meta": {
+            "schema_version": "1.0",
+            "name": "support-agent-policy",
+            "scope": "agent",
+        },
+        "capability_mappings": {
+            "web_browsing": {
+                "tools": ["mcp__browser__*"],
+                "card_actions": ["web_fetch", "web_search"],
+            }
+        },
+        "forbidden": [
+            {
+                "pattern": "mcp__filesystem__delete*",
+                "reason": "Deletion not permitted",
+                "severity": "critical",
+            }
+        ],
+        "defaults": {
+            "unmapped_tool_action": "warn",
+            "enforcement_mode": "warn",
+            "fail_open": True,
+        },
+    },
+).json()
+
+# Get the resolved (merged) policy
+resolved = httpx.get(
+    f"{API_BASE}/v1/agents/smolt-a4c12709/policy/resolved",
+    headers=headers,
+).json()
+
+# Evaluate tools against the policy
+result = httpx.post(
+    f"{API_BASE}/v1/policies/evaluate",
+    headers=headers,
+    json={
+        "agent_id": "smolt-a4c12709",
+        "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
+        "context": "gateway",
+    },
+).json()
+
+print(f"Verdict: {result['verdict']}")          # "fail"
+print(f"Violations: {result['violations']}")    # [{"tool": "mcp__filesystem__delete", ...}]
+print(f"Coverage: {result['coverage']['coverage_pct']}%")  # 40%
+```
+
+</CodeGroup>
+
+---
+
+## See Also
+
+- [Policy Engine](/concepts/policy-engine) -- How policies are evaluated and enforced
+- [Policy DSL Specification](/protocols/aap/policy-dsl) -- Full schema reference for policy documents
+- [Policy CLI](/cli/policy) -- Manage policies from the command line
+- [Policy Management Guide](/guides/policy-management) -- Best practices for writing and deploying policies

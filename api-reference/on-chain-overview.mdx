@@ -1,0 +1,488 @@
+---
+title: "On-Chain API"
+description: "API reference for on-chain Merkle root anchoring, score publishing, and verification on Base L2"
+sidebarTitle: "On-Chain API"
+icon: "link"
+---
+
+# On-Chain API
+
+The On-Chain API provides programmatic access to Mnemom's on-chain verification system -- anchoring Merkle roots, publishing reputation scores, and verifying agent trust data on Base L2. All on-chain operations are submitted via Mnemom's relayer; you do not need to hold ETH or interact with smart contracts directly.
+
+**Base URL:** `https://api.mnemom.ai/v1/on-chain`
+
+---
+
+## Authentication
+
+| Endpoint | Auth Required | Notes |
+|----------|--------------|-------|
+| `POST /v1/on-chain/anchor-root` | API key | Anchors a Merkle root on-chain |
+| `POST /v1/on-chain/publish-scores` | API key | Publishes scores on-chain |
+| `GET /v1/on-chain/verify-proof/{agent_id}` | API key | Verifies an agent's on-chain score |
+| `GET /v1/on-chain/status/{agent_id}` | API key | Checks on-chain status for an agent |
+| `GET /v1/on-chain/history` | API key | Retrieves anchoring and publishing history |
+
+**API key authentication:** Pass in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
+
+---
+
+## Rate Limits
+
+| Endpoint | Rate Limit | Window |
+|----------|-----------|--------|
+| `POST /on-chain/anchor-root` | 10 requests | per minute |
+| `POST /on-chain/publish-scores` | 10 requests | per minute |
+| `GET /on-chain/verify-proof/{agent_id}` | 30 requests | per minute |
+| `GET /on-chain/status/{agent_id}` | 30 requests | per minute |
+| `GET /on-chain/history` | 30 requests | per minute |
+
+Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+---
+
+## Endpoints
+
+### POST /v1/on-chain/anchor-root
+
+Anchor a Merkle root from the integrity checkpoint tree to the `MnemoMerkleAnchor` contract on Base L2. Creates an immutable, tamper-evident reference point for off-chain checkpoint data.
+
+**Request body:**
+
+```json
+{
+  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+  "leaf_count": 347,
+  "tree_depth": 9
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `merkle_root` | string | Yes | Merkle root hash to anchor (hex-encoded, 32 bytes) |
+| `leaf_count` | number | Yes | Number of leaves (checkpoints) in the tree |
+| `tree_depth` | number | Yes | Depth of the Merkle tree |
+
+**Response:** `200 OK`
+
+```json
+{
+  "anchor_id": "anc-7f8a9b2c",
+  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+  "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "block_number": 18234567,
+  "gas_used": 48732,
+  "chain": "base",
+  "anchored_at": "2026-02-26T10:30:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `anchor_id` | string | Unique identifier for this anchor operation |
+| `merkle_root` | string | The anchored Merkle root (echoed back) |
+| `tx_hash` | string | Base L2 transaction hash |
+| `block_number` | number | Block number containing the anchor transaction |
+| `gas_used` | number | Gas consumed by the transaction |
+| `chain` | string | Chain identifier (always `"base"`) |
+| `anchored_at` | string | ISO 8601 timestamp of when the root was anchored |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid Merkle root format, missing required fields, or invalid tree parameters |
+| `401` | API key required or invalid |
+| `409` | Merkle root has already been anchored |
+| `429` | Rate limit exceeded |
+
+---
+
+### POST /v1/on-chain/publish-scores
+
+Publish one or more agent reputation scores to the `MnemoReputationRegistry` contract on Base L2. Scores are published in a single batch transaction for gas efficiency.
+
+**Request body:**
+
+```json
+{
+  "publications": [
+    {
+      "agent_id": "smolt-a4c12709",
+      "score": 782,
+      "grade": "A"
+    },
+    {
+      "agent_id": "smolt-b8e34f21",
+      "score": 650,
+      "grade": "BBB"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `publications` | array | Yes | Array of score publication objects (max 200) |
+| `publications[].agent_id` | string | Yes | Agent identifier |
+| `publications[].score` | number | Yes | Composite reputation score (0-1000) |
+| `publications[].grade` | string | Yes | Letter grade: `AAA`, `AA`, `A`, `BBB`, `BB`, `B`, or `CCC` |
+
+**Response:** `200 OK`
+
+```json
+{
+  "publication_id": "pub-3e4f5a6b",
+  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "block_number": 18234589,
+  "gas_used": 142350,
+  "agent_count": 2,
+  "published_at": "2026-02-26T10:35:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `publication_id` | string | Unique identifier for this publication batch |
+| `tx_hash` | string | Base L2 transaction hash |
+| `block_number` | number | Block number containing the publish transaction |
+| `gas_used` | number | Gas consumed by the transaction |
+| `agent_count` | number | Number of agents published in this batch |
+| `published_at` | string | ISO 8601 timestamp of when scores were published |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Missing `publications`, empty array, exceeds 200 agents, invalid score range, or invalid grade |
+| `401` | API key required or invalid |
+| `404` | One or more agent IDs not found |
+| `422` | One or more agents do not have a computed reputation score (below 50-checkpoint minimum) |
+| `429` | Rate limit exceeded |
+
+---
+
+### GET /v1/on-chain/verify-proof/{agent_id}
+
+Verify an agent's on-chain reputation score and retrieve the cryptographic proof linking the on-chain record to the underlying integrity data.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "on_chain_score": 782,
+  "grade": "A",
+  "metadata_hash": "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba",
+  "published_at": "2026-02-26T10:35:00.000Z",
+  "block_number": 18234589,
+  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "verified": true
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `on_chain_score` | number | Score as recorded on-chain (0-1000) |
+| `grade` | string | Letter grade as recorded on-chain |
+| `metadata_hash` | string | keccak256 hash of the off-chain metadata at time of publication |
+| `published_at` | string | ISO 8601 timestamp of when the score was published on-chain |
+| `block_number` | number | Block number containing the publication transaction |
+| `tx_hash` | string | Transaction hash of the publication |
+| `verified` | boolean | Whether the on-chain score matches the current off-chain score and the proof is valid |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Agent not found or no on-chain score exists for this agent |
+| `429` | Rate limit exceeded |
+
+---
+
+### GET /v1/on-chain/status/{agent_id}
+
+Check whether an agent has an on-chain score and retrieve the current on-chain state, including the latest score and anchor information.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `agent_id` | path | string | Yes | Agent identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "has_on_chain_score": true,
+  "latest_score": {
+    "score": 782,
+    "grade": "A",
+    "block_number": 18234589,
+    "published_at": "2026-02-26T10:35:00.000Z"
+  },
+  "latest_anchor": {
+    "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+    "block_number": 18234567,
+    "anchored_at": "2026-02-26T10:30:00.000Z"
+  },
+  "last_updated": "2026-02-26T10:35:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent_id` | string | Agent identifier |
+| `has_on_chain_score` | boolean | Whether this agent has at least one published on-chain score |
+| `latest_score` | object \| null | Latest on-chain score record, or `null` if no score exists |
+| `latest_score.score` | number | Most recent on-chain score |
+| `latest_score.grade` | string | Most recent on-chain grade |
+| `latest_score.block_number` | number | Block number of the latest publication |
+| `latest_score.published_at` | string | Timestamp of the latest publication |
+| `latest_anchor` | object \| null | Latest Merkle root anchor relevant to this agent, or `null` |
+| `latest_anchor.merkle_root` | string | The anchored Merkle root |
+| `latest_anchor.block_number` | number | Block number of the anchor transaction |
+| `latest_anchor.anchored_at` | string | Timestamp of the anchor |
+| `last_updated` | string | Most recent on-chain activity timestamp for this agent |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `404` | Agent not found |
+| `429` | Rate limit exceeded |
+
+---
+
+### GET /v1/on-chain/history
+
+Retrieve the paginated history of on-chain anchoring and score publishing events for your account.
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page` | number | No | Page number (default: 1) |
+| `per_page` | number | No | Results per page (default: 20, max: 100) |
+
+**Response:** `200 OK`
+
+```json
+{
+  "anchors": [
+    {
+      "anchor_id": "anc-7f8a9b2c",
+      "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+      "leaf_count": 347,
+      "tree_depth": 9,
+      "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "block_number": 18234567,
+      "anchored_at": "2026-02-26T10:30:00.000Z"
+    }
+  ],
+  "publications": [
+    {
+      "publication_id": "pub-3e4f5a6b",
+      "agent_count": 2,
+      "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+      "block_number": 18234589,
+      "published_at": "2026-02-26T10:35:00.000Z"
+    }
+  ],
+  "page": 1,
+  "per_page": 20,
+  "total_anchors": 42,
+  "total_publications": 18
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `anchors` | array | List of Merkle root anchor events |
+| `anchors[].anchor_id` | string | Unique anchor identifier |
+| `anchors[].merkle_root` | string | The anchored Merkle root hash |
+| `anchors[].leaf_count` | number | Number of leaves in the tree |
+| `anchors[].tree_depth` | number | Depth of the Merkle tree |
+| `anchors[].tx_hash` | string | Transaction hash |
+| `anchors[].block_number` | number | Block number |
+| `anchors[].anchored_at` | string | ISO 8601 timestamp |
+| `publications` | array | List of score publication events |
+| `publications[].publication_id` | string | Unique publication identifier |
+| `publications[].agent_count` | number | Number of agents in the batch |
+| `publications[].tx_hash` | string | Transaction hash |
+| `publications[].block_number` | number | Block number |
+| `publications[].published_at` | string | ISO 8601 timestamp |
+| `page` | number | Current page number |
+| `per_page` | number | Results per page |
+| `total_anchors` | number | Total anchor events across all pages |
+| `total_publications` | number | Total publication events across all pages |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `401` | API key required or invalid |
+| `429` | Rate limit exceeded |
+
+---
+
+## Error Codes
+
+| Status | Code | Description |
+|--------|------|-------------|
+| `400` | `invalid_request` | Missing or invalid parameters (e.g., malformed Merkle root, score out of range, invalid grade) |
+| `401` | `unauthorized` | API key required but not provided or invalid |
+| `404` | `not_found` | Agent not found or no on-chain data exists for the specified agent |
+| `409` | `already_anchored` | The specified Merkle root has already been anchored on-chain |
+| `422` | `ineligible_agent` | Agent does not have a computed reputation score (below 50-checkpoint minimum) |
+| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
+| `500` | `internal_error` | Server error; retry with exponential backoff |
+| `502` | `chain_unavailable` | Base L2 network is temporarily unavailable; retry after a short delay |
+
+All error responses follow the standard envelope:
+
+```json
+{
+  "error": "invalid_request",
+  "message": "Merkle root must be a 32-byte hex string prefixed with 0x"
+}
+```
+
+---
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import {
+  anchorMerkleRoot,
+  publishScores,
+  verifyOnChainScore,
+  getOnChainStatus,
+  getOnChainHistory,
+} from '@mnemom/on-chain';
+
+// Anchor a Merkle root
+const anchor = await anchorMerkleRoot({
+  merkleRoot: '0xabc123def456789012345678901234567890123456789012345678901234abcd',
+  leafCount: 347,
+  treeDepth: 9,
+});
+console.log(`Root anchored in tx: ${anchor.tx_hash}`);
+
+// Publish scores for multiple agents
+const publication = await publishScores({
+  publications: [
+    { agentId: 'smolt-a4c12709', score: 782, grade: 'A' },
+    { agentId: 'smolt-b8e34f21', score: 650, grade: 'BBB' },
+  ],
+});
+console.log(`Published ${publication.agent_count} agents in tx: ${publication.tx_hash}`);
+
+// Verify an agent's on-chain score
+const proof = await verifyOnChainScore('smolt-a4c12709');
+console.log(`Verified: ${proof.verified}, Score: ${proof.on_chain_score}`);
+
+// Check on-chain status
+const status = await getOnChainStatus('smolt-a4c12709');
+console.log(`Has on-chain score: ${status.has_on_chain_score}`);
+
+// View history
+const history = await getOnChainHistory({ page: 1, perPage: 20 });
+console.log(`Total anchors: ${history.total_anchors}`);
+console.log(`Total publications: ${history.total_publications}`);
+```
+
+### Python
+
+```python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+HEADERS = {"Authorization": f"Bearer {api_key}"}
+
+# Anchor a Merkle root
+anchor = httpx.post(
+    f"{API_BASE}/v1/on-chain/anchor-root",
+    headers=HEADERS,
+    json={
+        "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+        "leaf_count": 347,
+        "tree_depth": 9,
+    },
+).json()
+print(f"Root anchored in tx: {anchor['tx_hash']}")
+
+# Publish scores
+publication = httpx.post(
+    f"{API_BASE}/v1/on-chain/publish-scores",
+    headers=HEADERS,
+    json={
+        "publications": [
+            {"agent_id": "smolt-a4c12709", "score": 782, "grade": "A"},
+            {"agent_id": "smolt-b8e34f21", "score": 650, "grade": "BBB"},
+        ]
+    },
+).json()
+print(f"Published {publication['agent_count']} agents in tx: {publication['tx_hash']}")
+
+# Verify an agent's on-chain score
+proof = httpx.get(
+    f"{API_BASE}/v1/on-chain/verify-proof/smolt-a4c12709",
+    headers=HEADERS,
+).json()
+print(f"Verified: {proof['verified']}, Score: {proof['on_chain_score']}")
+
+# Check on-chain status
+status = httpx.get(
+    f"{API_BASE}/v1/on-chain/status/smolt-a4c12709",
+    headers=HEADERS,
+).json()
+print(f"Has on-chain score: {status['has_on_chain_score']}")
+
+# View history
+history = httpx.get(
+    f"{API_BASE}/v1/on-chain/history",
+    headers=HEADERS,
+    params={"page": 1, "per_page": 20},
+).json()
+print(f"Total anchors: {history['total_anchors']}")
+print(f"Total publications: {history['total_publications']}")
+```
+
+---
+
+## See Also
+
+- [On-Chain Verification Concepts](/concepts/on-chain-verification) -- How on-chain anchoring and publishing work
+- [On-Chain Verification Guide](/guides/on-chain-verification) -- Step-by-step usage guide
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- Understanding reputation scores
+- [Trust Rating API](/api-reference/reputation-overview) -- API reference for off-chain reputation endpoints
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The data source for Merkle trees

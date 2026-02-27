@@ -285,6 +285,23 @@ Alignment Cards serve as the reference point across the entire Mnemom trust infr
 
 5. **Drift Detection**: [Drift detection](/concepts/drift-detection) compares traces over time against the card to identify behavioral divergence.
 
+6. **Policy Evaluation**: The [Policy Engine](/concepts/policy-engine) validates that the tools an agent uses map to capabilities declared in the card's `bounded_actions`. This bridges the gap between abstract card declarations and concrete tool usage.
+
+## Card Lifecycle
+
+Alignment cards are **lifecycle-managed artifacts** — they evolve as the agent's capabilities change. The [Card Lifecycle](/concepts/card-lifecycle) system tracks amendments, enables violation reclassification, and supports trust recovery.
+
+Key lifecycle capabilities:
+
+- **Amendment tracking**: Every card update creates a versioned amendment with diffs, preserving the full change history
+- **Violation reclassification**: When a violation was caused by a missing card capability (a `card_gap`) rather than agent misbehavior, it can be reclassified and excluded from trust scoring
+- **Trust recovery**: After reclassification and card amendment, trust scores recover automatically — see the [Trust Recovery guide](/guides/trust-recovery)
+- **Compliance export**: Full audit trail of card changes, violations, and reclassifications for regulatory compliance
+
+<Tip>
+  When you add new tools to your agent, update the card's `bounded_actions` and [policy](/concepts/policy-engine) to match. The 24-hour grace period gives you time to do this after tools are first observed, but proactive updates prevent violations entirely.
+</Tip>
+
 ## Card Versioning and Updates
 
 Cards are versioned through their `card_id` and `issued_at`/`expires_at` timestamps. When an agent's alignment posture changes:
@@ -292,6 +309,7 @@ Cards are versioned through their `card_id` and `issued_at`/`expires_at` timesta
 1. Issue a new card with a new `card_id` and updated `issued_at`.
 2. The old card remains valid until its `expires_at` or until explicitly revoked via `/.well-known/alignment-card-revocations.json`.
 3. AP-Traces generated during the old card's validity period reference the old `card_id`. Traces generated after the update reference the new one.
+4. Formal amendments are tracked with version history and diffs — see [Card Lifecycle](/concepts/card-lifecycle) for details.
 
 <Tip>
   Keep card lifetimes reasonable. A 6-month expiration is typical. Shorter lifetimes increase operational overhead; longer lifetimes risk the card becoming stale relative to actual behavior.
@@ -362,6 +380,8 @@ If you use Google's A2A protocol for agent discovery, the Alignment Card extends
 
 ## Further Reading
 
+- [Card Lifecycle](/concepts/card-lifecycle) -- Amendment tracking, reclassification, and trust recovery
+- [Policy Engine](/concepts/policy-engine) -- Governance-as-code bridging cards to concrete tools
 - [AP-Traces](/concepts/ap-traces) -- How agent actions are recorded for verification against cards
 - [Integrity Checkpoints](/concepts/integrity-checkpoints) -- Real-time analysis of agent thinking against cards
 - [Value Coherence](/concepts/value-coherence) -- Checking card compatibility between agents

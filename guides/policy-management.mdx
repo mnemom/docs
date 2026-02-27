@@ -1,0 +1,543 @@
+---
+title: "Policy Management"
+description: "Create, test, publish, and manage governance policies for your AI agents"
+sidebarTitle: "Policy Management"
+icon: "shield-halved"
+---
+
+# Policy Management
+
+Policies bridge [Alignment Cards](/concepts/alignment-cards) (abstract values and bounded actions) to concrete tool usage enforcement. An alignment card declares that an agent may perform `web_fetch`. A policy defines that `web_fetch` means the agent can call `mcp__browser__navigate` and `mcp__browser__click`, but not `mcp__filesystem__delete`. The card declares intent. The policy enforces it.
+
+A policy defines three things:
+- **Capability mappings** -- which concrete MCP tools satisfy which card-level actions
+- **Forbidden rules** -- which tools are always blocked, with reasons and severities
+- **Defaults** -- how unmapped tools are handled, what enforcement mode to use, and how long new tools get a grace period
+
+This guide walks through creating, testing, publishing, and managing policies using the CLI, API, and SDKs.
+
+## Quick Start
+
+<Steps>
+
+### Initialize a policy
+
+Generate a starter `policy.yaml` with commented examples:
+
+```bash
+smoltbot policy init
+```
+
+This creates a `policy.yaml` in your current directory with sensible defaults and annotated examples for every section.
+
+### Edit policy.yaml
+
+Open the generated file and define your capability mappings, forbidden rules, and defaults. Here is a fully annotated example for a customer support agent:
+
+```yaml
+meta:
+  schema_version: "1.0"
+  name: "support-agent-policy"
+  description: "Policy for customer support agents"
+  scope: agent
+
+capability_mappings:
+  web_browsing:
+    description: "Browser-based research and navigation"
+    tools:
+      - "mcp__browser__*"
+    card_actions:
+      - "web_fetch"
+      - "web_search"
+
+  file_operations:
+    description: "Reading and writing local files"
+    tools:
+      - "mcp__filesystem__read*"
+      - "mcp__filesystem__write*"
+    card_actions:
+      - "read"
+      - "write"
+
+  communication:
+    description: "Sending messages and notifications"
+    tools:
+      - "mcp__slack__post_message"
+      - "mcp__email__send"
+    card_actions:
+      - "send_response"
+
+forbidden:
+  - pattern: "mcp__filesystem__delete*"
+    reason: "File deletion not permitted for support agents"
+    severity: critical
+  - pattern: "mcp__admin__*"
+    reason: "Administrative operations require escalation"
+    severity: high
+
+escalation_triggers:
+  - condition: "tool_matches('mcp__payment__*')"
+    action: escalate
+    reason: "Payment operations require human approval"
+
+defaults:
+  unmapped_tool_action: warn
+  unmapped_severity: medium
+  fail_open: true
+  enforcement_mode: warn
+  grace_period_hours: 24
+```
+
+<Tip>
+  The `scope: agent` field means this policy layers on top of any org-level policy. Use `scope: org` for organization-wide baselines that apply to all agents. See [Policy Merge](#multi-environment-strategies) for how the two levels combine.
+</Tip>
+
+### Validate locally
+
+Run local validation to check schema compliance before publishing. This is a local-only check with no API call -- safe for CI pipelines:
+
+```bash
+smoltbot policy validate policy.yaml
+```
+
+Exit code `0` means the policy is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding.
+
+### Test against historical traces
+
+Dry-run the policy against your agent's recent traces to see what violations **would** have been flagged:
+
+```bash
+smoltbot policy test policy.yaml
+```
+
+This analyzes recent traces and reports which would pass, warn, or fail under the new policy. Use `--limit` to control how many traces to test:
+
+```bash
+smoltbot policy test policy.yaml --limit 100
+```
+
+<Warning>
+  Always run `policy test` before publishing. A policy that looks correct in isolation can produce unexpected violations when evaluated against real agent behavior. Testing first shows you the impact before it affects live traffic.
+</Warning>
+
+### Publish
+
+Upload the validated policy to your agent:
+
+```bash
+smoltbot policy publish policy.yaml
+```
+
+The CLI validates again before uploading, asks for confirmation, and archives the previous policy version. Use `--yes` to skip the confirmation prompt in CI workflows.
+
+</Steps>
+
+## Capability Mapping Walkthrough
+
+Capability mappings are the core of every policy. They bridge the gap between what your alignment card declares (abstract semantic actions) and what your agent actually invokes (concrete MCP tool names).
+
+### Start from your alignment card
+
+Look at your card's `autonomy_envelope.bounded_actions`. These are the abstract actions your agent has declared:
+
+```json
+{
+  "autonomy_envelope": {
+    "bounded_actions": [
+      "web_fetch",
+      "web_search",
+      "read",
+      "write",
+      "send_response"
+    ]
+  }
+}
+```
+
+Each of these needs at least one capability mapping in your policy.
+
+### Identify concrete tools
+
+List the MCP tools your agent actually uses. If you are unsure, check your agent's recent traces:
+
+```bash
+smoltbot traces list --agent support-agent --format tools
+```
+
+This gives you the concrete tool names like `mcp__browser__navigate`, `mcp__browser__click`, `mcp__filesystem__read_file`, and so on.
+
+### Create the mappings
+
+For each card action, create a capability mapping that lists the concrete tools implementing it:
+
+```yaml
+capability_mappings:
+  web_browsing:
+    description: "Browser-based research and navigation"
+    tools:
+      - "mcp__browser__*"
+    card_actions:
+      - "web_fetch"
+      - "web_search"
+```
+
+In this example, the card declares `web_fetch` and `web_search` as bounded actions. The agent uses `mcp__browser__navigate`, `mcp__browser__click`, and `mcp__browser__screenshot` to perform those actions. The glob pattern `mcp__browser__*` covers all of them.
+
+### Use glob patterns for tool families
+
+Glob patterns let you match groups of related tools without listing each one:
+
+| Pattern | Matches |
+|---|---|
+| `mcp__browser__*` | All browser tools (`navigate`, `click`, `screenshot`, etc.) |
+| `mcp__filesystem__read*` | `read_file`, `read_directory`, `read_metadata` |
+| `mcp__*__list*` | Any MCP server's list operations |
+| `custom_tool_v?` | `custom_tool_v1`, `custom_tool_v2`, etc. |
+
+<Tip>
+  Start with broad globs during initial development, then tighten them as you understand which specific tools your agent uses. A mapping like `mcp__browser__*` is fine for week one. By month two, you should enumerate the specific tools for tighter control.
+</Tip>
+
+### Verify coverage
+
+After writing your mappings, check that every card action is covered:
+
+```bash
+smoltbot policy evaluate --file policy.yaml --agent-id your-agent --min-coverage 90
+```
+
+The coverage report tells you which card actions are mapped and which are missing. Aim for 100% coverage in production policies.
+
+## API-Based Management
+
+Manage policies programmatically via the REST API or SDKs.
+
+### Set Agent Policy
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @policy.json
+```
+
+```typescript TypeScript
+import { MnemomClient } from '@mnemom/sdk';
+
+const client = new MnemomClient({ apiKey: process.env.API_KEY });
+
+await client.agents.setPolicy('smolt-a4c12709', {
+  meta: {
+    schema_version: '1.0',
+    name: 'support-agent-policy',
+    description: 'Policy for customer support agents',
+    scope: 'agent',
+  },
+  capability_mappings: {
+    web_browsing: {
+      description: 'Browser-based research and navigation',
+      tools: ['mcp__browser__*'],
+      card_actions: ['web_fetch', 'web_search'],
+    },
+  },
+  forbidden: [
+    {
+      pattern: 'mcp__filesystem__delete*',
+      reason: 'File deletion not permitted',
+      severity: 'critical',
+    },
+  ],
+  defaults: {
+    unmapped_tool_action: 'warn',
+    enforcement_mode: 'warn',
+    grace_period_hours: 24,
+  },
+});
+```
+
+```python Python
+from mnemom import MnemomClient
+
+client = MnemomClient(api_key="your-api-key")
+
+client.agents.set_policy("smolt-a4c12709", {
+    "meta": {
+        "schema_version": "1.0",
+        "name": "support-agent-policy",
+        "description": "Policy for customer support agents",
+        "scope": "agent",
+    },
+    "capability_mappings": {
+        "web_browsing": {
+            "description": "Browser-based research and navigation",
+            "tools": ["mcp__browser__*"],
+            "card_actions": ["web_fetch", "web_search"],
+        },
+    },
+    "forbidden": [
+        {
+            "pattern": "mcp__filesystem__delete*",
+            "reason": "File deletion not permitted",
+            "severity": "critical",
+        },
+    ],
+    "defaults": {
+        "unmapped_tool_action": "warn",
+        "enforcement_mode": "warn",
+        "grace_period_hours": 24,
+    },
+})
+```
+</CodeGroup>
+
+### Get Agent Policy
+
+<CodeGroup>
+```bash cURL
+curl https://api.mnemom.ai/v1/agents/{agent_id}/policy \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+```typescript TypeScript
+const policy = await client.agents.getPolicy('smolt-a4c12709');
+console.log(policy.meta.name);
+console.log(policy.capability_mappings);
+```
+
+```python Python
+policy = client.agents.get_policy("smolt-a4c12709")
+print(policy.meta.name)
+print(policy.capability_mappings)
+```
+</CodeGroup>
+
+### Get Resolved Policy (org + agent merged)
+
+The resolved policy shows the effective policy after merging the org-level baseline with the agent-level overlay:
+
+<CodeGroup>
+```bash cURL
+curl https://api.mnemom.ai/v1/agents/{agent_id}/policy/resolved \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+```typescript TypeScript
+const resolved = await client.agents.getResolvedPolicy('smolt-a4c12709');
+console.log(resolved.capability_mappings); // merged org + agent
+console.log(resolved.forbidden);           // union of both
+```
+
+```python Python
+resolved = client.agents.get_resolved_policy("smolt-a4c12709")
+print(resolved.capability_mappings)  # merged org + agent
+print(resolved.forbidden)            # union of both
+```
+</CodeGroup>
+
+### Evaluate Policy
+
+Test a set of tools against the active policy without making a real agent request:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "smolt-a4c12709",
+    "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
+    "context": "gateway"
+  }'
+```
+
+```typescript TypeScript
+const result = await client.policies.evaluate({
+  agentId: 'smolt-a4c12709',
+  tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
+  context: 'gateway',
+});
+
+console.log(result.verdict);    // 'fail'
+console.log(result.violations); // [{ tool: 'mcp__filesystem__delete', ... }]
+```
+
+```python Python
+result = client.policies.evaluate(
+    agent_id="smolt-a4c12709",
+    tools=["mcp__browser__navigate", "mcp__filesystem__delete"],
+    context="gateway",
+)
+
+print(result.verdict)    # 'fail'
+print(result.violations) # [{'tool': 'mcp__filesystem__delete', ...}]
+```
+</CodeGroup>
+
+The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and details for each tool: whether it matched a capability mapping, hit a forbidden rule, or fell through to defaults.
+
+## Multi-Environment Strategies
+
+### Separate policies per environment
+
+Use different enforcement modes across environments to catch issues progressively:
+
+<Tabs>
+  <Tab title="Development">
+
+In development, keep enforcement loose so agents can explore new tools without blocking:
+
+```yaml
+defaults:
+  unmapped_tool_action: allow
+  enforcement_mode: warn
+  grace_period_hours: 168  # 7 days
+```
+
+  </Tab>
+  <Tab title="Staging">
+
+In staging, surface warnings so you can identify unmapped tools and policy gaps before production:
+
+```yaml
+defaults:
+  unmapped_tool_action: warn
+  enforcement_mode: warn
+  grace_period_hours: 24
+```
+
+  </Tab>
+  <Tab title="Production">
+
+In production, enforce strictly. Every tool should be explicitly mapped or explicitly forbidden:
+
+```yaml
+defaults:
+  unmapped_tool_action: deny
+  enforcement_mode: enforce
+  grace_period_hours: 24
+```
+
+  </Tab>
+</Tabs>
+
+### Org-level baseline, agent-level specialization
+
+Use `scope: org` for organization-wide security rules that apply to every agent. Use `scope: agent` for per-agent customizations that add capabilities on top of the org baseline.
+
+The merge rules ensure agents can strengthen but never weaken org-level policy:
+
+| Section | Merge Strategy | Effect |
+|---|---|---|
+| `capability_mappings` | Union | Agent can add new mappings but cannot remove org mappings |
+| `forbidden` | Union | Both org and agent forbidden rules are enforced |
+| `defaults` | Org is floor | Agent can strengthen (e.g., `warn` to `deny`) but cannot weaken |
+| `escalation_triggers` | Union | Both org and agent triggers are evaluated |
+
+### Version control your policies
+
+Keep `policy.yaml` files alongside your agent code in version control. This gives you:
+
+- **Diff visibility** -- every policy change is reviewed in a pull request
+- **Rollback capability** -- revert to a previous policy by reverting the commit
+- **CI gating** -- validate and test policies automatically on every push
+
+```yaml
+# .github/workflows/policy-check.yml
+name: Policy Check
+on: [pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate policy
+        run: npx smoltbot policy validate policy.yaml
+      - name: Test against traces
+        run: npx smoltbot policy test policy.yaml --limit 50
+        env:
+          SMOLTBOT_API_KEY: ${{ secrets.SMOLTBOT_API_KEY }}
+```
+
+## Using Policy Recommendations
+
+The Intelligence Layer can analyze your team's fault lines and generate policy recommendations based on observed agent behavior, common violation patterns, and alignment card structure.
+
+### Generate a recommendation
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/teams/recommend-policy \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "team_id": "team-support-ops",
+    "analysis_window_days": 30
+  }'
+```
+
+The response includes a complete policy YAML with:
+
+- Capability mappings derived from observed tool usage patterns
+- Forbidden rules based on detected violations and near-misses
+- Escalation triggers from historical escalation patterns
+- Recommended enforcement mode based on team maturity
+
+<Note>
+  Policy recommendations are a starting point, not a final policy. Always review the generated policy, adjust mappings to match your specific agent architecture, and test against historical traces before publishing.
+</Note>
+
+### Review and customize
+
+The recommendation includes confidence scores for each section. Focus your review on low-confidence mappings where the system was uncertain about the correct card action mapping:
+
+```json
+{
+  "recommendation": {
+    "capability_mappings": {
+      "web_browsing": {
+        "confidence": 0.95,
+        "tools": ["mcp__browser__*"],
+        "card_actions": ["web_fetch", "web_search"]
+      },
+      "data_export": {
+        "confidence": 0.62,
+        "tools": ["mcp__csv__export", "mcp__sheets__write"],
+        "card_actions": ["write"],
+        "review_note": "Mapped to 'write' but may warrant a separate card action"
+      }
+    }
+  }
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Start with warn mode" icon="triangle-exclamation">
+    Begin with `enforcement_mode: warn` to observe what your policy catches without blocking agent traffic. Graduate to `enforce` after testing confirms the policy matches your expectations.
+  </Card>
+  <Card title="Test before publishing" icon="flask-vial">
+    Always run `smoltbot policy test` before `smoltbot policy publish`. Testing against historical traces shows you the real-world impact of your policy before it affects live requests.
+  </Card>
+  <Card title="Align mappings with card actions" icon="link">
+    Keep capability mappings tightly aligned with your alignment card's `bounded_actions`. Every card action should have a corresponding mapping, and every mapping should reference a real card action.
+  </Card>
+  <Card title="Aim for >90% coverage" icon="chart-line">
+    Review coverage reports regularly. Unmapped card actions fall through to defaults, which may not match your intent. Target 100% coverage in production policies.
+  </Card>
+  <Card title="Use the grace period" icon="clock">
+    The default 24-hour grace period prevents new tools from immediately becoming violations. This gives you time to update the policy after adding new MCP servers or tools.
+  </Card>
+  <Card title="Version control policies" icon="code-branch">
+    Store `policy.yaml` in your repository alongside agent code. Use CI validation to catch policy issues before deploy and maintain a clear audit trail of every change.
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Policy Engine](/concepts/policy-engine) -- How the policy engine evaluates tools against policies
+- [Policy DSL Specification](/specifications/policy-dsl) -- Full normative schema for policy YAML files
+- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI commands for init, validate, test, publish, and evaluate
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating policy checks into your deployment pipeline
+- [Alignment Card Management](/guides/card-management) -- Creating and managing the alignment cards that policies enforce
+- [Enforcement Modes](/smoltbot/enforcement) -- Alignment enforcement (observe/nudge/enforce) vs. policy enforcement

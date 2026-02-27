@@ -1,0 +1,254 @@
+---
+title: "Trust Recovery"
+description: "Recover agent trust scores by reclassifying card-gap violations and amending alignment cards"
+sidebarTitle: "Trust Recovery"
+icon: "heart-pulse"
+---
+
+# Trust Recovery via Reclassification
+
+When an agent's trust score drops due to violations, the **cause** matters. Not every violation reflects a genuine behavioral failure -- sometimes the agent acted correctly but the alignment card was missing a capability. These are **card gaps**, and they can be recovered through reclassification.
+
+This guide walks through the full recovery workflow: identifying whether a violation is a card gap or a behavior gap, submitting a reclassification request, amending the alignment card, and triggering score recomputation.
+
+---
+
+## Understanding card_gap vs behavior_gap
+
+Before reclassifying a violation, you need to determine its root cause. Violations fall into two categories, and only one is eligible for reclassification.
+
+<Tabs>
+<Tab title="card_gap">
+
+**The alignment card was outdated or incomplete.** The agent behaved correctly given its actual capabilities, but the card did not declare those capabilities.
+
+Common causes:
+
+- **New tools added without updating the card** -- e.g., added MCP browser tools but the card did not declare `web_fetch` in `bounded_actions`
+- **Configuration drift after deployment changes** -- infrastructure updates introduced new action types the card did not anticipate
+- **Incomplete initial card setup** -- the card was created from a template and never customized to match the agent's real toolset
+
+**Example:** An agent uses `mcp__browser__navigate` to fetch documentation during a research task. The card lists `bounded_actions: ["inference", "read", "write"]` but does not include `web_fetch`. The integrity checkpoint flags a boundary violation -- but the agent did exactly what it was supposed to do. The card was wrong, not the agent.
+
+**Eligible for reclassification:** Yes.
+
+</Tab>
+<Tab title="behavior_gap">
+
+**The agent genuinely violated its declared intent.** The card accurately described the expected behavior, but the agent acted outside those boundaries.
+
+Common causes:
+
+- **Used forbidden actions** -- the agent performed an action explicitly listed in `forbidden_actions`
+- **Exceeded autonomy boundaries** -- the agent took autonomous action beyond its declared limits (e.g., spent over the `max_autonomous_value` threshold)
+- **Failed to escalate when required** -- an escalation trigger condition was met but the agent did not escalate
+
+**Example:** An agent with `forbidden_actions: ["exfiltrate_data"]` sends user data to an external endpoint. The card was correct; the agent violated it.
+
+**Eligible for reclassification:** No. Address the root cause by fixing agent behavior, adjusting prompting, or tightening escalation triggers.
+
+</Tab>
+</Tabs>
+
+<Tip>
+The root cause that inspired CLPI: agent "blackbeard" repeatedly broke verification due to configuration drift (new tools added without updating the alignment card). The violations were config errors, not behavioral errors, yet trust scores declined.
+</Tip>
+
+---
+
+## Reclassification Workflow
+
+<Steps>
+
+### Step 1: Identify violations to reclassify
+
+Review recent violations via API or dashboard to find checkpoints that may be card gaps.
+
+Fetch existing reclassifications and pending violations:
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/reclassifications \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Or check policy evaluation results -- the policy engine often surfaces `card_gap` hints in its recommendations:
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/policy/resolved \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Look for checkpoints where:
+- The `concern_type` is `autonomy_violation` or `boundary_violation`
+- The agent's action was correct given its real capabilities
+- The card's `bounded_actions` or `escalation_triggers` did not cover the action
+
+<Note>
+Only violations classified as `card_gap` are eligible for reclassification. Attempting to reclassify a genuine `behavior_gap` will be rejected by the API and may flag the agent for review.
+</Note>
+
+### Step 2: Submit reclassification request
+
+Submit a reclassification for each checkpoint that was a card gap. Include a clear reason documenting why this was a card issue, not a behavioral one.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/reclassify \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "checkpoint_id": "ic-abc12345",
+    "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions"
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  `https://api.mnemom.ai/v1/agents/${agentId}/reclassify`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      checkpoint_id: 'ic-abc12345',
+      reason:
+        'Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions',
+    }),
+  }
+);
+```
+
+```python Python
+import httpx
+
+response = httpx.post(
+    f"https://api.mnemom.ai/v1/agents/{agent_id}/reclassify",
+    headers={"Authorization": f"Bearer {api_key}"},
+    json={
+        "checkpoint_id": "ic-abc12345",
+        "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
+    },
+)
+```
+
+</CodeGroup>
+
+The API returns a reclassification record with a unique ID and status. Reclassifications take effect immediately for score computation purposes.
+
+### Step 3: Amend the alignment card
+
+Reclassification removes the penalty for past violations, but without updating the card, the same violation will recur on the next checkpoint. Always amend the card alongside reclassification.
+
+Update the card to include the missing capability:
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "autonomy_envelope": {
+      "bounded_actions": ["inference", "read", "write", "web_fetch", "web_search"]
+    }
+  }'
+```
+
+Or link the card amendment directly to the reclassification for a cleaner audit trail:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/reclassify \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "checkpoint_id": "ic-abc12345",
+    "reason": "Card gap: web_fetch missing from bounded_actions",
+    "card_amendment_id": "amend-xyz789"
+  }'
+```
+
+<Warning>
+Reclassifying without amending the card is a common mistake. The violation is forgiven, but the next checkpoint with the same action will produce a new violation. Always close the gap.
+</Warning>
+
+### Step 4: Trigger score recomputation
+
+After reclassification and card amendment, trigger a score recomputation to reflect the changes immediately. Without this step, the score updates on the next scheduled recomputation cycle.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/reputation/{agent_id}/recompute \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+The recomputation recalculates all five scoring components (Integrity Ratio, Compliance, Drift Stability, Trace Completeness, and Coherence Compatibility) using the updated violation classifications.
+
+### Step 5: Monitor trust graph propagation
+
+Score changes do not stop at the reclassified agent. If the agent is part of a team or fleet, score changes propagate through the trust graph to related agents.
+
+Propagation mechanics:
+- **BFS traversal** from the affected agent outward
+- **Max depth:** 3 hops
+- **Max agents:** 50 per propagation event
+- **Decay factor:** 0.85 per hop (a 100-point improvement on the source agent produces an ~85-point signal at hop 1, ~72 at hop 2, ~61 at hop 3)
+
+Monitor propagation via the dashboard or subscribe to webhook events:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhooks/mnemom",
+    "event_types": ["reputation.score_changed", "reputation.grade_changed"]
+  }'
+```
+
+### Step 6: Export compliance record
+
+After recovery, export the full compliance record for audit purposes. The export includes the original violations, reclassification decisions, card amendments, and score history.
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/compliance-export \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+The export is a JSON document suitable for regulatory review, SOC 2 evidence, or internal governance reporting.
+
+</Steps>
+
+---
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Reclassify promptly" icon="clock">
+    Violations continue to impact scores until reclassified. The longer a card-gap violation sits unaddressed, the more it drags down the Compliance and Integrity components.
+  </Card>
+  <Card title="Always amend the card" icon="pen-to-square">
+    Reclassification without a card amendment is incomplete. The same action will trigger the same violation on the next checkpoint. Close the loop.
+  </Card>
+  <Card title="Use policy recommendations" icon="lightbulb">
+    The policy engine surfaces systematic card gaps in its recommendations. Review `policy/resolved` output regularly to catch gaps before they become violations.
+  </Card>
+  <Card title="Document reasons clearly" icon="file-lines">
+    Reclassification reasons are stored in the audit trail. Write reasons that a reviewer (human or automated) can understand months later.
+  </Card>
+  <Card title="Review history before publishing" icon="clock-rotate-left">
+    Before publishing a new card version, review reclassification history to ensure all known gaps are addressed in the updated card.
+  </Card>
+  <Card title="Test with smoltbot policy" icon="flask-vial">
+    Use `smoltbot policy test` to catch card gaps before they become violations. Run this in CI after any card or tool configuration change.
+  </Card>
+</CardGroup>
+
+---
+
+## See Also
+
+- [Card Lifecycle](/concepts/card-lifecycle) -- How cards evolve over time
+- [Reputation Scores](/concepts/reputation-scores) -- Score computation methodology
+- [Reclassification API](/api-reference/reclassification-overview) -- Full API reference for reclassification endpoints
+- [Card Management](/guides/card-management) -- Creating, validating, and publishing alignment cards
+- [Policy Management](/guides/policy-management) -- Policy setup and configuration

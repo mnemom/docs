@@ -1,0 +1,563 @@
+---
+title: "Intelligence API"
+description: "API reference for fault line analysis, risk forecasting, policy recommendations, and transaction guardrails"
+sidebarTitle: "Intelligence API"
+icon: "brain"
+---
+
+# Intelligence Layer API
+
+The Intelligence Layer provides analytical capabilities on top of the policy and reputation data. It identifies fault lines in team configurations, forecasts risks, recommends policies, and manages transaction-scoped guardrails.
+
+**Base URL:** `https://api.mnemom.ai/v1`
+
+---
+
+## Authentication
+
+All intelligence endpoints require API key authentication.
+
+| Endpoint | Auth Required | Notes |
+|----------|--------------|-------|
+| `POST /v1/teams/fault-lines` | API key | Analyze team fault lines |
+| `POST /v1/teams/forecast` | API key | Forecast team risks |
+| `POST /v1/teams/recommend-policy` | API key | Generate policy recommendation |
+| `POST /v1/transactions` | API key | Create transaction with guardrails |
+| `GET /v1/transactions/{id}` | API key | Get transaction details |
+| `DELETE /v1/transactions/{id}` | API key | Delete transaction |
+
+**API key authentication:** Pass in the `Authorization` header:
+
+```
+Authorization: Bearer {api_key}
+```
+
+API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
+
+---
+
+## Rate Limits
+
+| Endpoint | Rate Limit | Window |
+|----------|-----------|--------|
+| `POST /teams/fault-lines` | 10 requests | per minute |
+| `POST /teams/forecast` | 10 requests | per minute |
+| `POST /teams/recommend-policy` | 10 requests | per minute |
+| Transaction endpoints | 30 requests | per minute |
+
+Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+<Note>
+LLM-powered endpoints (`recommend-policy`, `forecast`) have lower limits due to compute cost.
+</Note>
+
+---
+
+## Endpoints
+
+### POST /v1/teams/fault-lines
+
+Analyze fault lines in a team's configuration -- value conflicts, capability gaps, and agent incompatibilities.
+
+**Request body:**
+
+```json
+{
+  "team_id": "team-abc123"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `team_id` | string | Yes | Team identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "team_id": "team-abc123",
+  "analysis_id": "fl-def456",
+  "fleet_score": 0.72,
+  "fault_lines": [
+    {
+      "id": "fl-001",
+      "value": "harm_prevention",
+      "classification": "priority_mismatch",
+      "severity": "medium",
+      "agents_declaring": ["agent-a", "agent-b"],
+      "agents_missing": ["agent-c"],
+      "agents_conflicting": [],
+      "impact_score": 0.65,
+      "resolution_hint": "Add harm_prevention to agent-c's alignment card",
+      "affects_capabilities": ["content_moderation"]
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "resolvable": 2,
+    "priority_mismatch": 1,
+    "incompatible": 0,
+    "critical_count": 0
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `team_id` | string | Team identifier |
+| `analysis_id` | string | Unique identifier for this analysis (used as input to `/forecast`) |
+| `fleet_score` | number | Overall fleet alignment score (0.0 -- 1.0) |
+| `fault_lines` | array | List of detected fault lines |
+| `summary` | object | Aggregate counts by classification and severity |
+
+**FaultLine object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique fault line identifier |
+| `value` | string | The value or capability where the fault line exists |
+| `classification` | string | Fault line classification (see below) |
+| `severity` | string | Severity level: `low`, `medium`, `high`, or `critical` |
+| `agents_declaring` | string[] | Agents that declare this value |
+| `agents_missing` | string[] | Agents that are missing this value |
+| `agents_conflicting` | string[] | Agents with conflicting definitions of this value |
+| `impact_score` | number | Estimated impact on team operations (0.0 -- 1.0) |
+| `resolution_hint` | string | Suggested action to resolve the fault line |
+| `affects_capabilities` | string[] | Capabilities affected by this fault line |
+
+**FaultLineClassification enum:**
+
+| Value | Description |
+|-------|-------------|
+| `resolvable` | The fault line can be automatically resolved by adjusting agent configurations |
+| `priority_mismatch` | Agents have the same value but with different priority levels |
+| `incompatible` | Agents have fundamentally conflicting values that cannot be automatically reconciled |
+
+**Severity levels:**
+
+| Level | Description |
+|-------|-------------|
+| `low` | Minor misalignment, unlikely to cause operational issues |
+| `medium` | Moderate misalignment that may affect coordination under certain conditions |
+| `high` | Significant misalignment that will likely cause issues in production |
+| `critical` | Severe conflict that requires immediate resolution before deployment |
+
+**Summary object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | number | Total number of detected fault lines |
+| `resolvable` | number | Count of `resolvable` fault lines |
+| `priority_mismatch` | number | Count of `priority_mismatch` fault lines |
+| `incompatible` | number | Count of `incompatible` fault lines |
+| `critical_count` | number | Count of fault lines with `critical` severity |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Team not found |
+| `422` | Team has no agents registered |
+
+---
+
+### POST /v1/teams/forecast
+
+Forecast risks based on fault line analysis. Uses LLM analysis (Claude Haiku) to predict failure modes and their probabilities.
+
+**Request body:**
+
+```json
+{
+  "team_id": "team-abc123",
+  "fault_line_analysis_id": "fl-def456"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `team_id` | string | Yes | Team identifier |
+| `fault_line_analysis_id` | string | Yes | Analysis ID from a previous `/teams/fault-lines` call |
+
+**Response:** `200 OK`
+
+```json
+{
+  "forecast_id": "fc-ghi789",
+  "fault_line_analysis_id": "fl-def456",
+  "failure_modes": [
+    {
+      "mode": "escalation_conflict",
+      "description": "Agents A and B have conflicting escalation triggers for financial operations",
+      "probability": 0.45,
+      "severity": "high",
+      "triggered_by": ["fl-001", "fl-002"],
+      "affected_agents": ["agent-a", "agent-b"],
+      "mitigation_available": true
+    }
+  ],
+  "overall_risk_level": "medium",
+  "confidence": 0.78
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `forecast_id` | string | Unique forecast identifier |
+| `fault_line_analysis_id` | string | The analysis this forecast is based on |
+| `failure_modes` | array | Predicted failure modes |
+| `overall_risk_level` | string | Aggregate risk: `low`, `medium`, `high`, or `critical` |
+| `confidence` | number | Model confidence in the forecast (0.0 -- 1.0) |
+
+**FailureMode object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | string | Failure mode type (see below) |
+| `description` | string | Human-readable description of the predicted failure |
+| `probability` | number | Estimated probability of occurrence (0.0 -- 1.0) |
+| `severity` | string | Severity if the failure occurs: `low`, `medium`, `high`, or `critical` |
+| `triggered_by` | string[] | Fault line IDs that contribute to this failure mode |
+| `affected_agents` | string[] | Agents that would be affected |
+| `mitigation_available` | boolean | Whether a policy recommendation can address this failure mode |
+
+**FailureMode types:**
+
+| Type | Description |
+|------|-------------|
+| `escalation_conflict` | Two or more agents have conflicting escalation triggers or thresholds |
+| `capability_gap` | A required capability is not covered by any agent in the team |
+| `value_override` | An agent may override another agent's value constraints during coordination |
+| `coordination_deadlock` | Agents may reach a deadlock state due to circular dependencies or conflicting preconditions |
+| `trust_erosion` | Repeated misalignment may degrade trust scores over time |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Team or analysis not found |
+| `422` | Analysis ID does not belong to the specified team |
+
+---
+
+### POST /v1/teams/recommend-policy
+
+Generate a policy recommendation based on team analysis. Uses LLM analysis to produce a policy that resolves detected fault lines and mitigates forecasted risks.
+
+**Request body:**
+
+```json
+{
+  "team_id": "team-abc123"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `team_id` | string | Yes | Team identifier |
+
+**Response:** `200 OK`
+
+```json
+{
+  "recommendation_id": "rec-jkl012",
+  "policy": { "..." : "..." },
+  "reasoning_chain": [
+    {
+      "step": 1,
+      "action": "Mapped browser tools to web_fetch capability",
+      "rationale": "All team members use mcp__browser__* tools for research tasks",
+      "fault_lines_addressed": ["fl-001"]
+    }
+  ],
+  "confidence": 0.85,
+  "forecast_summary": {
+    "risk_reduction": "medium → low",
+    "fault_lines_resolved": 2
+  },
+  "validation": {
+    "valid": true,
+    "errors": []
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `recommendation_id` | string | Unique recommendation identifier |
+| `policy` | object | The generated policy object, ready for use with the [Policy Management API](/api-reference/policy-overview) |
+| `reasoning_chain` | array | Step-by-step reasoning for the policy recommendation |
+| `confidence` | number | Model confidence in the recommendation (0.0 -- 1.0) |
+| `forecast_summary` | object | Summary of how the recommended policy affects risk |
+| `validation` | object | Whether the generated policy passes schema validation |
+
+**ReasoningStep object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `step` | number | Step number in the reasoning chain |
+| `action` | string | What the recommendation does at this step |
+| `rationale` | string | Why this action was chosen |
+| `fault_lines_addressed` | string[] | Fault line IDs resolved by this step |
+
+**ForecastSummary object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `risk_reduction` | string | Risk level change (e.g., `"medium → low"`) |
+| `fault_lines_resolved` | number | Number of fault lines resolved by the recommendation |
+
+**Validation object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | boolean | Whether the generated policy passes schema validation |
+| `errors` | string[] | Validation errors, if any |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Team not found |
+| `422` | Team has no agents registered or no fault line data available |
+
+---
+
+### POST /v1/transactions
+
+Create a transaction with scoped guardrails. Transaction guardrails use a 3-layer merge: org + team + transaction policies with intersection semantics for `capability_mappings`.
+
+**Request body:**
+
+```json
+{
+  "agent_id": "smolt-a4c12709",
+  "description": "Process customer refund",
+  "action_type": "financial_operation",
+  "tools": ["mcp__payment__refund", "mcp__db__update_order"],
+  "duration_hours": 1,
+  "policy": { "..." : "..." }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent performing the transaction |
+| `description` | string | Yes | Human-readable description of the transaction |
+| `action_type` | string | Yes | Category of the action (e.g., `financial_operation`, `data_access`, `content_generation`) |
+| `tools` | string[] | Yes | MCP tools the agent is authorized to use during this transaction |
+| `duration_hours` | number | No | Transaction TTL in hours (default: 1, max: 24) |
+| `policy` | object | No | Transaction-scoped policy overrides; merged with org and team policies |
+
+**Response:** `201 Created`
+
+```json
+{
+  "transaction_id": "txn-mno345",
+  "agent_id": "smolt-a4c12709",
+  "description": "Process customer refund",
+  "action_type": "financial_operation",
+  "status": "active",
+  "tools": ["mcp__payment__refund", "mcp__db__update_order"],
+  "merged_policy": { "..." : "..." },
+  "created_at": "2026-02-26T10:00:00.000Z",
+  "expires_at": "2026-02-26T11:00:00.000Z"
+}
+```
+
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `transaction_id` | string | Unique transaction identifier |
+| `agent_id` | string | Agent performing the transaction |
+| `description` | string | Transaction description |
+| `action_type` | string | Action category |
+| `status` | string | Transaction status: `active`, `completed`, or `expired` |
+| `tools` | string[] | Authorized tools for this transaction |
+| `merged_policy` | object | The resolved policy after 3-layer merge (org + team + transaction) |
+| `created_at` | string | ISO 8601 creation timestamp |
+| `expires_at` | string | ISO 8601 expiry timestamp |
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid request body or unsupported `action_type` |
+| `404` | Agent not found |
+| `422` | Policy merge conflict or invalid tool reference |
+
+---
+
+### GET /v1/transactions/{id}
+
+Get transaction details including the resolved policy.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `id` | path | string | Yes | Transaction identifier |
+
+**Response:** `200 OK`
+
+Returns the same transaction object as `POST /v1/transactions`.
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Transaction not found |
+
+---
+
+### DELETE /v1/transactions/{id}
+
+Delete or cancel an active transaction. Expired transactions are automatically cleaned up and do not need to be deleted.
+
+**Parameters:**
+
+| Parameter | In | Type | Required | Description |
+|-----------|----|------|----------|-------------|
+| `id` | path | string | Yes | Transaction identifier |
+
+**Response:** `204 No Content`
+
+**Error responses:**
+
+| Status | Meaning |
+|--------|---------|
+| `404` | Transaction not found |
+
+---
+
+## Error Codes
+
+| Status | Code | Description |
+|--------|------|-------------|
+| `400` | `invalid_request` | Missing or invalid parameters |
+| `401` | `unauthorized` | API key required but not provided or invalid |
+| `402` | `feature_required` | Intelligence features require Team or Enterprise plan |
+| `404` | `not_found` | Requested resource does not exist |
+| `422` | `validation_error` | Request body fails schema validation or business rule checks |
+| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
+| `500` | `internal_error` | Server error; retry with exponential backoff |
+
+All error responses follow the standard envelope:
+
+```json
+{
+  "error": "feature_required",
+  "message": "Intelligence features require a Team or Enterprise plan. Upgrade at https://app.mnemom.ai/billing"
+}
+```
+
+---
+
+## SDK Usage
+
+<CodeGroup>
+
+```typescript TypeScript
+import { MnemomClient } from '@mnemom/sdk';
+
+const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+
+// Analyze fault lines
+const analysis = await client.intelligence.analyzeFaultLines({
+  team_id: 'team-abc123',
+});
+console.log(`Fleet score: ${analysis.fleet_score}`);
+console.log(`Fault lines: ${analysis.summary.total}`);
+
+// Forecast risks
+const forecast = await client.intelligence.forecast({
+  team_id: 'team-abc123',
+  fault_line_analysis_id: analysis.analysis_id,
+});
+console.log(`Risk level: ${forecast.overall_risk_level}`);
+
+// Generate policy recommendation
+const recommendation = await client.intelligence.recommendPolicy({
+  team_id: 'team-abc123',
+});
+console.log(`Confidence: ${recommendation.confidence}`);
+console.log(`Fault lines resolved: ${recommendation.forecast_summary.fault_lines_resolved}`);
+
+// Create a transaction with guardrails
+const txn = await client.transactions.create({
+  agent_id: 'smolt-a4c12709',
+  description: 'Process customer refund',
+  action_type: 'financial_operation',
+  tools: ['mcp__payment__refund', 'mcp__db__update_order'],
+  duration_hours: 1,
+});
+console.log(`Transaction: ${txn.transaction_id}, expires: ${txn.expires_at}`);
+```
+
+```python Python
+import httpx
+
+API_BASE = "https://api.mnemom.ai"
+headers = {"Authorization": f"Bearer {api_key}"}
+
+# Analyze fault lines
+analysis = httpx.post(
+    f"{API_BASE}/v1/teams/fault-lines",
+    headers=headers,
+    json={"team_id": "team-abc123"},
+).json()
+print(f"Fleet score: {analysis['fleet_score']}")
+print(f"Fault lines: {analysis['summary']['total']}")
+
+# Forecast risks
+forecast = httpx.post(
+    f"{API_BASE}/v1/teams/forecast",
+    headers=headers,
+    json={
+        "team_id": "team-abc123",
+        "fault_line_analysis_id": analysis["analysis_id"],
+    },
+).json()
+print(f"Risk level: {forecast['overall_risk_level']}")
+
+# Generate policy recommendation
+recommendation = httpx.post(
+    f"{API_BASE}/v1/teams/recommend-policy",
+    headers=headers,
+    json={"team_id": "team-abc123"},
+).json()
+print(f"Confidence: {recommendation['confidence']}")
+print(f"Risk reduction: {recommendation['forecast_summary']['risk_reduction']}")
+
+# Create a transaction with guardrails
+txn = httpx.post(
+    f"{API_BASE}/v1/transactions",
+    headers=headers,
+    json={
+        "agent_id": "smolt-a4c12709",
+        "description": "Process customer refund",
+        "action_type": "financial_operation",
+        "tools": ["mcp__payment__refund", "mcp__db__update_order"],
+        "duration_hours": 1,
+    },
+).json()
+print(f"Transaction: {txn['transaction_id']}, expires: {txn['expires_at']}")
+```
+
+</CodeGroup>
+
+---
+
+## See Also
+
+- [Policy Engine](/concepts/policy-engine) -- Policy concepts
+- [Team Reputation](/concepts/team-reputation) -- Team scoring
+- [Policy Management](/guides/policy-management) -- Policy workflows
+- [Risk Engine Guide](/guides/risk-engine) -- Risk assessment

@@ -1,0 +1,308 @@
+---
+title: "Card Lifecycle"
+description: "How alignment cards evolve as living artifacts — amendments, reclassification, trust recovery, and version tracking"
+sidebarTitle: "Card Lifecycle"
+icon: "arrows-spin"
+---
+
+# Card Lifecycle
+
+Alignment cards are no longer static declarations. The [Agent Alignment Protocol (AAP)](/protocols/aap/specification) and [CLPI](/protocols/aip/specification) make them **lifecycle-managed artifacts** that evolve alongside the agents they describe. When an agent gains new tools, updates its configuration, or changes its operational scope, the card should evolve with it.
+
+Card lifecycle management tracks these changes through versioned amendments, distinguishes configuration errors from genuine behavioral errors through violation reclassification, and enables trust recovery when violations were caused by card drift rather than agent misbehavior.
+
+<Note>
+  Card lifecycle management builds on the foundation of [Alignment Cards](/concepts/alignment-cards). If you are unfamiliar with card structure, read that page first. This page covers what happens after a card is published -- how it changes, how violations are categorized, and how trust recovers when the card was wrong.
+</Note>
+
+---
+
+## Card Amendments
+
+Every change to an alignment card is tracked as an **amendment** -- a versioned, diffable record that preserves the full history of the card's evolution.
+
+When you update an alignment card (via CLI, API, or dashboard), the system does not overwrite the previous version. Instead, it creates a new version and records an amendment that captures:
+
+| Field | Description |
+|---|---|
+| `previous_version` | The `card_id` of the version being replaced |
+| `new_version` | The `card_id` of the updated version |
+| `changed_fields` | List of fields that were modified (e.g., `autonomy_envelope.bounded_actions`) |
+| `timestamp` | When the amendment was created |
+| `reason` | Human-readable explanation for the change |
+
+Amendments can be linked to reclassification requests, proving that a card gap existed at the time of a violation. This linkage is critical for trust recovery -- it provides auditable evidence that the violation was a configuration error, not agent misbehavior.
+
+### Retrieving Amendment History
+
+```bash
+# Via CLI
+smoltbot card amendments --agent-id agent_abc123
+
+# Via API
+curl https://api.mnemom.ai/v1/agents/agent_abc123/card-amendments
+```
+
+**API Response:**
+
+```json
+{
+  "amendments": [
+    {
+      "amendment_id": "amend-7f3a2b1c",
+      "previous_version": "ac-old-card-id",
+      "new_version": "ac-new-card-id",
+      "changed_fields": ["autonomy_envelope.bounded_actions"],
+      "timestamp": "2026-02-15T10:30:00Z",
+      "reason": "Added web_fetch capability after enabling browser MCP server",
+      "linked_reclassification_id": "reclass-9e4d5f6a"
+    }
+  ]
+}
+```
+
+<Tip>
+  Link amendments to reclassification requests whenever possible. An unlinked amendment is just a version bump. A linked amendment is evidence that the card was wrong -- and that the violation it caused should not count against the agent's trust score.
+</Tip>
+
+---
+
+## Violation Reclassification
+
+The core insight behind card lifecycle management: **not all violations indicate agent misbehavior**. Some violations are card gaps -- the agent used a tool correctly, but the alignment card did not declare that capability.
+
+Reclassification is the process of reviewing a violation after the fact and determining whether it was caused by the agent or by the card.
+
+### Taxonomy
+
+After reclassification, every violation falls into one of two categories:
+
+<CardGroup cols={2}>
+  <Card title="card_gap" icon="file-circle-exclamation">
+    **Configuration error.** The agent acted correctly, but the alignment card was missing a capability declaration. The card was wrong, not the agent.
+
+    *Example:* Agent uses `mcp__browser__navigate` for legitimate research, but `web_fetch` is not listed in `bounded_actions`. The [policy engine](/concepts/policy-engine) flags an `UNMAPPED_TOOL` violation.
+  </Card>
+  <Card title="behavior_gap" icon="robot">
+    **Genuine behavioral error.** The agent acted outside its declared intent, and the card was correct. The agent was wrong, not the card.
+
+    *Example:* Agent deletes files when the card explicitly lists `delete_files` in `forbidden_actions`. The card is accurate -- the agent violated it.
+  </Card>
+</CardGroup>
+
+This distinction matters because only `behavior_gap` violations should count against an agent's [trust score](/concepts/reputation-scores). Card gaps are operator errors, not agent errors.
+
+### Reclassification Workflow
+
+<Steps>
+  <Step title="Detect">
+    The [policy engine](/concepts/policy-engine) evaluates agent actions against the alignment card and policy rules. A violation is flagged -- for example, `UNMAPPED_TOOL` (tool not covered by any capability mapping) or `CAPABILITY_MISMATCH` (tool used outside declared capabilities).
+
+    At this point, the violation is unclassified. It counts against the agent's trust score by default.
+  </Step>
+
+  <Step title="Determine cause">
+    The operator reviews the violation. The key question: **was the card missing a capability, or did the agent genuinely misbehave?**
+
+    Indicators of a card gap:
+    - The tool was used for a legitimate purpose consistent with the agent's role
+    - The capability was recently added (new MCP server, new tool provider)
+    - Other agents in the fleet have this capability declared
+    - The tool usage pattern matches expected behavior
+
+    Indicators of a behavior gap:
+    - The tool is explicitly forbidden in the card
+    - The action contradicts the agent's declared values
+    - The tool was used in an unexpected or harmful way
+  </Step>
+
+  <Step title="Reclassify">
+    If the violation is a card gap, submit a reclassification via the API:
+
+    ```bash
+    curl -X POST https://api.mnemom.ai/v1/reclassifications \
+      -H "Authorization: Bearer $MNEMOM_API_KEY" \
+      -d '{
+        "agent_id": "agent_abc123",
+        "checkpoint_id": "chk-violation-id",
+        "new_type": "card_gap",
+        "reason": "Agent correctly used browser for research; web_fetch was missing from bounded_actions",
+        "card_amendment_id": "amend-7f3a2b1c"
+      }'
+    ```
+
+    The `card_amendment_id` is optional but recommended. Linking the reclassification to a specific card amendment creates an auditable chain: violation occurred, card was wrong, card was fixed, violation was reclassified.
+  </Step>
+
+  <Step title="Recompute">
+    After reclassification, the agent's trust scores are automatically recomputed. Card gap violations are excluded from the Compliance and Drift Stability components of the [Mnemom Trust Rating](/concepts/reputation-scores).
+
+    Recomputation happens on the next hourly cycle. The agent's score recovers without manual intervention.
+  </Step>
+
+  <Step title="Re-proof">
+    Sessions affected by the reclassification are re-proofed against the updated card. Previously failing sessions may now pass verification, because the updated card includes the capability that was missing.
+
+    Re-proofing results are recorded in the audit trail for full traceability.
+  </Step>
+</Steps>
+
+<Warning>
+  Reclassification is an audited action. Every reclassification is recorded with the operator who submitted it, the reason, and the timestamp. Reclassifications that appear to systematically excuse genuine behavioral violations will be flagged by the anti-gaming detection system.
+</Warning>
+
+---
+
+## Trust Graph Propagation
+
+When reclassification triggers a score recomputation, the effects can propagate through the trust graph. Agents do not exist in isolation -- they operate in [fleets](/concepts/fleet-coherence), teams, and delegation chains. A score change for one agent can affect trust assessments for related agents.
+
+Propagation uses breadth-first traversal from the reclassified agent with the following bounds:
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| **Maximum depth** | 3 hops | Prevents unbounded propagation across large fleets |
+| **Maximum agents affected** | 50 | Caps the blast radius of any single reclassification |
+| **Decay factor** | 0.85 per hop | Score impact diminishes with distance from the source agent |
+| **Eligibility** | Existing trust relationships only | Only affects team members and fleet peers with prior interactions |
+
+**Example:** Agent A is reclassified, gaining +40 points. Agent B (1 hop away, same team) sees a propagated impact of `40 * 0.85 = 34` points in the Coherence Compatibility component. Agent C (2 hops away) sees `40 * 0.85^2 = 28.9` points. Agent D (4 hops away) is beyond the maximum depth and is unaffected.
+
+<Note>
+  Propagation only affects the Coherence Compatibility component (10% of total score). It does not modify other agents' Integrity Ratio, Compliance, Drift Stability, or Trace Completeness scores. Those components are based solely on each agent's own behavioral data.
+</Note>
+
+---
+
+## Score Recovery Mechanics
+
+Reclassification enables trust recovery by excluding card gap violations from the score components they would otherwise penalize.
+
+### What Changes After Reclassification
+
+| Score Component | Effect of `card_gap` Reclassification |
+|---|---|
+| **Compliance (20%)** | Card gap violations are excluded from the session-capped violation sum. The compliance score is recomputed without them. |
+| **Drift Stability (20%)** | Sessions that were marked unstable solely due to card gap violations are reclassified as stable. |
+| **Integrity Ratio (40%)** | Not directly affected. Integrity checkpoints are independently evaluated by the daimonion. |
+| **Trace Completeness (10%)** | Not affected. Trace coverage is independent of violation type. |
+| **Coherence Compatibility (10%)** | May be indirectly affected through trust graph propagation. |
+
+### Recovery Boundaries
+
+Score recovery is bounded and specific:
+
+- Only the specific reclassified violations are excluded, not all violations
+- The agent's score recovers on the next hourly recomputation cycle
+- Recovery is proportional to how much the reclassified violations were depressing the score
+- If the agent has other `behavior_gap` violations, those continue to count against the score
+
+```
+Before reclassification:
+  Compliance = 1000 / (1 + 3.2)^1.5 = 142   (3 violations, 2 sessions)
+
+After reclassifying 2 violations as card_gap:
+  Compliance = 1000 / (1 + 0.8)^1.5 = 465   (1 behavior_gap violation, 1 session)
+```
+
+---
+
+## Session Re-Proofing
+
+When a reclassification includes a card amendment, affected sessions are re-verified against the updated card. This is not just a score adjustment -- the sessions are actually re-evaluated to determine whether they now pass.
+
+### How Re-Proofing Works
+
+1. **Identify affected sessions** -- The system finds all sessions that contain the reclassified violation. These are sessions where the agent used the capability that was missing from the original card.
+
+2. **Re-verify against updated card** -- Each affected session is verified against the amended card. The same verification logic runs, but with the new card that includes the previously missing capability.
+
+3. **Update session status** -- Sessions that now pass verification are updated from `failed` to `passed`. Sessions that still fail (due to other violations) retain their `failed` status.
+
+4. **Record in audit trail** -- Every re-proofing action is recorded: which session, which card version was used, the previous result, and the new result.
+
+<Tip>
+  Re-proofing is automatic when a reclassification includes a `card_amendment_id`. If you submit a reclassification without linking it to an amendment, re-proofing does not run -- only the score is recomputed. Always link amendments to reclassifications to get the full benefit.
+</Tip>
+
+---
+
+## OTel Reclassification Events
+
+Reclassification emits [OpenTelemetry](https://opentelemetry.io/) spans for observability integration. These spans provide structured data about every reclassification event for monitoring dashboards, alerting pipelines, and audit systems.
+
+### Span: `reclassification.process`
+
+Emitted when a reclassification is processed:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `reclassification.agent_id` | string | The agent whose violation was reclassified |
+| `reclassification.checkpoint_id` | string | The integrity checkpoint containing the violation |
+| `reclassification.original_type` | string | Original violation type (e.g., `UNMAPPED_TOOL`, `CAPABILITY_MISMATCH`) |
+| `reclassification.new_type` | string | Reclassified type: `card_gap` or `behavior_gap` |
+| `reclassification.reason` | string | Operator-provided reason for the reclassification |
+| `reclassification.card_amendment_id` | string | Linked card amendment ID (empty if not linked) |
+| `reclassification.score_before` | int | Agent's trust score before recomputation |
+| `reclassification.score_after` | int | Agent's trust score after recomputation |
+
+### Example OTel Export
+
+```json
+{
+  "name": "reclassification.process",
+  "traceId": "abc123def456",
+  "spanId": "span789",
+  "attributes": {
+    "reclassification.agent_id": "agent_abc123",
+    "reclassification.checkpoint_id": "chk-violation-id",
+    "reclassification.original_type": "UNMAPPED_TOOL",
+    "reclassification.new_type": "card_gap",
+    "reclassification.reason": "web_fetch missing from bounded_actions",
+    "reclassification.card_amendment_id": "amend-7f3a2b1c",
+    "reclassification.score_before": 612,
+    "reclassification.score_after": 738
+  }
+}
+```
+
+These spans integrate with any OTel-compatible backend (Grafana, Datadog, Honeycomb, etc.) and can be used to build dashboards tracking reclassification frequency, score recovery trends, and card gap patterns across your fleet.
+
+---
+
+## Compliance Export
+
+For audit trails and regulatory compliance, the compliance export endpoint provides a complete, tamper-evident record of an agent's lifecycle.
+
+```bash
+curl https://api.mnemom.ai/v1/agents/agent_abc123/compliance-export \
+  -H "Authorization: Bearer $MNEMOM_API_KEY"
+```
+
+### What the Export Includes
+
+| Section | Contents |
+|---|---|
+| **Violations** | All violations with original type, reclassified type (if applicable), severity, and timestamp |
+| **Reclassifications** | Every reclassification with reason, operator, linked amendment, and score impact |
+| **Card amendments** | Full amendment history with diffs, reasons, and linked reclassifications |
+| **Score history** | Weekly score snapshots with component breakdowns |
+| **Session results** | Verification results for all sessions, including re-proofing outcomes |
+
+### Tamper Evidence
+
+The compliance export is cryptographically linked to the agent's [integrity certificate chain](/protocols/aip/certificates). Each record in the export references a certificate hash, enabling independent verification that the data has not been modified since it was recorded.
+
+<Warning>
+  The compliance export may contain sensitive operational data. Access requires authentication and is scoped to agents you own or administer. Organization admins can export data for any agent in their organization.
+</Warning>
+
+---
+
+## See Also
+
+- [Alignment Cards](/concepts/alignment-cards) -- Card structure and schema
+- [Policy Engine](/concepts/policy-engine) -- How policies detect violations
+- [Trust Recovery Guide](/guides/trust-recovery) -- Step-by-step recovery workflow
+- [Reputation Scores](/concepts/reputation-scores) -- How scores are computed
+- [Reclassification API](/api-reference/reclassification-overview) -- API reference

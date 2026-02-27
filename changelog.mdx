@@ -9,6 +9,52 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
+## Card Lifecycle & Policy Intelligence — CLPI
+<sub>February 2026</sub>
+
+**Mnemom becomes a policy-driven governance platform.** A 5-phase overhaul that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, and on-chain anchoring. Root cause: configuration drift (new tools added without updating alignment cards) caused false violations and unfair trust score declines. CLPI fixes this by distinguishing card gaps from behavioral gaps and enabling trust recovery.
+
+### Phase 1: Policy Engine
+- **[Policy DSL](/specifications/policy-dsl)**: YAML-based governance rules with `capability_mappings` (glob patterns bridging tools to card categories), `forbidden` rules, `escalation_triggers`, and configurable `defaults`
+- **Three evaluation contexts**: CI/CD static validation, gateway live enforcement, observer post-action analysis
+- **Enforcement modes**: `warn` (log only), `enforce` (block with 403), `off` — controlled independently from alignment enforcement via `X-Policy-Verdict` header
+- **Grace period**: 24-hour default window for newly discovered tools before they become violations
+- **[Policy CLI](/smoltbot/policy-cli)**: `smoltbot policy init|validate|publish|list|test|evaluate` subcommands with CI-friendly exit codes
+- **Policy merge**: Org-level + agent-level policies merge with union semantics for mappings and floor semantics for defaults
+
+### Phase 2: Card Lifecycle & Trust Recovery
+- **[Card amendments](/concepts/card-lifecycle)**: Tracked changes with version history and diffs — cards are now lifecycle-managed artifacts
+- **[Violation reclassification](/guides/trust-recovery)**: Distinguish `card_gap` (configuration error) from `behavior_gap` (genuine misbehavior) — reclassified card_gap violations are excluded from compliance and drift scoring
+- **Score recomputation**: Automatic trust score recovery after reclassification with trust graph propagation (BFS, depth 3, max 50 agents, 0.85/hop decay)
+- **Compliance export**: Full audit trail of violations, reclassifications, card amendments, and score history
+- **[Reclassification API](/api-reference/reclassification-overview)**: 5 endpoints for reclassify, recompute, export, and history
+
+### Phase 3: Intelligence Layer
+- **[Fault line analysis](/api-reference/intelligence-overview)**: Identify value conflicts and capability gaps across teams with classification (resolvable, priority mismatch, incompatible) and severity scoring
+- **Risk forecasting**: Predict failure modes (escalation conflicts, capability gaps, coordination deadlocks, trust erosion) with probability and severity estimates
+- **Policy recommendations**: LLM-powered policy generation from team analysis with confidence scores and reasoning chains
+- **Transaction guardrails**: 3-layer policy merge (org + team + transaction) with intersection semantics for capability mappings
+
+### Phase 4: On-Chain Verification
+- **[ERC-8004 Reputation Registry](/concepts/on-chain-verification)**: Smart contracts on Base L2 for immutable reputation anchoring
+- **MnemoReputationRegistry**: Publish individual and batch scores (max 200/batch) with metadata hashes
+- **MnemoMerkleAnchor**: Anchor Merkle roots for tamper-evident verification
+- **[On-Chain API](/api-reference/on-chain-overview)**: 5 endpoints for anchoring roots, publishing scores, verification, and history
+
+### Phase 5: Observability
+- **Policy OTel spans**: `policy.evaluate` span with verdict, violations, and duration attributes
+- **Reclassification OTel spans**: `reclassification.process` span with before/after scores and amendment tracking
+- **Policy-aware drift detection**: Distinguishes policy gaps from genuine misalignment in drift analysis
+
+**New documentation:**
+- [Policy Engine](/concepts/policy-engine) | [Card Lifecycle](/concepts/card-lifecycle) | [On-Chain Verification](/concepts/on-chain-verification)
+- [Policy DSL Specification](/specifications/policy-dsl)
+- [Policy CLI Reference](/smoltbot/policy-cli)
+- [Policy Management](/guides/policy-management) | [Trust Recovery](/guides/trust-recovery) | [CI/CD Policy Gates](/guides/ci-cd-policy-gates) | [On-Chain Verification Guide](/guides/on-chain-verification)
+- [Policy API](/api-reference/policy-overview) | [Reclassification API](/api-reference/reclassification-overview) | [Intelligence API](/api-reference/intelligence-overview) | [On-Chain API](/api-reference/on-chain-overview)
+
+---
+
 ## Team Reputation & Risk Scoring (E-25)
 <sub>February 2026</sub>
 

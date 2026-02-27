@@ -1,0 +1,516 @@
+---
+title: "Policy DSL Specification"
+description: "Normative schema definition for Mnemom Policy YAML — capability mappings, forbidden rules, escalation triggers, and defaults"
+sidebarTitle: "Policy DSL"
+icon: "file-code"
+---
+
+# Policy DSL Specification
+
+This document is the normative schema definition for Mnemom Policy YAML files. A policy file declares what an agent is allowed to do, what is forbidden, when to escalate, and how to handle unmapped tools. The policy engine evaluates every tool call against the active policy before execution.
+
+---
+
+## Schema Version
+
+The current schema version is **`1.0`**.
+
+<Note>
+Schema versions follow semantic versioning for backward compatibility. All `1.x` schemas are backward-compatible with `1.0` — new optional fields may be added, but no existing field will change meaning or become required. A major version bump (e.g., `2.0`) indicates a breaking change and will be accompanied by a migration guide.
+</Note>
+
+The `schema_version` field is required in every policy file. The policy engine rejects files with an unrecognized schema version.
+
+---
+
+## Complete Schema Definition
+
+A valid policy YAML file contains five top-level keys: `meta`, `capability_mappings`, `forbidden`, `escalation_triggers`, and `defaults`.
+
+```yaml
+meta:                    # Required
+capability_mappings:     # Required
+forbidden:               # Required (can be empty array)
+escalation_triggers:     # Optional (defaults to empty)
+defaults:                # Required
+```
+
+### `meta` (required)
+
+Identifies the policy and controls merge behavior.
+
+```yaml
+meta:
+  schema_version: string  # Required. "1.0"
+  name: string            # Required. Human-readable policy name
+  description: string     # Optional. Policy purpose
+  scope: "org" | "agent"  # Required. Determines merge behavior
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schema_version` | string | Yes | Must be a recognized version. Currently `"1.0"`. |
+| `name` | string | Yes | Human-readable name for the policy. Must be non-empty. |
+| `description` | string | No | Free-text description of the policy's purpose. |
+| `scope` | string | Yes | Either `"org"` (organization-wide baseline) or `"agent"` (agent-specific overlay). Determines how this policy merges with others. See [Merge Semantics](#merge-semantics). |
+
+<Tip>
+Use `scope: "org"` for organization-wide security baselines that apply to all agents. Use `scope: "agent"` for per-agent customizations that layer on top of the org policy.
+</Tip>
+
+---
+
+### `capability_mappings` (required)
+
+A map of capability names to their definitions. Each capability groups related tools under a semantic name that corresponds to bounded actions in the agent's alignment card.
+
+```yaml
+capability_mappings:
+  <capability_name>:
+    description: string    # Optional
+    tools: string[]        # Required. Glob patterns matching tool names
+    card_actions: string[] # Required. Semantic categories from alignment card
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `description` | string | No | Human-readable description of this capability. |
+| `tools` | string[] | Yes | Array of glob patterns matching tool names. Must be non-empty. |
+| `card_actions` | string[] | Yes | Semantic action categories from the alignment card's `autonomy_envelope.bounded_actions`. Must be non-empty. |
+
+#### Tool Pattern Syntax
+
+Tool patterns use glob syntax for matching:
+
+| Pattern | Meaning | Example |
+|---|---|---|
+| `*` | Matches any sequence of characters | `mcp__browser__*` matches all browser tools |
+| `?` | Matches exactly one character | `mcp__fs__read?` matches `mcp__fs__readf` but not `mcp__fs__readdir` |
+| `literal` | Exact match | `mcp__browser__navigate` matches only that tool |
+
+<Warning>
+Each tool call is matched against patterns **in declaration order** — the first matching capability wins. If a tool matches multiple capabilities, only the first match is used for policy evaluation. Order your capability mappings from most specific to least specific.
+</Warning>
+
+The `card_actions` array must reference entries defined in the agent's alignment card under `autonomy_envelope.bounded_actions`. A mismatch between policy `card_actions` and the alignment card produces a validation warning.
+
+---
+
+### `forbidden` (required, can be empty array)
+
+An array of rules that unconditionally block specific tools. Forbidden rules are evaluated **before** capability mappings.
+
+```yaml
+forbidden:
+  - pattern: string        # Required. Glob pattern matching tool names
+    reason: string         # Required. Human-readable explanation
+    severity: "critical" | "high" | "medium" | "low"  # Required
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `pattern` | string | Yes | Glob pattern matching tool names. Same syntax as capability mapping tool patterns. |
+| `reason` | string | Yes | Human-readable explanation of why this tool is forbidden. Included in violation reports and audit logs. |
+| `severity` | string | Yes | One of `"critical"`, `"high"`, `"medium"`, or `"low"`. |
+
+#### Severity Enforcement Behavior
+
+Severity determines how the policy engine handles a match:
+
+| Severity | Enforce Mode | Warn Mode |
+|---|---|---|
+| `critical` | **Blocked** — tool call denied with 403 | Warning recorded |
+| `high` | **Blocked** — tool call denied with 403 | Warning recorded |
+| `medium` | Warning only (not blocked) | Warning recorded |
+| `low` | Warning only (not blocked) | Warning recorded |
+
+<Note>
+Even in `enforce` mode, `medium` and `low` severity forbidden rules produce warnings rather than hard blocks. This allows you to track usage of discouraged tools without disrupting agent operation. Use `critical` or `high` for tools that must never be called.
+</Note>
+
+If `forbidden` has no rules, pass an empty array:
+
+```yaml
+forbidden: []
+```
+
+---
+
+### `escalation_triggers` (optional, defaults to empty)
+
+An array of conditional rules that flag tool calls for human review, add warnings, or deny access based on pattern expressions.
+
+```yaml
+escalation_triggers:
+  - condition: string      # Required. Expression (e.g., "tool_matches('pattern')")
+    action: "escalate" | "warn" | "deny"  # Required
+    reason: string         # Required
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `condition` | string | Yes | A condition expression. Currently supports `tool_matches('glob_pattern')`. |
+| `action` | string | Yes | One of `"escalate"`, `"warn"`, or `"deny"`. |
+| `reason` | string | Yes | Human-readable explanation included in escalation reports. |
+
+#### Action Behavior
+
+| Action | Effect |
+|---|---|
+| `escalate` | Flags the tool call for human review. The call is paused (in enforce mode) or logged (in warn mode) until a human approves or rejects it. |
+| `warn` | Adds a warning to the checkpoint record. The tool call proceeds. |
+| `deny` | Treats the match as a violation. In enforce mode, the call is blocked. In warn mode, a warning is recorded. |
+
+#### Condition Expressions
+
+The `condition` field currently supports one expression type:
+
+```
+tool_matches('glob_pattern')
+```
+
+The glob pattern inside `tool_matches()` uses the same syntax as tool patterns in `capability_mappings` and `forbidden`. Future schema versions may add additional expression types (e.g., `session_count_exceeds(n)`, `time_since_last_escalation()`).
+
+If `escalation_triggers` is omitted, it defaults to an empty array.
+
+---
+
+### `defaults` (required)
+
+Controls fallback behavior for tools that do not match any capability mapping or forbidden rule.
+
+```yaml
+defaults:
+  unmapped_tool_action: "allow" | "deny" | "warn"  # Required
+  unmapped_severity: "critical" | "high" | "medium" | "low"  # Required
+  fail_open: boolean       # Required
+  enforcement_mode: "warn" | "enforce" | "off"  # Optional, defaults to "warn"
+  grace_period_hours: number  # Optional, defaults to 24
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `unmapped_tool_action` | string | Yes | -- | How to handle tools that do not match any capability or forbidden rule. `"allow"` permits them silently, `"warn"` permits with a warning, `"deny"` blocks them. |
+| `unmapped_severity` | string | Yes | -- | Severity level assigned to unmapped tool violations or warnings. |
+| `fail_open` | boolean | Yes | -- | If `true`, policy engine errors (e.g., malformed policy, evaluation timeout) result in the tool call being **allowed**. If `false`, errors result in the call being **denied**. |
+| `enforcement_mode` | string | No | `"warn"` | Global enforcement mode. `"off"` disables policy evaluation entirely. `"warn"` evaluates but only records warnings. `"enforce"` actively blocks violations. |
+| `grace_period_hours` | number | No | `24` | Hours after a new policy is deployed before `enforce` mode takes effect. During the grace period, the policy operates in `warn` mode regardless of the `enforcement_mode` setting. |
+
+<Warning>
+Setting `fail_open: true` means that if the policy engine encounters an internal error, **all tool calls will be permitted**. This maximizes availability but reduces safety guarantees. For high-risk agents, set `fail_open: false` to ensure errors fail safely.
+</Warning>
+
+---
+
+## Validation Rules
+
+The policy engine validates every policy file on load. A policy that fails validation is rejected entirely -- partial policies are never applied.
+
+<AccordionGroup>
+  <Accordion title="meta validation">
+    - `meta.schema_version` must be present, a string, and a recognized version (currently `"1.0"`)
+    - `meta.name` must be present and non-empty
+    - `meta.scope` must be exactly `"org"` or `"agent"`
+    - `meta.description`, if present, must be a string
+  </Accordion>
+
+  <Accordion title="capability_mappings validation">
+    - Must be a mapping (YAML object), not an array or scalar
+    - Each entry key (capability name) must be a non-empty string
+    - Each entry must have a `tools` array with at least one element
+    - Each element in `tools` must be a non-empty string (valid glob pattern)
+    - Each entry must have a `card_actions` array with at least one element
+    - Each element in `card_actions` must be a non-empty string
+    - `description`, if present, must be a string
+    - Duplicate capability names are rejected
+  </Accordion>
+
+  <Accordion title="forbidden validation">
+    - Must be an array (can be empty)
+    - Each element must have `pattern` (non-empty string), `reason` (non-empty string), and `severity`
+    - `severity` must be one of: `"critical"`, `"high"`, `"medium"`, `"low"`
+    - Overlapping patterns are permitted (all matching rules fire)
+  </Accordion>
+
+  <Accordion title="escalation_triggers validation">
+    - If present, must be an array
+    - Each element must have `condition` (non-empty string), `action`, and `reason` (non-empty string)
+    - `action` must be one of: `"escalate"`, `"warn"`, `"deny"`
+    - `condition` must be a valid expression (currently only `tool_matches('...')` is supported)
+    - Invalid condition expressions produce a validation error
+  </Accordion>
+
+  <Accordion title="defaults validation">
+    - `unmapped_tool_action` must be present and one of: `"allow"`, `"deny"`, `"warn"`
+    - `unmapped_severity` must be present and one of: `"critical"`, `"high"`, `"medium"`, `"low"`
+    - `fail_open` must be present and a boolean
+    - `enforcement_mode`, if present, must be one of: `"warn"`, `"enforce"`, `"off"`
+    - `grace_period_hours`, if present, must be a non-negative number
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Full Annotated Example
+
+The following is a complete, realistic policy for a customer support agent. It maps browser and filesystem tools to alignment card actions, forbids dangerous operations, sets up escalation triggers for sensitive patterns, and uses warn mode with a 24-hour grace period.
+
+<CodeGroup>
+
+```yaml policy.yaml
+# ----------------------------------------------------------
+# Policy: Customer Support Agent
+# Scope: agent-level overlay on top of org baseline
+# ----------------------------------------------------------
+
+meta:
+  schema_version: "1.0"
+  name: "Customer Support Agent Policy"
+  description: >
+    Policy for the customer-facing support agent. Permits web
+    browsing and file reads for knowledge base lookups. Forbids
+    destructive filesystem operations and code execution.
+  scope: "agent"
+
+# ----------------------------------------------------------
+# Capability Mappings
+# Map tool glob patterns to alignment card bounded_actions.
+# Order matters — first match wins.
+# ----------------------------------------------------------
+capability_mappings:
+  web_browsing:
+    description: "Browser-based research and information retrieval"
+    tools:
+      - "mcp__browser__navigate"
+      - "mcp__browser__click"
+      - "mcp__browser__scroll"
+      - "mcp__browser__screenshot"
+      - "mcp__browser__*"
+    card_actions:
+      - "web_fetch"
+      - "web_search"
+
+  knowledge_base_read:
+    description: "Read-only access to internal knowledge base files"
+    tools:
+      - "mcp__fs__read"
+      - "mcp__fs__list"
+      - "mcp__fs__stat"
+    card_actions:
+      - "read"
+
+  knowledge_base_write:
+    description: "Write access for updating support articles"
+    tools:
+      - "mcp__fs__write"
+      - "mcp__fs__mkdir"
+    card_actions:
+      - "write"
+
+  ticket_management:
+    description: "Create and update support tickets"
+    tools:
+      - "mcp__zendesk__create_ticket"
+      - "mcp__zendesk__update_ticket"
+      - "mcp__zendesk__add_comment"
+    card_actions:
+      - "ticket_create"
+      - "ticket_update"
+
+# ----------------------------------------------------------
+# Forbidden Rules
+# Checked BEFORE capability mappings. Any match = violation.
+# ----------------------------------------------------------
+forbidden:
+  - pattern: "mcp__fs__delete*"
+    reason: "File deletion is not permitted for support agents"
+    severity: "critical"
+
+  - pattern: "mcp__fs__chmod*"
+    reason: "Permission changes are not permitted"
+    severity: "critical"
+
+  - pattern: "mcp__exec__*"
+    reason: "Arbitrary code execution is forbidden for all agents"
+    severity: "critical"
+
+  - pattern: "mcp__shell__*"
+    reason: "Shell access is forbidden for support agents"
+    severity: "high"
+
+  - pattern: "mcp__zendesk__delete_ticket"
+    reason: "Ticket deletion requires human approval"
+    severity: "high"
+
+  - pattern: "mcp__browser__execute_script"
+    reason: "Arbitrary JS execution in browser is discouraged"
+    severity: "medium"
+
+# ----------------------------------------------------------
+# Escalation Triggers
+# Conditional rules for human-in-the-loop review.
+# ----------------------------------------------------------
+escalation_triggers:
+  - condition: "tool_matches('mcp__zendesk__update_ticket')"
+    action: "escalate"
+    reason: "Ticket updates should be reviewed by a human during the ramp-up period"
+
+  - condition: "tool_matches('mcp__fs__write')"
+    action: "warn"
+    reason: "File writes are permitted but tracked for audit"
+
+  - condition: "tool_matches('mcp__browser__navigate')"
+    action: "warn"
+    reason: "External navigation logged for compliance review"
+
+# ----------------------------------------------------------
+# Defaults
+# Fallback behavior for tools not matched above.
+# ----------------------------------------------------------
+defaults:
+  unmapped_tool_action: "warn"
+  unmapped_severity: "medium"
+  fail_open: false
+  enforcement_mode: "warn"
+  grace_period_hours: 24
+```
+
+</CodeGroup>
+
+### Walkthrough
+
+1. **`meta`** -- The policy is scoped to a single agent (`scope: "agent"`), meaning it layers on top of an org-level baseline via the merge rules described below.
+
+2. **`capability_mappings`** -- Four capabilities are defined. `web_browsing` uses a catch-all glob (`mcp__browser__*`) as its last pattern, ensuring any browser tool not explicitly listed still maps to this capability. `knowledge_base_read` and `knowledge_base_write` separate read and write filesystem operations.
+
+3. **`forbidden`** -- Six rules block destructive operations. The `critical` and `high` severity rules will be hard-blocked in enforce mode. The `medium` severity rule for `mcp__browser__execute_script` produces a warning even in enforce mode, since it is discouraged but not categorically dangerous.
+
+4. **`escalation_triggers`** -- Ticket updates require human approval during ramp-up. File writes and external navigation are permitted but logged.
+
+5. **`defaults`** -- Unmapped tools produce a `medium` warning (not blocked). `fail_open: false` ensures that policy engine errors are treated as denials. The 24-hour grace period means a newly deployed policy runs in warn mode for the first day, even if `enforcement_mode` is later changed to `enforce`.
+
+---
+
+## Merge Semantics
+
+When an agent has both an org-scoped policy and an agent-scoped policy, the policy engine merges them into a single effective policy. The merge follows deterministic rules designed so that org policies set a security floor and agent policies can only strengthen (never weaken) it.
+
+<Tabs>
+  <Tab title="capability_mappings">
+
+### capability_mappings: Union
+
+The effective capability mappings are the **union** of org and agent mappings.
+
+- If the same capability name appears in both, the **agent definition replaces** the org definition entirely (not a deep merge).
+- Capabilities defined only in org or only in agent are included as-is.
+
+```
+effective.capability_mappings = org.capability_mappings + agent.capability_mappings
+# agent entries override org entries with the same key
+```
+
+<Note>
+In **transaction guardrails** (multi-agent coordination), capability mappings use **intersection** instead of union. A tool call is only permitted if it is mapped in both the initiating agent's and the counterparty's effective policies. This prevents one agent from granting capabilities the other has not approved.
+</Note>
+
+  </Tab>
+  <Tab title="forbidden">
+
+### forbidden: Union
+
+The effective forbidden list is the **union** of all rules from both policies.
+
+- All org forbidden rules are enforced.
+- All agent forbidden rules are also enforced.
+- Duplicates (same pattern) are kept -- both rules fire independently.
+
+```
+effective.forbidden = org.forbidden + agent.forbidden
+```
+
+An agent policy cannot remove or weaken an org-level forbidden rule.
+
+  </Tab>
+  <Tab title="escalation_triggers">
+
+### escalation_triggers: Concatenation
+
+Escalation triggers are concatenated with org triggers first, then agent triggers.
+
+- Org triggers are evaluated first.
+- Agent triggers are evaluated second.
+- All matching triggers fire (not short-circuited).
+
+```
+effective.escalation_triggers = org.escalation_triggers + agent.escalation_triggers
+```
+
+An agent policy cannot remove org-level escalation triggers.
+
+  </Tab>
+  <Tab title="defaults">
+
+### defaults: Org Floor, Agent Strengthens
+
+The org policy sets the floor. The agent policy can only make defaults **stricter**, never more permissive.
+
+**`unmapped_tool_action`** -- Strength order: `allow` < `warn` < `deny`. The stronger (more restrictive) value wins.
+
+```
+# If org says "warn" and agent says "allow", effective = "warn"
+# If org says "warn" and agent says "deny", effective = "deny"
+```
+
+**`unmapped_severity`** -- Strength order: `low` < `medium` < `high` < `critical`. The stronger value wins.
+
+**`fail_open`** -- If either policy sets `fail_open: false`, the effective value is `false`. (The stricter setting wins.)
+
+**`enforcement_mode`** -- Strength order: `off` < `warn` < `enforce`. The stronger value wins.
+
+```
+# If org says "warn" and agent says "enforce", effective = "enforce"
+# If org says "enforce" and agent says "off", effective = "enforce"
+```
+
+**`grace_period_hours`** -- The **shorter** grace period wins (more restrictive means less time before enforcement activates).
+
+  </Tab>
+</Tabs>
+
+### Merge Summary Table
+
+| Field | Merge Strategy | Direction |
+|---|---|---|
+| `capability_mappings` | Union (agent overrides same-name keys) | Additive |
+| `forbidden` | Union (all rules kept) | Additive |
+| `escalation_triggers` | Concatenation (org first, then agent) | Additive |
+| `defaults.unmapped_tool_action` | Stronger wins | `allow` < `warn` < `deny` |
+| `defaults.unmapped_severity` | Stronger wins | `low` < `medium` < `high` < `critical` |
+| `defaults.fail_open` | AND (false wins) | Stricter wins |
+| `defaults.enforcement_mode` | Stronger wins | `off` < `warn` < `enforce` |
+| `defaults.grace_period_hours` | Minimum wins | Shorter = stricter |
+
+<Tip>
+To preview the effective merged policy for a specific agent, use the `smoltbot policy inspect` command. It renders the final merged output and highlights which fields came from the org policy vs. the agent policy. See the [Policy CLI Reference](/smoltbot/policy-cli) for details.
+</Tip>
+
+---
+
+## Evaluation Order
+
+When a tool call is evaluated against the effective policy, the engine follows this order:
+
+1. **Forbidden rules** -- If any forbidden rule matches, the tool call is flagged as a violation with the corresponding severity. Evaluation continues (all matching forbidden rules are collected).
+2. **Escalation triggers** -- All matching triggers fire. Actions (`escalate`, `warn`, `deny`) are collected.
+3. **Capability mappings** -- The tool is matched against capability patterns in declaration order. The first matching capability is used. If matched, the tool call is permitted (subject to any forbidden or escalation results from steps 1-2).
+4. **Defaults** -- If no capability mapping matched and no forbidden rule matched, the `unmapped_tool_action` is applied.
+5. **Decision** -- The engine aggregates all violations, warnings, and escalations to produce a final decision: `allow`, `warn`, `deny`, or `escalate`.
+
+---
+
+## Related
+
+- [Policy Engine](/concepts/policy-engine) -- Architecture and runtime behavior of the policy evaluation engine
+- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI commands for validating, inspecting, and deploying policies
+- [Policy Management Guide](/guides/policy-management) -- End-to-end guide for writing and managing policies

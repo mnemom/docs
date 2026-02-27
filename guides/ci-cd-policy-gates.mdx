@@ -1,0 +1,286 @@
+---
+title: "CI/CD Policy Gates"
+description: "Integrate policy validation and evaluation into your CI/CD pipeline with GitHub Actions and GitLab CI"
+sidebarTitle: "CI/CD Policy Gates"
+icon: "code-merge"
+---
+
+# CI/CD Policy Gates
+
+Policy gates prevent misconfigurations from reaching production. By embedding policy checks directly into your CI/CD pipeline, you catch violations before they affect live agent traffic -- not after.
+
+There are two types of gates:
+
+1. **Static validation** -- `smoltbot policy validate` checks schema correctness. It is fast, offline, and makes no API calls.
+2. **Policy evaluation** -- `smoltbot policy evaluate` checks the policy against live agent data. It requires an API key and network access.
+
+Both commands return CI-friendly exit codes: `0` on pass, `1` on failure. This means any CI system that interprets exit codes (GitHub Actions, GitLab CI, Jenkins, CircleCI, etc.) will correctly pass or fail the pipeline step.
+
+---
+
+## Static Validation Gate
+
+Static validation checks that your `policy.yaml` conforms to the [Policy DSL schema](/specifications/policy-dsl) without making any API calls. This makes it fast, safe to run on every pull request, and suitable for environments without API credentials.
+
+<Note>
+  Static validation catches structural errors -- missing required fields, invalid enum values, malformed glob patterns, and schema version mismatches. It does not verify that capability mappings reference real tools or that coverage is adequate. Use [policy evaluation](#policy-evaluation-gate) for that.
+</Note>
+
+<Tabs>
+  <Tab title="GitHub Actions">
+
+```yaml
+# .github/workflows/policy-validate.yml
+name: Policy Validation
+on:
+  pull_request:
+    paths:
+      - 'policy.yaml'
+      - 'policies/**'
+
+jobs:
+  validate-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @mnemom/smoltbot
+      - name: Validate policy
+        run: smoltbot policy validate policy.yaml
+```
+
+This workflow triggers only when `policy.yaml` or files under `policies/` change, keeping CI fast for unrelated pull requests.
+
+  </Tab>
+  <Tab title="GitLab CI">
+
+```yaml
+# .gitlab-ci.yml
+validate-policy:
+  stage: test
+  image: node:20
+  script:
+    - npm install -g @mnemom/smoltbot
+    - smoltbot policy validate policy.yaml
+  only:
+    changes:
+      - policy.yaml
+      - policies/**
+```
+
+GitLab's `only:changes` directive provides the same path-scoped triggering as GitHub's `paths` filter.
+
+  </Tab>
+</Tabs>
+
+<Tip>
+  Run static validation first in your pipeline. It completes in under a second and catches the most common errors before the slower evaluation step runs.
+</Tip>
+
+---
+
+## Policy Evaluation Gate
+
+Policy evaluation goes beyond schema validation. It evaluates your policy against the agent's actual state -- checking capability mapping coverage, verifying that referenced tools exist, and scoring the policy against recent traces. This requires an API key.
+
+<Warning>
+  The evaluation gate makes API calls and reads live agent data. Only run it in trusted CI environments where your API key is stored as a secret. Never log the full evaluation response in public build logs if it contains agent identifiers or tool names you consider sensitive.
+</Warning>
+
+<Tabs>
+  <Tab title="GitHub Actions">
+
+```yaml
+# .github/workflows/policy-evaluate.yml
+name: Policy Evaluation
+on:
+  push:
+    branches: [main]
+
+jobs:
+  evaluate-policy:
+    runs-on: ubuntu-latest
+    env:
+      MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @mnemom/smoltbot
+      - name: Evaluate policy
+        run: smoltbot policy evaluate --agent my-agent --format json
+```
+
+This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM_API_KEY` is read from GitHub Secrets and exposed as an environment variable.
+
+  </Tab>
+  <Tab title="GitLab CI">
+
+```yaml
+# .gitlab-ci.yml
+evaluate-policy:
+  stage: deploy
+  image: node:20
+  variables:
+    MNEMOM_API_KEY: $MNEMOM_API_KEY
+  script:
+    - npm install -g @mnemom/smoltbot
+    - smoltbot policy evaluate --agent my-agent
+  only:
+    - main
+```
+
+In GitLab, store `MNEMOM_API_KEY` as a CI/CD variable (Settings > CI/CD > Variables) with the "Masked" option enabled.
+
+  </Tab>
+</Tabs>
+
+---
+
+## Exit Codes and Error Handling
+
+Both `policy validate` and `policy evaluate` use standard exit codes that CI systems interpret automatically:
+
+| Exit Code | Meaning | CI Behavior |
+|-----------|---------|-------------|
+| `0` | All checks pass | Pipeline continues |
+| `1` | Validation or evaluation failures | Pipeline fails |
+
+No special configuration is needed. If the command exits with `1`, the pipeline step fails, and downstream steps (like deployment) are skipped.
+
+### JSON Output for CI
+
+Use `--format json` to get machine-readable output for programmatic parsing in complex pipelines:
+
+```bash
+smoltbot policy evaluate --agent my-agent --format json
+```
+
+The JSON output includes the verdict, any violations, warnings, and coverage metrics:
+
+```json
+{
+  "verdict": "fail",
+  "violations": [
+    {
+      "tool": "mcp__filesystem__delete",
+      "rule": "forbidden",
+      "reason": "File deletion not permitted for support agents",
+      "severity": "critical"
+    }
+  ],
+  "warnings": [
+    {
+      "tool": "mcp__custom__export",
+      "rule": "unmapped",
+      "reason": "Tool not covered by any capability mapping"
+    }
+  ],
+  "coverage": {
+    "coverage_pct": 85,
+    "mapped_actions": 5,
+    "total_actions": 6,
+    "unmapped": ["data_export"]
+  }
+}
+```
+
+<Tip>
+  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `smoltbot policy evaluate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
+</Tip>
+
+---
+
+## Combining with Reputation Gates
+
+For comprehensive pre-deploy checks, combine policy gates with reputation gates. Policy gates verify that your governance configuration is correct. Reputation gates verify that your agent's trust score meets your organization's threshold. Together, they ensure both policy correctness and operational trustworthiness before code reaches production.
+
+```yaml
+# .github/workflows/pre-deploy.yml
+name: Pre-Deploy Gates
+on:
+  push:
+    branches: [main]
+
+jobs:
+  policy-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @mnemom/smoltbot
+      - run: smoltbot policy validate policy.yaml
+      - run: smoltbot policy evaluate --agent my-agent
+        env:
+          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+
+  reputation-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mnemom/reputation-check@v1
+        with:
+          agent-id: smolt-a4c12709
+          min-score: 600
+          api-key: ${{ secrets.MNEMOM_API_KEY }}
+```
+
+Both jobs run in parallel. If either gate fails, the workflow fails and deployment is blocked.
+
+<Note>
+  The `reputation-gate` job uses the `mnemom/reputation-check@v1` GitHub Action, which is a standalone action that checks the agent's reputation score against a minimum threshold. See [Embeddable Trust Badges](/guides/reputation-badges#github-action-cicd-reputation-gates) for full configuration options.
+</Note>
+
+---
+
+## Setting Up the Full Pipeline
+
+Here is a complete end-to-end workflow that validates on every PR and evaluates on merge to `main`:
+
+<Steps>
+
+### Add your API key as a secret
+
+In GitHub, go to Settings > Secrets and variables > Actions, then add `MNEMOM_API_KEY` with your API key. In GitLab, go to Settings > CI/CD > Variables and add it there with the "Masked" option enabled.
+
+### Create the validation workflow
+
+Add a workflow file that runs static validation on every pull request that modifies policy files. This catches schema errors before code review.
+
+### Create the evaluation workflow
+
+Add a second workflow file that runs policy evaluation on pushes to `main`. This confirms the policy is valid against the live agent state before deployment proceeds.
+
+### Add the reputation gate (optional)
+
+If your organization enforces minimum trust scores, add the `mnemom/reputation-check` action as a parallel job in your deploy workflow.
+
+### Monitor and iterate
+
+Review pipeline failures in your CI dashboard. Use `--format json` output to integrate with alerting tools like Slack, PagerDuty, or Datadog.
+
+</Steps>
+
+---
+
+## Best Practices
+
+- **Run validation on every PR that touches policy files.** Static validation is fast and catches the most common mistakes before human review begins.
+- **Run evaluation on main branch merges (pre-deploy).** Evaluation confirms the policy works against real agent data, not just schema correctness.
+- **Store policy.yaml in version control alongside application code.** This gives you diff visibility, rollback capability, and a clear audit trail for every policy change.
+- **Use `--format json` for programmatic parsing in complex pipelines.** JSON output integrates cleanly with `jq`, custom scripts, and downstream CI steps.
+- **Set up notifications for evaluation failures.** Route CI failures to Slack, email, or your incident management tool so the team responds quickly.
+- **Keep validation fast by running it first.** Since static validation needs no API call, it should always be the first gate. If it fails, there is no reason to run the slower evaluation step.
+
+---
+
+## See Also
+
+- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI command details for `validate`, `evaluate`, `test`, and `publish`
+- [Policy Management](/guides/policy-management) -- Full policy workflow from init to publish
+- [Policy DSL Specification](/specifications/policy-dsl) -- Schema reference for `policy.yaml`
+- [Embeddable Trust Badges](/guides/reputation-badges) -- GitHub Action for reputation gates

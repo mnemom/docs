@@ -1,0 +1,232 @@
+---
+title: "On-Chain Verification"
+description: "Immutable reputation anchoring on Base L2 via ERC-8004 smart contracts — Merkle root anchoring, score publishing, and cryptographic verification"
+sidebarTitle: "On-Chain Verification"
+icon: "link"
+---
+
+## Why On-Chain?
+
+The Mnemom Trust Rating is computed and stored on centralized infrastructure. While the scoring methodology is transparent and cryptographically verifiable via [Merkle proofs](/concepts/reputation-scores#cryptographic-verification), the data ultimately lives on Mnemom servers. On-chain verification adds a **decentralized trust anchor** that eliminates single-point-of-failure concerns:
+
+- **Immutable** -- Once a reputation score or Merkle root is published to the blockchain, it cannot be altered or deleted by anyone, including Mnemom
+- **Tamper-evident** -- Any discrepancy between on-chain and off-chain data is immediately detectable by any observer
+- **Independently verifiable** -- Anyone with an Ethereum-compatible client can verify scores without relying on Mnemom's API or infrastructure
+- **Composable** -- On-chain scores can be consumed by other smart contracts, dApps, and protocols directly, enabling trust-gated interactions in DeFi, DAOs, and agent marketplaces
+
+On-chain verification does not replace the off-chain scoring system. It complements it by anchoring the most critical data points -- Merkle roots and reputation scores -- to an immutable ledger that survives even if Mnemom's infrastructure is unavailable.
+
+---
+
+## ERC-8004 Reputation Registry
+
+Mnemom's on-chain verification is built on **ERC-8004**, a standard for on-chain reputation registries. ERC-8004 defines a common interface for publishing, querying, and verifying reputation scores on EVM-compatible chains, enabling any contract or dApp to:
+
+- Query an agent's current reputation score and grade
+- Retrieve historical score records
+- Verify Merkle root anchors for tamper-evidence
+- Gate interactions based on minimum reputation thresholds
+
+By building on a standard rather than a proprietary interface, Mnemom enables interoperability with other reputation systems, agent marketplaces, and smart contracts that adopt ERC-8004.
+
+---
+
+## Base L2 Rationale
+
+Mnemom deploys its reputation contracts on **Base**, Coinbase's Layer 2 network built on the OP Stack. The choice of Base is driven by:
+
+| Factor | Base L2 Advantage |
+|--------|-------------------|
+| **Gas costs** | Transactions cost $0.01-0.05, making frequent score publishing economical |
+| **Ethereum security** | Base settles to Ethereum L1, inheriting its security guarantees |
+| **EVM compatibility** | Standard Solidity contracts and tooling work without modification |
+| **Ecosystem alignment** | Coinbase's agent and crypto infrastructure provides natural distribution |
+| **Finality speed** | 2-second block times enable near-instant score confirmation |
+
+Base's low transaction costs are critical for the anchoring model. Publishing reputation scores for hundreds of agents would cost thousands of dollars per batch on Ethereum L1 but only a few dollars on Base.
+
+---
+
+## Smart Contracts Overview
+
+### MnemoReputationRegistry
+
+The primary contract for publishing and querying individual agent reputation scores.
+
+**Constants:**
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_SCORE` | 1000 | Maximum possible reputation score |
+| `MAX_BATCH_SIZE` | 200 | Maximum agents per batch publication |
+
+**Key Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `publishScore(bytes32 agentId, uint16 score, bytes3 grade, bytes32 metadataHash)` | Publish a single agent's reputation score |
+| `publishBatch(ScoreRecord[] records)` | Publish scores for up to 200 agents in a single transaction |
+| `getScore(bytes32 agentId)` | Retrieve the latest on-chain score for an agent |
+| `getScoreHistory(bytes32 agentId)` | Retrieve all historical score records for an agent |
+| `getLatestBatchRoot()` | Get the Merkle root of the most recent batch publication |
+| `getTotalPublishedAgents()` | Count of unique agents with on-chain scores |
+
+**ScoreRecord Struct:**
+
+```solidity
+struct ScoreRecord {
+    uint16  score;         // 0-1000 composite score
+    bytes3  grade;         // ASCII grade (e.g., "A", "AA", "BBB")
+    uint64  publishedAt;   // Unix timestamp of publication
+    uint64  blockNumber;   // Block number at publication
+    bytes32 metadataHash;  // keccak256 hash of off-chain metadata
+}
+```
+
+**Events:**
+
+| Event | Emitted When |
+|-------|-------------|
+| `ScorePublished(bytes32 indexed agentId, uint16 score, bytes3 grade, uint64 publishedAt)` | A single score is published |
+| `BatchPublished(bytes32 batchRoot, uint32 agentCount, uint64 publishedAt)` | A batch of scores is published |
+
+---
+
+### MnemoMerkleAnchor
+
+The anchoring contract for publishing Merkle tree roots from the off-chain integrity checkpoint system.
+
+**Key Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `anchorRoot(bytes32 merkleRoot, uint32 leafCount, uint16 treeDepth)` | Anchor a new Merkle root on-chain |
+| `getLatestRoot()` | Retrieve the most recently anchored root |
+| `getRootByIndex(uint256 index)` | Retrieve a specific historical root by index |
+| `getRootCount()` | Total number of anchored roots |
+| `isRootAnchored(bytes32 merkleRoot)` | Check whether a specific Merkle root has been anchored |
+
+**AnchorRecord Struct:**
+
+```solidity
+struct AnchorRecord {
+    bytes32 merkleRoot;    // Root hash of the Merkle tree
+    uint64  anchoredAt;    // Unix timestamp of anchoring
+    uint64  blockNumber;   // Block number at anchoring
+    uint32  leafCount;     // Number of leaves (checkpoints) in the tree
+    uint16  treeDepth;     // Depth of the Merkle tree
+}
+```
+
+**Events:**
+
+| Event | Emitted When |
+|-------|-------------|
+| `RootAnchored(bytes32 indexed merkleRoot, uint32 leafCount, uint16 treeDepth, uint64 anchoredAt)` | A new Merkle root is anchored |
+
+---
+
+## Merkle Root Anchoring Flow
+
+Mnemom anchors Merkle roots on-chain as tamper-evidence checkpoints for the off-chain integrity system. The anchoring flow works as follows:
+
+```
+Off-Chain                                      On-Chain (Base L2)
+─────────                                      ──────────────────
+
+Agent integrity checkpoints
+        │
+        ▼
+Per-agent Merkle trees
+(each agent's checkpoints
+ form a tree)
+        │
+        ▼
+Agent-level Merkle roots
+aggregated into global root
+        │
+        ▼
+Global Merkle root ──────────────────────────→ MnemoMerkleAnchor.anchorRoot()
+                                                       │
+                                                       ▼
+                                               AnchorRecord stored on-chain
+                                               RootAnchored event emitted
+```
+
+**Anchoring cadence:** Global Merkle roots are anchored periodically (typically every few hours) to Base L2. The frequency balances cost efficiency against freshness -- more frequent anchoring provides tighter tamper-evidence windows but costs more gas.
+
+**Verification:** Anyone can call `isRootAnchored(root)` with a Merkle root obtained from the off-chain API to confirm it has been anchored on-chain. If the root exists on-chain, the underlying checkpoint data has not been tampered with since anchoring.
+
+**Inclusion proofs:** Individual checkpoints can be verified for inclusion in an anchored root using standard Merkle inclusion proofs. The off-chain API provides the proof path, and the on-chain root serves as the trusted reference.
+
+---
+
+## Score Publishing and Verification
+
+### Publishing
+
+Reputation scores are published to `MnemoReputationRegistry` either individually or in batches:
+
+**Agent ID encoding:** Human-readable agent IDs (e.g., `smolt-a4c12709`) are converted to `bytes32` via `keccak256(abi.encodePacked(agentId))` before on-chain storage. This provides a fixed-size identifier suitable for mapping keys.
+
+**Grade encoding:** Letter grades are stored as `bytes3` ASCII values. For example, `"A"` becomes `0x410000`, `"AA"` becomes `0x414100`, and `"BBB"` becomes `0x424242`.
+
+**Batch publishing:** When multiple scores are published in a single transaction via `publishBatch()`, a batch Merkle root is computed from the individual score records and stored alongside the batch. This enables efficient verification that a specific score was included in a particular batch without replaying the entire batch.
+
+### Verification
+
+Anyone can verify an agent's on-chain reputation:
+
+1. **Query the score** -- Call `getScore(agentId)` on the `MnemoReputationRegistry` contract to retrieve the latest on-chain `ScoreRecord`
+2. **Compare with off-chain** -- Fetch the same agent's score from the Mnemom API (`GET /v1/reputation/{agent_id}`) and compare. Matching scores confirm consistency
+3. **Verify the anchor** -- Call `isRootAnchored(root)` on `MnemoMerkleAnchor` with the Merkle root from the off-chain verification endpoint to confirm the underlying data is tamper-evident
+4. **Check history** -- Call `getScoreHistory(agentId)` to see how the on-chain score has evolved over time
+
+```
+Verifier                     Base L2                     Mnemom API
+────────                     ───────                     ──────────
+
+getScore(agentId) ─────────→ ScoreRecord
+                              (score: 782,
+                               grade: "A")
+
+                                                 GET /v1/reputation/{agent_id}
+                                                 ◄────── score: 782, grade: "A"
+
+Compare: on-chain == off-chain ✓
+
+isRootAnchored(root) ──────→ true ✓
+
+Verification complete: score is authentic and tamper-evident
+```
+
+---
+
+## Cost Estimates
+
+On-chain operations consume gas, but Base L2's low fees make frequent anchoring and publishing economical:
+
+| Operation | Approximate Gas | Approximate Cost (Base L2) |
+|-----------|----------------|---------------------------|
+| Anchor single Merkle root | ~50,000 gas | $0.01 - $0.02 |
+| Publish single score | ~80,000 gas | $0.02 - $0.03 |
+| Batch publish (50 agents) | ~200,000 gas | $0.03 - $0.05 |
+| Batch publish (200 agents) | ~600,000 gas | $0.08 - $0.15 |
+| Read score (view call) | 0 gas | Free |
+| Check if root anchored (view call) | 0 gas | Free |
+
+<Note>
+Gas costs fluctuate with Base L2 network activity and Ethereum L1 blob fees. The estimates above reflect typical conditions. Read operations (view calls) are always free.
+</Note>
+
+For comparison, the same batch publish of 50 agents on Ethereum L1 would cost approximately $5-15 depending on gas prices -- 100-300x more expensive than Base L2.
+
+---
+
+## See Also
+
+- [On-Chain Verification Guide](/guides/on-chain-verification) -- Step-by-step guide for anchoring, publishing, and verifying
+- [On-Chain API Reference](/api-reference/on-chain-overview) -- Full API reference for on-chain endpoints
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- How reputation scores are computed
+- [Cryptographic Verification](/concepts/reputation-scores#cryptographic-verification) -- Off-chain proof chain structure
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The data source for Merkle trees
