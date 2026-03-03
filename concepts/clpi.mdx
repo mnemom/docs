@@ -1,0 +1,109 @@
+---
+title: "CLPI: Card Lifecycle & Policy Intelligence"
+description: "The governance layer that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring"
+sidebarTitle: "CLPI Overview"
+icon: "gears"
+---
+
+# Card Lifecycle & Policy Intelligence (CLPI)
+
+CLPI is Mnemom's governance layer — a 5-phase system that transforms alignment cards from static declarations into **lifecycle-managed artifacts** with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring.
+
+## The problem CLPI solves
+
+Without CLPI, a common failure mode undermines trust scores:
+
+1. An operator adds a new MCP server to an agent (e.g., a browser tool)
+2. The alignment card is not updated to declare the new capability
+3. The agent uses the tool correctly, but the [policy engine](/concepts/policy-engine) flags it as an `UNMAPPED_TOOL` violation
+4. The agent's [trust score](/concepts/reputation-scores) drops — even though the agent did nothing wrong
+
+This is **configuration drift**: the card falls out of sync with the agent's actual capabilities. The result is false violations, unfair score declines, and eroded trust in the scoring system itself.
+
+CLPI fixes this by distinguishing configuration errors from behavioral failures, enabling trust recovery when the card was wrong, and providing governance-as-code to prevent drift in the first place.
+
+## How CLPI relates to AAP and AIP
+
+[AAP](/protocols/aap/specification) and [AIP](/protocols/aip/specification) are **detection protocols** — they identify misalignment and compromise. CLPI is the **governance layer** that prevents problems, recovers from false positives, and anchors trust on-chain.
+
+| | AAP | AIP | CLPI |
+|---|-----|-----|------|
+| **Role** | Post-hoc verification | Real-time integrity | Governance & recovery |
+| **Catches** | Behavioral drift over time | Active attacks in progress | Configuration drift, false violations |
+| **Mechanism** | Alignment Cards + AP-Traces | Thinking block analysis | Policy enforcement + reclassification |
+| **When** | After the agent acts | While the agent thinks | Before, during, and after |
+
+Together: AAP and AIP detect problems. CLPI prevents them and recovers from them.
+
+## The 5 phases
+
+<Steps>
+  <Step title="Phase 1: Policy Engine">
+    Governance-as-code. A declarative YAML-based DSL that bridges alignment card capabilities to concrete tool enforcement. Policies define which tools map to card capabilities, what is forbidden, and how unmapped tools are handled — evaluated in CI/CD, at the gateway, and post-action.
+
+    [Policy Engine concepts](/concepts/policy-engine) | [Policy DSL spec](/specifications/policy-dsl) | [Policy CLI](/smoltbot/policy-cli)
+  </Step>
+
+  <Step title="Phase 2: Card Lifecycle & Trust Recovery">
+    Alignment cards become lifecycle-managed artifacts with versioned amendments, violation reclassification (`card_gap` vs. `behavior_gap`), automatic score recovery, session re-proofing, and compliance export. When a violation was caused by a missing capability — not agent misbehavior — the score recovers.
+
+    [Card Lifecycle concepts](/concepts/card-lifecycle) | [Trust Recovery guide](/guides/trust-recovery)
+  </Step>
+
+  <Step title="Phase 3: Intelligence Layer">
+    Analytical capabilities on top of policy and reputation data. Fault line analysis identifies value conflicts across teams. Risk forecasting predicts failure modes. LLM-powered policy recommendations generate governance rules from team analysis. Transaction guardrails scope enforcement to individual operations.
+
+    [Intelligence API](/api-reference/intelligence-overview)
+  </Step>
+
+  <Step title="Phase 4: On-Chain Verification">
+    Immutable reputation anchoring on Base L2. Merkle roots from the integrity checkpoint tree are anchored to the `MnemoMerkleAnchor` contract. Reputation scores are published to the `MnemoReputationRegistry`. Any third party can verify an agent's score without trusting Mnemom's infrastructure.
+
+    [On-Chain Verification concepts](/concepts/on-chain-verification) | [On-Chain guide](/guides/on-chain-verification)
+  </Step>
+
+  <Step title="Phase 5: Observability">
+    OpenTelemetry integration for the full governance pipeline. Policy evaluation spans, reclassification spans, and policy-aware drift detection — all exported to any OTel-compatible backend. See [Observability guide](/guides/observability) and [OTel attributes spec](/specifications/otel-attributes).
+  </Step>
+</Steps>
+
+## CLPI sub-pages
+
+<CardGroup cols={2}>
+  <Card title="Policy Engine" icon="shield-halved" href="/concepts/policy-engine">
+    Phase 1. Governance-as-code: capability mappings, forbidden rules, enforcement modes, and policy merge.
+  </Card>
+  <Card title="Card Lifecycle" icon="arrows-spin" href="/concepts/card-lifecycle">
+    Phase 2. Amendments, violation reclassification, trust recovery, score recomputation, and compliance export.
+  </Card>
+  <Card title="Trust Recovery Guide" icon="heart-pulse" href="/guides/trust-recovery">
+    Step-by-step workflow for reclassifying violations and recovering trust scores.
+  </Card>
+  <Card title="On-Chain Verification" icon="link" href="/concepts/on-chain-verification">
+    Phase 4. Merkle root anchoring and reputation publishing on Base L2.
+  </Card>
+  <Card title="Observability" icon="chart-mixed" href="/guides/observability">
+    Phase 5. OTel spans for policy evaluation, reclassification, and drift detection.
+  </Card>
+  <Card title="Policy Management Guide" icon="list-check" href="/guides/policy-management">
+    Writing, deploying, and iterating on governance policies.
+  </Card>
+</CardGroup>
+
+## API surface
+
+CLPI spans four API domains:
+
+| Domain | Phase | Overview | Key operations |
+|--------|-------|----------|----------------|
+| Policy | Phase 1 | [Policy API](/api-reference/policy-overview) | CRUD policies, evaluate tools, resolve merged policy |
+| Reclassification | Phase 2 | [Reclassification API](/api-reference/reclassification-overview) | Reclassify violations, recompute scores, export compliance |
+| Intelligence | Phase 3 | [Intelligence API](/api-reference/intelligence-overview) | Fault lines, risk forecast, policy recommendations, transactions |
+| On-Chain | Phase 4 | [On-Chain API](/api-reference/on-chain-overview) | Anchor roots, publish scores, verify proofs |
+
+## See Also
+
+- [Changelog — CLPI release](/changelog) — Full release notes with implementation details
+- [Policy DSL Specification](/specifications/policy-dsl) — Normative YAML schema reference
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — Integrating policy checks into deployment pipelines
+- [Reputation Scores](/concepts/reputation-scores) — How trust scores are computed and how CLPI affects them
