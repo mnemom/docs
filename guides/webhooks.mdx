@@ -1,23 +1,30 @@
 ---
 title: "Webhook Notifications"
-description: "Real-time HTTP POST notifications for integrity events — pipe violations, drift, conscience escalations, and billing events into your ops stack."
+description: "Real-time HTTP POST notifications for integrity and alignment trace events — pipe violations, drift, conscience escalations, trace verification, and billing events into your ops stack."
 sidebarTitle: "Webhooks"
 icon: "bell"
 ---
 
 # Webhook Notifications
 
-**Real-time HTTP POST notifications for integrity events.** Pipe violations, drift alerts, conscience escalations, and billing events into PagerDuty, Slack, Datadog, or any HTTP endpoint.
+**Real-time HTTP POST notifications for integrity and alignment events.** Pipe violations, drift alerts, conscience escalations, alignment traces, and billing events into PagerDuty, Slack, Datadog, or any HTTP endpoint.
 
 Instead of polling the API, configure webhook endpoints to receive events as they happen. Mnemom signs every payload with HMAC-SHA256 so your server can verify authenticity before acting on it.
 
+Mnemom emits two categories of webhook events:
+- **Integrity Events (AIP)** — real-time checkpoint verdicts from the gateway (violations, drift, conscience)
+- **Alignment Trace Events (AAP)** — post-hoc trace analysis from the observer (verification, escalation, policy)
+
+Both use the same registration endpoint and table. A single webhook endpoint can subscribe to events from both systems.
+
 ```
-Integrity Event ──→ Mnemom ──→ Signed HTTP POST ──→ Your Endpoint
-                                     │
-                                     ├── PagerDuty
-                                     ├── Slack
-                                     ├── Datadog
-                                     └── Custom handler
+AIP Checkpoint ──→ Gateway  ──→ Signed POST (X-AIP-Signature) ──→ Your Endpoint
+AAP Trace      ──→ Observer ──→ Signed POST (X-AAP-Signature) ──→ Your Endpoint
+                                       │
+                                       ├── PagerDuty
+                                       ├── Slack
+                                       ├── Datadog
+                                       └── Custom handler
 ```
 
 <Info>
@@ -39,9 +46,11 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
   -d '{
     "url": "https://your-server.com/webhooks/mnemom",
     "description": "Production alerts",
-    "event_types": ["integrity.violation", "drift.detected"]
+    "event_types": ["integrity.violation", "drift.detected", "trace.failed"]
   }'
 ```
+
+This example subscribes to AIP integrity violations, drift alerts, and AAP trace failures — all at one endpoint.
 
 **2. Copy the signing secret** from the response — it's shown only once:
 
@@ -72,7 +81,11 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/whe-a1b2c3d4/test \
 
 ## Event Catalog
 
-Mnemom emits 23 event types across integrity, drift, conscience, reputation, teams, billing, and containment domains.
+Mnemom emits 28 event types across two systems: **AIP** (integrity checkpoints from the gateway) and **AAP** (alignment traces from the observer), plus platform events for drift, reputation, teams, and billing.
+
+### Integrity Events (AIP)
+
+These events fire from the **gateway** during real-time request interception.
 
 | Event Type | Description | Trigger |
 |---|---|---|
@@ -82,14 +95,41 @@ Mnemom emits 23 event types across integrity, drift, conscience, reputation, tea
 | `drift.resolved` | A drift alert was acknowledged | Org member acknowledges alert |
 | `conscience.escalation` | Conscience value conflict during analysis | Checkpoint has conscience conflicts |
 | `conscience.values_updated` | Org conscience values were modified | Create, update, delete, or mode change |
+| `agent.paused` | Agent was paused (manually or by auto-containment) | Containment pause action |
+| `agent.resumed` | Agent was resumed or reactivated | Containment resume/reactivate action |
+| `agent.killed` | Agent was killed | Containment kill action |
+
+AIP webhook payloads are signed with `X-AIP-Signature` and include `X-AIP-Version`.
+
+### Alignment Trace Events (AAP)
+
+These events fire from the **observer** after post-hoc trace analysis.
+
+| Event Type | Description | Trigger |
+|---|---|---|
+| `trace.created` | New alignment trace recorded | Every trace submitted to Supabase |
+| `trace.verified` | Trace passed verification checks | `verification.verified === true` |
+| `trace.failed` | Trace failed verification checks | `verification.verified === false` |
+| `trace.escalation_required` | Escalation condition detected | `trace.escalation.required === true` |
+| `policy.violation` | Policy evaluation resulted in denial | `policyResult.verdict === 'fail'` |
+
+AAP webhook payloads are signed with `X-AAP-Signature` and include `X-AAP-Version`. Use the `trace.*` wildcard to subscribe to all trace events, or `*` for everything.
+
+<Tip>
+A single registration can subscribe to both AIP and AAP events. For example, `event_types: ["integrity.violation", "trace.failed"]` will receive gateway violations and observer trace failures at the same endpoint. The signature header (`X-AIP-Signature` vs `X-AAP-Signature`) tells you which system sent the event.
+</Tip>
+
+### Platform Events
+
+| Event Type | Description | Trigger |
+|---|---|---|
 | `reputation.score_changed` | Reputation score changed significantly | Score changed by more than 10 points |
 | `reputation.grade_changed` | Reputation letter grade changed | Grade transition (e.g., BBB to A) |
 | `quota.warning` | Usage approaching plan limit (80%+) | Cron check on billing period |
 | `quota.exceeded` | Usage has exceeded plan limit (100%+) | Cron check on billing period |
+| `quota.risk_exceeded` | Risk usage exceeded plan limit | Risk engine billing check |
+| `quota.risk_warning` | Risk usage approaching limit (80%+) | Risk engine billing check |
 | `subscription.status_changed` | Subscription status changed | Plan upgrade, downgrade, or cancellation |
-| `agent.paused` | Agent was paused (manually or by auto-containment) | Containment pause action |
-| `agent.resumed` | Agent was resumed or reactivated | Containment resume/reactivate action |
-| `agent.killed` | Agent was killed | Containment kill action |
 | `team.created` | Team was created | Team CRUD |
 | `team.archived` | Team was archived | Team CRUD |
 | `team.member_added` | Agent added to team | Roster change |
@@ -123,7 +163,7 @@ Every webhook delivery uses the same envelope structure:
 | Field | Type | Description |
 |---|---|---|
 | `id` | string | Unique event ID (`evt-xxxxxxxx`). Use for idempotency. |
-| `type` | string | One of the 14 event types above |
+| `type` | string | One of the 28 event types above |
 | `created_at` | string | ISO 8601 timestamp |
 | `account_id` | string | Billing account that owns the resource |
 | `data` | object | Event-specific payload |
@@ -500,6 +540,149 @@ Every webhook delivery uses the same envelope structure:
 </Accordion>
 </AccordionGroup>
 
+### AAP Trace Event Payloads
+
+AAP trace events use a different payload structure from AIP events. The envelope includes `event` (most specific event type), `all_events` (all applicable types for this trace), and a `trace` object with verification and policy results.
+
+<AccordionGroup>
+<Accordion title="trace.created">
+```json
+{
+  "event": "trace.created",
+  "all_events": ["trace.created"],
+  "timestamp": "2026-03-03T14:30:00.000Z",
+  "trace": {
+    "trace_id": "tr-a1b2c3d4",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "decision": {
+      "reasoning": "Agent selected the most transparent response option",
+      "alternatives_count": 3
+    },
+    "verification": null,
+    "escalation": null,
+    "policy": null
+  }
+}
+```
+</Accordion>
+
+<Accordion title="trace.verified">
+```json
+{
+  "event": "trace.verified",
+  "all_events": ["trace.created", "trace.verified"],
+  "timestamp": "2026-03-03T14:30:01.000Z",
+  "trace": {
+    "trace_id": "tr-e5f6g7h8",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "decision": {
+      "reasoning": "Agent reasoning aligns with declared values",
+      "alternatives_count": 2
+    },
+    "verification": {
+      "verified": true,
+      "warnings": []
+    },
+    "escalation": null,
+    "policy": null
+  }
+}
+```
+</Accordion>
+
+<Accordion title="trace.failed">
+```json
+{
+  "event": "trace.failed",
+  "all_events": ["trace.created", "trace.failed"],
+  "timestamp": "2026-03-03T14:30:02.000Z",
+  "trace": {
+    "trace_id": "tr-i9j0k1l2",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "decision": {
+      "reasoning": "Agent bypassed transparency requirements",
+      "alternatives_count": 4
+    },
+    "verification": {
+      "verified": false,
+      "warnings": [
+        "Decision conflicts with alignment card boundary: transparency_commitment",
+        "No escalation was triggered despite high-risk action"
+      ]
+    },
+    "escalation": null,
+    "policy": null
+  }
+}
+```
+</Accordion>
+
+<Accordion title="trace.escalation_required">
+```json
+{
+  "event": "trace.escalation_required",
+  "all_events": ["trace.created", "trace.failed", "trace.escalation_required"],
+  "timestamp": "2026-03-03T14:30:03.000Z",
+  "trace": {
+    "trace_id": "tr-m3n4o5p6",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "decision": {
+      "reasoning": "Agent attempted action requiring human oversight",
+      "alternatives_count": 2
+    },
+    "verification": {
+      "verified": false,
+      "warnings": ["Escalation trigger was not activated"]
+    },
+    "escalation": {
+      "required": true,
+      "reason": "Action exceeds autonomy envelope",
+      "triggered": false
+    },
+    "policy": null
+  }
+}
+```
+</Accordion>
+
+<Accordion title="policy.violation">
+```json
+{
+  "event": "policy.violation",
+  "all_events": ["trace.created", "trace.failed", "policy.violation"],
+  "timestamp": "2026-03-03T14:30:04.000Z",
+  "trace": {
+    "trace_id": "tr-q7r8s9t0",
+    "agent_id": "smolt-agent01",
+    "session_id": "sess-def67890",
+    "decision": {
+      "reasoning": "Agent invoked restricted tool without authorization",
+      "alternatives_count": 1
+    },
+    "verification": {
+      "verified": false,
+      "warnings": ["Tool usage violates policy constraints"]
+    },
+    "escalation": null,
+    "policy": {
+      "verdict": "fail",
+      "violations": 2,
+      "warnings": 1
+    }
+  }
+}
+```
+</Accordion>
+</AccordionGroup>
+
+<Note>
+AAP events are signed with `X-AAP-Signature` (not `X-AIP-Signature`). The HMAC-SHA256 algorithm is identical — only the header name differs. Use the header name to distinguish which system sent the webhook.
+</Note>
+
 ---
 
 ## Security
@@ -817,6 +1000,9 @@ app.post('/webhooks/mnemom', (req, res) => {
     'drift.detected': ':warning:',
     'conscience.escalation': ':brain:',
     'quota.warning': ':chart_with_upwards_trend:',
+    'trace.failed': ':x:',
+    'trace.escalation_required': ':exclamation:',
+    'policy.violation': ':no_entry:',
   }[event.type] || ':bell:';
 
   fetch(process.env.SLACK_WEBHOOK_URL, {
