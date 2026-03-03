@@ -1,13 +1,13 @@
 ---
 title: "Protocol Overview"
-description: "Understanding AAP and AIP — the twin protocols for agent trust"
+description: "Understanding AAP, AIP, and CLPI — the protocol stack for agent trust"
 sidebarTitle: "Overview"
 icon: "layer-group"
 ---
 
 # Protocol Overview
 
-Mnemom is built on two complementary open-source protocols. Together, they provide both retrospective and real-time verification of AI agent behavior.
+Mnemom is built on two complementary open-source verification protocols (AAP and AIP) plus a governance layer (CLPI). Together, they provide retrospective verification, real-time integrity assurance, and active policy enforcement for AI agent behavior.
 
 | | AAP | AIP |
 |---|-----|-----|
@@ -32,9 +32,11 @@ They complement each other:
 
 Neither protocol alone is sufficient. An agent that passes all AIP checks during execution could still drift from its declared values over weeks of operation (caught by AAP). An agent that matches its alignment card perfectly could have its reasoning temporarily compromised by a prompt injection (caught by AIP).
 
-<Warning>
-**Neither protocol guarantees trustworthiness.** AAP and AIP make agent behavior observable and auditable. They detect certain categories of misalignment and compromise. But they cannot prove an agent is safe, aligned, or trustworthy in any absolute sense. See the [AAP limitations](/protocols/aap/limitations) and [AIP limitations](/protocols/aip/limitations) for what each protocol can and cannot guarantee.
-</Warning>
+<Note>
+**What the protocols guarantee:** AAP provides complete audit trails of every agent decision. AIP provides real-time attestation of reasoning integrity at the thinking level — with cryptographic proofs ([certificates](/protocols/aip/certificates), [ZK proofs](/protocols/aip/verifiable-verdicts)) that any party can independently verify. Combined with [CLPI](/concepts/clpi) policy enforcement, Mnemom provides verifiable accountability from declared intent through execution.
+
+**The boundary:** No external system can enforce at the sub-thinking level — inside the model's weights. If a model produces compromised reasoning that does not surface in its thinking blocks, no external observer can detect it. See the [AAP limitations](/protocols/aap/limitations) and [AIP limitations](/protocols/aip/limitations) for details.
+</Note>
 
 ## How they work together
 
@@ -87,11 +89,15 @@ Mnemom's protocols sit alongside existing agent infrastructure standards:
 | Agent communication | [A2A](https://google.github.io/A2A/) | Agent-to-agent task delegation and coordination |
 | Alignment verification | **AAP** | Post-hoc verification of behavior against declared values |
 | Integrity assurance | **AIP** | Real-time analysis of reasoning for active threats |
+| Cryptographic attestation | **[AIP Certificates](/protocols/aip/certificates)** | Ed25519 signatures, hash chains, Merkle proofs, and SP1 zero-knowledge proofs |
+| Policy governance | **[CLPI](/concepts/clpi)** | Governance-as-code: policy enforcement, trust recovery, risk intelligence, on-chain anchoring |
+| Trust scoring | **[Mnemom Trust Rating](/concepts/reputation-scores)** | Composite trust metric for agents and teams — cryptographically provable, anchorable on-chain |
 
-AAP and AIP do not replace MCP or A2A -- they add a verification layer on top. An agent can use MCP tools, communicate via A2A, and have all of that activity traced and verified through AAP and AIP.
+AAP and AIP do not replace MCP or A2A -- they add a verification layer on top. CLPI adds a governance layer that prevents configuration drift, recovers from false violations, and anchors trust on-chain. An agent can use MCP tools, communicate via A2A, and have all of that activity traced and verified through AAP and AIP, with governance enforced by CLPI.
 
 - **MCP + AAP**: Every MCP tool call can generate an AP-Trace. See [MCP migration](/protocols/aap/mcp-migration).
 - **A2A + AAP**: Before two agents collaborate, value coherence checks verify compatibility. See [A2A integration](/protocols/aap/a2a-integration).
+- **CLPI + AAP/AIP**: CLPI's policy engine governs which tools are permitted, its reclassification system fixes false violations from AAP/AIP, and its on-chain layer anchors the resulting trust scores immutably. See [CLPI overview](/concepts/clpi).
 
 ## Core concepts
 
@@ -110,6 +116,18 @@ AAP and AIP do not replace MCP or A2A -- they add a verification layer on top. A
   </Card>
   <Card title="Value Coherence" icon="handshake" href="/concepts/value-coherence">
     Pairwise compatibility checking between two agents' Alignment Cards. Identifies shared values, conflicts, and proposes resolutions before collaboration begins.
+  </Card>
+  <Card title="CLPI: Governance Layer" icon="gears" href="/concepts/clpi">
+    Card Lifecycle & Policy Intelligence. The 5-phase governance system that enforces policies, recovers trust after false violations, and anchors reputation on-chain.
+  </Card>
+  <Card title="Mnemom Trust Rating" icon="ranking-star" href="/concepts/reputation-scores">
+    Composite trust metric for AI agents — a credit score built from integrity checkpoints, drift stability, compliance, and fleet coherence. Publicly queryable, embeddable, and cryptographically provable.
+  </Card>
+  <Card title="Team Reputation" icon="users-gear" href="/concepts/team-reputation">
+    Teams as first-class meta-agents with persistent identity, their own alignment cards, accumulated reputation, and ZK-provable team trust scores.
+  </Card>
+  <Card title="Verifiable Integrity" icon="certificate" href="/protocols/aip/certificates">
+    Four-layer cryptographic attestation stack: Ed25519 signatures, hash chains, Merkle proofs, and SP1 zero-knowledge proofs for independent verdict verification.
   </Card>
 </CardGroup>
 
