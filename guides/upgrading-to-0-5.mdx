@@ -1,0 +1,256 @@
+---
+title: "Upgrading to AAP 0.5.0"
+description: "Step-by-step migration guide for updating your agents, cards, and policies to AAP 0.5.0"
+sidebarTitle: "Upgrading to 0.5.0"
+icon: "arrow-up-right-dots"
+---
+
+# Upgrading to AAP 0.5.0
+
+AAP 0.5.0 aligns the `aap_version` field across the entire Mnemom ecosystem — SDKs, schemas, fixtures, and examples all now default to `"0.5.0"`. This release also introduces YAML policy authoring and the Trust Edges API.
+
+<Info>
+  **This is a backward-compatible release.** Existing cards with `aap_version: "0.1.0"` continue to work. No breaking changes. We recommend updating your cards at your own pace.
+</Info>
+
+## What Changed
+
+| Area | Before | After |
+|---|---|---|
+| `aap_version` default | `"0.1.0"` | `"0.5.0"` |
+| Policy authoring | JSON only | JSON or YAML |
+| Trust edges | Not available | `GET`/`POST`/`DELETE /v1/agents/:id/trust-edges` |
+| Test fixtures | Mixed versions (`"1.0"`, `"0.1.0"`) | Consistent `"0.5.0"` |
+
+## Step 1: Update Your Alignment Cards
+
+Update the `aap_version` field in your existing alignment cards from `"0.1.0"` to `"0.5.0"`.
+
+### Via API
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/card \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "card_json": {
+      "aap_version": "0.5.0",
+      "card_id": "ac-your-card-id",
+      "agent_id": "your-agent-id",
+      "issued_at": "2026-03-04T00:00:00Z",
+      "expires_at": "2026-09-04T00:00:00Z",
+      "principal": { "type": "human", "relationship": "delegated_authority" },
+      "values": {
+        "declared": ["transparency", "honesty", "harm_prevention"],
+        "hierarchy": "lexicographic"
+      },
+      "autonomy_envelope": {
+        "bounded_actions": ["inference", "read", "write"],
+        "escalation_triggers": [],
+        "forbidden_actions": ["exfiltrate_data"]
+      },
+      "audit_commitment": {
+        "trace_format": "ap-trace-v1",
+        "retention_days": 90,
+        "queryable": true,
+        "tamper_evidence": "append_only"
+      }
+    }
+  }'
+```
+
+### Via CLI
+
+If you manage your card as a local JSON file, update the `aap_version` field and republish:
+
+```bash
+# Edit your card file
+sed -i '' 's/"aap_version": "0.1.0"/"aap_version": "0.5.0"/' alignment-card.json
+
+# Validate and publish
+smoltbot card validate alignment-card.json
+smoltbot card publish alignment-card.json
+```
+
+### Via Dashboard
+
+1. Open the [Mnemom dashboard](https://mnemom.ai/dashboard)
+2. Select your agent
+3. Open the **Alignment Card** panel
+4. Switch to the **JSON editor**
+5. Change `"aap_version": "0.1.0"` to `"aap_version": "0.5.0"`
+6. Click **Save**
+
+## Step 2: Update SDK Packages
+
+Update to the latest SDK versions that default to `aap_version: "0.5.0"`:
+
+<CodeGroup>
+```bash npm
+npm install @mnemom/agent-alignment-protocol@0.5.0
+```
+
+```bash pip
+pip install agent-alignment-proto==0.5.0
+```
+
+```bash pnpm
+pnpm add @mnemom/agent-alignment-protocol@0.5.0
+```
+</CodeGroup>
+
+After updating, any new cards created via the SDK will default to `aap_version: "0.5.0"` automatically.
+
+## New Feature: YAML Policy Authoring
+
+The Mnemom API now accepts policies in YAML format alongside JSON. YAML policies are easier to read, support comments, and are the recommended format going forward.
+
+### Before: JSON Only
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meta": { "schema_version": "1.0", "name": "my-policy", "scope": "agent" },
+    "capability_mappings": {
+      "web_browsing": {
+        "tools": ["mcp__browser__*"],
+        "card_actions": ["web_fetch"]
+      }
+    },
+    "defaults": { "enforcement_mode": "warn" }
+  }'
+```
+
+### After: YAML Supported
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: text/yaml" \
+  -d '
+meta:
+  schema_version: "1.0"
+  name: my-policy
+  scope: agent
+
+# Map concrete tools to card-level actions
+capability_mappings:
+  web_browsing:
+    tools:
+      - "mcp__browser__*"
+    card_actions:
+      - web_fetch
+
+defaults:
+  enforcement_mode: warn
+'
+```
+
+Both `text/yaml` and `application/yaml` content types are accepted. JSON remains fully supported — use whichever format fits your workflow.
+
+<Tip>
+  YAML policies support inline comments, making them ideal for documenting the reasoning behind specific rules directly in the policy file.
+</Tip>
+
+## New Feature: Trust Edges API
+
+Trust edges define explicit trust relationships between agents. An agent can declare that it trusts another agent, creating a directed edge in the trust graph. Trust edges influence reputation propagation and coherence scoring.
+
+### Create a Trust Edge
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/trust-edges \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_agent_id": "smolt-target-agent",
+    "trust_level": "high",
+    "reason": "Verified partner agent for data pipeline"
+  }'
+```
+
+### List Trust Edges
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{agent_id}/trust-edges \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Response:
+
+```json
+{
+  "trust_edges": [
+    {
+      "id": "te-abc123",
+      "source_agent_id": "smolt-my-agent",
+      "target_agent_id": "smolt-target-agent",
+      "trust_level": "high",
+      "reason": "Verified partner agent for data pipeline",
+      "created_at": "2026-03-04T12:00:00Z"
+    }
+  ]
+}
+```
+
+### Remove a Trust Edge
+
+```bash
+curl -X DELETE https://api.mnemom.ai/v1/agents/{agent_id}/trust-edges/{edge_id} \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Trust levels: `low`, `medium`, `high`. Higher trust levels give more weight to the target agent's reputation in coherence calculations.
+
+## Checklist
+
+Use this checklist to verify your upgrade is complete:
+
+<Steps>
+
+### Update alignment cards
+
+Set `aap_version` to `"0.5.0"` on all agent cards via API, CLI, or dashboard.
+
+### Update SDK packages
+
+Install `@mnemom/agent-alignment-protocol@0.5.0` (npm) or `agent-alignment-proto==0.5.0` (pip).
+
+### Update local card files
+
+If you version-control alignment card JSON files, update `aap_version` in those files and commit.
+
+### Verify
+
+Run `smoltbot card show` for each agent to confirm the updated version is active.
+
+</Steps>
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="Is this a breaking change?">
+    No. Existing cards with `aap_version: "0.1.0"` continue to work without modification. The API accepts both old and new version values. We recommend updating to `"0.5.0"` for consistency, but there is no deadline.
+  </Accordion>
+  <Accordion title="Do I need to update all my agents at once?">
+    No. You can update agents incrementally. Cards with different `aap_version` values coexist without issues.
+  </Accordion>
+  <Accordion title="Will my existing policies still work?">
+    Yes. Policies are unaffected by the `aap_version` change. The new YAML support is additive — existing JSON policies continue to work as before.
+  </Accordion>
+  <Accordion title="What happens if I don't upgrade?">
+    Nothing breaks. However, new SDK versions default to `"0.5.0"`, so new cards created via the SDK will use the new version. Keeping older cards at `"0.1.0"` is fine but may cause minor inconsistencies in reports.
+  </Accordion>
+  <Accordion title="How do trust edges affect my reputation score?">
+    Trust edges influence how reputation signals propagate between agents. Declaring trust in a high-reputation agent has a small positive effect on coherence scoring. Declaring trust in a low-reputation agent has no negative effect — trust edges are additive.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+- [Alignment Card Management](/guides/card-management) — Creating and managing alignment cards
+- [Policy Management](/guides/policy-management) — Policy authoring in YAML and JSON
+- [Policy DSL Specification](/specifications/policy-dsl) — Full normative schema for policy files
+- [Changelog](/changelog) — Full release history
