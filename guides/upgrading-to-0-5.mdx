@@ -154,6 +154,100 @@ Both `text/yaml` and `application/yaml` content types are accepted. JSON remains
   YAML policies support inline comments, making them ideal for documenting the reasoning behind specific rules directly in the policy file.
 </Tip>
 
+## New Feature: YAML Card Authoring
+
+In addition to YAML policies, AAP 0.5.0 introduces YAML as an authoring format for alignment cards. Write your cards in YAML for readability, and they are stored as JSON in the database.
+
+<Info>
+  YAML is an **authoring format** — the API converts it to JSON on ingest. Cards are always stored and returned as JSON. You can author in whichever format you prefer.
+</Info>
+
+### Complete YAML Card Example
+
+Here is a full alignment card written in YAML:
+
+```yaml
+# alignment-card.yaml
+aap_version: "0.5.0"
+card_id: ac-research-agent-v1
+agent_id: smolt-research-agent
+issued_at: "2026-03-04T00:00:00Z"
+expires_at: "2026-09-04T00:00:00Z"
+
+principal:
+  type: human
+  relationship: delegated_authority
+  escalation_contact: mailto:team@example.com
+
+values:
+  declared:
+    - transparency
+    - honesty
+    - harm_prevention
+    - minimal_data
+  hierarchy: lexicographic
+
+autonomy_envelope:
+  bounded_actions:
+    - inference
+    - read
+    - write
+    - web_fetch
+    - web_search
+  escalation_triggers:
+    - condition: named_entity_critical
+      action: escalate
+      reason: Critical claims about named entities require human review
+  forbidden_actions:
+    - fabricate_sources
+    - exfiltrate_data
+    - impersonate_human
+
+audit_commitment:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  queryable: true
+  tamper_evidence: append_only
+```
+
+### Publish via CLI
+
+The CLI accepts both `.yaml` and `.json` card files:
+
+```bash
+# Validate a YAML card
+smoltbot card validate my-card.yaml
+
+# Publish it to your agent
+smoltbot card publish my-card.yaml
+```
+
+The CLI detects the file extension and handles conversion automatically. Validation rules are identical for both formats.
+
+### Publish via Dashboard
+
+The dashboard card editor now includes a **YAML tab** alongside the Visual and JSON editors:
+
+<Steps>
+
+### Open the card editor
+
+Navigate to your agent in the [dashboard](https://mnemom.ai/dashboard) and open the **Alignment Card** panel.
+
+### Switch to the YAML tab
+
+Click the **YAML** tab at the top of the card editor. You can paste or write your card in YAML format directly.
+
+### Save
+
+Click **Save**. The dashboard validates and converts the YAML to JSON before storing. Any syntax or schema errors are shown inline.
+
+</Steps>
+
+<Tip>
+  YAML cards support inline comments, making them ideal for documenting why specific values, triggers, or forbidden actions were chosen — context that is lost in JSON.
+</Tip>
+
 ## New Feature: Trust Edges API
 
 Trust edges define explicit trust relationships between agents. An agent can declare that it trusts another agent, creating a directed edge in the trust graph. Trust edges influence reputation propagation and coherence scoring.
@@ -220,7 +314,7 @@ Install `@mnemom/agent-alignment-protocol@0.5.0` (npm) or `agent-alignment-proto
 
 ### Update local card files
 
-If you version-control alignment card JSON files, update `aap_version` in those files and commit.
+If you version-control alignment card files (JSON or YAML), update `aap_version` in those files and commit. Consider switching to YAML for better readability and inline comments.
 
 ### Verify
 
@@ -239,6 +333,9 @@ Run `smoltbot card show` for each agent to confirm the updated version is active
   </Accordion>
   <Accordion title="Will my existing policies still work?">
     Yes. Policies are unaffected by the `aap_version` change. The new YAML support is additive — existing JSON policies continue to work as before.
+  </Accordion>
+  <Accordion title="Can I mix JSON and YAML across cards and policies?">
+    Yes. YAML support is per-file. You can author some cards in YAML and others in JSON, and the same goes for policies. The API normalizes everything to JSON on ingest, so there are no compatibility issues.
   </Accordion>
   <Accordion title="What happens if I don't upgrade?">
     Nothing breaks. However, new SDK versions default to `"0.5.0"`, so new cards created via the SDK will use the new version. Keeping older cards at `"0.1.0"` is fine but may cause minor inconsistencies in reports.

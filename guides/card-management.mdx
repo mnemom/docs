@@ -13,15 +13,17 @@ Customizing your card is how you make alignment verification meaningful. A card 
 
 ## Creating a Card
 
-An alignment card is a JSON document that follows the [AAP specification](/protocols/aap/specification). Here is how to build one from scratch.
+An alignment card is a structured document that follows the [AAP specification](/protocols/aap/specification). You can author cards in JSON or YAML -- the API accepts both formats and stores cards as JSON internally.
 
 ### Start from the Template
 
 Every card requires five blocks: identity, principal, values, autonomy envelope, and audit commitment.
 
+<Tabs>
+  <Tab title="JSON">
 ```json
 {
-  "aap_version": "0.1.0",
+  "aap_version": "0.5.0",
   "card_id": "ac-YOUR_CARD_ID",
   "agent_id": "YOUR_AGENT_ID",
   "issued_at": "2026-02-21T00:00:00Z",
@@ -52,6 +54,37 @@ Every card requires five blocks: identity, principal, values, autonomy envelope,
   }
 }
 ```
+  </Tab>
+  <Tab title="YAML">
+```yaml
+aap_version: "0.5.0"
+card_id: ac-YOUR_CARD_ID
+agent_id: YOUR_AGENT_ID
+issued_at: "2026-02-21T00:00:00Z"
+expires_at: "2026-08-21T00:00:00Z"
+
+principal:
+  type: human
+  relationship: delegated_authority
+  escalation_contact: mailto:you@example.com
+
+values:
+  declared: []
+  hierarchy: lexicographic
+
+autonomy_envelope:
+  bounded_actions: []
+  escalation_triggers: []
+  forbidden_actions: []
+
+audit_commitment:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  queryable: true
+  tamper_evidence: append_only
+```
+  </Tab>
+</Tabs>
 
 ### Choose Values
 
@@ -136,9 +169,11 @@ Declare how your agent logs decisions and whether external parties can query tra
 
 ### Full Example: Customer Support Agent
 
+<Tabs>
+  <Tab title="JSON">
 ```json
 {
-  "aap_version": "0.1.0",
+  "aap_version": "0.5.0",
   "card_id": "ac-cs-agent-001-v1",
   "agent_id": "smolt-cs-agent-001",
   "issued_at": "2026-02-21T00:00:00Z",
@@ -215,6 +250,76 @@ Declare how your agent logs decisions and whether external parties can query tra
   }
 }
 ```
+  </Tab>
+  <Tab title="YAML">
+```yaml
+# Customer support agent alignment card
+aap_version: "0.5.0"
+card_id: ac-cs-agent-001-v1
+agent_id: smolt-cs-agent-001
+issued_at: "2026-02-21T00:00:00Z"
+expires_at: "2026-08-21T00:00:00Z"
+
+principal:
+  type: human
+  relationship: delegated_authority
+  escalation_contact: mailto:support-team@example.com
+
+values:
+  declared:
+    - principal_benefit
+    - transparency
+    - honesty
+    - privacy
+    - customer_satisfaction
+  definitions:
+    customer_satisfaction:
+      name: Customer Satisfaction
+      description: Prioritize resolving customer issues efficiently and empathetically
+      priority: 5
+  conflicts_with:
+    - upsell_pressure
+    - data_harvesting
+  hierarchy: lexicographic
+
+autonomy_envelope:
+  bounded_actions:
+    - inference
+    - read
+    - search_knowledge_base
+    - create_ticket
+    - update_ticket
+    - send_response
+  escalation_triggers:
+    # Financial threshold — requires manager approval
+    - condition: "refund_amount > 500"
+      action: escalate
+      reason: "Refunds over $500 require manager approval"
+    # Legal exposure — route to legal team
+    - condition: legal_claims_present
+      action: escalate
+      reason: Legal claims require legal team review
+    # Retention risk — human intervention needed
+    - condition: customer_churn_risk
+      action: escalate
+      reason: High churn risk accounts need human intervention
+  max_autonomous_value:
+    amount: 500
+    currency: USD
+  forbidden_actions:
+    - access_payment_credentials
+    - modify_billing_without_consent
+    - share_customer_data_externally
+    - make_legal_commitments
+
+audit_commitment:
+  trace_format: ap-trace-v1
+  retention_days: 365
+  queryable: true
+  tamper_evidence: append_only
+```
+  </Tab>
+</Tabs>
 
 ## Publishing via CLI
 
@@ -222,11 +327,17 @@ Declare how your agent logs decisions and whether external parties can query tra
 
 ### Validate your card
 
-Run local validation to check AAP spec compliance before publishing:
+Run local validation to check AAP spec compliance before publishing. The CLI accepts both JSON and YAML files:
 
-```bash
+<CodeGroup>
+```bash JSON
 smoltbot card validate my-card.json
 ```
+
+```bash YAML
+smoltbot card validate my-card.yaml
+```
+</CodeGroup>
 
 This checks required blocks, value definitions, bounded actions, escalation trigger evaluability, and expiry dates. Exit code 0 means the card is valid; exit code 1 means there are errors.
 
@@ -234,9 +345,15 @@ This checks required blocks, value definitions, bounded actions, escalation trig
 
 Upload the validated card to your agent:
 
-```bash
+<CodeGroup>
+```bash JSON
 smoltbot card publish my-card.json
 ```
+
+```bash YAML
+smoltbot card publish my-card.yaml
+```
+</CodeGroup>
 
 The CLI validates again before uploading, asks for confirmation, and optionally re-verifies existing traces against the new card.
 
@@ -280,7 +397,7 @@ Scroll to the Alignment Card panel on the agent page. Your current card (or the 
 
 ### Choose your editor
 
-Switch between the **Visual editor** (form-based, guided) and the **JSON editor** (raw JSON, full control) using the toggle at the top of the card panel.
+Switch between the **Visual editor** (form-based, guided), **JSON editor** (raw JSON), and **YAML editor** (YAML with comments) using the tabs at the top of the card panel.
 
 ### Edit and save
 
@@ -293,7 +410,7 @@ The card panel updates immediately after saving. You can also confirm via CLI wi
 </Steps>
 
 <Tip>
-  For paste-from-file workflows, use the JSON editor. Copy your local card JSON and paste it directly into the editor, then save. This is faster than manually filling in the visual editor for complex cards.
+  For paste-from-file workflows, use the JSON or YAML editor. Copy your local card file and paste it directly into the corresponding editor tab, then save. This is faster than manually filling in the visual editor for complex cards.
 </Tip>
 
 ## Publishing via API
@@ -306,7 +423,7 @@ curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
   -H "Content-Type: application/json" \
   -d '{
     "card_json": {
-      "aap_version": "0.1.0",
+      "aap_version": "0.5.0",
       "card_id": "ac-your-card-id",
       "agent_id": "your-agent-id",
       "issued_at": "2026-02-21T00:00:00Z",
@@ -374,7 +491,7 @@ Reference table of all validation checks performed during `smoltbot card validat
 
 | Check | Rule | Severity |
 |---|---|---|
-| Valid JSON | Must parse without errors | Error |
+| Valid JSON/YAML | Must parse without errors | Error |
 | Required blocks | `principal`, `values`, `autonomy_envelope`, `audit_commitment` must be present | Error |
 | Non-empty values | `values.declared` must have at least one entry | Error |
 | Custom definitions | Every non-standard value must have a `definitions` entry | Warning |
@@ -404,7 +521,7 @@ Every card update creates a formal amendment with version history and diffs. Ame
 
 <CardGroup cols={2}>
   <Card title="Version control your cards" icon="code-branch">
-    Keep alignment card JSON files in your repository alongside your agent code. Use `smoltbot card validate` in CI to catch issues before deploy.
+    Keep alignment card files (JSON or YAML) in your repository alongside your agent code. Use `smoltbot card validate` in CI to catch issues before deploy.
   </Card>
   <Card title="Match bounded actions to real tools" icon="wrench">
     Your `bounded_actions` list should reflect your agent's actual tools and capabilities. Adding actions the agent never takes produces noise; missing actions the agent does take produces false violations.
