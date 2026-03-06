@@ -166,6 +166,83 @@ For the complete attributes and metrics reference, see [OTel Attributes](/specif
 | `aap.verification.duration_ms` | Histogram | — |
 | `aap.coherence.score` | Histogram | compatible |
 
+## Policy Evaluation Spans
+
+When the Policy Engine evaluates requests at the gateway, it emits `policy.evaluate` spans. Record these alongside integrity checks for complete governance telemetry:
+
+<CodeGroup>
+```typescript TypeScript
+import { createAIPOTelRecorder } from "@mnemom/aip-otel-exporter";
+
+const recorder = createAIPOTelRecorder({ tracerProvider });
+
+// Record a policy evaluation result
+recorder.recordPolicyEvaluation({
+  agent_id: "my-agent",
+  policy_id: "research-agent-policy",
+  policy_version: 2,
+  verdict: "pass",
+  violations_count: 0,
+  warnings_count: 1,
+  coverage_pct: 92.5,
+  context: "gateway",
+  enforcement_mode: "enforce",
+  duration_ms: 3.2,
+});
+```
+
+```python Python
+from aip_otel_exporter import AIPOTelRecorder
+
+recorder = AIPOTelRecorder(tracer_provider=provider)
+
+recorder.record_policy_evaluation(
+    agent_id="my-agent",
+    policy_id="research-agent-policy",
+    policy_version=2,
+    verdict="pass",
+    violations_count=0,
+    warnings_count=1,
+    coverage_pct=92.5,
+    context="gateway",
+    enforcement_mode="enforce",
+    duration_ms=3.2,
+)
+```
+</CodeGroup>
+
+### Policy Dashboard Example
+
+A Grafana dashboard panel for policy evaluation monitoring:
+
+```json
+{
+  "title": "Policy Evaluation Overview",
+  "panels": [
+    {
+      "title": "Policy Verdicts (24h)",
+      "type": "piechart",
+      "targets": [{ "expr": "sum by (verdict) (increase(policy_evaluations_total[24h]))" }]
+    },
+    {
+      "title": "Policy Violations by Type",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum by (type, severity) (rate(policy_violations_total[5m]))" }]
+    },
+    {
+      "title": "Policy Evaluation Latency (p99)",
+      "type": "stat",
+      "targets": [{ "expr": "histogram_quantile(0.99, rate(policy_evaluation_duration_ms_bucket[5m]))" }]
+    },
+    {
+      "title": "Coverage by Agent",
+      "type": "table",
+      "targets": [{ "expr": "avg by (agent_id) (policy_coverage_pct)" }]
+    }
+  ]
+}
+```
+
 ## Dashboard Templates
 
 Pre-built dashboards are available in the [aip-otel-exporter repository](https://github.com/mnemom/aip-otel-exporter/tree/main/packages/typescript/dashboards):
