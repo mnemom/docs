@@ -5,11 +5,11 @@ sidebarTitle: "Specification"
 icon: "book"
 ---
 
-**Version:** 0.5.0
+**Version:** 0.6.0
 **Status:** Draft
 **Date:** 2026-03-06
 **Authors:** Mnemom.ai
-**Sister Protocol:** AAP v0.5.0
+**Sister Protocol:** AAP v0.6.0
 
 ---
 
@@ -417,7 +417,7 @@ interface IntegrityCheckpoint {
   /**
    * Analysis scope: what content was included in the conscience prompt.
    * "thinking_only" (default, v0.1.x behavior) or "thinking_and_output".
-   * @since 0.5.0
+   * @since 0.6.0
    */
   analysis_scope: "thinking_only" | "thinking_and_output";
 
@@ -425,7 +425,7 @@ interface IntegrityCheckpoint {
    * SHA-256 hash of the output block content.
    * Present only when analysis_scope is "thinking_and_output".
    * The full output text MUST NOT be stored in the checkpoint.
-   * @since 0.5.0
+   * @since 0.6.0
    */
   output_block_hash?: string;
 }
@@ -613,7 +613,7 @@ Implementations SHOULD enforce a minimum evidence threshold:
 
 ### 7.1 Overview
 
-AIP v0.1.x analyzed only thinking blocks — the internal reasoning produced before or alongside the agent's visible response. Starting in v0.5.0, AIP supports **output analysis**: the conscience prompt can include the model's visible output alongside the thinking block, enabling the analysis LLM to detect misalignment between what the agent was thinking and what it actually said.
+AIP v0.1.x analyzed only thinking blocks — the internal reasoning produced before or alongside the agent's visible response. Starting in v0.6.0, AIP supports **output analysis**: the conscience prompt can include the model's visible output alongside the thinking block, enabling the analysis LLM to detect misalignment between what the agent was thinking and what it actually said.
 
 ### 7.2 Analysis Scope
 
@@ -698,6 +698,41 @@ The total token budget for the conscience prompt is:
 - Thinking block: up to 4096 tokens
 - Output block: up to 2048 tokens (when enabled)
 - Evaluation instructions: ~300 tokens
+
+The analysis LLM token limit and timeout are adjusted based on analysis scope:
+
+| Parameter           | thinking_only | thinking_and_output |
+|---------------------|---------------|---------------------|
+| max_tokens          | 1024          | 2048                |
+| analysis_timeout_ms | 10000 (10s)   | 15000 (15s)         |
+
+### 7.8 Output Extraction
+
+The `extractOutputText()` function extracts the visible output from a provider response body. It supports the three primary providers:
+
+| Provider | Extraction Path |
+|---|---|
+| **Anthropic** | `content[].text` — Iterate `content` array, concatenate blocks with `type === "text"` |
+| **OpenAI** | `choices[0].message.content` — Direct string field on the first choice |
+| **Google Gemini** | `candidates[0].content.parts[].text` — Iterate `parts` array, concatenate `text` fields |
+
+If the provider is not recognized or the output cannot be extracted, `extractOutputText()` returns `null` and the checkpoint falls back to `analysis_scope: "thinking_only"`.
+
+### 7.9 Response Headers
+
+When the gateway performs an integrity check, it includes the analysis scope in the response headers:
+
+```
+X-AIP-Analysis-Scope: thinking_only
+```
+
+or
+
+```
+X-AIP-Analysis-Scope: thinking_and_output
+```
+
+This header is always present when AIP is active, allowing downstream consumers to determine whether the checkpoint includes output analysis. The value is set based on the agent's `analyze_output` setting at the time of the request.
 
 ---
 

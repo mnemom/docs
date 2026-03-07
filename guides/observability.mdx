@@ -243,6 +243,22 @@ A Grafana dashboard panel for policy evaluation monitoring:
 }
 ```
 
+### Output Analysis in Traces
+
+When output analysis is enabled for an agent (`analyze_output: true`), the observer passes `output_block_hash` and `analysis_scope` through `linkCheckpointToTrace()`. These fields appear in the `aip.integrity_check` span alongside the existing thinking-block attributes.
+
+To filter traces by output-aware analysis in Grafana:
+
+```promql
+{span.aip.integrity.analysis_scope = "thinking_and_output"} | rate() by (span.aip.integrity.verdict)
+```
+
+This query surfaces only checkpoints where the conscience prompt included both thinking and output content, making it easy to compare verdict distributions between thinking-only and output-aware analysis.
+
+<Note>
+  In the observer context, `enforcement_mode` is always `observe` — the observer performs post-action evaluation and never blocks requests. The `policy.enforcement_mode` attribute on observer-emitted `policy.evaluate` spans will always be `observe`, distinguishing them from gateway-emitted spans which may be `warn` or `enforce`.
+</Note>
+
 ## Dashboard Templates
 
 Pre-built dashboards are available in the [aip-otel-exporter repository](https://github.com/mnemom/aip-otel-exporter/tree/main/packages/typescript/dashboards):
