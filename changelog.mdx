@@ -9,6 +9,44 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
+## AIP 0.6.0 — Output-Aware Analysis & Policy Identity Resolution
+<sub>March 2026</sub>
+
+**Output-aware conscience analysis and robust policy identity resolution.** 13 PRs across 4 repos (smoltbot, mnemom-api, aip, aip-otel-exporter) ship the infrastructure for the arena proving ground. The integrity system can now analyze what an agent *said* — not just what it was *thinking*.
+
+### Output-Aware Conscience Analysis
+- **Analysis scope extension**: `analysis_scope: "thinking_and_output"` includes visible model output in the conscience prompt alongside the thinking block
+- **Two new concern categories**: `output_misalignment` (output contradicts card values despite clean thinking) and `output_injection_compliance` (output follows injected instructions the thinking block identified as adversarial)
+- **Provider output extraction**: `extractOutputText()` supports Anthropic (`content[].text`), OpenAI (`choices[0].message.content`), and Gemini (`candidates[0].content.parts[].text`)
+- **Checkpoint fields**: `analysis_scope` and `output_block_hash` (SHA-256, full content never stored)
+- **Response header**: `X-AIP-Analysis-Scope: thinking_only | thinking_and_output` on all gateway responses
+- **Increased limits**: `max_tokens` raised to 2048 and `analysis_timeout_ms` to 15000ms for output-aware analysis (up from 1024/10000ms for thinking-only)
+
+### Policy Identity Resolution
+- **3-tier resolution chain**: `linked_agent_id` lookup → direct `get_policy_for_agent()` → name-based fallback via `x-smoltbot-agent` header
+- **Auto-linking**: Name-based fallback creates a `linked_agent_id` record (migration 066) for future direct lookups
+- **Observer parity**: Observer uses the same resolution chain as the gateway, ensuring consistent policy enforcement across real-time and post-action evaluation
+- **Fail-open**: All resolution failures → proceed without policy (never block on lookup errors)
+
+### Policy OTel
+- **`recordPolicyEvaluation()`**: 10-attribute `policy.evaluate` span (agent_id, policy_id, policy_version, verdict, violations/warnings counts, coverage_pct, context, duration_ms, enforcement_mode) with `policy.violation` events
+- **Output passthrough**: Observer passes `output_block_hash` and `analysis_scope` through `linkCheckpointToTrace()`
+
+### Database Migrations
+- **066**: `linked_agent_id` column on agents table for permanent cross-reference
+- **067**: `analysis_scope` and `output_block_hash` columns on integrity checkpoints
+- **068**: Policy evaluation audit log table
+- **069**: Index on `linked_agent_id` for fast name-based fallback
+
+### Package Versions
+| Package | Version |
+|---|---|
+| `@mnemom/agent-integrity-protocol` | 0.6.0 |
+| `@mnemom/aip-otel-exporter` | 0.5.0 |
+| `@mnemom/policy-engine` | 0.5.0 |
+
+---
+
 ## AAP 0.5.0 — Version Alignment & Trust Edges
 <sub>March 2026</sub>
 

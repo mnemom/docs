@@ -7,11 +7,15 @@ icon: "list-check"
 
 # OpenTelemetry Attributes Reference
 
+<Note>
+  Current as of `@mnemom/aip-otel-exporter` v0.5.0 and `@mnemom/agent-integrity-protocol` v0.6.0.
+</Note>
+
 Complete reference for all span attributes and metrics emitted by the [aip-otel-exporter](/guides/observability). These attributes follow [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/) for span naming and attribute structure.
 
 ## Span Attributes
 
-### `aip.integrity_check` — 22 attributes + 2 GenAI SIG aliases
+### `aip.integrity_check` — 26 attributes + 2 GenAI SIG aliases
 
 The primary span for AIP integrity checkpoint results.
 
@@ -31,6 +35,15 @@ The primary span for AIP integrity checkpoint results.
 | `aip.integrity.thinking_tokens` | int | analysis_metadata | Token count of the thinking block |
 | `aip.integrity.truncated` | boolean | analysis_metadata | Whether the thinking block was truncated |
 | `aip.integrity.extraction_confidence` | float | analysis_metadata | Confidence in thinking block extraction |
+| `aip.integrity.output_hash` | string | checkpoint | SHA-256 hash of the output block (when `analysis_scope` is `thinking_and_output`) |
+| `aip.integrity.output_tokens` | int | analysis_metadata | Token count of the output block analyzed |
+| `aip.integrity.output_truncated` | boolean | analysis_metadata | Whether the output block was truncated |
+| `aip.integrity.analysis_scope` | string | checkpoint | `thinking_only` or `thinking_and_output` |
+
+<Note>
+  The four output attributes (`output_hash`, `output_tokens`, `output_truncated`, `analysis_scope`) are only populated when `analysis_scope` is `thinking_and_output`. When `analysis_scope` is `thinking_only` (the default), these attributes are omitted from the span.
+</Note>
+
 | `aip.conscience.consultation_depth` | string | conscience_context | `standard` or `deep` conscience evaluation |
 | `aip.conscience.values_checked_count` | int | conscience_context | Number of values evaluated |
 | `aip.conscience.conflicts_count` | int | conscience_context | Number of value conflicts detected |
@@ -89,7 +102,7 @@ Span for AAP behavioral drift detection results.
 
 - `aap.drift_alert` — One event per alert. Includes `drift_direction`, `integrity_similarity`, and `sustained_checks`.
 
-### `policy.evaluate` — 8 attributes
+### `policy.evaluate` — 10 attributes (Implemented)
 
 Span for policy evaluation results. Created when the [Policy Engine](/concepts/policy-engine) evaluates a request against the active policy.
 

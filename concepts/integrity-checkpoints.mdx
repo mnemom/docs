@@ -394,6 +394,68 @@ Integrity checkpoints and AP-Traces are complementary:
 
 When both protocols are active, they enrich each other. The integrity verdict is stored in the AP-Trace's context metadata, and `boundary_violation` verdicts automatically set `escalation.required = true` in the corresponding trace.
 
+## Output Analysis
+
+<Note>
+  Output analysis is available starting in AIP v0.6.0. It extends the integrity check to analyze the agent's visible output alongside the thinking block.
+</Note>
+
+By default, AIP analyzes only the thinking block (`analysis_scope: "thinking_only"`). When output analysis is enabled (`analysis_scope: "thinking_and_output"`), the conscience prompt includes the model's visible response, allowing the analysis LLM to detect misalignment between intent and output.
+
+### What Gets Analyzed
+
+| Content | Default (thinking_only) | Output-aware (thinking_and_output) |
+|---|---|---|
+| Thinking block | Analyzed | Analyzed |
+| Visible output | Not analyzed | Analyzed (up to 2048 tokens) |
+
+### When Output Analysis Helps
+
+- **Subtle adversarial agents**: An agent's thinking block may appear clean while its output complies with injected instructions.
+- **Output drift**: The agent reasons correctly but produces output that contradicts its declared card values.
+- **Injection compliance**: The thinking block identifies an injection attempt, but the output follows the injected instructions anyway.
+
+### Updated Checkpoint Structure
+
+When output analysis is active, the checkpoint includes two additional fields:
+
+```json
+{
+  "checkpoint_id": "ic-a1b2c3d4-5678-9abc-def0-123456789abc",
+  "agent_id": "did:web:shopping.agent.example.com",
+  "thinking_block_hash": "a1b2c3d4e5f6...",
+  "analysis_scope": "thinking_and_output",
+  "output_block_hash": "f6e5d4c3b2a1...",
+  "verdict": "boundary_violation",
+  "concerns": [
+    {
+      "category": "output_injection_compliance",
+      "severity": "critical",
+      "description": "Output follows injected instructions despite clean thinking"
+    }
+  ]
+}
+```
+
+<Warning>
+  Like `thinking_block_hash`, the `output_block_hash` is a SHA-256 hash. The full output content is never stored in the checkpoint — it is extracted, included in the conscience prompt, and discarded.
+</Warning>
+
+### New Concern Categories
+
+Output analysis adds two concern categories to the existing taxonomy:
+
+| Category | Description | Severity Range |
+|---|---|---|
+| `output_misalignment` | Visible output contradicts declared card values, even when thinking appears aligned | medium - critical |
+| `output_injection_compliance` | Output complies with injected instructions that the thinking block correctly identified as adversarial | high - critical |
+
+These categories are only emitted when `analysis_scope` is `thinking_and_output`.
+
+<Tip>
+  `analysis_scope` defaults to `thinking_only`. Output analysis requires the `analyze_output: true` setting on the agent — it is not enabled globally. Configure it per-agent via the API or dashboard agent settings.
+</Tip>
+
 ## Error Handling
 
 AIP defaults to **fail-open**: if the analysis LLM is unreachable or errors, a synthetic `clear` checkpoint is generated and the agent proceeds. This prioritizes availability.

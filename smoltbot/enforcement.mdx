@@ -262,6 +262,51 @@ See [Policy Engine](/concepts/policy-engine) for full details on how policies ar
 In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode. This applies to both alignment and policy violations.
 </Note>
 
+## Output Analysis
+
+Output analysis is an opt-in extension that works independently of the enforcement mode. When enabled, the integrity check analyzes the agent's visible output alongside its thinking block, detecting cases where clean thinking produces misaligned output.
+
+### How It Works
+
+1. The agent's response is intercepted at the gateway
+2. Both the thinking block and visible output are sent to the conscience prompt
+3. The analysis LLM evaluates alignment between thinking, output, and the agent's card
+4. The checkpoint records `analysis_scope: "thinking_and_output"` with an `output_block_hash`
+5. The response includes the `X-AIP-Analysis-Scope: thinking_and_output` header
+
+### Interaction with Enforcement Modes
+
+Output analysis produces the same verdict types (`clear`, `review_needed`, `boundary_violation`) and interacts with enforcement modes identically to thinking-only analysis:
+
+| Enforcement Mode | Output concern detected |
+|---|---|
+| **Observe** | Recorded in trace, no action taken |
+| **Nudge** | Integrity notice injected on next request |
+| **Enforce** | Blocked (non-streaming) or nudged (streaming) |
+
+### New Concern Categories
+
+Output analysis can emit two additional concern categories:
+
+- **`output_misalignment`** — The visible output contradicts declared card values, even when thinking appears aligned
+- **`output_injection_compliance`** — The output follows injected instructions that the thinking block correctly identified as adversarial
+
+### Configuration
+
+Enable output analysis per-agent via the API:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
+  -H "Content-Type: application/json" \
+  -d '{"analyze_output": true}'
+```
+
+Or toggle it in the **Agent Settings** panel on the dashboard.
+
+<Tip>
+  Output analysis increases the conscience prompt token budget (from 1024 to 2048 `max_tokens`) and timeout (from 10s to 15s). This adds modest latency but catches a class of misalignment that thinking-only analysis cannot detect.
+</Tip>
+
 ## Conscience Timeline
 
 All enforcement actions are tracked in the conscience timeline, accessible via the API and the web dashboard at [mnemom.ai](https://mnemom.ai). The timeline records:

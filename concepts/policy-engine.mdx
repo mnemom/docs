@@ -125,6 +125,22 @@ Live evaluation runs in real-time as requests pass through the smoltbot gateway.
 5. Unmatched tools fall through to `defaults.unmapped_tool_action`
 6. A verdict is returned via the `X-Policy-Verdict` response header
 
+### Policy Identity Resolution
+
+The gateway resolves an agent's policy through a 3-tier identity resolution chain. Each tier is attempted in order; the first match wins.
+
+| Tier | Method | Description |
+|---|---|---|
+| 1 | `linked_agent_id` lookup | Checks if the request's agent ID has a permanent cross-reference to another agent with a published policy. The `linked_agent_id` column (migration 066) stores these mappings. |
+| 2 | Direct `get_policy_for_agent()` | Looks up a policy by the agent's own ID. Works for agents with directly assigned policies. |
+| 3 | Name-based fallback | Extracts the agent name from the `x-smoltbot-agent` request header and searches for a policy by name. If found, automatically creates a `linked_agent_id` record so future requests resolve via Tier 1. |
+
+**Fail-open:** All resolution failures — database errors, missing headers, no matching policy — result in the request proceeding without policy enforcement. The policy engine never blocks a request due to a lookup failure.
+
+<Note>
+  The observer uses the same 3-tier resolution chain as the gateway, ensuring consistent policy identity across real-time (gateway) and post-action (observer) evaluation contexts.
+</Note>
+
 **Verdict headers:**
 
 | Header Value | Meaning |
