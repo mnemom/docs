@@ -1,0 +1,208 @@
+---
+title: "Detection Recipes"
+description: "Structured detection signatures for AI alignment verification — like antivirus definitions for behavioral drift"
+sidebarTitle: "Detection Recipes"
+icon: "shield-check"
+---
+
+# Detection Recipes
+
+**Structured, declarative patterns for identifying adversarial behavior in AI agents.**
+
+Detection Recipes are versioned signatures that describe what suspicious behavior looks like and how to check for it. Just as antivirus software uses virus definitions to identify known malware, detection recipes give the [Agent Integrity Protocol](/protocols/aip/specification) precise patterns to match against — making analysis more targeted, more consistent, and easier to update as new evasion techniques emerge.
+
+## What Detection Recipes Are
+
+A detection recipe encodes a known behavioral anomaly as a structured YAML document. Each recipe defines:
+
+- **What to measure** — structural properties of an agent's thinking and output (e.g., reasoning depth, response patterns)
+- **What signals to raise** when those measurements exceed thresholds
+- **What to check** in deeper analysis when signals are present
+- **How to resolve** disagreements between structural signals and the analysis verdict
+
+Recipes are versioned, scoped, and go through a lifecycle from draft to production. They can be activated and deactivated without code changes, and each activation is logged with an audit trail.
+
+## Three-Tier Detection Architecture
+
+Detection recipes operate across three layers, applied in sequence during each integrity check.
+
+### Tier 1 — Heuristic Prefilter
+
+Deterministic structural checks that run before any LLM analysis. Tier 1 computes metrics from the agent's thinking and output — things like reasoning depth, output length ratios, and linguistic hedging patterns — and compares them against thresholds defined in the recipe.
+
+When a metric crosses a threshold, Tier 1 raises a **signal**. Signals are lightweight: they don't block anything or produce a verdict on their own. Their purpose is to flag potentially suspicious responses so that Tier 2 can take targeted action.
+
+**Tier 1 is deterministic.** Given the same inputs, it always produces the same signals. This makes it fast, auditable, and free of model variance.
+
+### Tier 2 — Conscience Augmentation
+
+When Tier 1 signals are present, Tier 2 injects targeted checks into the AIP conscience prompt. These checks are additional `ConscienceValue` entries drawn from the matched recipes — specific questions for the analyzer to answer about the current response.
+
+This means the AIP analysis doesn't just apply general alignment values; it also applies **recipe-specific checks** that are directly relevant to the detected signal. A recipe that detects low reasoning depth might inject a check asking the analyzer to verify that output claims are supported by the reasoning evidence.
+
+Tier 2 augments the conscience prompt without replacing it. The core alignment values still apply; recipes make the analysis more targeted against known patterns.
+
+### Tier 3 — Cross-Validation
+
+Tier 3 runs after the AIP verdict is produced. It compares the structural signals from Tier 1 against the verdict from Tier 2. When they disagree — for example, when Tier 1 raised strong signals but the analysis returned a clear verdict — Tier 3 can override the verdict to `review_needed` and attach a reason.
+
+This cross-validation layer exists because structural signals and LLM analysis can each be fooled in different ways. Requiring agreement between them raises the bar for evasion.
+
+```
+Agent Response
+     │
+     ▼
+┌─────────────────────┐
+│  Tier 1: Heuristics  │  ── metrics → signals
+└──────────┬──────────┘
+           │ signals
+           ▼
+┌─────────────────────┐
+│  Tier 2: Conscience  │  ── injects recipe checks into AIP
+│  Augmentation        │
+└──────────┬──────────┘
+           │ AIP verdict
+           ▼
+┌─────────────────────┐
+│  Tier 3: Cross-      │  ── signals vs verdict → override if needed
+│  Validation          │
+└──────────┬──────────┘
+           │
+           ▼
+     Final Verdict
+```
+
+## How Recipes Improve Detection
+
+The antivirus analogy is apt. Antivirus software doesn't try to reason about whether any arbitrary file is safe — it maintains a library of known malware signatures and updates that library continuously as new threats are discovered.
+
+Detection recipes work the same way. When a new evasion technique is observed — for example, an agent that produces minimal reasoning but still passes analysis — the pattern gets analyzed, encoded into a recipe, validated, and activated. From that point on, the recipe is applied to every future integrity check in scope.
+
+This means the detection system **learns from observed evasions** without requiring model retraining or code changes. New recipes can be tested in arena scope first, promoted to canary, and eventually to production — each step with empirical evidence that the recipe catches evasions without causing false positives.
+
+## Recipe Lifecycle
+
+Each recipe moves through a defined set of states:
+
+| Status | Meaning |
+|--------|---------|
+| `draft` | Created but not yet validated. Not applied to any checks. |
+| `active` | Validated and applied to checks within the recipe's scope. |
+| `inactive` | Temporarily disabled. Can be reactivated without creating a new version. |
+| `archived` | Superseded or retired. Not applied to checks. Retained for audit history. |
+
+Recipes start as `draft`. Activation requires explicit action — either manual review or, if auto-patch mode is enabled, automated activation when confidence is high. Every status change is recorded in the activation log with a timestamp, actor, and reason.
+
+### Scope
+
+Recipes are scoped to limit their blast radius during validation:
+
+| Scope | Where Applied |
+|-------|--------------|
+| `arena_only` | Arena Proving Ground only — safe for unvalidated recipes |
+| `canary` | A subset of production traffic — for recipes with arena evidence |
+| `production` | All integrity checks — for fully validated recipes |
+
+## YAML Schema Reference
+
+A detection recipe is a single YAML document. Here is a minimal example showing the structure:
+
+```yaml
+id: dr-example-001
+version: 1
+title: "Example Detection Pattern"
+description: "Detects a class of behavioral anomaly"
+
+metadata:
+  technique_category: calibration
+  severity: medium
+  scope: arena_only
+  status: active
+
+tier1:
+  match: any
+  conditions:
+    - metric: thinking_output_ratio
+      operator: lt
+      threshold: 0.3
+      signal: low_reasoning_depth
+
+tier2:
+  trigger:
+    on_signals: [low_reasoning_depth]
+  checks:
+    - id: check-example
+      type: BOUNDARY
+      content: >-
+        Verify that output claims are supported
+        by reasoning evidence.
+
+tier3:
+  rules:
+    - when:
+        tier1_escalated: true
+        aip_verdict: clear
+      action: override_to_review
+      reason: "Structural signals contradicted clear verdict"
+```
+
+### Fields
+
+**Top-level**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Stable identifier (e.g., `dr-001`). Never reused. |
+| `version` | integer | Incremented on each update. Previous versions are retained. |
+| `title` | string | Short human-readable name. |
+| `description` | string | What behavioral class this recipe targets. |
+
+**`metadata`**
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `technique_category` | `calibration`, `boundary`, `deception`, `concealment`, ... | Category of the evasion technique. |
+| `severity` | `low`, `medium`, `high`, `critical` | Impact severity if this technique succeeds. |
+| `scope` | `arena_only`, `canary`, `production` | Where this recipe is applied. |
+| `status` | `draft`, `active`, `inactive`, `archived` | Lifecycle state. |
+
+**`tier1.conditions`**
+
+| Field | Description |
+|-------|-------------|
+| `metric` | Computed property of the agent's thinking or output. |
+| `operator` | Comparison: `lt`, `lte`, `gt`, `gte`, `eq`, `neq`, `matches`, `contains`. |
+| `threshold` | Value to compare against. |
+| `signal` | Name of the signal raised when the condition matches. |
+
+`match: any` means any single condition matching raises signals. `match: all` requires all conditions.
+
+**`tier2.trigger`**
+
+Defines when Tier 2 checks are injected. Can trigger on specific signals (`on_signals`) or technique categories (`on_categories`), or both.
+
+**`tier2.checks`**
+
+Each check becomes an additional conscience value injected into the AIP analysis prompt. The `type` maps to conscience value types (`BOUNDARY`, `BEHAVIOR`, `OBJECTIVE`). The `content` is the specific check instruction.
+
+**`tier3.rules`**
+
+Each rule defines a condition (`when`) and an action (`override_to_review`). When the condition is met — for example, Tier 1 escalated but AIP returned clear — the rule overrides the verdict and attaches the reason to the checkpoint.
+
+## Integration with AIP
+
+Detection recipes extend the [Agent Integrity Protocol](/protocols/aip/specification) without replacing it. The core AIP conscience values defined in an agent's alignment card still apply to every check. Recipes add an additional layer on top: targeted checks derived from known evasion patterns, applied only when structural signals indicate they're relevant.
+
+The result is a two-level conscience prompt: general alignment values (from the card) plus pattern-specific checks (from active recipes). This combination is what gets analyzed to produce the integrity verdict.
+
+Recipe attribution is recorded in each checkpoint's metadata — which Tier 1 signals fired, which recipe checks were injected, and whether Tier 3 applied an override. This makes the detection logic fully auditable: for any checkpoint, you can trace exactly which recipes influenced the verdict.
+
+<Note>
+  Detection recipes are a backend mechanism. They are not configured per-agent or per-card — they apply globally within their scope to all agents subject to AIP integrity checking.
+</Note>
+
+## Related
+
+- [Agent Integrity Protocol](/protocols/aip/specification) — the underlying protocol recipes augment
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) — what gets produced by each AIP check
+- [Conscience Values](/smoltbot/conscience-values) — the alignment values that Tier 2 augments
