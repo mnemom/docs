@@ -456,6 +456,28 @@ These categories are only emitted when `analysis_scope` is `thinking_and_output`
   `analysis_scope` defaults to `thinking_only`. Output analysis requires the `analyze_output: true` setting on the agent — it is not enabled globally. Configure it per-agent via the API or dashboard agent settings.
 </Tip>
 
+## Adaptive Detection
+
+Active detection rules may augment the checkpoint evaluation, increasing sensitivity to known evasion patterns. When active rules apply, the checkpoint records which rules were evaluated and which contributed to the verdict:
+
+```json
+{
+  "checkpoint_id": "ic-a1b2c3d4-5678-9abc-def0-123456789abc",
+  "verdict": "boundary_violation",
+  "recipes_evaluated": ["recipe-001", "recipe-007", "recipe-012"],
+  "recipes_triggered": ["recipe-007"],
+  "concerns": [
+    {
+      "category": "deceptive_reasoning",
+      "severity": "high",
+      "description": "Reasoning pattern matches known evasion technique"
+    }
+  ]
+}
+```
+
+The `recipes_evaluated` array lists the IDs of active detection rules that were applied during analysis. The `recipes_triggered` array lists those that fired and contributed to the verdict. Both arrays are empty when no active rules apply.
+
 ## Error Handling
 
 AIP defaults to **fail-open**: if the analysis LLM is unreachable or errors, a synthetic `clear` checkpoint is generated and the agent proceeds. This prioritizes availability.
