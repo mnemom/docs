@@ -123,6 +123,166 @@
   ],
   "security": [{"BearerAuth": []}],
   "paths": {
+    "/agents": {
+      "post": {
+        "operationId": "registerAgent",
+        "summary": "Register a new agent",
+        "description": "Register a new agent with a name and hash proof. Optionally attach an alignment card and policy.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "hash_proof"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Agent name. 2-32 characters, alphanumeric and hyphens only, must start and end with alphanumeric.",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]{0,30}[a-zA-Z0-9]$",
+                    "minLength": 2,
+                    "maxLength": 32,
+                    "example": "my-agent"
+                  },
+                  "hash_proof": {
+                    "type": "string",
+                    "description": "SHA256 hex string used to derive the agent ID and hash.",
+                    "minLength": 16,
+                    "example": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+                  },
+                  "card_json": {
+                    "type": "object",
+                    "description": "Optional alignment card JSON to attach on creation.",
+                    "additionalProperties": true
+                  },
+                  "policy_yaml": {
+                    "type": "string",
+                    "description": "Optional YAML policy string to create alongside the agent."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Agent registered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Agent ID (e.g. smolt-abc12345)",
+                      "example": "smolt-a1b2c3d4"
+                    },
+                    "agent_hash": {
+                      "type": "string",
+                      "description": "First 16 characters of the hash_proof"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "card_id": {
+                      "type": "string",
+                      "description": "ID of the created alignment card"
+                    },
+                    "policy_created": {
+                      "type": "boolean",
+                      "description": "Whether a policy was created from the provided policy_yaml"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Agent with this hash already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listAgents",
+        "summary": "List your agents",
+        "description": "List all agents owned by the authenticated user. Supports pagination.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            },
+            "description": "Maximum number of agents to return (max 100)"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            },
+            "description": "Number of agents to skip for pagination"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent"
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Total number of agents owned by the user"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/agents/{agent_id}": {
       "get": {
         "operationId": "getAgent",
@@ -154,6 +314,118 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateAgent",
+        "summary": "Update agent name",
+        "description": "Update the name of an agent you own.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "New agent name. 2-32 characters, alphanumeric and hyphens only.",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]{0,30}[a-zA-Z0-9]$",
+                    "minLength": 2,
+                    "maxLength": 32
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated agent record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Not the owner of this agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deactivateAgent",
+        "summary": "Deactivate agent",
+        "description": "Soft-delete an agent by setting its status to deactivated and unlinking it from your account.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deactivated": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Not the owner of this agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
