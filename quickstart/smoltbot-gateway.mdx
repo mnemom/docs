@@ -142,6 +142,28 @@ Smoltbot is a transparent AI gateway that sits between your application and any 
   </Step>
 </Steps>
 
+## Named Agents
+
+If you run multiple agents behind the same API key, use the `x-smoltbot-agent` header to give each one a distinct identity. The provider path stays unchanged -- the gateway hashes `SHA256(apiKey + '|' + agentName)` to derive a unique agent ID.
+
+```bash
+curl https://gateway.mnemom.ai/anthropic/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "x-smoltbot-agent: my-coder" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+Each named agent gets its own trace history, integrity scores, and drift detection -- even though they share an API key.
+
+<Tip>
+You can also register agents programmatically via the [Agent CRUD API](/api-reference/endpoint/post-agents). This lets you pre-register agents with metadata before they make their first request.
+</Tip>
+
 ## Supported providers
 
 | Provider | Models | Thinking / AIP Support | Auth Header |
