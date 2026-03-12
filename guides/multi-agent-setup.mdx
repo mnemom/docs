@@ -355,6 +355,34 @@ A common fleet pattern:
 
 For full details on each mode, see [Enforcement Modes](/smoltbot/enforcement).
 
+## API-Based Registration
+
+In addition to CLI-based setup, you can register and manage agents programmatically via the CRUD API. This is useful for automated fleet provisioning, CI/CD pipelines, and dynamic agent lifecycle management.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | [`/v1/agents`](/api-reference/endpoint/post-agents) | Register a new agent with name, hash proof, and optional card/policy |
+| `GET` | [`/v1/agents`](/api-reference/endpoint/get-agents) | List all agents owned by the authenticated user |
+| `PUT` | [`/v1/agents/:id`](/api-reference/endpoint/put-agents-agent-id) | Update an agent's name |
+| `DELETE` | [`/v1/agents/:id`](/api-reference/endpoint/delete-agents-agent-id) | Deactivate an agent (soft-delete, preserves traces) |
+
+When registering an agent, you must provide a `hash_proof` -- the SHA-256 hex digest of your API key combined with the agent name (`SHA256(apiKey + '|' + agentName)`). This proves ownership of the API key without transmitting it.
+
+```bash
+# Register a new agent with an Alignment Card
+curl -X POST https://api.mnemom.ai/v1/agents \
+  -H "Authorization: Bearer $MNEMOM_JWT" \
+  -H "content-type: application/json" \
+  -d '{
+    "name": "shopping-agent",
+    "hash_proof": "a1b2c3...",
+    "card_json": { ... },
+    "policy_yaml": "version: 1\nrules: ..."
+  }'
+```
+
+The response includes the `agent_hash` (the gateway-computed identity), `card_id` (if a card was attached), and `policy_created` (if a policy was attached). If an agent with the same hash already exists, the API returns `409 Conflict`.
+
 ## Next Steps
 
 <CardGroup cols={3}>
