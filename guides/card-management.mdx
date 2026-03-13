@@ -415,16 +415,18 @@ The card panel updates immediately after saving. You can also confirm via CLI wi
 
 ## Publishing via API
 
-Update your agent's alignment card directly with a `PATCH` request:
+Update your agent's alignment card directly with a `PATCH` request. If the agent does not yet have a card, one will be created automatically.
 
-```bash
+Authenticate with either a Bearer JWT or an API key:
+
+<CodeGroup>
+```bash API Key
 curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-Mnemom-Api-Key: mnm_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{
     "card_json": {
       "aap_version": "0.5.0",
-      "card_id": "ac-your-card-id",
       "agent_id": "your-agent-id",
       "issued_at": "2026-02-21T00:00:00Z",
       "expires_at": "2026-08-21T00:00:00Z",
@@ -444,6 +446,34 @@ curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
     }
   }'
 ```
+
+```bash Bearer Token
+curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "card_json": {
+      "aap_version": "0.5.0",
+      "agent_id": "your-agent-id",
+      "issued_at": "2026-02-21T00:00:00Z",
+      "expires_at": "2026-08-21T00:00:00Z",
+      "principal": { "type": "human", "relationship": "delegated_authority" },
+      "values": { "declared": ["transparency", "honesty"], "hierarchy": "lexicographic" },
+      "autonomy_envelope": {
+        "bounded_actions": ["inference", "read"],
+        "escalation_triggers": [],
+        "forbidden_actions": ["exfiltrate_data"]
+      },
+      "audit_commitment": {
+        "trace_format": "ap-trace-v1",
+        "retention_days": 90,
+        "queryable": true,
+        "tamper_evidence": "append_only"
+      }
+    }
+  }'
+```
+</CodeGroup>
 
 See the [API reference](/api-reference/endpoint/patch-agents-agent-id-card) for full request/response details.
 
