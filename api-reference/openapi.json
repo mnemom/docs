@@ -121,7 +121,7 @@
       "description": "On-chain Merkle root anchoring and score publishing. Anchor integrity proofs to blockchain, publish scores, and verify on-chain proofs."
     }
   ],
-  "security": [{"BearerAuth": []}],
+  "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
   "paths": {
     "/agents": {
       "post": {
@@ -129,7 +129,7 @@
         "summary": "Register a new agent",
         "description": "Register a new agent with a name and hash proof. Optionally attach an alignment card and policy.",
         "tags": ["Agents"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -226,7 +226,7 @@
         "summary": "List your agents",
         "description": "List all agents owned by the authenticated user. Supports pagination.",
         "tags": ["Agents"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "name": "limit",
@@ -325,7 +325,7 @@
         "summary": "Update agent name",
         "description": "Update the name of an agent you own.",
         "tags": ["Agents"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "$ref": "#/components/parameters/AgentId"
@@ -388,7 +388,7 @@
         "summary": "Deactivate agent",
         "description": "Soft-delete an agent by setting its status to deactivated and unlinking it from your account.",
         "tags": ["Agents"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "$ref": "#/components/parameters/AgentId"
@@ -464,13 +464,16 @@
       "patch": {
         "operationId": "updateAgentCard",
         "summary": "Update alignment card",
-        "description": "**Requires ServiceRole authentication.** This endpoint is only accessible to platform administrators with the Supabase service role key. Regular API keys and user tokens cannot access this endpoint.\n\nUpdate the alignment card for an agent.",
+        "description": "Update or create the alignment card for an agent. If the agent does not yet have a card, one will be created automatically. Accepts Bearer JWT or API key authentication. Org-scoped API keys can manage cards for any agent within their organization.",
         "tags": [
           "Agents"
         ],
         "security": [
           {
-            "ServiceRole": []
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
           }
         ],
         "parameters": [
@@ -6087,7 +6090,7 @@
         "summary": "List org conscience values",
         "description": "Returns all conscience values for the org, along with mode and enabled status. Requires Enterprise plan with custom_conscience_values feature flag.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6116,7 +6119,7 @@
         "summary": "Create org conscience value",
         "description": "Create a new custom conscience value. Max 20 per org. Requires owner or admin role.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6157,7 +6160,7 @@
         "summary": "Update org conscience value",
         "description": "Update fields on an existing conscience value. Requires owner or admin role.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
           {"name": "value_id", "in": "path", "required": true, "schema": {"type": "string"}}
@@ -6196,7 +6199,7 @@
         "summary": "Delete org conscience value",
         "description": "Permanently delete a conscience value. Requires owner or admin role.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}},
           {"name": "value_id", "in": "path", "required": true, "schema": {"type": "string"}}
@@ -6226,7 +6229,7 @@
         "summary": "Reorder org conscience values",
         "description": "Set the sort order for all conscience values.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6268,7 +6271,7 @@
         "summary": "Update org conscience mode",
         "description": "Set the conscience mode (augment/replace) and enabled flag.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6311,7 +6314,7 @@
         "summary": "Get conscience values audit log",
         "description": "Returns the audit trail for conscience value changes. Requires owner, admin, or auditor role.",
         "tags": ["Conscience Values"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6467,7 +6470,7 @@
         "summary": "Get org card template",
         "description": "Returns the organization's alignment card template, including enabled status and the template card JSON. Requires Enterprise plan.",
         "tags": ["Card Templates"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6491,7 +6494,7 @@
         "summary": "Update org card template",
         "description": "Create or update the organization's alignment card template. All agents in the org will inherit this template. Requires owner or admin role. Requires Enterprise plan.",
         "tags": ["Card Templates"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6530,7 +6533,7 @@
         "summary": "Delete org card template",
         "description": "Delete the organization's alignment card template. All agents revert to using only their individual cards. Requires owner role. Requires Enterprise plan.",
         "tags": ["Card Templates"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "org_id", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
@@ -6559,7 +6562,7 @@
         "summary": "Set agent org card exemption",
         "description": "Set or remove an agent's exemption from the organization's card template. Exempt agents use only their individual card. Requires owner or admin role. Requires Enterprise plan.",
         "tags": ["Card Templates"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -6607,7 +6610,7 @@
         "summary": "Create a team",
         "description": "Create a new team with at least 2 agent members. Team names must be unique within the organization.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -6663,7 +6666,7 @@
         "summary": "Get team by ID",
         "description": "Retrieve a team and its current members.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -6694,7 +6697,7 @@
         "summary": "Update team",
         "description": "Update a team's name, description, or metadata.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -6741,7 +6744,7 @@
         "summary": "Archive team",
         "description": "Archive a team. Archived teams are soft-deleted and can be listed with status=archived.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -6772,7 +6775,7 @@
         "summary": "Add members to team",
         "description": "Add one or more agents to a team. Teams have a maximum of 50 members.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -6829,7 +6832,7 @@
         "summary": "Remove member from team",
         "description": "Remove an agent from a team. Teams must retain a minimum of 2 members.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"},
           {"$ref": "#/components/parameters/AgentId"}
@@ -6869,7 +6872,7 @@
         "summary": "Get team roster history",
         "description": "Retrieve the history of member additions and removals for a team.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"},
           {"name": "page", "in": "query", "schema": {"type": "integer", "default": 1}, "description": "Page number"},
@@ -6906,7 +6909,7 @@
         "summary": "List teams in organization",
         "description": "List all teams belonging to an organization, filtered by status.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/OrgId"},
           {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["active", "archived"], "default": "active"}, "description": "Filter by team status"},
@@ -6944,7 +6947,7 @@
         "summary": "Get team alignment card",
         "description": "Retrieve the active alignment card for a team, or null if no card is set.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -6976,7 +6979,7 @@
         "summary": "Set team alignment card",
         "description": "Manually set an alignment card for a team. The card must include principal, values, autonomy_envelope, and audit_commitment sections.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -7041,7 +7044,7 @@
         "summary": "Derive team alignment card from members",
         "description": "Automatically derive a team alignment card from the individual cards of team members. Requires at least 2 members with active alignment cards.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -7082,7 +7085,7 @@
         "summary": "Get team card history",
         "description": "Retrieve the history of alignment cards for a team.",
         "tags": ["Teams"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -7122,7 +7125,7 @@
         "summary": "Get team reputation score",
         "description": "Retrieve the current reputation score for a team, including component breakdown and A2A trust extension.",
         "tags": ["Team Reputation"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -7153,7 +7156,7 @@
         "summary": "Get team reputation history",
         "description": "Retrieve weekly reputation score snapshots for a team.",
         "tags": ["Team Reputation"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/TeamId"}
         ],
@@ -7264,7 +7267,7 @@
         "summary": "Get agent policy",
         "description": "Retrieve the CLPI policy currently assigned to the specified agent. Returns the full policy document including capability mappings, forbidden rules, escalation triggers, and enforcement defaults.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -7286,7 +7289,7 @@
         "summary": "Set agent policy",
         "description": "Create or replace the CLPI policy for the specified agent. The policy defines which tools map to which capabilities, forbidden tool patterns, escalation triggers, and enforcement defaults. Agent-level policies override org-level policies when merged.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -7317,7 +7320,7 @@
         "summary": "Delete agent policy",
         "description": "Remove the agent-level CLPI policy. After deletion the agent will inherit the org-level policy (if any) or operate with no policy constraints.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -7346,7 +7349,7 @@
         "summary": "Get merged org+agent policy",
         "description": "Returns the effective policy for the agent after merging the org-level policy with any agent-level overrides. This is the policy that the enforcement engine actually applies at runtime. Org defaults are used for any field not overridden at the agent level.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -7370,7 +7373,7 @@
         "summary": "Get org policy",
         "description": "Retrieve the CLPI policy defined at the organization level. All agents in the org inherit this policy unless they have agent-level overrides.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/OrgId"}
         ],
@@ -7392,7 +7395,7 @@
         "summary": "Set org policy",
         "description": "Create or replace the CLPI policy at the organization level. This policy applies to all agents in the org as the base layer, which agent-level policies can override.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/OrgId"}
         ],
@@ -7423,7 +7426,7 @@
         "summary": "Delete org policy",
         "description": "Remove the organization-level CLPI policy. All agents in the org will lose their inherited policy defaults and rely solely on agent-level policies (if any).",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/OrgId"}
         ],
@@ -7452,7 +7455,7 @@
         "summary": "Get org policy version history",
         "description": "Retrieve the version history of the organization's CLPI policy. Each entry includes the full policy snapshot, who made the change, and when. Useful for auditing policy evolution over time.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/OrgId"},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of versions to return"},
@@ -7496,7 +7499,7 @@
         "summary": "Evaluate policy against tools",
         "description": "Evaluate a CLPI policy against a list of tools to determine which are allowed, forbidden, or unmapped. Returns a verdict with detailed violations, warnings, card coverage gaps, and overall coverage percentage. Useful for dry-run validation before deploying a policy.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -7540,7 +7543,7 @@
         "summary": "Evaluate policy against historical traces",
         "description": "Evaluate a CLPI policy against historical AIP traces for an agent. Replays past tool invocations through the policy to identify what would have been blocked, escalated, or flagged. Useful for understanding the impact of a policy change before rolling it out.",
         "tags": ["Policy"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -7608,7 +7611,7 @@
         "summary": "Reclassify a checkpoint violation",
         "description": "Reclassify a previously recorded AIP checkpoint violation. This allows operators to correct false positives or adjust severity after manual review. The reclassification is recorded in the audit trail and can trigger a score recomputation.",
         "tags": ["Reclassification"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -7641,7 +7644,7 @@
         "summary": "Trigger score recomputation",
         "description": "Trigger a full recomputation of the agent's reputation and compliance scores. This re-evaluates all checkpoints, reclassifications, and card amendments to produce an updated score. Useful after bulk reclassifications or policy changes.",
         "tags": ["Reclassification"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "name": "agent_id",
@@ -7701,7 +7704,7 @@
         "summary": "Export compliance record",
         "description": "Export a comprehensive compliance record for the agent including all checkpoints, reclassifications, card amendments, and score history. Returns a structured document suitable for regulatory audits and compliance reviews.",
         "tags": ["Reclassification"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"},
           {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["json", "csv"], "default": "json"}, "description": "Export format"},
@@ -7746,7 +7749,7 @@
         "summary": "List reclassification history",
         "description": "Retrieve the history of all checkpoint reclassifications for the specified agent. Each entry includes the original and reclassified type, reason, and score impact.",
         "tags": ["Reclassification"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of records to return"},
@@ -7781,7 +7784,7 @@
         "summary": "List card amendment history",
         "description": "Retrieve the history of all alignment card amendments for the specified agent. Card amendments are changes to the agent's alignment card that were triggered by reclassifications, policy changes, or manual edits.",
         "tags": ["Reclassification"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}, "description": "Maximum number of amendments to return"},
@@ -7829,7 +7832,7 @@
         "summary": "Analyze team fault lines",
         "description": "Analyze alignment fault lines across a team of agents. Identifies capabilities, values, or constraints that some agents declare but others miss, creating potential alignment gaps. Returns a fleet-wide score with individual fault line details and resolution hints.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -7877,7 +7880,7 @@
         "summary": "Forecast team risks",
         "description": "Forecast potential risks and failure modes for a team based on current alignment state, historical trends, and known fault lines. Returns ranked failure modes with probability estimates, impact assessments, and mitigation suggestions.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -7925,7 +7928,7 @@
         "summary": "Generate policy recommendation",
         "description": "Generate a recommended CLPI policy for a team based on current agent capabilities, alignment cards, historical violations, and known fault lines. The recommendation aims to close coverage gaps while minimizing disruption to existing workflows.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -7991,7 +7994,7 @@
         "summary": "Create transaction with guardrails",
         "description": "Create a new guarded transaction. The transaction wraps one or more agent actions with CLPI policy guardrails, ensuring all tool invocations are evaluated against the effective policy before execution. Returns the transaction ID and initial evaluation status.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -8054,7 +8057,7 @@
         "summary": "Get transaction details",
         "description": "Retrieve the details of a guarded transaction including its current status, policy evaluation result, and action outcomes.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "name": "id",
@@ -8103,7 +8106,7 @@
         "summary": "Delete transaction",
         "description": "Delete a guarded transaction. Only transactions in pending or completed status can be deleted. Active transactions must be completed or cancelled first.",
         "tags": ["Intelligence"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {
             "name": "id",
@@ -8141,7 +8144,7 @@
         "summary": "Anchor Merkle root on-chain",
         "description": "Anchor a Merkle root hash on-chain for a batch of integrity proofs. This creates an immutable, publicly verifiable record of the integrity state at a point in time. Returns the transaction hash, block number, and gas used.",
         "tags": ["On-Chain"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -8199,7 +8202,7 @@
         "summary": "Publish scores on-chain",
         "description": "Publish agent integrity or reputation scores on-chain for public verifiability. Scores are batched into a Merkle tree and the root is anchored. Individual scores can later be verified using Merkle proofs.",
         "tags": ["On-Chain"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "requestBody": {
           "required": true,
           "content": {
@@ -8274,7 +8277,7 @@
         "summary": "Verify on-chain proof",
         "description": "Verify an agent's integrity or score proof against the on-chain Merkle root. Checks that the provided proof correctly links the agent's data to an anchored root, confirming the data has not been tampered with since anchoring.",
         "tags": ["On-Chain"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"},
           {"name": "anchor_id", "in": "query", "schema": {"type": "string"}, "description": "Specific anchor ID to verify against. If omitted, verifies against the most recent anchor."},
@@ -8318,7 +8321,7 @@
         "summary": "Get on-chain status",
         "description": "Get the current on-chain anchoring status for an agent. Returns the most recent anchor, pending publications, and overall on-chain coverage statistics.",
         "tags": ["On-Chain"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"$ref": "#/components/parameters/AgentId"}
         ],
@@ -8358,7 +8361,7 @@
         "summary": "Get on-chain history",
         "description": "Retrieve the history of on-chain Merkle root anchoring events. Returns a paginated list of all anchors with their transaction details, included agents, and verification status.",
         "tags": ["On-Chain"],
-        "security": [{"BearerAuth": []}],
+        "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
         "parameters": [
           {"name": "chain", "in": "query", "schema": {"type": "string", "enum": ["ethereum", "polygon", "base"]}, "description": "Filter by blockchain network"},
           {"name": "agent_id", "in": "query", "schema": {"type": "string"}, "description": "Filter anchors that include this agent"},
