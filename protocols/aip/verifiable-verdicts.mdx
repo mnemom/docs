@@ -96,17 +96,30 @@ The `image_id` is a content hash of the compiled guest program. It acts as a com
 
 ---
 
-## Optimistic Proving Strategy
+## Tiered Proving Strategy
 
-Not every checkpoint receives a ZK proof. Proving has non-trivial cost and latency, so AIP uses an **optimistic proving strategy**:
+Not every checkpoint receives a ZK proof. Proving has non-trivial cost and latency, so AIP uses a **tiered proving strategy** that distinguishes real violations from configuration errors:
 
 | Verdict | Proving Policy | Rationale |
 |---------|---------------|-----------|
-| `boundary_violation` | **Always proven** | Highest-consequence verdicts must be independently verifiable. A false boundary_violation can block an agent; a missed one can allow harm. |
-| `review_needed` | **10% stochastic sampling** | Sampled proofs provide statistical confidence without proving every checkpoint. |
-| `clear` | **10% stochastic sampling** | Same stochastic rate. Sampling clear verdicts catches systematic errors in the derivation logic. |
+| `boundary_violation` (no card gaps) | **Proven** (subject to `proof_boundary_cap`) | Confirmed behavioral violations must be independently verifiable. |
+| `boundary_violation` (with card gaps) | **Deferred** | Card-gap violations are configuration errors (stale alignment cards), not agent misbehavior. Proving is deferred until [DDR reconciliation](/concepts/card-lifecycle#disagreement-reviews) classifies the violation. |
+| `review_needed` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampled proofs provide statistical confidence without proving every checkpoint. |
+| `clear` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampling clear verdicts catches systematic errors in the derivation logic. |
 
-The 10% sampling rate means that over a session of 100 checkpoints, approximately 10 will have ZK proofs. This provides strong probabilistic assurance that the derivation logic is functioning correctly, while keeping proving costs proportional to usage.
+### Deferred Proofs
+
+When the [policy engine](/concepts/policy-engine) detects `card_gaps` alongside a `boundary_violation`, the gateway creates a proof record with `status: deferred` instead of immediately dispatching to the prover. This creates a tamper-evident audit trail without incurring GPU cost.
+
+The observer's DDR (Distributed Deliberation Review) reconciliation later classifies the violation:
+
+| DDR Outcome | Proof Resolution | GPU Cost |
+|-------------|-----------------|----------|
+| `card_gap` | `skipped_card_gap` — proof permanently skipped | None |
+| `observer_noise` | `skipped_noise` — proof permanently skipped | None |
+| `aip_miss` | Upgraded to `pending` and dispatched to prover | Normal |
+
+This means only **confirmed real violations** receive the expensive GPU treatment. During rapid development when alignment cards frequently drift, this can reduce proving costs by 80-95%.
 
 ### On-Demand Proving
 
@@ -115,6 +128,7 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 - An operator wants to verify a specific `review_needed` verdict
 - An auditor requires proof for a specific checkpoint
 - The stochastic sample missed a checkpoint of interest
+- A deferred proof needs to be forced without waiting for DDR
 
 ---
 
@@ -196,6 +210,8 @@ curl https://api.mnemom.ai/v1/checkpoints/{checkpoint_id}/proof
 ```
 
 The `status` field progresses through: `pending` -> `proving` -> `completed` (or `failed`).
+
+For deferred proofs, the progression is: `deferred` -> `skipped_card_gap` | `skipped_noise` | `pending` (then normal flow).
 
 ---
 
