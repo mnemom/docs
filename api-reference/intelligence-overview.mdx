@@ -96,6 +96,17 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
       "affects_capabilities": ["content_moderation"]
     }
   ],
+  "alignments": [
+    {
+      "id": "al-abc123",
+      "fault_line_ids": ["fl-001", "fl-002", "fl-003"],
+      "minority_agents": ["agent-c"],
+      "majority_agents": ["agent-a", "agent-b"],
+      "alignment_score": 0.87,
+      "severity": "high",
+      "description": "3 fault lines consistently isolate agent-c from the team"
+    }
+  ],
   "summary": {
     "total": 3,
     "resolvable": 2,
@@ -114,6 +125,7 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
 | `analysis_id` | string | Unique identifier for this analysis (used as input to `/forecast`) |
 | `fleet_score` | number | Overall fleet alignment score (0.0 -- 1.0) |
 | `fault_lines` | array | List of detected fault lines |
+| `alignments` | array | List of structural fault line alignments (compound fault lines that consistently split the same agents) |
 | `summary` | object | Aggregate counts by classification and severity |
 
 **FaultLine object:**
@@ -138,6 +150,7 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
 | `resolvable` | The fault line can be automatically resolved by adjusting agent configurations |
 | `priority_mismatch` | Agents have the same value but with different priority levels |
 | `incompatible` | Agents have fundamentally conflicting values that cannot be automatically reconciled |
+| `complementary` | Value divergence appears intentional given agent specializations — may be a feature of the team architecture |
 
 **Severity levels:**
 
@@ -157,6 +170,22 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
 | `priority_mismatch` | number | Count of `priority_mismatch` fault lines |
 | `incompatible` | number | Count of `incompatible` fault lines |
 | `critical_count` | number | Count of fault lines with `critical` severity |
+
+**FaultLineAlignment object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique alignment identifier |
+| `fault_line_ids` | string[] | IDs of the individual fault lines that form this structural fault line |
+| `minority_agents` | string[] | Agents on the smaller side of the divide |
+| `majority_agents` | string[] | Agents on the larger side of the divide |
+| `alignment_score` | number | Strength of the structural alignment (0.0 -- 1.0); higher means the same agents are consistently isolated across multiple fault lines |
+| `severity` | string | Severity level: `low`, `medium`, `high`, or `critical` |
+| `description` | string | Human-readable summary of the structural fault line |
+
+<Note>
+The fault line analysis is grounded in the `checkFleetFaultLines` function from `@mnemom/agent-alignment-protocol`. The same analysis is reproducible locally without the API.
+</Note>
 
 **Error responses:**
 

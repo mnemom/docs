@@ -63,6 +63,110 @@ For each value in the union of all declared values, the report shows:
 
 Values are sorted by impact, helping fleet operators prioritize alignment work.
 
+## Fault Line Analysis
+
+The divergence report identifies *where* agents disagree. Fault line analysis goes further: it classifies each divergence into an actionable category, scores its impact, and provides resolution hints. Use `analyzeFaultLines` to classify an existing `FleetCoherenceResult`, or use `checkFleetFaultLines` as a convenience wrapper that runs both steps in one call.
+
+### The FaultLine Type
+
+Each detected fault line has the following shape:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique fault line identifier |
+| `value` | string | The value or capability where the fault line exists |
+| `classification` | string | One of `resolvable`, `priority_mismatch`, `incompatible`, `complementary` |
+| `severity` | string | `low`, `medium`, `high`, or `critical` |
+| `agents_declaring` | string[] | Agents that declare this value |
+| `agents_missing` | string[] | Agents that are missing this value |
+| `agents_conflicting` | string[] | Agents with an explicit `conflicts_with` entry for this value |
+| `impact_score` | number | Estimated impact on fleet operations (0.0 -- 1.0) |
+| `resolution_hint` | string | Suggested action to resolve this fault line |
+| `affects_capabilities` | string[] | Capabilities affected by this fault line |
+
+### Classifications
+
+| Classification | Meaning | Typical Resolution |
+|---------------|---------|-------------------|
+| `resolvable` | The value is missing from one or more agents — no explicit conflict exists. A card update fixes it. | Add the missing value to the agent's alignment card |
+| `priority_mismatch` | All agents declare the value but diverge on its priority level or definition | Review value definitions across agents and align on priority weights |
+| `incompatible` | One or more agents have an explicit `conflicts_with` entry for this value | Requires human review — this is a fundamental value conflict |
+| `complementary` | Divergence appears intentional given agent specializations — e.g., a safety-focused agent appropriately emphasizes safety more than a research agent | No action needed; this is intentional team architecture |
+
+### Impact Score Formula
+
+The impact score estimates how much a fault line affects fleet operations:
+
+```
+impact_score = impact_on_fleet_score × coordination_overlap
+```
+
+Where `coordination_overlap` is how frequently the affected agents interact. Impact scores can optionally be weighted by agent reputation scores — higher-reputation agents have their fault lines weighted more heavily since their behavior is better established.
+
+### SDK Usage
+
+<CodeGroup>
+
+```typescript TypeScript
+import { checkFleetFaultLines } from '@mnemom/agent-alignment-protocol';
+
+const { coherence, analysis } = checkFleetFaultLines([
+  { agentId: 'agent-a', card: cardA },
+  { agentId: 'agent-b', card: cardB },
+  { agentId: 'agent-c', card: cardC },
+]);
+
+console.log(`Fleet score: ${coherence.fleet_score}`);
+console.log(`Fault lines: ${analysis.summary.total}`);
+console.log(`Resolvable: ${analysis.summary.resolvable}`);
+analysis.fault_lines.forEach(fl => {
+  console.log(`${fl.value} (${fl.classification}): ${fl.resolution_hint}`);
+});
+```
+
+```python Python
+from aap import check_fleet_fault_lines
+
+result = check_fleet_fault_lines([
+    {"agentId": "agent-a", "card": card_a},
+    {"agentId": "agent-b", "card": card_b},
+    {"agentId": "agent-c", "card": card_c},
+])
+
+print(f"Fleet score: {result.coherence.fleet_score}")
+print(f"Fault lines: {result.analysis.summary.total}")
+for fl in result.analysis.fault_lines:
+    print(f"{fl.value} ({fl.classification}): {fl.resolution_hint}")
+```
+
+</CodeGroup>
+
+---
+
+## Structural Fault Lines
+
+When multiple fault lines consistently split agents along the same divide, this is a **structural fault line** — also called a fault line alignment. It is substantially more serious than several independent single-value gaps, because it signals a deep architectural division in the fleet.
+
+**Example:** If agents A and B declare `accuracy`, `helpfulness`, and `safety` but agent C declares none of them, these three individual fault lines all isolate agent C. The `FaultLineAnalysis.alignments` array will contain one `FaultLineAlignment` describing this structural isolation. Agent C is not merely missing one value — it is systematically on the other side of a team divide.
+
+### The FaultLineAlignment Type
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique alignment identifier |
+| `fault_line_ids` | string[] | IDs of the individual fault lines that form this structural fault line |
+| `minority_agents` | string[] | Agents on the smaller side of the divide |
+| `majority_agents` | string[] | Agents on the larger side of the divide |
+| `alignment_score` | number | Strength of the structural alignment (0.0 -- 1.0); higher means more consistent splitting |
+| `severity` | string | `low`, `medium`, `high`, or `critical` |
+| `description` | string | Human-readable summary of the structural fault line |
+
+<Note>
+Structural fault lines are grounded in Lau & Murnighan's (1998) research on demographic faultlines in human teams, applied to agent value alignment. Just as human teams with strong demographic faultlines are prone to subgroup conflict, agent fleets with strong structural fault lines are prone to coordination failures when the minority subgroup operates under different value constraints.
+</Note>
+
+---
+
 ## SDK Usage
 
 ### TypeScript
