@@ -121,6 +121,33 @@ Custom values are supported but must be defined in a `definitions` block:
 
 The `conflicts_with` array lists values the agent refuses to coordinate with during [value coherence checks](/concepts/value-coherence).
 
+### What belongs in values.declared
+
+`values.declared` is consulted by the AIP integrity monitor at runtime to verify that the agent's actual reasoning aligns with its stated commitments. Only include values the agent will genuinely apply in its decision-making.
+
+**Do declare** — ethical and behavioral values that drive how the agent makes decisions:
+
+- `transparency`, `honesty`, `accuracy`, `safety`, `accountability`, `helpfulness`, `fairness`, `deliberation_before_action`
+
+These represent the agent's decision-making commitments and should appear in AP-Traces via `values_applied` when they influence a decision.
+
+**Do NOT declare** — role capabilities, operational principles, or job-function descriptors:
+
+| What you might want to declare | Where it actually belongs |
+|---|---|
+| `fiduciary_precision` | `extensions.clpi.role` or `extensions` metadata |
+| `organizational_clarity` | `extensions.clpi.role` or `extensions` metadata |
+| `conservative_risk_management` (as a role label) | `extensions` metadata — unless it materially changes ethical reasoning |
+| `read_documents` (a capability) | `autonomy_envelope.bounded_actions` |
+
+**Rule of thumb**: If removing the value from a card would change HOW the agent reasons about ethics, it's a value. If it describes WHAT the agent is or does in its role, it belongs in `extensions`.
+
+**Cross-cutting baseline**: All agents in a team should share a common baseline of behavioral values — `transparency`, `honesty`, `accountability`, `accuracy`, `safety`, `quality`, `helpfulness`, `deliberation_before_action`. Role-specific values layer on top of this shared baseline, not in place of it.
+
+<Note>
+  Custom values declared by one agent but not others create fault lines in fleet coherence analysis. If the divergence is intentional role specialization — for example, a CFO agent has `fiduciary_precision` and a CoS agent has `organizational_clarity` — set `extensions.clpi.role` on each agent's card. The fault line analyzer uses this field to classify those divergences as `complementary` (by design) rather than `resolvable` (a gap to fill).
+</Note>
+
 ### Autonomy Envelope Block
 
 The autonomy envelope defines the boundaries of independent action:
