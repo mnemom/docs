@@ -1,0 +1,349 @@
+---
+title: "CFD Webhooks"
+description: "Receive real-time HTTP POST notifications for Context Front Door evaluation events — block decisions, quarantine alerts, canary triggers, and campaign detection."
+sidebarTitle: "CFD Webhooks"
+icon: "webhook"
+---
+
+# CFD Webhooks
+
+**React to threats in real-time.** CFD emits webhook events when it blocks a message, quarantines a session, detects a canary trigger, or identifies a cross-agent attack campaign. Route these events to PagerDuty, Slack, your SIEM, or any HTTP endpoint.
+
+CFD webhooks reuse the existing AIP webhook infrastructure. If you already have AIP webhooks configured, add `cfd.*` to your `event_types` — no new endpoints or secrets required.
+
+```
+CFD evaluation ──→ Gateway ──→ Signed POST (X-AIP-Signature) ──→ Your Endpoint
+                                      │
+                                      ├── PagerDuty (cfd.evaluation.block)
+                                      ├── Slack (cfd.evaluation.quarantine)
+                                      ├── SIEM (all cfd.*)
+                                      └── Security on-call (cfd.canary.triggered)
+```
+
+---
+
+## Event Types
+
+| Event | When It Fires | Severity |
+|-------|--------------|----------|
+| `cfd.evaluation.warn` | CFD flags a turn above the warn threshold but below block | Informational |
+| `cfd.evaluation.quarantine` | CFD quarantines a turn for human review | High |
+| `cfd.evaluation.block` | CFD blocks a turn outright | Critical |
+| `cfd.canary.triggered` | A canary credential was used — indicating active exploitation | Critical |
+| `cfd.session.escalated` | Session risk has risen to `high` across multiple turns | High |
+| `cfd.campaign.detected` | Multiple agents have received similar attacks from the same infrastructure | Critical |
+
+---
+
+## Payload Structure
+
+All events share a common envelope. The `data` object varies by event type.
+
+### `cfd.evaluation.block`
+
+```json
+{
+  "event": "cfd.evaluation.block",
+  "timestamp": "2026-03-30T14:32:11Z",
+  "agent_id": "smolt-18a228f3",
+  "session_id": "18a228f3-1234",
+  "data": {
+    "verdict": "block",
+    "quarantine_id": "qid_7f3a9b2c",
+    "overall_risk": 0.94,
+    "top_threat": {
+      "type": "bec_fraud",
+      "confidence": 0.94,
+      "reasoning": "Financial action ('wire transfer') · Urgency ('immediately') · Authority ('CEO') · Secrecy ('don't tell')"
+    },
+    "detection_layer": "l2",
+    "review_url": "https://app.mnemom.com/cfd/quarantine/qid_7f3a9b2c"
+  }
+}
+```
+
+### `cfd.evaluation.quarantine`
+
+```json
+{
+  "event": "cfd.evaluation.quarantine",
+  "timestamp": "2026-03-30T15:11:04Z",
+  "agent_id": "smolt-18a228f3",
+  "session_id": "18a228f3-1234",
+  "data": {
+    "verdict": "quarantine",
+    "quarantine_id": "qid_2a9c4f11",
+    "overall_risk": 0.71,
+    "top_threat": {
+      "type": "indirect_injection",
+      "confidence": 0.71,
+      "reasoning": "Imperative instruction structure detected in tool result · References external data destination"
+    },
+    "detection_layer": "l1",
+    "pending_human_review": true,
+    "review_url": "https://app.mnemom.com/cfd/quarantine/qid_2a9c4f11"
+  }
+}
+```
+
+### `cfd.canary.triggered`
+
+```json
+{
+  "event": "cfd.canary.triggered",
+  "timestamp": "2026-03-30T16:00:00Z",
+  "agent_id": "smolt-18a228f3",
+  "session_id": "18a228f3-5678",
+  "data": {
+    "canary_id": "can_f9e2a01b",
+    "canary_type": "api_key",
+    "triggered_by": "inbound_message",
+    "raw_signal": "Canary credential appeared in inbound turn content",
+    "action_taken": "session_terminated"
+  }
+}
+```
+
+### `cfd.session.escalated`
+
+```json
+{
+  "event": "cfd.session.escalated",
+  "timestamp": "2026-03-30T16:45:22Z",
+  "agent_id": "smolt-a9f34c12",
+  "session_id": "a9f34c12-2233",
+  "data": {
+    "previous_risk": "medium",
+    "current_risk": "high",
+    "escalation_reason": "hijack_attempt",
+    "turn_count": 7,
+    "pattern_description": "Benign session pivot — topic and action scope shifted abruptly at turn 6"
+  }
+}
+```
+
+### `cfd.campaign.detected`
+
+```json
+{
+  "event": "cfd.campaign.detected",
+  "timestamp": "2026-03-30T17:22:09Z",
+  "data": {
+    "campaign_id": "camp_b3c9d4a1",
+    "threat_type": "bec_fraud",
+    "affected_agents": ["smolt-18a228f3", "smolt-a9f34c12", "smolt-00ff1122"],
+    "agent_count": 3,
+    "similarity_score": 0.92,
+    "first_seen": "2026-03-30T16:50:00Z",
+    "infrastructure_hint": "Similar sender fingerprint and payload structure across agents"
+  }
+}
+```
+
+---
+
+## Signature Verification
+
+Every CFD webhook is signed with HMAC-SHA256, identical to AIP webhooks. The signature header is `X-AIP-Signature` with value `sha256=<hex digest>`.
+
+**Always verify signatures before acting on a webhook.** An unverified webhook can be spoofed.
+
+```typescript
+import crypto from 'crypto';
+import { Request, Response } from 'express';
+
+export function handleCfdWebhook(req: Request, res: Response) {
+  const signature = req.headers['x-aip-signature'] as string;
+  const secret = process.env.MNEMOM_WEBHOOK_SECRET!;
+
+  // Use the raw body — any middleware that parses JSON changes the byte sequence
+  const body = req.rawBody; // or however your framework exposes raw bytes
+
+  const expected =
+    'sha256=' +
+    crypto.createHmac('sha256', secret).update(body).digest('hex');
+
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  const event = JSON.parse(body);
+  // safe to process
+}
+```
+
+<Warning>
+Use `timingSafeEqual` rather than `===` for signature comparison. String equality is vulnerable to timing attacks that can be used to brute-force the secret one byte at a time.
+</Warning>
+
+**Timestamp freshness check (recommended):** Reject payloads where `timestamp` is older than 5 minutes to prevent replay attacks.
+
+```typescript
+const age = Date.now() - new Date(event.timestamp).getTime();
+if (age > 5 * 60 * 1000) {
+  return res.status(400).send('Stale event');
+}
+```
+
+---
+
+## Registration
+
+CFD events use the same webhook registration as AIP webhooks. Add `cfd.*` to your `event_types`:
+
+```bash
+# Add CFD events to an existing webhook endpoint
+curl -X PATCH https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id} \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_types": [
+      "integrity.violation",
+      "drift.detected",
+      "cfd.evaluation.block",
+      "cfd.evaluation.quarantine",
+      "cfd.evaluation.warn",
+      "cfd.canary.triggered",
+      "cfd.session.escalated",
+      "cfd.campaign.detected"
+    ]
+  }'
+```
+
+Or register a dedicated CFD endpoint:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.com/webhooks/cfd",
+    "description": "CFD security alerts",
+    "event_types": [
+      "cfd.evaluation.block",
+      "cfd.evaluation.quarantine",
+      "cfd.canary.triggered",
+      "cfd.campaign.detected"
+    ]
+  }'
+```
+
+---
+
+## Retry Logic
+
+Webhook delivery follows the same retry policy as AIP webhooks. If your endpoint returns a non-2xx status, Mnemom retries at increasing intervals:
+
+| Attempt | Delay |
+|---------|-------|
+| 1 (initial) | Immediate |
+| 2 | 1 000 ms |
+| 3 | 5 000 ms |
+| 4 | 15 000 ms |
+
+After 4 failed attempts, the delivery is marked `failed` in `aip_webhook_deliveries`. You can redeliver manually:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/deliveries/{delivery_id}/redeliver \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Integration Patterns
+
+### Route `cfd.evaluation.block` to on-call
+
+High-confidence blocks warrant immediate human attention. Page your security on-call directly.
+
+```typescript
+if (event.event === 'cfd.evaluation.block' && event.data.overall_risk > 0.9) {
+  await pagerduty.createIncident({
+    title: `CFD block: ${event.data.top_threat.type} on agent ${event.agent_id}`,
+    severity: 'critical',
+    body: event.data.top_threat.reasoning,
+    links: [{ href: event.data.review_url, text: 'Review in Mnemom' }],
+  });
+}
+```
+
+### Route `cfd.evaluation.quarantine` to human reviewer
+
+Quarantined items need human review before the session can continue. Post to Slack with the review link.
+
+```typescript
+if (event.event === 'cfd.evaluation.quarantine') {
+  await slack.postMessage({
+    channel: '#security-review',
+    text: [
+      `*CFD Quarantine* — Agent \`${event.agent_id}\``,
+      `Threat: \`${event.data.top_threat.type}\` (${Math.round(event.data.top_threat.confidence * 100)}% confidence)`,
+      `Reasoning: ${event.data.top_threat.reasoning}`,
+      `<${event.data.review_url}|Review and release →>`,
+    ].join('\n'),
+  });
+}
+```
+
+### Treat `cfd.canary.triggered` as a security incident
+
+A canary trigger means an attacker has gained access to a credential planted specifically to detect exploitation. Escalate immediately.
+
+```typescript
+if (event.event === 'cfd.canary.triggered') {
+  await incidentResponse.openP0({
+    title: `Canary credential triggered — active exploitation suspected`,
+    agentId: event.agent_id,
+    sessionId: event.session_id,
+    canaryId: event.data.canary_id,
+  });
+
+  // Optionally: contain the agent immediately
+  await fetch(`https://api.mnemom.ai/v1/orgs/${ORG_ID}/agents/${event.agent_id}/pause`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.MNEMOM_API_KEY}` },
+    body: JSON.stringify({ reason: 'Canary credential triggered — automated containment' }),
+  });
+}
+```
+
+### Log all CFD events to your SIEM
+
+```typescript
+app.post('/webhooks/cfd', verifySignature, (req, res) => {
+  const event = req.body;
+  siem.ingest({
+    source: 'mnemom-cfd',
+    event_type: event.event,
+    agent_id: event.agent_id,
+    session_id: event.session_id,
+    timestamp: event.timestamp,
+    payload: event.data,
+  });
+  res.status(200).send('ok');
+});
+```
+
+---
+
+## Testing Your Integration
+
+Send a test event to your endpoint without waiting for a real threat:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id}/test \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_type": "cfd.evaluation.block"}'
+```
+
+The test payload uses synthetic data but is signed with your real signing secret — your signature verification code runs against a real payload.
+
+---
+
+## Related
+
+- [Webhook Notifications](/guides/webhooks) — Full webhook infrastructure documentation
+- [CFD Threat Model](/guides/cfd-threat-model) — What each threat type means and how it's detected
+- [CFD Monitoring](/guides/cfd-monitoring) — Query evaluation history, metrics, and the security observatory
+- [CFD API Reference](/api-reference/cfd-overview) — Quarantine management and configuration endpoints
