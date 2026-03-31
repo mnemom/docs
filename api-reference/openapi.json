@@ -680,6 +680,75 @@
         }
       }
     },
+    "/agents/{agent_id}/rekey": {
+      "post": {
+        "operationId": "rekeyAgent",
+        "summary": "Re-bind agent to a new API key",
+        "description": "Updates the agent's key binding to a new provider API key hash. The agent ID, traces, alignment card, integrity score, and trust edges are fully preserved.\n\n**Security model**: Your API key is hashed on your device (SHA-256) before transmission — the raw key is never sent to Mnemom servers.\n\n**Named agents**: If this agent was registered with a name (via `x-smoltbot-agent`), hash the new key as `SHA256(newKey + '|' + agentName)` before submitting.\n\n**Conflict**: If the new key was already used and auto-created a new agent, the endpoint returns `409` with the conflicting agent ID.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["new_key_hash"],
+                "properties": {
+                  "new_key_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{16}$",
+                    "description": "First 16 hex characters of SHA256(newApiKey) for unnamed agents, or SHA256(newApiKey + '|' + agentName) for named agents. Compute client-side — do not transmit the raw key.",
+                    "example": "a3f8c1d9e7b2045f"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent successfully re-bound to the new key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {"type": "boolean", "example": true},
+                    "agent_id": {"type": "string", "example": "smolt-a1b2c3d4"},
+                    "rekeyed_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {
+            "description": "The new key is already bound to another agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {"type": "string"},
+                    "conflict_agent_id": {"type": "string", "example": "smolt-e5f6g7h8"}
+                  }
+                }
+              }
+            }
+          },
+          "429": {"description": "Rate limit exceeded."}
+        }
+      }
+    },
     "/agents/{agent_id}/traces": {
       "get": {
         "operationId": "getAgentTraces",
