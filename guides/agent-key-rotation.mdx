@@ -124,6 +124,56 @@ Replace `my-coder` with the exact name used when the agent was registered. Check
 }
 ```
 
+## Reading your key prefix
+
+After your first gateway request following this update, your agent displays the first 16 characters of its bound provider key — enough to identify the provider and key type without exposing sensitive material.
+
+| Provider | Example prefix |
+|----------|---------------|
+| Anthropic | `sk-ant-api03-xx…` |
+| OpenAI | `sk-proj-xxxxxxx…` |
+| Gemini | `AIzaSyBxxxxxxxx…` |
+
+Agents registered before this feature was shipped will show "Prefix not available" until they make their next gateway request, at which point the prefix is captured automatically.
+
+## Verifying your key binding
+
+Not sure which key is bound to your agent? Use verify binding to confirm without rekeying.
+
+### CLI
+
+```bash
+smoltbot agents check-binding
+# For a named agent:
+smoltbot agents check-binding my-coder
+```
+
+You will be prompted for the key to check. For CI use:
+
+```bash
+SMOLTBOT_CHECK_KEY=sk-ant-... smoltbot agents check-binding
+```
+
+### Dashboard
+
+In the agent Security tab, click **Verify my key** below the current key prefix display. Enter your key — the result appears inline.
+
+### API
+
+```bash
+KEY_HASH=$(printf '%s' 'your-api-key' | sha256sum | cut -c1-16)
+
+curl -X POST https://api.mnemom.ai/v1/agents/smolt-a1b2c3d4/verify-binding \
+  -H "Authorization: Bearer <your-mnemom-token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"key_hash\": \"$KEY_HASH\"}"
+```
+
+Response:
+```json
+{ "bound": true, "key_prefix": "sk-ant-api03-xx" }
+```
+
 ## Multiple named agents from the same key
 
 If you registered multiple named agents from the same provider key, each holds a distinct hash:

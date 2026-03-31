@@ -705,6 +705,11 @@
                     "pattern": "^[0-9a-f]{16}$",
                     "description": "First 16 hex characters of SHA256(newApiKey) for unnamed agents, or SHA256(newApiKey + '|' + agentName) for named agents. Compute client-side — do not transmit the raw key.",
                     "example": "a3f8c1d9e7b2045f"
+                  },
+                  "key_prefix": {
+                    "type": "string",
+                    "description": "First 16 characters of the new provider API key. Stored for display — not sensitive. If provided, returned in the response.",
+                    "example": "sk-ant-api03-xx"
                   }
                 }
               }
@@ -745,6 +750,56 @@
               }
             }
           },
+          "429": {"description": "Rate limit exceeded."}
+        }
+      }
+    },
+    "/agents/{agent_id}/verify-binding": {
+      "post": {
+        "operationId": "verifyAgentBinding",
+        "summary": "Verify key binding",
+        "description": "Checks whether a given API key hash matches the key currently bound to this agent. The raw key is hashed client-side — only the hash is transmitted.\n\n**Named agents**: hash as `SHA256(key + '|' + agentName)` before submitting.\n\nReturns `key_prefix` of the registered key regardless of match result — useful for debugging.",
+        "tags": ["Agents"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"$ref": "#/components/parameters/AgentId"}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["key_hash"],
+                "properties": {
+                  "key_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{16}$",
+                    "description": "First 16 hex chars of SHA256(apiKey) or SHA256(apiKey + '|' + agentName) for named agents.",
+                    "example": "a3f8c1d9e7b2045f"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Binding check result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bound": {"type": "boolean", "description": "True if the submitted hash matches the registered key."},
+                    "key_prefix": {"type": "string", "nullable": true, "description": "First 16 chars of the registered key, or null if not yet captured.", "example": "sk-ant-api03-xx"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
           "429": {"description": "Rate limit exceeded."}
         }
       }
