@@ -1,0 +1,160 @@
+---
+title: "Rotating Your Agent's API Key"
+description: "How to update an agent's provider key binding without losing history"
+sidebarTitle: "API Key Rotation"
+icon: "key"
+---
+
+# Rotating Your Agent's API Key
+
+When you rotate a provider API key (Anthropic, OpenAI, or Gemini), Mnemom would normally treat the new key as a brand-new, unregistered agent — losing your traces, alignment card, integrity score, and trust edges. **Rekeying** re-binds your existing agent to the new key in seconds, with no history lost.
+
+## How it works
+
+Your agent is identified by the first 16 characters of the SHA-256 hash of your provider API key. Mnemom never stores or transmits your raw key — only this short hash. Rekeying atomically swaps the stored hash to match your new key, keeping the agent ID and all associated data intact.
+
+The operation is:
+- **Atomic** — conflict detection and hash swap happen in a single database transaction
+- **Privacy-preserving** — your raw API key is hashed client-side before any network call
+- **Non-destructive** — agent ID, traces, alignment card, integrity score, and trust edges are unchanged
+
+## Prerequisites
+
+- Your agent must be [claimed](/smoltbot/overview) and linked to your Mnemom account
+- You must have your new provider API key ready before starting
+
+## Option 1: CLI
+
+<Steps>
+
+### Update the CLI (if needed)
+
+```bash
+npm update -g @mnemom/smoltbot
+```
+
+### Run the rekey command
+
+```bash
+smoltbot agents rekey
+# For a named agent:
+smoltbot agents rekey my-coder
+```
+
+You will be prompted for your new provider API key. The key is hashed locally using SHA-256 — the raw value never leaves your machine.
+
+**CI/CD**: Set the `SMOLTBOT_NEW_KEY` environment variable to skip the interactive prompt:
+
+```bash
+SMOLTBOT_NEW_KEY=sk-ant-api03-... smoltbot agents rekey
+```
+
+### Update your environment variable
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-api03-...   # your new key
+# or OPENAI_API_KEY / GOOGLE_API_KEY for other providers
+```
+
+### Verify
+
+```bash
+smoltbot status
+```
+
+The agent ID should be unchanged. Existing traces and settings are intact.
+
+</Steps>
+
+## Option 2: Dashboard
+
+<Steps>
+
+### Navigate to your agent
+
+Open your agent dashboard and click the **Security** tab.
+
+### Open the API Key section
+
+Scroll to **API Key** at the bottom of the Security tab and click **Rotate Key**.
+
+### Confirm the operation
+
+Read the confirmation dialog, then click **Continue**.
+
+### Enter your new key
+
+Type your new provider API key into the input and confirm it. The key is hashed in your browser before being sent — it is never transmitted in raw form.
+
+### Done
+
+A success notification confirms the re-binding. Update your `ANTHROPIC_API_KEY` (or equivalent) environment variable.
+
+</Steps>
+
+## Option 3: API
+
+Compute the SHA-256 hash of your new key **client-side**, then POST it:
+
+```bash
+# Unnamed agent: hash the key directly
+NEW_HASH=$(printf '%s' 'your-new-api-key' | sha256sum | cut -c1-16)
+
+curl -X POST https://api.mnemom.ai/v1/agents/smolt-a1b2c3d4/rekey \
+  -H "Authorization: Bearer <your-mnemom-token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"new_key_hash\": \"$NEW_HASH\"}"
+```
+
+**Named agents** (registered with `x-smoltbot-agent` header — the name is included in the hash):
+
+```bash
+NEW_HASH=$(printf '%s' 'your-new-api-key|my-coder' | sha256sum | cut -c1-16)
+```
+
+Replace `my-coder` with the exact name used when the agent was registered. Check your agent details in the dashboard or via `GET /v1/agents/{agent_id}` to confirm the name.
+
+**Success response:**
+
+```json
+{
+  "success": true,
+  "agent_id": "smolt-a1b2c3d4",
+  "rekeyed_at": "2026-03-31T12:00:00.000Z"
+}
+```
+
+## Multiple named agents from the same key
+
+If you registered multiple named agents from the same provider key, each holds a distinct hash:
+- Agent A: `SHA256(key|nameA).slice(0, 16)`
+- Agent B: `SHA256(key|nameB).slice(0, 16)`
+
+You must **rekey each agent independently**, using the correct hash for each name:
+
+```bash
+smoltbot agents rekey agent-a
+smoltbot agents rekey agent-b
+```
+
+## Resolving key conflicts
+
+If you used your new key to make a request **before rekeying**, the gateway auto-created a shadow agent for it. The rekey endpoint returns `409 Conflict` with the shadow agent's ID.
+
+**To resolve:**
+
+1. Note the `conflict_agent_id` from the error (`409` response body or CLI output)
+2. In your dashboard, navigate to the shadow agent and **Deactivate** it (Settings tab → Deactivate)
+   - Only do this if the shadow agent is unclaimed and has no meaningful history
+3. Retry the rekey
+
+<Note>
+If the shadow agent has traces you want to keep, contact [support@mnemom.ai](mailto:support@mnemom.ai) before deactivating it.
+</Note>
+
+## Security notes
+
+- **The raw API key is never transmitted to Mnemom.** Only the 16-character SHA-256 prefix is sent.
+- The rekey operation is **rate-limited** per account to prevent abuse.
+- After rekeying, the old key no longer identifies this agent. Any infrastructure still using the old key will auto-create a new, unclaimed agent — rotate your environment variable promptly.
+- The `rekeyed_at` timestamp and a `rekey_count` are stored on the agent for audit purposes.
