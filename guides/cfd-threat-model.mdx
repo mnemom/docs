@@ -5,13 +5,13 @@ sidebarTitle: "CFD Threat Model"
 icon: "shield-virus"
 ---
 
-# CFD Threat Model
+# CFD threat model
 
 The Context Front Door (CFD) operates as the inbound security layer for every message an agent receives. Before a turn is processed, CFD evaluates it against a library of known attack patterns, a behavioral session model, and an LLM-based analysis layer. This document details what CFD defends against, how each attack class is detected, and where the limits are.
 
 ---
 
-## The Attack Surface
+## The attack surface
 
 Agents receive input from many sources, each with a different trust profile. An email assistant reads messages from strangers. A research agent fetches content from arbitrary URLs. An internal workflow agent receives instructions from other agents in a pipeline. CFD sits in front of all of these:
 
@@ -30,9 +30,9 @@ Agent-to-agent message ────→   Canary tripwires   →─┘
 
 ---
 
-## Threat Categories
+## Threat categories
 
-### BEC Fraud — `bec_fraud`
+### BEC fraud — `bec_fraud`
 
 **What it looks like:**
 
@@ -54,7 +54,7 @@ BEC detection applies to any inbound channel, not just email. An agent that rece
 
 ---
 
-### Prompt Injection — `prompt_injection`
+### Prompt injection — `prompt_injection`
 
 **What it looks like:**
 
@@ -71,7 +71,7 @@ Direct prompt injection attempts to override the agent's system prompt or operat
 
 ---
 
-### Indirect Injection — `indirect_injection`
+### Indirect injection — `indirect_injection`
 
 **What it looks like:**
 
@@ -91,7 +91,7 @@ Indirect injection embeds malicious instructions inside content the agent proces
 
 ---
 
-### Social Engineering — `social_engineering`
+### Social engineering — `social_engineering`
 
 **What it looks like:**
 
@@ -108,7 +108,7 @@ Social engineering applies authority pressure and urgency without a direct finan
 
 ---
 
-### Agent Spoofing — `agent_spoofing`
+### Agent spoofing — `agent_spoofing`
 
 **What it looks like:**
 
@@ -125,7 +125,7 @@ In multi-agent pipelines, agents receive instructions from other agents. An atta
 
 ---
 
-### Multi-turn Hijack — `hijack_attempt`
+### Multi-turn hijack — `hijack_attempt`
 
 **What it looks like:**
 
@@ -143,7 +143,7 @@ The session model tracks turn-by-turn behavioral trajectories. A sudden pivot af
 
 ---
 
-### Data Exfiltration — `data_exfiltration`
+### Data exfiltration — `data_exfiltration`
 
 **What it looks like:**
 
@@ -160,7 +160,7 @@ Data exfiltration attempts instruct the agent to route data to an unauthorized e
 
 ---
 
-### Privilege Escalation — `privilege_escalation`
+### Privilege escalation — `privilege_escalation`
 
 **What it looks like:**
 
@@ -178,7 +178,7 @@ Privilege escalation attempts to exceed the agent's declared `bounded_actions` �
 
 ---
 
-## What CFD Does Not Protect Against
+## What CFD does not protect against
 
 Being explicit about limits is as important as documenting what works.
 
@@ -192,11 +192,11 @@ Being explicit about limits is as important as documenting what works.
 
 ---
 
-## False Positive Management
+## False positive management
 
 CFD will occasionally flag legitimate messages. The calibration loop closes this gap without requiring manual review of every flagged event.
 
-### When to Raise Thresholds
+### When to raise thresholds
 
 Default thresholds are calibrated for general-purpose agents. High-specificity use cases — a legal research agent that regularly discusses financial transactions, a security operations agent that processes threat intelligence containing malicious payloads — will produce elevated false positive rates at default settings.
 
@@ -219,7 +219,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/smolt-18a228f3/cfd/config \
   }'
 ```
 
-### Marking False Positives
+### Marking false positives
 
 When releasing a quarantined item, set `is_false_positive: true`:
 
@@ -235,7 +235,7 @@ curl -X POST https://api.mnemom.ai/v1/cfd/quarantine/qid_7f3a9b2c/release \
 
 False positive records feed the calibration loop. When the same agent accumulates false positives in a specific threat category, the adaptive threshold suggestion engine recommends configuration changes. The suggestions are available at `GET /v1/cfd/threshold-suggestions`.
 
-### How the Calibration Loop Works
+### How the calibration loop works
 
 1. Quarantine events accumulate with their resolution outcomes (`released`, `released_false_positive`, `confirmed_threat`)
 2. The calibration engine computes precision and recall per threat type per agent over a rolling 30-day window
@@ -250,7 +250,7 @@ Don't apply threshold changes immediately across all agents when you see a false
 
 ---
 
-## Further Reading
+## Further reading
 
 - [Context Front Door overview](/concepts/context-front-door) — Architecture and how CFD fits into the smoltbot stack
 - [CFD Webhooks](/guides/cfd-webhooks) — React to threats in real-time via webhook events

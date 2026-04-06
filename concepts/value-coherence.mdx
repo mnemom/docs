@@ -15,7 +15,7 @@ This is a pre-coordination check, not a trust guarantee. It answers "can we work
   Value coherence operates on declared values. It checks whether two agents' *claims* are compatible. It does not verify that either agent actually holds or acts on those values. Observed behavior is verified through [AP-Traces](/concepts/ap-traces) and [integrity checkpoints](/concepts/integrity-checkpoints).
 </Note>
 
-## Why Value Coherence Matters
+## Why value coherence matters
 
 As autonomous agents increasingly interact with each other -- delegating tasks, sharing data, coordinating actions -- a new class of problems emerges. Two agents may each serve their respective principals faithfully while being fundamentally incompatible in how they operate:
 
@@ -25,7 +25,7 @@ As autonomous agents increasingly interact with each other -- delegating tasks, 
 
 Without a coherence check, these conflicts surface at runtime as unexpected behavior, data handling violations, or broken trust assumptions.
 
-## The Coherence Handshake
+## The coherence handshake
 
 The Value Coherence Handshake is a four-message protocol exchange:
 
@@ -48,7 +48,7 @@ Agent A (Initiator)                     Agent B (Responder)
        |                                       |
 ```
 
-### Step 1: Card Request
+### Step 1: Card request
 
 The initiating agent requests the responder's Alignment Card, providing context about the proposed task:
 
@@ -71,7 +71,7 @@ The initiating agent requests the responder's Alignment Card, providing context 
 
 The `task_context` tells the responder what the collaboration involves and which values are required. This allows the responder to evaluate compatibility before sharing its full card.
 
-### Step 2: Card Response
+### Step 2: Card response
 
 The responder returns its Alignment Card, optionally signed for authenticity:
 
@@ -93,7 +93,7 @@ The responder returns its Alignment Card, optionally signed for authenticity:
   Signatures are optional but recommended for high-stakes interactions. An Ed25519 signature on the card response prevents man-in-the-middle substitution of alignment cards during the handshake.
 </Tip>
 
-### Step 3: Coherence Check
+### Step 3: Coherence check
 
 The initiator compares both cards and sends a coherence check specifying the proposed collaboration scope:
 
@@ -119,7 +119,7 @@ The initiator compares both cards and sends a coherence check specifying the pro
 }
 ```
 
-### Step 4: Coherence Result
+### Step 4: Coherence result
 
 The responder returns the coherence assessment:
 
@@ -182,7 +182,7 @@ The responder returns the coherence assessment:
 }
 ```
 
-## Coherence Score
+## Coherence score
 
 The coherence score is computed as:
 
@@ -206,7 +206,7 @@ The score is always in the range [0.0, 1.0]:
 
 The automatic proceed threshold is `0.70` (`MIN_COHERENCE_FOR_PROCEED`). Below this score, the recommendation is to negotiate, modify scope, or escalate to principals.
 
-### Code Example
+### Code example
 
 <CodeGroup>
 ```python Python
@@ -286,11 +286,11 @@ console.log(`Score: ${result.score}`);           // 0.85
 ```
 </CodeGroup>
 
-## Conflict Detection
+## Conflict detection
 
 Conflicts are detected in several ways:
 
-### Explicit Conflicts
+### Explicit conflicts
 
 The most direct: one agent's `conflicts_with` array contains a value the other agent declares.
 
@@ -304,7 +304,7 @@ The most direct: one agent's `conflicts_with` array contains a value the other a
 
 This produces an immediate incompatibility. No amount of scope modification resolves an explicit value conflict.
 
-### Value Incompatibility
+### Value incompatibility
 
 Two values that are not explicitly conflicted but are operationally incompatible for the proposed task:
 
@@ -319,7 +319,7 @@ Two values that are not explicitly conflicted but are operationally incompatible
 
 These conflicts may be resolvable through scope modification.
 
-### Autonomy Scope Conflicts
+### Autonomy scope conflicts
 
 When the proposed collaboration requires one agent to take actions outside its autonomy envelope, or actions that the other agent has listed as forbidden:
 
@@ -332,15 +332,15 @@ When the proposed collaboration requires one agent to take actions outside its a
 }
 ```
 
-## Resolution Strategies
+## Resolution strategies
 
 When conflicts are detected, AAP defines a three-tier resolution order:
 
-### 1. Automatic Resolution
+### 1. Automatic resolution
 
 If one value strictly subsumes another -- for example, `privacy` subsumes `minimal_data` -- the more general value can satisfy both parties without negotiation.
 
-### 2. Negotiated Resolution (Modified Scope)
+### 2. Negotiated resolution (modified scope)
 
 Agents may propose a modified collaboration scope that avoids the conflict:
 
@@ -358,7 +358,7 @@ Agents may propose a modified collaboration scope that avoids the conflict:
 
 The modified scope removes the conflicting requirement, allowing collaboration on the remaining compatible values.
 
-### 3. Principal Escalation
+### 3. Principal escalation
 
 When agents cannot resolve autonomously, the conflict is escalated to their respective principals (human operators or higher-authority agents):
 
@@ -375,7 +375,7 @@ When agents cannot resolve autonomously, the conflict is escalated to their resp
   Principal escalation is the fallback of last resort. If agents routinely escalate coherence conflicts, the alignment cards may need revision. Frequent escalation suggests the cards are either too restrictive or poorly calibrated for the agent's actual operating context.
 </Warning>
 
-## Use Cases
+## Use cases
 
 <CardGroup cols={2}>
   <Card title="Multi-Agent Systems" icon="sitemap">
@@ -415,7 +415,7 @@ This produces an `aap.check_coherence` span with attributes:
 | `aap.coherence.matched_count` | int |
 | `aap.coherence.conflict_count` | int |
 
-## Protocol Security
+## Protocol security
 
 Coherence handshake messages must be transmitted over TLS 1.3 or equivalent. Requests include unique `request_id` and `timestamp` fields for replay protection. Responses must reference the `request_id` they are responding to.
 
@@ -427,7 +427,7 @@ Card signatures (Ed25519) are optional but recommended for high-stakes interacti
   Value coherence checks declared values, not actual behavior. An agent can declare `principal_benefit` and score highly on coherence while acting against its principal's interests. Coherence is necessary but not sufficient for trustworthy collaboration. Pair it with ongoing [AP-Trace verification](/concepts/ap-traces) and [integrity monitoring](/concepts/integrity-checkpoints) of collaborating agents.
 </Warning>
 
-## See Also
+## See also
 
 - [Alignment Cards](/concepts/alignment-cards) -- The declarations that coherence checks compare
 - [AP-Traces](/concepts/ap-traces) -- Behavioral verification that complements coherence

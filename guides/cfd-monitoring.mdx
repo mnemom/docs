@@ -5,17 +5,17 @@ sidebarTitle: "CFD Monitoring"
 icon: "chart-line"
 ---
 
-# CFD Monitoring
+# CFD monitoring
 
 Once CFD is running, the Security Observatory gives you a live view of the threat landscape across your agents. This guide covers what each panel shows, which metrics matter, and how to respond to the alerts you will encounter.
 
 ---
 
-## The Security Observatory
+## The security observatory
 
 The Security Observatory is the CFD section of the Mnemom dashboard at [app.mnemom.com/cfd](https://app.mnemom.com/cfd). It has five main panels.
 
-### Threat Feed
+### Threat feed
 
 A real-time stream of evaluation events across all agents in your org, newest first. Each row shows:
 
@@ -30,7 +30,7 @@ Click any row to open the full evaluation detail: the turn content, all threat s
 
 **What to look for:** A sudden spike in `prompt_injection` or `indirect_injection` events on a specific agent often means its data sources (search results, email, API responses) have been poisoned. Investigate the source, not just the individual turn.
 
-### Metrics Overview
+### Metrics overview
 
 Four KPI cards with 7-day and 30-day comparisons:
 
@@ -39,7 +39,7 @@ Four KPI cards with 7-day and 30-day comparisons:
 - **Quarantine Queue Depth** — count of items awaiting human review. If this grows faster than your review capacity, consider adjusting thresholds or enabling automatic release for low-confidence quarantines.
 - **False Positive Rate** — computed over resolved quarantine items. Target below 15%. Above 20% means thresholds need adjustment for the dominant false-positive threat type.
 
-### Session Risk Panel
+### Session risk panel
 
 Lists all active sessions with elevated risk (`medium` or `high`). A session enters `medium` risk when any single turn scores above the warn threshold. It escalates to `high` when:
 
@@ -49,7 +49,7 @@ Lists all active sessions with elevated risk (`medium` or `high`). A session ent
 
 **What to watch:** A session that reaches `high` but has not been blocked means CFD is in `quarantine` or `warn` enforcement mode for that agent. The session is still live. Check whether human review is proceeding fast enough — the session may be waiting on you.
 
-### Campaign Tracker
+### Campaign tracker
 
 Displays detected cross-agent attack campaigns — groups of agents that have received structurally similar attacks from what appears to be the same infrastructure within a rolling time window.
 
@@ -59,7 +59,7 @@ Campaign detection fires when:
 
 **What it means:** A campaign detection is strong evidence of a coordinated attack rather than a coincidental spike. The attacker is probing multiple agents simultaneously, possibly to find the one with the weakest enforcement configuration. Respond by checking whether any of the targeted agents have higher thresholds than the others.
 
-### Pattern Activity
+### Pattern activity
 
 Shows recently promoted and demoted patterns in the threat library, and the current backlog of candidate patterns awaiting evaluation.
 
@@ -72,9 +72,9 @@ Shows recently promoted and demoted patterns in the threat library, and the curr
 
 ---
 
-## Key Metrics to Watch
+## Key metrics to watch
 
-### Block Rate by Agent
+### Block rate by agent
 
 ```bash
 curl "https://api.mnemom.ai/v1/cfd/metrics/timeseries?metric=block_rate&bucket=hour&agent_id=smolt-18a228f3" \
@@ -88,7 +88,7 @@ A block rate above 2% on a single agent almost always means one of three things:
 
 Compare the threat type breakdown to distinguish attack from false positive.
 
-### Warn Rate by Confidence Band
+### Warn rate by confidence band
 
 Break down `warn` events by confidence band to understand whether your threshold is set correctly:
 
@@ -99,13 +99,13 @@ Break down `warn` events by confidence band to understand whether your threshold
 | High | 0.70–0.85 | Strong signal — these are approaching block territory |
 | Very High | 0.85+ | Near-certain threat — if these are in `warn` mode, consider raising to `block` |
 
-### False Positive Rate by Confidence Band
+### False positive rate by confidence band
 
 This is the most useful metric for threshold calibration. If your false positive rate is high in the 0.55–0.70 band but low in the 0.70–0.85 band, you should raise your `warn` threshold to 0.70 and leave your `block` threshold where it is.
 
 ---
 
-## Session Threat Escalation
+## Session threat escalation
 
 The `X-CFD-Session-Risk` response header on every gateway response reflects the current session risk level for that session. Your application code can read this header and take action:
 
@@ -137,7 +137,7 @@ Sessions reset to `low` at the start of each new session. They do not carry over
 
 ---
 
-## Campaign Detection
+## Campaign detection
 
 When the campaign tracker shows a new campaign, your response workflow should be:
 
@@ -155,7 +155,7 @@ curl "https://api.mnemom.ai/v1/cfd/campaigns?status=active" \
 
 ---
 
-## Adaptive Threshold Suggestions
+## Adaptive threshold suggestions
 
 The calibration engine runs nightly and computes threshold suggestions for any agent whose false positive or miss rate deviates from targets. Retrieve them:
 
@@ -189,7 +189,7 @@ When the calibration engine produces suggestions for multiple threat types on th
 
 ---
 
-## Querying Evaluation History
+## Querying evaluation history
 
 The evaluation log supports rich filtering for forensic investigation and compliance review.
 
@@ -230,7 +230,7 @@ curl "https://api.mnemom.ai/v1/cfd/metrics/timeseries?threat_type=prompt_injecti
 
 ---
 
-## The Audit Log
+## The audit log
 
 Every configuration change, quarantine decision, and pattern activation is recorded in the CFD audit log. The audit log is append-only and tamper-evident.
 
@@ -255,7 +255,7 @@ Audit log entries are included in the EU AI Act compliance export (`GET /v1/comp
 
 ---
 
-## Further Reading
+## Further reading
 
 - [CFD Threat Model](/guides/cfd-threat-model) — What each threat type is and how detection works
 - [CFD Webhooks](/guides/cfd-webhooks) — Integrate threat events into your ops stack

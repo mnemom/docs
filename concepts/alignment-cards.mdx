@@ -15,7 +15,7 @@ Alignment Cards are the foundational data structure of the [Agent Alignment Prot
   Alignment Cards declare intent, not guarantee behavior. An agent can publish a card claiming any set of values. The card becomes meaningful only when paired with AP-Traces that can be verified against it and integrity checkpoints that analyze the agent's reasoning in real time.
 </Note>
 
-## Why Alignment Cards Exist
+## Why alignment cards exist
 
 Current agent protocols solve capability discovery (A2A Agent Cards), tool integration (MCP), and payment authorization. None of them address a fundamental question: **is this agent serving its principal's interests?**
 
@@ -34,7 +34,7 @@ An Alignment Card contains five required blocks and one optional block:
 | **Audit Commitment** | How the agent logs decisions | Yes |
 | **Extensions** | Protocol-specific additions (A2A, MCP) | No |
 
-### Identity Fields
+### Identity fields
 
 Every card begins with identity and versioning metadata:
 
@@ -52,7 +52,7 @@ Every card begins with identity and versioning metadata:
 - `agent_id` identifies the agent itself, using a DID (Decentralized Identifier), URL, or UUID.
 - `issued_at` and `expires_at` establish the card's validity window.
 
-### Principal Block
+### Principal block
 
 The principal block declares who the agent serves and the nature of that relationship:
 
@@ -74,7 +74,7 @@ Three relationship types are defined:
 | `advisory` | Agent recommends; principal decides |
 | `autonomous` | Agent operates independently within declared values |
 
-### Values Block
+### Values block
 
 The values block declares the agent's operational priorities:
 
@@ -148,7 +148,7 @@ These represent the agent's decision-making commitments and should appear in AP-
   Custom values declared by one agent but not others create fault lines in fleet coherence analysis. If the divergence is intentional role specialization — for example, a CFO agent has `fiduciary_precision` and a CoS agent has `organizational_clarity` — set `extensions.clpi.role` on each agent's card. The fault line analyzer uses this field to classify those divergences as `complementary` (by design) rather than `resolvable` (a gap to fill).
 </Note>
 
-### Autonomy Envelope Block
+### Autonomy envelope block
 
 The autonomy envelope defines the boundaries of independent action:
 
@@ -193,7 +193,7 @@ This block has four components:
   Forbidden actions are the hardest boundary. During [verification](/protocols/aap/specification), taking a forbidden action produces a `FORBIDDEN_ACTION` violation at `CRITICAL` severity. During [integrity checking](/concepts/integrity-checkpoints), intent to take a forbidden action triggers a `boundary_violation` verdict.
 </Warning>
 
-### Audit Commitment Block
+### Audit commitment block
 
 The audit commitment declares how the agent logs and exposes its decisions:
 
@@ -213,7 +213,7 @@ Key fields:
 - `queryable`: Whether external parties can query the agent's traces.
 - `tamper_evidence`: Mechanism for ensuring trace integrity (`append_only`, `signed`, or `merkle`).
 
-### Extensions Block
+### Extensions block
 
 Extensions allow protocol-specific metadata without modifying the core schema:
 
@@ -232,7 +232,7 @@ Extensions allow protocol-specific metadata without modifying the core schema:
 
 Extensions must be namespaced by protocol identifier. Implementations ignore unrecognized extensions.
 
-## Complete Example
+## Complete example
 
 Here is a full Alignment Card for a shopping assistant agent:
 
@@ -298,7 +298,7 @@ Here is a full Alignment Card for a shopping assistant agent:
 }
 ```
 
-## How Cards Are Used
+## How cards are used
 
 Alignment Cards serve as the reference point across the entire Mnemom trust infrastructure:
 
@@ -314,7 +314,7 @@ Alignment Cards serve as the reference point across the entire Mnemom trust infr
 
 6. **Policy Evaluation**: The [Policy Engine](/concepts/policy-engine) validates that the tools an agent uses map to capabilities declared in the card's `bounded_actions`. This bridges the gap between abstract card declarations and concrete tool usage.
 
-## Card Lifecycle
+## Card lifecycle
 
 Alignment cards are **lifecycle-managed artifacts** — they evolve as the agent's capabilities change. The [Card Lifecycle](/concepts/card-lifecycle) system tracks amendments, enables violation reclassification, and supports trust recovery.
 
@@ -329,7 +329,7 @@ Key lifecycle capabilities:
   When you add new tools to your agent, update the card's `bounded_actions` and [policy](/concepts/policy-engine) to match. The 24-hour grace period gives you time to do this after tools are first observed, but proactive updates prevent violations entirely.
 </Tip>
 
-## Card Versioning and Updates
+## Card versioning and updates
 
 Cards are versioned through their `card_id` and `issued_at`/`expires_at` timestamps. When an agent's alignment posture changes:
 
@@ -342,11 +342,11 @@ Cards are versioned through their `card_id` and `issued_at`/`expires_at` timesta
   Keep card lifetimes reasonable. A 6-month expiration is typical. Shorter lifetimes increase operational overhead; longer lifetimes risk the card becoming stale relative to actual behavior.
 </Tip>
 
-## Managing Your Card
+## Managing your card
 
 When you connect an agent via smoltbot, a default alignment card is created automatically. This default card uses generic values and minimal autonomy -- it is a starting point, not a finished card. To make the card meaningful, you should customize it to reflect your agent's actual values, boundaries, and capabilities.
 
-### Three Ways to Customize
+### Three ways to customize
 
 There are three ways to update your agent's alignment card:
 
@@ -366,7 +366,7 @@ Use `smoltbot card validate` for local pre-flight checks before publishing. This
 
 See the [CLI reference](/smoltbot/cli) for full command documentation.
 
-### Organization Card Templates (Enterprise)
+### Organization card templates (Enterprise)
 
 <Info>
   Organization card templates require an Enterprise plan.
@@ -378,11 +378,11 @@ This is similar to how [custom conscience values](/smoltbot/conscience-values) w
 
 See the [Organization Card Templates guide](/smoltbot/org-card-templates) for setup and configuration details.
 
-## Relationship to A2A Agent Cards
+## Relationship to A2A agent cards
 
 If you use Google's A2A protocol for agent discovery, the Alignment Card extends the A2A Agent Card rather than replacing it. The A2A Agent Card describes capabilities (what the agent can do). The Alignment Card describes alignment (what the agent will and will not do, and why). The `extensions.a2a.agent_card_url` field links the two.
 
-## Best Practices
+## Best practices
 
 <CardGroup cols={2}>
   <Card title="Be specific about boundaries" icon="border-all">
@@ -405,7 +405,7 @@ If you use Google's A2A protocol for agent discovery, the Alignment Card extends
   An Alignment Card is a declaration, not a guarantee. Agents can publish cards claiming any values. The card's value comes from being verifiable against observed behavior via AP-Traces and integrity checkpoints -- not from the declaration itself.
 </Warning>
 
-## See Also
+## See also
 
 - [Card Lifecycle](/concepts/card-lifecycle) -- Amendment tracking, reclassification, and trust recovery
 - [Policy Engine](/concepts/policy-engine) -- Governance-as-code bridging cards to concrete tools

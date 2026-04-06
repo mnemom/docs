@@ -12,7 +12,7 @@ While [pairwise value coherence](/concepts/value-coherence) checks compatibility
 - **Cluster Analysis** — Groups of compatible agents
 - **Divergence Report** — Values where agents disagree
 
-## Fleet Score
+## Fleet score
 
 The fleet score is the mean of all pairwise coherence scores:
 
@@ -29,7 +29,7 @@ Additionally, the **weakest link** (minimum pairwise score) identifies the most 
 | 0.50–0.70 | Moderate alignment — review outliers before coordination |
 | < 0.50 | Poor alignment — significant value conflicts present |
 
-## Outlier Detection
+## Outlier detection
 
 Per-agent mean pairwise scores are computed. An agent is flagged as an **outlier** if its mean score is more than 1 standard deviation below the fleet mean:
 
@@ -43,7 +43,7 @@ is_outlier = agent_mean < fleet_mean - 1.0 * stddev
 
 Outlier agents are reported with their primary conflict values — the specific value disagreements causing friction.
 
-## Cluster Analysis
+## Cluster analysis
 
 Agents are grouped into clusters using connected components on a compatibility graph:
 
@@ -53,7 +53,7 @@ Agents are grouped into clusters using connected components on a compatibility g
 
 Clusters reveal natural groupings — for example, in an incident response fleet, monitoring and classification agents may form one cluster while remediation agents form another.
 
-## Divergence Report
+## Divergence report
 
 For each value in the union of all declared values, the report shows:
 - Which agents declare it
@@ -63,11 +63,11 @@ For each value in the union of all declared values, the report shows:
 
 Values are sorted by impact, helping fleet operators prioritize alignment work.
 
-## Fault Line Analysis
+## Fault line analysis
 
 The divergence report identifies *where* agents disagree. Fault line analysis goes further: it classifies each divergence into an actionable category, scores its impact, and provides resolution hints. Use `analyzeFaultLines` to classify an existing `FleetCoherenceResult`, or use `checkFleetFaultLines` as a convenience wrapper that runs both steps in one call.
 
-### The FaultLine Type
+### The FaultLine type
 
 Each detected fault line has the following shape:
 
@@ -93,7 +93,7 @@ Each detected fault line has the following shape:
 | `incompatible` | One or more agents have an explicit `conflicts_with` entry for this value | Requires human review — this is a fundamental value conflict |
 | `complementary` | Divergence appears intentional given agent specializations — e.g., a safety-focused agent appropriately emphasizes safety more than a research agent | No action needed; this is intentional team architecture |
 
-### Impact Score Formula
+### Impact score formula
 
 The impact score estimates how much a fault line affects fleet operations:
 
@@ -103,7 +103,7 @@ impact_score = impact_on_fleet_score × coordination_overlap
 
 Where `coordination_overlap` is how frequently the affected agents interact. Impact scores can optionally be weighted by agent reputation scores — higher-reputation agents have their fault lines weighted more heavily since their behavior is better established.
 
-### SDK Usage
+### SDK usage
 
 <CodeGroup>
 
@@ -143,13 +143,13 @@ for fl in result.analysis.fault_lines:
 
 ---
 
-## Structural Fault Lines
+## Structural fault lines
 
 When multiple fault lines consistently split agents along the same divide, this is a **structural fault line** — also called a fault line alignment. It is substantially more serious than several independent single-value gaps, because it signals a deep architectural division in the fleet.
 
 **Example:** If agents A and B declare `accuracy`, `helpfulness`, and `safety` but agent C declares none of them, these three individual fault lines all isolate agent C. The `FaultLineAnalysis.alignments` array will contain one `FaultLineAlignment` describing this structural isolation. Agent C is not merely missing one value — it is systematically on the other side of a team divide.
 
-### The FaultLineAlignment Type
+### The FaultLineAlignment type
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -167,7 +167,7 @@ Structural fault lines are grounded in Lau & Murnighan's (1998) research on demo
 
 ---
 
-## SDK Usage
+## SDK usage
 
 ### TypeScript
 
@@ -216,14 +216,14 @@ Authorization: Bearer <token>
 
 Results are cached for 5 minutes. Requires the `nway_coherence` feature flag (Enterprise plan).
 
-## Use Cases
+## Use cases
 
 - **Fleet Management** — Monitor overall value alignment across all agents in an organization
 - **Compliance** — Identify agents whose values diverge from organizational standards
 - **Incident Response** — Verify response team coherence before coordinating autonomous actions
 - **Onboarding** — Assess how a new agent's alignment card fits with the existing fleet
 
-## See Also
+## See also
 
 - [Value Coherence](/concepts/value-coherence) — Pairwise coherence between two agents
 - [Team Trust Rating](/concepts/team-reputation) — Team-level reputation scoring that builds on fleet coherence metrics

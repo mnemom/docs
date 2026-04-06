@@ -9,7 +9,7 @@ icon: "shield-halved"
 
 This page explains how the Context Front Door (CFD) integrates technically with the smoltbot gateway. If you are new to CFD, start with the [concept overview](/concepts/context-front-door) first.
 
-## Request Pipeline
+## Request pipeline
 
 CFD runs as **Phase 0.5** — after agent identification resolves the agent config and policy, but before quota enforcement or message forwarding. This placement is intentional: the gateway already knows which agent is handling the request (so CFD config can be loaded), but no downstream resources have been consumed yet.
 
@@ -57,13 +57,13 @@ CFD runs as **Phase 0.5** — after agent identification resolves the agent conf
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Phase-by-Phase Breakdown
+## Phase-by-phase breakdown
 
-### Phase 0 — Agent Identification
+### Phase 0 — Agent identification
 
 The gateway resolves the `Authorization` header to an agent record and loads the agent's alignment card, CFD configuration, and policy bundle from KV. If CFD mode is `disabled` (the default), Phase 0.5 is skipped entirely with no performance cost.
 
-### Phase 0.5 — CFD Screening
+### Phase 0.5 — CFD screening
 
 Behavior depends on the configured mode:
 
@@ -110,19 +110,19 @@ This is the recommended first step when enabling CFD on an existing agent. Run s
   </Tab>
 </Tabs>
 
-### Phase 1 — Quota Enforcement
+### Phase 1 — Quota enforcement
 
 Standard token and request quota checks run here. In enforce mode, this phase is only reached by messages that passed CFD screening, so quota is not consumed by quarantined or blocked attempts.
 
-### Phase 2 — Policy Evaluation
+### Phase 2 — Policy evaluation
 
 The three-layer policy merge (org → agent → transaction) runs here. CFD operates independently of the policy engine — a message can pass CFD and fail policy, or vice versa.
 
-### Phase 3 — Forward to AI Provider
+### Phase 3 — Forward to AI provider
 
 The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemini, etc.). In enforce mode, only messages with a CFD `pass` or `warn` verdict reach this stage.
 
-### Phase 4 — AIP Conscience Analysis
+### Phase 4 — AIP conscience analysis
 
 The streaming response is teed through the AIP analysis pipeline. If CFD scored the inbound message with a non-zero threat score (even if the verdict was `pass`), that score and the specific threat categories detected are injected into the conscience prompt. This gives AIP additional signal to scrutinize the resulting reasoning.
 
@@ -134,7 +134,7 @@ Threat signals: social_engineering (0.38), privilege_escalation (0.21).
 Message passed CFD threshold but apply elevated scrutiny.
 ```
 
-## KV Caching
+## KV caching
 
 CFD configuration and session state are cached in the `BILLING_CACHE` KV binding (the same binding used for quota state). Cache TTLs:
 
@@ -147,7 +147,7 @@ CFD configuration and session state are cached in the `BILLING_CACHE` KV binding
 
 The `BILLING_CACHE` binding must be present in `wrangler.toml` for CFD to operate. If the binding is absent and `CFD_ENABLED=true`, the gateway logs a warning and skips CFD analysis for all requests.
 
-## Pre-emptive Nudge Injection
+## Pre-emptive nudge injection
 
 When a message passes CFD screening but its L2 score is ≥ 0.6, CFD writes a record to the `enforcement_nudges` table. On the agent's *next* request, the gateway's standard nudge injection logic picks this up and prepends a notice to the system prompt:
 
@@ -170,7 +170,7 @@ CFD scores are included in the attestation `inputCommitment` hash. When proof ge
 
 This creates a tamper-evident record that the CFD analysis was performed and what it returned, which is important for compliance use cases where you need to demonstrate that screening happened.
 
-## Sovereign Agent Template
+## Sovereign agent template
 
 For agents operating in high-trust, high-risk environments (financial automation, infrastructure management, regulated data handling), the sovereign agent template provides a hardened CFD configuration as a starting point:
 
@@ -198,7 +198,7 @@ For agents operating in high-trust, high-risk environments (financial automation
 
 The key differences from default settings: all three surfaces are screened (not just inbound), thresholds are tighter than defaults, canaries are auto-seeded from the agent's context, and session escalation is active.
 
-## Environment Requirements
+## Environment requirements
 
 CFD requires the following to be present in the gateway environment:
 
