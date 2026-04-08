@@ -1,13 +1,13 @@
 ---
-title: "CFD API Reference"
-description: "Complete reference for all Context Front Door endpoints — configuration, quarantine management, observability, pattern library, canary credentials, and compliance."
-sidebarTitle: "CFD Overview"
+title: "Safe House API Reference"
+description: "Complete reference for all Safe House endpoints — configuration, quarantine management, observability, pattern library, canary credentials, and compliance."
+sidebarTitle: "Safe House Overview"
 icon: "shield-check"
 ---
 
-# CFD API Reference
+# Safe House API Reference
 
-The Context Front Door API covers six functional areas: configuration, quarantine management, observability and metrics, pattern and intelligence management, canary credentials, and compliance exports. All endpoints require a Bearer token or API key unless otherwise noted.
+The Safe House API covers six functional areas: configuration, quarantine management, observability and metrics, pattern and intelligence management, canary credentials, and compliance exports. All endpoints require a Bearer token or API key unless otherwise noted.
 
 Base URL: `https://api.mnemom.ai`
 
@@ -15,20 +15,20 @@ Base URL: `https://api.mnemom.ai`
 
 ## Configuration
 
-Control how CFD behaves — globally for the org, per-agent, or in bulk.
+Control how Safe House behaves — globally for the org, per-agent, or in bulk.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/v1/cfd/config` | Retrieve org-level CFD defaults (thresholds, enforcement mode, enabled threat types) |
-| `PUT` | `/v1/cfd/config` | Update org-level defaults — applies to all agents that don't have a per-agent override |
-| `GET` | `/v1/agents/:id/cfd/config` | Retrieve per-agent CFD config (shows effective config after inheritance from org) |
-| `PUT` | `/v1/agents/:id/cfd/config` | Update per-agent config — overrides org defaults for the specified fields only |
-| `POST` | `/v1/cfd/config/bulk-apply` | Apply a config patch to multiple agents at once |
+| `GET` | `/v1/safe-house/config` | Retrieve org-level Safe House defaults (thresholds, enforcement mode, enabled threat types) |
+| `PUT` | `/v1/safe-house/config` | Update org-level defaults — applies to all agents that don't have a per-agent override |
+| `GET` | `/v1/agents/:id/safe-house/config` | Retrieve per-agent Safe House config (shows effective config after inheritance from org) |
+| `PUT` | `/v1/agents/:id/safe-house/config` | Update per-agent config — overrides org defaults for the specified fields only |
+| `POST` | `/v1/safe-house/config/bulk-apply` | Apply a config patch to multiple agents at once |
 
 **Retrieve org-level config:**
 
 ```bash
-curl https://api.mnemom.ai/v1/cfd/config \
+curl https://api.mnemom.ai/v1/safe-house/config \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -53,7 +53,7 @@ curl https://api.mnemom.ai/v1/cfd/config \
 **Update a single agent's config:**
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/smolt-18a228f3/cfd/config \
+curl -X PUT https://api.mnemom.ai/v1/agents/smolt-18a228f3/safe-house/config \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -66,7 +66,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/smolt-18a228f3/cfd/config \
 **Bulk-apply a config patch:**
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/config/bulk-apply \
+curl -X POST https://api.mnemom.ai/v1/safe-house/config/bulk-apply \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -85,23 +85,23 @@ Quarantined turns are held pending human review. Reviewers can release (with or 
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/v1/cfd/quarantine` | List quarantined items — filter by `status`, `agent_id`, `threat_type`, date range |
-| `GET` | `/v1/cfd/quarantine/:id` | Retrieve a single quarantine record with full evaluation detail |
-| `DELETE` | `/v1/cfd/quarantine/:id` | Delete a quarantine record (admin only; irreversible) |
-| `POST` | `/v1/cfd/quarantine/:id/release` | Release the quarantined turn to the agent; optionally mark as false positive |
-| `POST` | `/v1/cfd/quarantine/:id/report` | Confirm the quarantined turn as a genuine threat |
+| `GET` | `/v1/safe-house/quarantine` | List quarantined items — filter by `status`, `agent_id`, `threat_type`, date range |
+| `GET` | `/v1/safe-house/quarantine/:id` | Retrieve a single quarantine record with full evaluation detail |
+| `DELETE` | `/v1/safe-house/quarantine/:id` | Delete a quarantine record (admin only; irreversible) |
+| `POST` | `/v1/safe-house/quarantine/:id/release` | Release the quarantined turn to the agent; optionally mark as false positive |
+| `POST` | `/v1/safe-house/quarantine/:id/report` | Confirm the quarantined turn as a genuine threat |
 
 **List open quarantine items:**
 
 ```bash
-curl "https://api.mnemom.ai/v1/cfd/quarantine?status=pending&limit=20" \
+curl "https://api.mnemom.ai/v1/safe-house/quarantine?status=pending&limit=20" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 **Release with false-positive flag:**
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/quarantine/qid_7f3a9b2c/release \
+curl -X POST https://api.mnemom.ai/v1/safe-house/quarantine/qid_7f3a9b2c/release \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -113,7 +113,7 @@ curl -X POST https://api.mnemom.ai/v1/cfd/quarantine/qid_7f3a9b2c/release \
 **Confirm as genuine threat:**
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/quarantine/qid_7f3a9b2c/report \
+curl -X POST https://api.mnemom.ai/v1/safe-house/quarantine/qid_7f3a9b2c/report \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,24 +129,24 @@ Query the full evaluation history, aggregate metrics, and access a live SSE stre
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/v1/cfd/evaluations` | Full evaluation log — filter by `agent_id`, `verdict`, `threat_type`, `from`, `to`, `min_risk` |
-| `GET` | `/v1/cfd/metrics/summary` | Aggregated counts: total evaluations, block rate, warn rate, false positive rate |
-| `GET` | `/v1/cfd/metrics/timeseries` | Time-bucketed metrics for charts — specify `bucket` (`hour`, `day`, `week`) |
-| `GET` | `/v1/cfd/metrics/threats` | Top threat types by volume and confidence over a time window |
-| `GET` | `/v1/cfd/feed` | SSE stream of live CFD events — connect once and receive events as they happen |
-| `GET` | `/v1/cfd/sessions` | List active sessions with elevated session risk (`medium` or `high`) |
+| `GET` | `/v1/safe-house/evaluations` | Full evaluation log — filter by `agent_id`, `verdict`, `threat_type`, `from`, `to`, `min_risk` |
+| `GET` | `/v1/safe-house/metrics/summary` | Aggregated counts: total evaluations, block rate, warn rate, false positive rate |
+| `GET` | `/v1/safe-house/metrics/timeseries` | Time-bucketed metrics for charts — specify `bucket` (`hour`, `day`, `week`) |
+| `GET` | `/v1/safe-house/metrics/threats` | Top threat types by volume and confidence over a time window |
+| `GET` | `/v1/safe-house/feed` | SSE stream of live Safe House events — connect once and receive events as they happen |
+| `GET` | `/v1/safe-house/sessions` | List active sessions with elevated session risk (`medium` or `high`) |
 
 **Query evaluations with filters:**
 
 ```bash
-curl "https://api.mnemom.ai/v1/cfd/evaluations?agent_id=smolt-18a228f3&verdict=block&from=2026-03-01T00:00:00Z&limit=50" \
+curl "https://api.mnemom.ai/v1/safe-house/evaluations?agent_id=smolt-18a228f3&verdict=block&from=2026-03-01T00:00:00Z&limit=50" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 **Get summary metrics:**
 
 ```bash
-curl "https://api.mnemom.ai/v1/cfd/metrics/summary?from=2026-03-01T00:00:00Z&to=2026-03-30T23:59:59Z" \
+curl "https://api.mnemom.ai/v1/safe-house/metrics/summary?from=2026-03-01T00:00:00Z&to=2026-03-30T23:59:59Z" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -168,12 +168,12 @@ curl "https://api.mnemom.ai/v1/cfd/metrics/summary?from=2026-03-01T00:00:00Z&to=
 **Connect to the live SSE feed:**
 
 ```bash
-curl -N https://api.mnemom.ai/v1/cfd/feed \
+curl -N https://api.mnemom.ai/v1/safe-house/feed \
   -H "Authorization: Bearer $TOKEN" \
   -H "Accept: text/event-stream"
 ```
 
-The feed emits `cfd.evaluation.*`, `cfd.canary.*`, `cfd.session.*`, and `cfd.campaign.*` events as they occur. Reconnect with `Last-Event-ID` to replay missed events (replays up to 10 minutes back).
+The feed emits `safe_house.evaluation.*`, `safe_house.canary.*`, `safe_house.session.*`, and `safe_house.campaign.*` events as they occur. Reconnect with `Last-Event-ID` to replay missed events (replays up to 10 minutes back).
 
 ---
 
@@ -183,21 +183,21 @@ Manage the threat pattern library and retrieve adaptive threshold recommendation
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/v1/cfd/patterns` | List active and candidate threat patterns — filter by `status`, `threat_type` |
-| `POST` | `/v1/cfd/patterns` | Submit a candidate pattern for review and potential promotion |
-| `GET` | `/v1/cfd/threshold-suggestions` | Adaptive threshold recommendations based on your false-positive and miss rate |
+| `GET` | `/v1/safe-house/patterns` | List active and candidate threat patterns — filter by `status`, `threat_type` |
+| `POST` | `/v1/safe-house/patterns` | Submit a candidate pattern for review and potential promotion |
+| `GET` | `/v1/safe-house/threshold-suggestions` | Adaptive threshold recommendations based on your false-positive and miss rate |
 
 **List active patterns for a threat type:**
 
 ```bash
-curl "https://api.mnemom.ai/v1/cfd/patterns?status=active&threat_type=bec_fraud" \
+curl "https://api.mnemom.ai/v1/safe-house/patterns?status=active&threat_type=bec_fraud" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 **Get threshold suggestions:**
 
 ```bash
-curl https://api.mnemom.ai/v1/cfd/threshold-suggestions \
+curl https://api.mnemom.ai/v1/safe-house/threshold-suggestions \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -222,7 +222,7 @@ curl https://api.mnemom.ai/v1/cfd/threshold-suggestions \
 **Submit a candidate pattern:**
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/patterns \
+curl -X POST https://api.mnemom.ai/v1/safe-house/patterns \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -239,18 +239,18 @@ Submitted patterns enter `candidate` status. The arena evaluation pipeline tests
 
 ## Canary Credentials
 
-Canary credentials are honeypot API keys, tokens, or other secrets deliberately planted in the agent's context. If an attacker extracts and uses them, CFD detects the use and fires a `cfd.canary.triggered` event.
+Canary credentials are honeypot API keys, tokens, or other secrets deliberately planted in the agent's context. If an attacker extracts and uses them, Safe House detects the use and fires a `safe_house.canary.triggered` event.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/cfd/canaries` | Create a canary credential and associate it with an agent |
-| `GET` | `/v1/cfd/canaries?agent_id=` | List canaries for an agent |
-| `GET` | `/v1/cfd/canaries/:id/status` | Check whether a specific canary has been triggered |
+| `POST` | `/v1/safe-house/canaries` | Create a canary credential and associate it with an agent |
+| `GET` | `/v1/safe-house/canaries?agent_id=` | List canaries for an agent |
+| `GET` | `/v1/safe-house/canaries/:id/status` | Check whether a specific canary has been triggered |
 
 **Create a canary:**
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/canaries \
+curl -X POST https://api.mnemom.ai/v1/safe-house/canaries \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -273,12 +273,12 @@ curl -X POST https://api.mnemom.ai/v1/cfd/canaries \
 }
 ```
 
-The `credential` value is returned only at creation time. CFD monitors for its appearance in outbound requests or inbound message content.
+The `credential` value is returned only at creation time. Safe House monitors for its appearance in outbound requests or inbound message content.
 
 **Check canary status:**
 
 ```bash
-curl https://api.mnemom.ai/v1/cfd/canaries/can_f9e2a01b/status \
+curl https://api.mnemom.ai/v1/safe-house/canaries/can_f9e2a01b/status \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -291,7 +291,7 @@ curl https://api.mnemom.ai/v1/cfd/canaries/can_f9e2a01b/status \
 One-call configuration for sovereign agents — applies hardened defaults, creates initial canaries, sets enforcement mode to block, and enables all threat types.
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/cfd/sovereign-setup \
+curl -X POST https://api.mnemom.ai/v1/safe-house/sovereign-setup \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -306,7 +306,7 @@ This is the recommended starting point for agents handling financial transaction
 List detected attack campaigns — groups of related attacks targeting multiple agents from the same infrastructure.
 
 ```bash
-curl "https://api.mnemom.ai/v1/cfd/campaigns?status=active" \
+curl "https://api.mnemom.ai/v1/safe-house/campaigns?status=active" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -329,10 +329,10 @@ curl "https://api.mnemom.ai/v1/cfd/campaigns?status=active" \
 
 ### EU AI Act Compliance Export
 
-Export CFD evaluation data in EU AI Act Article 50 compliance format.
+Export Safe House evaluation data in EU AI Act Article 50 compliance format.
 
 ```bash
-curl "https://api.mnemom.ai/v1/compliance/cfd-report?from=2026-01-01T00:00:00Z&to=2026-03-31T23:59:59Z" \
+curl "https://api.mnemom.ai/v1/compliance/safe-house-report?from=2026-01-01T00:00:00Z&to=2026-03-31T23:59:59Z" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/json"
 ```
@@ -343,7 +343,7 @@ Returns a structured compliance report covering all evaluation decisions, blocke
 
 ## Error Responses
 
-All CFD endpoints return standard Mnemom error objects:
+All Safe House endpoints return standard Mnemom error objects:
 
 ```json
 {
@@ -366,7 +366,7 @@ All CFD endpoints return standard Mnemom error objects:
 
 ## Related
 
-- [CFD Threat Model](/guides/cfd-threat-model) — What each threat type means and how detection works
-- [CFD Webhooks](/guides/cfd-webhooks) — React to CFD events in real-time
-- [CFD Monitoring](/guides/cfd-monitoring) — Security Observatory and alert management
-- [Policy Overview](/api-reference/policy-overview) — Policy enforcement runs alongside CFD
+- [Safe House Threat Model](/guides/safe-house-threat-model) — What each threat type means and how detection works
+- [Safe House Webhooks](/guides/safe-house-webhooks) — React to Safe House events in real-time
+- [Safe House Monitoring](/guides/safe-house-monitoring) — Security Observatory and alert management
+- [Policy Overview](/api-reference/policy-overview) — Policy enforcement runs alongside Safe House

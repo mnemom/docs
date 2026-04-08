@@ -1,25 +1,25 @@
 ---
-title: "Enable CFD Protection"
+title: "Enable Safe House Protection"
 description: "Add pre-screening threat detection to an AI agent in 5 minutes — from observe mode through your first quarantined message"
-sidebarTitle: "CFD Protection"
+sidebarTitle: "Safe House Protection"
 icon: "shield-halved"
 ---
 
-# Enable CFD Protection
+# Enable Safe House Protection
 
-This quickstart walks you through enabling the Context Front Door (CFD) on an existing agent, observing real threat detections, switching to enforce mode, and managing quarantined messages. You will need a smoltbot agent already registered — if you do not have one, see [Smoltbot Overview](/smoltbot/overview) first.
+This quickstart walks you through enabling Safe House on an existing agent, observing real threat detections, switching to enforce mode, and managing quarantined messages. You will need a smoltbot agent already registered — if you do not have one, see [Smoltbot Overview](/smoltbot/overview) first.
 
 ## Prerequisites
 
 - A smoltbot API token in `$MNEMOM_TOKEN`
 - An agent ID in `$AGENT_ID` (e.g. `smolt-a1b2c3d4`)
 
-## Step 1 — Enable CFD in Observe Mode
+## Step 1 — Enable Safe House in Observe Mode
 
-Start with `observe` mode. This runs full threat analysis asynchronously with zero latency impact, so you can see what CFD would catch before committing to blocking.
+Start with `observe` mode. This runs full threat analysis asynchronously with zero latency impact, so you can see what Safe House would catch before committing to blocking.
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/config \
+curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/config \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -73,34 +73,34 @@ curl -X POST https://gateway.mnemom.ai/v1/messages \
   -i
 ```
 
-Look for CFD headers in the response:
+Look for Safe House headers in the response:
 
 ```
 HTTP/2 200
-x-cfd-session-risk: medium
-x-cfd-verdict: warn
+x-safe-house-session-risk: medium
+x-safe-house-verdict: warn
 content-type: application/json
 ...
 ```
 
 <Note>
-In observe mode, `X-CFD-Session-Risk` reflects the risk level accumulated across the current session. `X-CFD-Verdict` appears in observe mode so you can track what *would* have happened in enforce mode — the message still reaches the agent regardless.
+In observe mode, `X-Safe-House-Session-Risk` reflects the risk level accumulated across the current session. `X-Safe-House-Verdict` appears in observe mode so you can track what *would* have happened in enforce mode — the message still reaches the agent regardless.
 </Note>
 
 ## Step 3 — Review Detections in the Observatory
 
-Open the Observatory to see CFD detections logged from your test:
+Open the Observatory to see Safe House detections logged from your test:
 
 1. Go to [mnemom.ai/observatory](https://mnemom.ai/observatory)
 2. Select your agent from the sidebar
 3. Click **Security** in the top nav
 
-You will see a **CFD Events** timeline with each detection, its threat category, L1/L2 scores, and verdict. The test message should appear within a few seconds of the request completing.
+You will see a **Safe House Events** timeline with each detection, its threat category, L1/L2 scores, and verdict. The test message should appear within a few seconds of the request completing.
 
 You can also pull detection stats directly via the API:
 
 ```bash
-curl https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/stats \
+curl https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/stats \
   -H "Authorization: Bearer $MNEMOM_TOKEN"
 ```
 
@@ -130,10 +130,10 @@ curl https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/stats \
 
 ## Step 4 — Switch to Enforce Mode
 
-Once you are comfortable with what CFD is catching, switch to enforce mode. From this point, messages that score above the `quarantine` threshold are held for review, and messages above the `block` threshold are dropped.
+Once you are comfortable with what Safe House is catching, switch to enforce mode. From this point, messages that score above the `quarantine` threshold are held for review, and messages above the `block` threshold are dropped.
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/config \
+curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/config \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -158,7 +158,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/config \
 ```
 
 <Warning>
-Enforce mode will return HTTP 400 for quarantined messages and HTTP 403 for blocked messages. Make sure your application handles these responses before switching. If your agent is customer-facing, test in simulate mode first: `"mode": "simulate"` runs full analysis and returns `X-CFD-Simulated-Verdict` without ever blocking anything.
+Enforce mode will return HTTP 400 for quarantined messages and HTTP 403 for blocked messages. Make sure your application handles these responses before switching. If your agent is customer-facing, test in simulate mode first: `"mode": "simulate"` runs full analysis and returns `X-Safe-House-Simulated-Verdict` without ever blocking anything.
 </Warning>
 
 ## Step 5 — See a Message Get Quarantined
@@ -187,13 +187,13 @@ This time the response is a 400 with a quarantine ID:
 
 ```
 HTTP/2 400
-x-cfd-verdict: quarantine
-x-cfd-quarantine-id: qr_01HXYZ9ABCDEF123456789
+x-safe-house-verdict: quarantine
+x-safe-house-quarantine-id: qr_01HXYZ9ABCDEF123456789
 content-type: application/json
 
 {
   "error": "Message quarantined",
-  "type": "cfd_quarantine",
+  "type": "safe_house_quarantine",
   "quarantine_id": "qr_01HXYZ9ABCDEF123456789"
 }
 ```
@@ -206,7 +206,7 @@ Inspect the quarantined message and decide whether to release it or discard it:
 
 ```bash
 # Get the quarantine entry
-curl https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/quarantine/qr_01HXYZ9ABCDEF123456789 \
+curl https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789 \
   -H "Authorization: Bearer $MNEMOM_TOKEN"
 ```
 
@@ -229,7 +229,7 @@ curl https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/quarantine/qr_01HXYZ9ABCDEF12
 If the message is legitimate (a false positive), release it. This forwards the original message to the agent and removes the quarantine entry:
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/quarantine/qr_01HXYZ9ABCDEF123456789/release \
+curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789/release \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -249,7 +249,7 @@ curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/quarantine/qr_01HXYZ9
 To discard the message without releasing it (confirm it was a real threat):
 
 ```bash
-curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/cfd/quarantine/qr_01HXYZ9ABCDEF123456789/discard \
+curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789/discard \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -264,13 +264,13 @@ Releasing a quarantined message also records it as a false positive, which feeds
 ## What to Do Next
 
 <CardGroup cols={2}>
-  <Card title="Add canary credentials" icon="key" href="/concepts/context-front-door#canary-credentials">
+  <Card title="Add canary credentials" icon="key" href="/concepts/safe-house#canary-credentials">
     Plant fake API keys in agent context. Any attempt to use them is a zero-FP indicator of successful exfiltration.
   </Card>
-  <Card title="Configure source trust" icon="circle-check" href="/concepts/context-front-door#source-trust">
+  <Card title="Configure source trust" icon="circle-check" href="/concepts/safe-house#source-trust">
     Set `risk_multiplier: 0.0` for trusted internal callers to reduce false positives on known-good sources.
   </Card>
-  <Card title="Enable outbound DLP" icon="arrow-right-from-bracket" href="/concepts/context-front-door#bidirectional-screening">
+  <Card title="Enable outbound DLP" icon="arrow-right-from-bracket" href="/concepts/safe-house#bidirectional-screening">
     Scan agent responses for PII and secrets before they are returned to callers.
   </Card>
   <Card title="Review the Observatory" icon="magnifying-glass" href="https://mnemom.ai/observatory">
@@ -280,6 +280,6 @@ Releasing a quarantined message also records it as a false positive, which feeds
 
 ## Related
 
-- [Context Front Door concept](/concepts/context-front-door) — Full explanation of modes, threat categories, and detection layers
-- [CFD Gateway Integration](/smoltbot/cfd-overview) — How CFD fits into the smoltbot request pipeline
+- [Safe House concept](/concepts/safe-house) — Full explanation of modes, threat categories, and detection layers
+- [Safe House Gateway Integration](/smoltbot/safe-house-overview) — How Safe House fits into the smoltbot request pipeline
 - [Enforcement Modes](/smoltbot/enforcement) — How smoltbot handles violations after they reach the agent
