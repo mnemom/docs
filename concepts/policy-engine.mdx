@@ -16,7 +16,7 @@ The policy engine translates [Alignment Card](/concepts/alignment-cards) declara
 Policies are defined in a YAML-based DSL (domain-specific language) with five top-level sections: `capability_mappings`, `forbidden`, `defaults`, and optionally `escalation_triggers` and `meta`. They are evaluated in three contexts -- CI/CD pipelines, live gateway requests, and post-action observation -- giving operators governance coverage across the full agent lifecycle.
 
 <Note>
-  The policy engine is a parallel enforcement layer to [alignment enforcement](/smoltbot/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against policy rules. Both run independently and produce separate verdicts.
+  The policy engine is a parallel enforcement layer to [alignment enforcement](/gateway/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against policy rules. Both run independently and produce separate verdicts.
 </Note>
 
 ## Policy DSL Overview
@@ -93,10 +93,10 @@ Static evaluation runs in pipelines before deployment. It validates policy synta
 
 ```bash
 # Validate policy schema (syntax + structure)
-smoltbot policy validate --file policy.yaml
+mnemom policy validate --file policy.yaml
 
 # Evaluate policy against historical traces
-smoltbot policy evaluate --file policy.yaml --agent-id agent_abc123 --days 30
+mnemom policy evaluate --file policy.yaml --agent-id agent_abc123 --days 30
 ```
 
 **What it checks:**
@@ -107,14 +107,14 @@ smoltbot policy evaluate --file policy.yaml --agent-id agent_abc123 --days 30
 - Historical traces would pass/fail under the proposed policy
 - Coverage report identifies unmapped card actions
 
-**Use case:** Pre-deploy gates. A CI job runs `smoltbot policy validate` and `smoltbot policy evaluate` before merging policy changes. If evaluation shows violations in recent traces, the merge is blocked.
+**Use case:** Pre-deploy gates. A CI job runs `mnemom policy validate` and `mnemom policy evaluate` before merging policy changes. If evaluation shows violations in recent traces, the merge is blocked.
 
   </Tab>
   <Tab title="Gateway (Live)">
 
 ### Gateway Evaluation
 
-Live evaluation runs in real-time as requests pass through the smoltbot gateway. The policy engine extracts tool names from the request body, checks each tool against the policy, and returns a verdict.
+Live evaluation runs in real-time as requests pass through the Mnemom gateway. The policy engine extracts tool names from the request body, checks each tool against the policy, and returns a verdict.
 
 **How it works:**
 
@@ -240,7 +240,7 @@ The policy engine has its own enforcement mode, independent of the alignment enf
 | **Alignment enforcement** (observe/nudge/enforce) | Agent behavior against card values and autonomy envelope | AIP integrity checkpoints, AAP verification |
 | **Policy enforcement** (warn/enforce/off) | Tool usage against policy rules and capability mappings | Policy engine evaluation |
 
-Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/smoltbot/enforcement) and [observability exports](/guides/observability).
+Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
 
 ## Forbidden Actions
 
@@ -414,7 +414,7 @@ Every policy evaluation produces a coverage report that quantifies how well the 
 
 ```bash
 # Evaluate policy and fail if coverage is below threshold
-smoltbot policy evaluate \
+mnemom policy evaluate \
   --file policy.yaml \
   --agent-id agent_abc123 \
   --min-coverage 90
@@ -495,7 +495,7 @@ escalation_triggers:
 ## See Also
 
 - [Policy DSL Specification](/specifications/policy-dsl) -- Full normative specification for the policy YAML schema
-- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI commands for validating, evaluating, and managing policies
+- [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for validating, evaluating, and managing policies
 - [Policy Management Guide](/guides/policy-management) -- Step-by-step guide to writing and deploying policies
 - [Card Lifecycle](/concepts/card-lifecycle) -- How alignment cards evolve and interact with policy
-- [Enforcement Modes](/smoltbot/enforcement) -- Alignment enforcement modes (observe/nudge/enforce)
+- [Enforcement Modes](/gateway/enforcement) -- Alignment enforcement modes (observe/nudge/enforce)

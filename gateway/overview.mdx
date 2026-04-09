@@ -1,20 +1,20 @@
 ---
-title: "Smoltbot Overview"
+title: "Mnemom Gateway Overview"
 description: "Transparent AI agent tracing gateway with AAP and AIP compliance"
 sidebarTitle: "Overview"
 icon: "satellite-dish"
 ---
 
-# Smoltbot Overview
+# Mnemom Gateway Overview
 
-Smoltbot is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
+Mnemom is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
 
-Smoltbot is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs real-time [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
+Mnemom is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs real-time [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
 
 ## Architecture
 
 ```
-smoltbot/
+gateway/
 ├── cli/          # CLI tool (npm package)
 ├── gateway/      # Cloudflare Worker — API proxy + tracing
 ├── observer/     # Cloudflare Worker — trace builder + AAP verification
@@ -27,7 +27,7 @@ smoltbot/
 
 ```
                     ┌─── /anthropic/* ──→ Anthropic (Claude)
-Your App → smoltbot ├─── /openai/*    ──→ OpenAI (GPT-5)
+Your App → mnemom   ├─── /openai/*    ──→ OpenAI (GPT-5)
            gateway  └─── /gemini/*    ──→ Google (Gemini)
                 ↓               ↑
            CF AI Gateway ← SSE stream
@@ -50,7 +50,7 @@ Your App → smoltbot ├─── /openai/*    ──→ OpenAI (GPT-5)
            Dashboard (mnemom.ai)
 ```
 
-Named agents use the `x-smoltbot-agent` header to specify an agent name (e.g., `x-smoltbot-agent: my-coder`). The provider path stays unchanged (`/anthropic/v1/messages`). The gateway hashes `SHA256(apiKey + '|' + agentName)` to derive a unique identity for each named agent, so multiple agents can share the same API key while maintaining distinct trace histories.
+Named agents use the `x-mnemom-agent` header to specify an agent name (e.g., `x-mnemom-agent: my-coder`). The gateway also accepts `x-smoltbot-agent` during the transition period. The provider path stays unchanged (`/anthropic/v1/messages`). The gateway hashes `SHA256(apiKey + '|' + agentName)` to derive a unique identity for each named agent, so multiple agents can share the same API key while maintaining distinct trace histories.
 
 The system consists of five components:
 
@@ -60,7 +60,7 @@ The system consists of five components:
 
 3. **API** — Serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
 
-4. **CLI** — The `smoltbot` command. Configures your local environment and queries your agent's transparency data. See the [CLI Reference](/smoltbot/cli) for details.
+4. **CLI** — The `mnemom` command. Configures your local environment and queries your agent's transparency data. See the [CLI Reference](/gateway/cli) for details.
 
 5. **Dashboard** — Web UI at [mnemom.ai](https://mnemom.ai) where you can view the conscience timeline, claim your agent, and monitor alignment.
 
@@ -74,7 +74,7 @@ The system consists of five components:
 
 ## What Gets Traced
 
-Smoltbot builds AP-Traces that record:
+Mnemom Gateway builds AP-Traces that record:
 
 - **Action** — What the agent did (type, name, category)
 - **Decision** — What alternatives were considered and why one was selected
@@ -99,9 +99,9 @@ Your prompts, responses, and API keys are never stored. Only SHA-256 hashes of A
 
 ## Claiming Your Agent
 
-After running `smoltbot init`, your agent is registered automatically. To link it to your Mnemom account:
+After running `mnemom init`, your agent is registered automatically. To link it to your Mnemom account:
 
-1. Run `smoltbot status` to get your agent ID
+1. Run `mnemom status` to get your agent ID
 2. Go to [mnemom.ai/claim](https://mnemom.ai/claim)
 3. Paste your agent ID and prove ownership with your API key hash
 
@@ -110,7 +110,7 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 ## Current Limitations
 
 - **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
-- **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `x-smoltbot-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
+- **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `x-mnemom-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
 - **AIP requires reasoning models** — AIP integrity checking requires models with exposed thinking (Anthropic, Gemini, GPT-5 Thinking). Models without thinking get synthetic clear verdicts.
 - **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
 
@@ -126,11 +126,11 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="CLI Reference" icon="terminal" href="/smoltbot/cli">
+  <Card title="CLI Reference" icon="terminal" href="/gateway/cli">
     Learn about all CLI commands and usage
   </Card>
-  <Card title="Enforcement Modes" icon="gavel" href="/smoltbot/enforcement">
-    Configure how smoltbot responds to violations
+  <Card title="Enforcement Modes" icon="gavel" href="/gateway/enforcement">
+    Configure how the gateway responds to violations
   </Card>
   <Card title="Observability" icon="chart-line" href="/guides/observability">
     Export traces to your observability platform via OpenTelemetry

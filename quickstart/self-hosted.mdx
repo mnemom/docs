@@ -1,13 +1,13 @@
 ---
 title: "Self-Hosted Deployment"
-description: "Run the smoltbot gateway on your own infrastructure with Docker or Kubernetes"
+description: "Run the Mnemom Gateway on your own infrastructure with Docker or Kubernetes"
 sidebarTitle: "Self-Hosted"
 icon: "server"
 ---
 
 # Self-Hosted Deployment
 
-Run the smoltbot gateway on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your network. The self-hosted gateway is a Node.js adapter that runs the same code as the managed Cloudflare Workers service — identical behavior, your infrastructure.
+Run the Mnemom Gateway on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your network. The self-hosted gateway is a Node.js adapter that runs the same code as the managed Cloudflare Workers service — identical behavior, your infrastructure.
 
 <Note>
 Self-hosted deployment requires an **Enterprise license**. [Contact us](https://mnemom.ai/contact) to obtain a license key. Enterprise includes hybrid analysis mode, SSO/SAML integration, and dedicated support.
@@ -111,11 +111,11 @@ The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis
   </Step>
 
   <Step title="Connect an agent">
-    Point the smoltbot CLI at your self-hosted gateway:
+    Point the mnemom CLI at your self-hosted gateway:
 
     ```bash
-    npm install -g smoltbot
-    smoltbot init --gateway=http://localhost:8787
+    npm install -g @mnemom/smoltbot
+    mnemom init --gateway=http://localhost:8787
     ```
 
     Make a test request:
@@ -134,7 +134,7 @@ The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis
     Verify the agent is connected:
 
     ```bash
-    smoltbot status
+    mnemom status
     ```
   </Step>
 </Steps>
@@ -154,7 +154,7 @@ For production deployments with auto-scaling, high availability, and monitoring.
 <Steps>
   <Step title="Add the Helm chart">
     ```bash
-    cd smoltbot/deploy/helm
+    cd smoltbot/deploy/helm  # navigate to the helm chart
     ```
   </Step>
 
@@ -162,7 +162,7 @@ For production deployments with auto-scaling, high availability, and monitoring.
     Store sensitive credentials in a Secret:
 
     ```bash
-    kubectl create secret generic smoltbot-secrets \
+    kubectl create secret generic mnemom-secrets \
       --from-literal=SUPABASE_URL=<your-supabase-url> \
       --from-literal=SUPABASE_KEY=<your-service-role-key> \
       --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
@@ -174,8 +174,8 @@ For production deployments with auto-scaling, high availability, and monitoring.
 
   <Step title="Install the chart">
     ```bash
-    helm install smoltbot ./mnemom-gateway \
-      --set secrets.existingSecret=smoltbot-secrets \
+    helm install mnemom ./mnemom-gateway \
+      --set secrets.existingSecret=mnemom-secrets \
       --set ingress.enabled=true \
       --set ingress.hosts[0].host=gateway.yourcompany.com \
       --set ingress.hosts[0].paths[0].path=/ \
@@ -186,7 +186,7 @@ For production deployments with auto-scaling, high availability, and monitoring.
   <Step title="Verify the deployment">
     ```bash
     kubectl get pods -l app.kubernetes.io/name=mnemom-gateway
-    helm test smoltbot
+    helm test mnemom
     ```
   </Step>
 </Steps>
@@ -237,7 +237,7 @@ Self-Hosted Gateway (Node.js, port 8787)
   ▼
 PostgreSQL (Supabase or self-managed)
   │
-  ├──▶ CLI (smoltbot status / logs)
+  ├──▶ CLI (mnemom status / logs)
   └──▶ Dashboard (mnemom.ai or self-hosted)
 ```
 
@@ -288,7 +288,7 @@ In hybrid mode, only thinking/reasoning blocks are sent for analysis — raw pro
 | `REDIS_URL` | -- | Redis connection URL. Without Redis, an in-memory KV adapter is used (single-node only). |
 | `PORT` | `8787` | HTTP listen port |
 | `HOST` | `0.0.0.0` | HTTP bind address |
-| `SMOLTBOT_ROLE` | `all` | `gateway` (HTTP only), `scheduler` (cron only), or `all` (both) |
+| `MNEMOM_ROLE` | `all` | `gateway` (HTTP only), `scheduler` (cron only), or `all` (both) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. Structured JSON to stdout. |
 
 ---
@@ -340,8 +340,8 @@ Migrations run automatically via the `migrate` service.
 ### Helm
 
 ```bash
-helm upgrade smoltbot ./deploy/helm/mnemom-gateway \
-  --set secrets.existingSecret=smoltbot-secrets
+helm upgrade mnemom ./deploy/helm/mnemom-gateway \
+  --set secrets.existingSecret=mnemom-secrets
 ```
 
 The migration job runs as a pre-upgrade Helm hook.
@@ -388,7 +388,7 @@ Always back up your database before upgrading. For Docker: `docker compose exec 
 
 ## Next Steps
 
-- [Smoltbot overview](/smoltbot/overview) — architecture and components
-- [Enforcement modes](/smoltbot/enforcement) — observe, nudge, and enforce
+- [Mnemom Gateway overview](/gateway/overview) — architecture and components
+- [Enforcement modes](/gateway/enforcement) — observe, nudge, and enforce
 - [Observability guide](/guides/observability) — dashboards and alerting
 - [Security model](/guides/security-trust-model) — trust boundaries and threat model

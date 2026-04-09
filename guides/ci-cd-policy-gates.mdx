@@ -11,8 +11,8 @@ Policy gates prevent misconfigurations from reaching production. By embedding po
 
 There are two types of gates:
 
-1. **Static validation** -- `smoltbot policy validate` checks schema correctness. It is fast, offline, and makes no API calls.
-2. **Policy evaluation** -- `smoltbot policy evaluate` checks the policy against live agent data. It requires an API key and network access.
+1. **Static validation** -- `mnemom policy validate` checks schema correctness. It is fast, offline, and makes no API calls.
+2. **Policy evaluation** -- `mnemom policy evaluate` checks the policy against live agent data. It requires an API key and network access.
 
 Both commands return CI-friendly exit codes: `0` on pass, `1` on failure. This means any CI system that interprets exit codes (GitHub Actions, GitLab CI, Jenkins, CircleCI, etc.) will correctly pass or fail the pipeline step.
 
@@ -48,7 +48,7 @@ jobs:
           node-version: '20'
       - run: npm install -g @mnemom/smoltbot
       - name: Validate policy
-        run: smoltbot policy validate policy.yaml
+        run: mnemom policy validate policy.yaml
 ```
 
 This workflow triggers only when `policy.yaml` or files under `policies/` change, keeping CI fast for unrelated pull requests.
@@ -63,7 +63,7 @@ validate-policy:
   image: node:20
   script:
     - npm install -g @mnemom/smoltbot
-    - smoltbot policy validate policy.yaml
+    - mnemom policy validate policy.yaml
   only:
     changes:
       - policy.yaml
@@ -111,7 +111,7 @@ jobs:
           node-version: '20'
       - run: npm install -g @mnemom/smoltbot
       - name: Evaluate policy
-        run: smoltbot policy evaluate --agent my-agent --format json
+        run: mnemom policy evaluate --agent my-agent --format json
 ```
 
 This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM_API_KEY` is read from GitHub Secrets and exposed as an environment variable.
@@ -128,7 +128,7 @@ evaluate-policy:
     MNEMOM_API_KEY: $MNEMOM_API_KEY
   script:
     - npm install -g @mnemom/smoltbot
-    - smoltbot policy evaluate --agent my-agent
+    - mnemom policy evaluate --agent my-agent
   only:
     - main
 ```
@@ -156,7 +156,7 @@ No special configuration is needed. If the command exits with `1`, the pipeline 
 Use `--format json` to get machine-readable output for programmatic parsing in complex pipelines:
 
 ```bash
-smoltbot policy evaluate --agent my-agent --format json
+mnemom policy evaluate --agent my-agent --format json
 ```
 
 The JSON output includes the verdict, any violations, warnings, and coverage metrics:
@@ -189,7 +189,7 @@ The JSON output includes the verdict, any violations, warnings, and coverage met
 ```
 
 <Tip>
-  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `smoltbot policy evaluate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
+  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `mnemom policy evaluate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
 </Tip>
 
 ---
@@ -214,8 +214,8 @@ jobs:
         with:
           node-version: '20'
       - run: npm install -g @mnemom/smoltbot
-      - run: smoltbot policy validate policy.yaml
-      - run: smoltbot policy evaluate --agent my-agent
+      - run: mnemom policy validate policy.yaml
+      - run: mnemom policy evaluate --agent my-agent
         env:
           MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
 
@@ -280,7 +280,7 @@ Review pipeline failures in your CI dashboard. Use `--format json` output to int
 
 ## See Also
 
-- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI command details for `validate`, `evaluate`, `test`, and `publish`
+- [Policy CLI Reference](/gateway/policy-cli) -- CLI command details for `validate`, `evaluate`, `test`, and `publish`
 - [Policy Management](/guides/policy-management) -- Full policy workflow from init to publish
 - [Policy DSL Specification](/specifications/policy-dsl) -- Schema reference for `policy.yaml`
 - [Embeddable Trust Badges](/guides/reputation-badges) -- GitHub Action for reputation gates
