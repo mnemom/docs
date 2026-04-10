@@ -25,7 +25,7 @@ This guide walks through creating, testing, publishing, and managing policies us
 Generate a starter `policy.yaml` with commented examples:
 
 ```bash
-smoltbot policy init
+mnemom policy init
 ```
 
 This creates a `policy.yaml` in your current directory with sensible defaults and annotated examples for every section.
@@ -97,7 +97,7 @@ defaults:
 Run local validation to check schema compliance before publishing. This is a local-only check with no API call -- safe for CI pipelines:
 
 ```bash
-smoltbot policy validate policy.yaml
+mnemom policy validate policy.yaml
 ```
 
 Exit code `0` means the policy is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding.
@@ -107,13 +107,13 @@ Exit code `0` means the policy is valid. Exit code `1` means there are errors. F
 Dry-run the policy against your agent's recent traces to see what violations **would** have been flagged:
 
 ```bash
-smoltbot policy test policy.yaml
+mnemom policy test policy.yaml
 ```
 
 This analyzes recent traces and reports which would pass, warn, or fail under the new policy. Use `--limit` to control how many traces to test:
 
 ```bash
-smoltbot policy test policy.yaml --limit 100
+mnemom policy test policy.yaml --limit 100
 ```
 
 <Warning>
@@ -125,7 +125,7 @@ smoltbot policy test policy.yaml --limit 100
 Upload the validated policy to your agent:
 
 ```bash
-smoltbot policy publish policy.yaml
+mnemom policy publish policy.yaml
 ```
 
 The CLI validates again before uploading, asks for confirmation, and archives the previous policy version. Use `--yes` to skip the confirmation prompt in CI workflows.
@@ -161,7 +161,7 @@ Each of these needs at least one capability mapping in your policy.
 List the MCP tools your agent actually uses. If you are unsure, check your agent's recent traces:
 
 ```bash
-smoltbot traces list --agent support-agent --format tools
+mnemom traces list --agent support-agent --format tools
 ```
 
 This gives you the concrete tool names like `mcp__browser__navigate`, `mcp__browser__click`, `mcp__filesystem__read_file`, and so on.
@@ -203,7 +203,7 @@ Glob patterns let you match groups of related tools without listing each one:
 After writing your mappings, check that every card action is covered:
 
 ```bash
-smoltbot policy evaluate --file policy.yaml --agent-id your-agent --min-coverage 90
+mnemom policy evaluate --file policy.yaml --agent-id your-agent --min-coverage 90
 ```
 
 The coverage report tells you which card actions are mapped and which are missing. Aim for 100% coverage in production policies.
@@ -452,9 +452,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate policy
-        run: npx smoltbot policy validate policy.yaml
+        run: npx mnemom policy validate policy.yaml
       - name: Test against traces
-        run: npx smoltbot policy test policy.yaml --limit 50
+        run: npx mnemom policy test policy.yaml --limit 50
         env:
           SMOLTBOT_API_KEY: ${{ secrets.SMOLTBOT_API_KEY }}
 ```
@@ -517,7 +517,7 @@ The recommendation includes confidence scores for each section. Focus your revie
     Begin with `enforcement_mode: warn` to observe what your policy catches without blocking agent traffic. Graduate to `enforce` after testing confirms the policy matches your expectations.
   </Card>
   <Card title="Test before publishing" icon="flask-vial">
-    Always run `smoltbot policy test` before `smoltbot policy publish`. Testing against historical traces shows you the real-world impact of your policy before it affects live requests.
+    Always run `mnemom policy test` before `mnemom policy publish`. Testing against historical traces shows you the real-world impact of your policy before it affects live requests.
   </Card>
   <Card title="Align mappings with card actions" icon="link">
     Keep capability mappings tightly aligned with your alignment card's `bounded_actions`. Every card action should have a corresponding mapping, and every mapping should reference a real card action.
@@ -537,7 +537,7 @@ The recommendation includes confidence scores for each section. Focus your revie
 
 - [Policy Engine](/concepts/policy-engine) -- How the policy engine evaluates tools against policies
 - [Policy DSL Specification](/specifications/policy-dsl) -- Full normative schema for policy YAML files
-- [Policy CLI Reference](/smoltbot/policy-cli) -- CLI commands for init, validate, test, publish, and evaluate
+- [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for init, validate, test, publish, and evaluate
 - [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating policy checks into your deployment pipeline
 - [Alignment Card Management](/guides/card-management) -- Creating and managing the alignment cards that policies enforce
-- [Enforcement Modes](/smoltbot/enforcement) -- Alignment enforcement (observe/nudge/enforce) vs. policy enforcement
+- [Enforcement Modes](/gateway/enforcement) -- Alignment enforcement (observe/nudge/enforce) vs. policy enforcement
