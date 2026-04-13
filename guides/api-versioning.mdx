@@ -1,0 +1,113 @@
+---
+title: API Versioning
+description: How to pin your integration to a specific API version and manage upgrades safely.
+---
+
+# API Versioning
+
+mnemom-api uses **date-based header versioning** alongside the `/v1/` URL prefix. This gives you fine-grained control over which API behavior your integration uses, independent of when you deploy.
+
+## How it works
+
+Send the `X-Mnemom-Version` header with every request:
+
+```http
+GET /v1/agents/mnm-550e8400-e29b-41d4-a716-446655440000/card
+X-Mnemom-Api-Key: your-api-key
+X-Mnemom-Version: 2026-04-13
+```
+
+Every response echoes the version used:
+
+```http
+HTTP/2 200
+X-Mnemom-Version: 2026-04-13
+Content-Type: application/json
+```
+
+If you don't send the header, the **latest** behavior is used. For production systems — including AI agents — always pin to a specific date.
+
+## Current version
+
+The current stable version is **`2026-04-13`** (the baseline). This is the version to pin to for new integrations.
+
+```bash
+curl https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
+  -H "X-Mnemom-Api-Key: $API_KEY" \
+  -H "X-Mnemom-Version: 2026-04-13"
+```
+
+## SDK defaults
+
+The official SDKs pin to the latest stable version automatically:
+
+```typescript
+// @mnemom/agent-integrity-protocol — pins to latest stable by default
+import { MnemomClient } from '@mnemom/agent-integrity-protocol';
+
+const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+// Optionally override:
+const client = new MnemomClient({
+  apiKey: process.env.MNEMOM_API_KEY,
+  apiVersion: '2026-04-13',
+});
+```
+
+## Support window
+
+| Change type | Support window |
+|-------------|---------------|
+| Standard breaking change | **18 months** from new version date |
+| Security vulnerability | 30 days minimum |
+| Enterprise contract | Per contract terms |
+
+The 18-month standard window is longer than most APIs. This reflects mnemom's service to the agentic internet: AI agents that call our API may be embedded in contexts that cannot self-update in response to deprecation notices.
+
+## Deprecation signals
+
+When a version you are using is deprecated, you will see:
+
+```http
+Deprecation: true
+Sunset: Mon, 13 Oct 2027 00:00:00 GMT
+Link: <https://docs.mnemom.ai/guides/api-versioning>; rel="deprecation"
+X-Mnemom-Deprecation-Note: Version 2026-04-13 deprecated; migrate to 2026-10-01 by Oct 2027
+```
+
+You will also receive email notifications at:
+- T+0 (deprecation announcement)
+- T+12 months
+- T+16 months
+- T+17 months (last warning)
+
+## Breaking vs. non-breaking changes
+
+**Breaking changes** always get a new version date:
+- Removing or renaming response fields
+- Changing field types
+- Removing endpoints
+- Making optional parameters required
+- Changing default behavior
+
+**Non-breaking changes** (no new version date needed):
+- New endpoints
+- New optional fields in responses
+- New optional request parameters
+
+<Warning>
+**Additive changes are still risky for AI agents.** An AI agent with a hardcoded response schema may fail if unexpected fields appear. Use lenient JSON parsing — always ignore unknown fields — and your integration will be safe across non-breaking changes.
+</Warning>
+
+## URL versioning (`/v1/` vs `/v2/`)
+
+The `/v1/` URL prefix represents the current API generation. A `/v2/` would only be introduced for a complete API redesign — not for individual breaking changes. URL version increments are expected to happen at most once every several years.
+
+Date header versioning handles all evolution within `/v1/`.
+
+## Migration guides
+
+Migration guides for each breaking version will appear here as they are introduced.
+
+| Version date | What changed | Migration guide |
+|-------------|-------------|----------------|
+| `2026-04-13` | Initial baseline | — |
