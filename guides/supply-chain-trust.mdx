@@ -1,0 +1,82 @@
+---
+title: Supply Chain Trust
+description: How Mnemom publishes its npm packages with SLSA provenance, and how to verify the packages you install.
+---
+
+# Supply Chain Trust
+
+Every `@mnemom/*` npm package is published with **SLSA build provenance** — a cryptographically signed attestation that binds each published tarball to the exact GitHub Actions workflow run that built it. This guarantees the package you install was built from the source code we published, on infrastructure we control, without a developer's laptop or long-lived credential in the chain.
+
+## What provenance means
+
+When you install a recent version of any `@mnemom/*` package, the tarball on the npm registry is accompanied by a [SLSA provenance attestation](https://slsa.dev/spec/v1.0/provenance) (predicate type `https://slsa.dev/provenance/v1`). The attestation is:
+
+- **Signed** via [sigstore](https://www.sigstore.dev/), using short-lived keys issued only to the specific GitHub Actions workflow run.
+- **Bound to the source** — records the exact commit SHA, repository, and workflow path used to build the package.
+- **Transparent** — published to the public sigstore transparency log; anyone can audit the full signing history.
+
+No long-lived npm tokens are used. All publishes authenticate via GitHub OIDC to npm's [Trusted Publisher](https://docs.npmjs.com/trusted-publishers) system.
+
+## Verifying a package
+
+### Quick check with npm
+
+```bash
+# Install, then verify signatures and attestations for your dependency tree:
+npm install @mnemom/agent-integrity-protocol
+npm audit signatures
+```
+
+Expected output:
+
+```
+audited 1 package in 0s
+
+1 package has a verified registry signature
+1 package has a verified attestation
+```
+
+If any `@mnemom/*` package in your tree reports `missing attestations` or `unverified`, treat it as a supply-chain incident and contact security@mnemom.ai before using the installed code.
+
+### Inspecting provenance directly
+
+```bash
+npm view @mnemom/agent-integrity-protocol dist.attestations
+```
+
+You should see an entry like:
+
+```
+{
+  url: 'https://registry.npmjs.org/-/npm/v1/attestations/@mnemom%2fagent-integrity-protocol@1.0.0',
+  provenance: { predicateType: 'https://slsa.dev/provenance/v1' }
+}
+```
+
+### SBOMs
+
+Every release ships a CycloneDX software bill of materials (SBOM). You can find it in two places:
+
+- **GitHub Release assets** — for packages published via GitHub Releases (e.g., `@mnemom/types`), the SBOM is attached to the release itself. Example: [mnemom/mnemom-types releases](https://github.com/mnemom/mnemom-types/releases).
+- **Workflow run artifacts** — every publish workflow run uploads `sbom.cdx.json` as an artifact, retained for 90 days.
+
+SBOMs are CycloneDX JSON format and can be consumed by any standard SBOM scanner (Grype, Trivy, Dependency-Track, etc.).
+
+## Packages covered
+
+All packages under the `@mnemom/*` scope on npm. A non-exhaustive list:
+
+| Package | Repo |
+|---|---|
+| `@mnemom/agent-alignment-protocol` | [mnemom/aap](https://github.com/mnemom/aap) |
+| `@mnemom/agent-integrity-protocol` | [mnemom/aip](https://github.com/mnemom/aip) |
+| `@mnemom/aip-otel-exporter` | [mnemom/aip-otel-exporter](https://github.com/mnemom/aip-otel-exporter) |
+| `@mnemom/policy-engine` | [mnemom/mnemom-platform](https://github.com/mnemom/mnemom-platform) |
+| `@mnemom/mnemom` (CLI) | [mnemom/mnemom-platform](https://github.com/mnemom/mnemom-platform) |
+| `@mnemom/types` | [mnemom/mnemom-types](https://github.com/mnemom/mnemom-types) |
+
+All publishes use the same canonical workflow, maintained in [mnemom/.github](https://github.com/mnemom/.github), which gives us a single source of truth for the publish recipe and makes drift between repos architecturally impossible.
+
+## Reporting concerns
+
+If you encounter a package that fails verification, or you have questions about the supply-chain posture, email security@mnemom.ai or see our [security policy](https://github.com/mnemom/.github/blob/main/SECURITY.md).
