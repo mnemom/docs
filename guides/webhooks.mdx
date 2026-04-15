@@ -853,22 +853,33 @@ Always verify signatures against the **raw request body** (the exact bytes recei
 
 ### First Delivery
 
-Mnemom attempts inline delivery immediately when an event is emitted. Most webhooks arrive within seconds of the triggering event. If inline delivery fails, the event enters the retry queue.
+Mnemom attempts inline delivery immediately when an event is emitted. Most webhooks arrive within seconds of the triggering event. The first delivery attempt includes up to 4 rapid retries (at 1s, 5s, and 15s intervals). If all inline attempts fail, the event enters the **dead-letter queue (DLQ)** for persistent retry.
 
 ### Retry Schedule
 
-Failed deliveries are retried with exponential backoff:
+Failed deliveries are retried in two phases:
+
+**Phase 1: Inline (immediate)**
 
 | Attempt | Delay | Cumulative |
 |---|---|---|
 | 1 (initial) | Immediate | 0s |
-| 2 | 10 seconds | 10s |
-| 3 | 30 seconds | 40s |
-| 4 | 2 minutes | 2m 40s |
-| 5 | 10 minutes | 12m 40s |
-| 6 | 1 hour | 1h 12m 40s |
+| 2 | 1 second | 1s |
+| 3 | 5 seconds | 6s |
+| 4 | 15 seconds | 21s |
 
-After 6 attempts, the delivery is marked as **failed** (terminal).
+**Phase 2: DLQ (persistent, exponential backoff)**
+
+| Attempt | Delay | Cumulative |
+|---|---|---|
+| 5 | 1 minute | ~1m |
+| 6 | 5 minutes | ~6m |
+| 7 | 30 minutes | ~36m |
+| 8 | 2 hours | ~2h 36m |
+| 9 | 6 hours | ~8h 36m |
+| 10 | 24 hours | ~32h 36m |
+
+After **10 total attempts**, the delivery is marked as **dead** (permanently failed). Platform alerts fire when a delivery is dead-lettered. You can redeliver dead events manually via the API.
 
 ### Permanent vs. Retryable Failures
 
@@ -877,7 +888,7 @@ After 6 attempts, the delivery is marked as **failed** (terminal).
 | **2xx** | Success. Delivery marked as `delivered`. |
 | **429** | Rate limited. Retries with at least 60s backoff. |
 | **4xx** (except 429) | Permanent failure. No retries. Fix your endpoint. |
-| **5xx** | Retryable. Follows backoff schedule. |
+| **5xx** | Retryable. Follows backoff schedule above. |
 | **Timeout** (>10s) | Retryable. Your endpoint must respond within 10 seconds. |
 
 ### Auto-Disable
