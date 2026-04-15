@@ -1,0 +1,110 @@
+---
+title: "Governance guarantees"
+description: "Cross-cutting contracts that apply to every card, template, and exemption mutation — audit, idempotency, schema identity, webhooks."
+---
+
+Every mutation against the unified card surface is bound by four guarantees.
+These apply uniformly to alignment-card, protection-card, org-template,
+and exemption endpoints.
+
+## 1. Schema identity on every response
+
+Every response includes:
+
+```
+X-Mnemom-Schema: unified/2026-04-15
+```
+
+The value changes when the card surface version changes. A compliance
+auditor can point at any request/response pair and determine the exact
+schema that served it without replaying the endpoint.
+
+## 2. Idempotency-Key required on mutations
+
+`PUT`, `POST`, and `DELETE` endpoints require an `Idempotency-Key` header:
+
+```
+Idempotency-Key: <opaque 24h-unique string>
+```
+
+Behavior:
+
+- **First request with key K** — the mutation executes. The response body,
+  status, and content type are cached for 24 hours keyed by `(user, K)`.
+- **Retry with same K, same body** — the cached response is returned
+  verbatim; the mutation is NOT re-executed. The replay carries
+  `Idempotent-Replay: true`.
+- **Retry with same K, different body** — returns `422 Unprocessable
+  Content` with an "Idempotency-Key reused with different inputs" error.
+  Use a new key for a new mutation.
+- **Expiry** — keys older than 24 hours are pruned by a scheduled job.
+
+## 3. Synchronous governance audit log
+
+Every successful mutation writes exactly one row to `governance_audit_log`
+in the same request lifecycle as the mutation itself. The audit row
+includes:
+
+- `actor_user_id`, `actor_auth_method`, `actor_api_key_id?`, `actor_org_id?`
+- `action` (e.g. `alignment_card.put`, `exemption.granted`)
+- `target_type` + `target_id`
+- `request_id` (Cloudflare ray)
+- `idempotency_key`
+- `before_json` — canonical state before the mutation (nullable)
+- `after_json` — canonical state after (nullable on delete)
+- `metadata` — including the `X-Mnemom-Schema` value at write time
+
+If the audit write fails, the response returns `500` and the mutation is
+NOT considered durable. This is by design — we never ship a card change
+without its audit trail.
+
+This log is distinct from the HTTP-request-level `api_audit_log` (which
+records every authenticated write). `governance_audit_log` is the
+domain-level record used for SOC 2 Article 12 / HIPAA BAA compliance.
+
+## 4. Webhook events on every mutation
+
+Each mutation emits exactly one webhook event via the existing DLQ-backed
+dispatcher:
+
+| Action                              | Event type                             |
+|-------------------------------------|----------------------------------------|
+| `PUT /v1/agents/:id/alignment-card` | `alignment_card.updated`               |
+| `PUT /v1/agents/:id/protection-card`| `protection_card.updated`              |
+| `PUT /v1/orgs/:id/alignment-template` | `org_alignment_template.updated`     |
+| `DELETE /v1/orgs/:id/alignment-template` | `org_alignment_template.deleted`  |
+| `PUT /v1/orgs/:id/protection-template` | `org_protection_template.updated`   |
+| `DELETE /v1/orgs/:id/protection-template` | `org_protection_template.deleted` |
+| `POST /v1/agents/:id/exemptions`    | `agent.exemption.granted`              |
+| `DELETE /v1/agents/:id/exemptions/:eid` | `agent.exemption.revoked`          |
+
+Webhook emission is fail-open: if the dispatcher is unavailable, the
+mutation still succeeds. The governance_audit_log row is the permanent
+record; the webhook is the notification layer.
+
+## Exemption grant constraints
+
+Exemptions relax an org-level floor for a specific agent. They are
+intentionally hard to create:
+
+- **Auth** — org owner or admin only, of the agent's org. Agents without
+  an org cannot have exemptions (no floor to exempt from; their own card
+  is the source of truth).
+- **`reason`** — required, minimum 20 characters. Describe why this
+  agent needs to bypass the org floor.
+- **`expires_at`** — defaults to `now() + 90 days` if omitted. Permanent
+  exemptions require explicit opt-in (`expires_at: null` in the body).
+- **Revocation is hard-delete** — the `governance_audit_log` row is the
+  permanent record that an exemption was granted and revoked.
+
+## API version header
+
+```
+X-Mnemom-Version: 2026-04-15
+```
+
+Present on every response. At current install base we run a single
+supported version; older version dates are no longer deprecated through
+this header because the legacy endpoints were deleted rather than
+deprecated. See [ADR-006](/concepts/api-versioning) for the deprecation
+doctrine that applies once there is a non-zero external install base.
