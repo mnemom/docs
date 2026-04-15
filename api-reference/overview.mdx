@@ -90,16 +90,38 @@ All error responses return a JSON body with a human-readable `error` field:
 
 ## Rate Limits
 
-API requests are rate-limited per authentication credential:
+API requests are rate-limited across three tiers, evaluated in order:
 
-| Plan | Rate Limit |
-|------|------------|
-| Free | 10 requests/second |
-| Developer | 50 requests/second |
-| Team | 200 requests/second |
-| Enterprise | Custom |
+| Tier | Scope | Default Limit | Configurable |
+|------|-------|---------------|-------------|
+| **Per-IP** | Client IP address | 100 requests/minute | No |
+| **Per-agent** | Agent hash (API key identity) | 100 requests/minute | Yes (per-org) |
+| **Per-org** | Billing account | 1,000 requests/minute | Yes (per-org) |
 
-When you exceed the rate limit, the API returns a `429` status code with a `Retry-After` header indicating how many seconds to wait before retrying.
+Enterprise organizations can request custom per-org and per-agent limits via their account settings or by contacting support.
+
+### Rate Limit Response
+
+When any tier is exceeded, the API returns HTTP `429` with these headers:
+
+| Header | Description |
+|--------|-------------|
+| `Retry-After` | Seconds to wait before retrying |
+| `X-RateLimit-Limit` | Maximum requests allowed in the window |
+| `X-RateLimit-Remaining` | Requests remaining (always `0` on a 429) |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+
+```json
+{
+  "error": "Rate limit exceeded",
+  "type": "rate_limit_error",
+  "tier": "ip",
+  "limit": 100,
+  "retry_after": 42
+}
+```
+
+The `tier` field indicates which limit was hit (`ip`, `agent`, or `org`). Rate limit windows are 1 minute.
 
 ## Endpoint Documentation
 
