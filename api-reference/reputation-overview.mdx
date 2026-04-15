@@ -38,18 +38,37 @@ API keys can be created in your dashboard under Settings or via `POST /v1/api-ke
 
 ## Rate Limits
 
-| Endpoint | Rate Limit | Window |
-|----------|-----------|--------|
-| `GET /reputation/{agent_id}` | 100 requests | per minute |
-| `GET /reputation/{agent_id}/history` | 60 requests | per minute |
-| `GET /reputation/{agent_id}/badge.svg` | 300 requests | per minute |
-| `GET /reputation/{agent_id}/verify` | 30 requests | per minute |
-| `POST /reputation/batch` | 30 requests | per minute |
-| `GET /reputation/search` | 60 requests | per minute |
-| `GET /reputation/compare` | 60 requests | per minute |
-| `GET /reputation/benchmarks` | 30 requests | per minute |
+Reputation endpoints are rate-limited to prevent systematic enumeration. Limits are applied per-IP for unauthenticated requests and per-API-key (JWT `sub`) for authenticated requests.
 
-Rate-limited responses return HTTP `429` with a `Retry-After` header.
+| Category | Endpoints | Unauthenticated (per-IP) | Authenticated (per-API-key) |
+|----------|-----------|--------------------------|----------------------------|
+| **Lookup** | `/reputation/{id}`, `/reputation/{id}/history`, `/reputation/{id}/events`, `/reputation/{id}/verify`, team variants | **10/min** | **60/min** |
+| **Compare** | `/reputation/compare`, `/teams/reputation/compare` | **10/min** | **60/min** |
+| **Benchmarks** | `/reputation/benchmarks` | **30/min** | **60/min** |
+| **Badge / OG-image** | `/reputation/{id}/badge.svg`, `/reputation/{id}/og-image`, team variants | **300/min** | **300/min** |
+| **Search / Batch** | `/reputation/search`, `/reputation/batch`, team variants | — (auth required) | **30/min** |
+
+Badge and OG-image endpoints have generous limits because they are typically embedded in websites and served through CDN caching. Authenticate requests (via `Authorization: Bearer <token>`) to access higher limits.
+
+### 429 Response Format
+
+```json
+{
+  "error": "Rate limit exceeded",
+  "type": "rate_limit_error",
+  "limit": 10,
+  "retry_after": 42
+}
+```
+
+| Header | Description |
+|--------|-------------|
+| `Retry-After` | Seconds to wait before retrying |
+| `X-RateLimit-Limit` | Maximum requests allowed in the window |
+| `X-RateLimit-Remaining` | Requests remaining (always `0` on a 429) |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+
+Rate limit windows are 1 minute. Enterprise customers requiring higher limits should contact support.
 
 ---
 
