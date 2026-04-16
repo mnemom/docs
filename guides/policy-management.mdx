@@ -20,19 +20,9 @@ This guide walks through creating, testing, publishing, and managing policies us
 
 <Steps>
 
-### Initialize a policy
+### Create your alignment card
 
-Generate a starter `policy.yaml` with commented examples:
-
-```bash
-mnemom policy init
-```
-
-This creates a `policy.yaml` in your current directory with sensible defaults and annotated examples for every section.
-
-### Edit policy.yaml
-
-Open the generated file and define your capability mappings, forbidden rules, and defaults. Here is a fully annotated example for a customer support agent:
+Policy is now defined directly in the alignment card. Create a YAML alignment card that includes capability mappings, forbidden rules, and enforcement defaults. Here is a fully annotated example for a customer support agent:
 
 ```yaml
 meta:
@@ -97,38 +87,34 @@ defaults:
 Run local validation to check schema compliance before publishing. This is a local-only check with no API call -- safe for CI pipelines:
 
 ```bash
-mnemom policy validate policy.yaml
+mnemom card validate card.yaml
 ```
 
-Exit code `0` means the policy is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding.
+Exit code `0` means the card is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding.
 
-### Test against historical traces
+### Evaluate against tools
 
-Dry-run the policy against your agent's recent traces to see what violations **would** have been flagged:
+Test your card's policy against the tools your agent actually uses:
 
 ```bash
-mnemom policy test policy.yaml
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
 ```
 
-This analyzes recent traces and reports which would pass, warn, or fail under the new policy. Use `--limit` to control how many traces to test:
-
-```bash
-mnemom policy test policy.yaml --limit 100
-```
+This evaluates each tool against the card's capability mappings, forbidden rules, and defaults. Use this to verify coverage before publishing.
 
 <Warning>
-  Always run `policy test` before publishing. A policy that looks correct in isolation can produce unexpected violations when evaluated against real agent behavior. Testing first shows you the impact before it affects live traffic.
+  Always run `card evaluate` before publishing. A card that looks correct in isolation can produce unexpected violations when evaluated against real agent tools. Testing first shows you the impact before it affects live traffic.
 </Warning>
 
 ### Publish
 
-Upload the validated policy to your agent:
+Upload the validated card (with embedded policy) to your agent:
 
 ```bash
-mnemom policy publish policy.yaml
+mnemom card publish card.yaml --agent my-agent
 ```
 
-The CLI validates again before uploading, asks for confirmation, and archives the previous policy version. Use `--yes` to skip the confirmation prompt in CI workflows.
+The CLI validates again before uploading, asks for confirmation, and archives the previous card version. Use `--yes` to skip the confirmation prompt in CI workflows.
 
 </Steps>
 
@@ -203,10 +189,10 @@ Glob patterns let you match groups of related tools without listing each one:
 After writing your mappings, check that every card action is covered:
 
 ```bash
-mnemom policy evaluate --file policy.yaml --agent-id your-agent --min-coverage 90
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__read_file --agent my-agent
 ```
 
-The coverage report tells you which card actions are mapped and which are missing. Aim for 100% coverage in production policies.
+The coverage report tells you which card actions are mapped and which are missing. Aim for 100% coverage in production cards.
 
 ## API-Based Management
 
@@ -443,20 +429,20 @@ Keep `policy.yaml` files alongside your agent code in version control. This give
 - **CI gating** -- validate and test policies automatically on every push
 
 ```yaml
-# .github/workflows/policy-check.yml
-name: Policy Check
+# .github/workflows/card-check.yml
+name: Card Check
 on: [pull_request]
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate policy
-        run: npx mnemom policy validate policy.yaml
-      - name: Test against traces
-        run: npx mnemom policy test policy.yaml --limit 50
+      - name: Validate card
+        run: npx mnemom card validate card.yaml
+      - name: Evaluate card policy
+        run: npx mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --format json
         env:
-          SMOLTBOT_API_KEY: ${{ secrets.SMOLTBOT_API_KEY }}
+          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
 ```
 
 ## Using Policy Recommendations
@@ -516,8 +502,8 @@ The recommendation includes confidence scores for each section. Focus your revie
   <Card title="Start with warn mode" icon="triangle-exclamation">
     Begin with `enforcement_mode: warn` to observe what your policy catches without blocking agent traffic. Graduate to `enforce` after testing confirms the policy matches your expectations.
   </Card>
-  <Card title="Test before publishing" icon="flask-vial">
-    Always run `mnemom policy test` before `mnemom policy publish`. Testing against historical traces shows you the real-world impact of your policy before it affects live requests.
+  <Card title="Evaluate before publishing" icon="flask-vial">
+    Always run `mnemom card evaluate` before `mnemom card publish`. Evaluating against your agent's tools shows you the real-world impact of your policy before it affects live requests.
   </Card>
   <Card title="Align mappings with card actions" icon="link">
     Keep capability mappings tightly aligned with your alignment card's `bounded_actions`. Every card action should have a corresponding mapping, and every mapping should reference a real card action.
@@ -537,7 +523,7 @@ The recommendation includes confidence scores for each section. Focus your revie
 
 - [Policy Engine](/concepts/policy-engine) -- How the policy engine evaluates tools against policies
 - [Policy DSL Specification](/specifications/policy-dsl) -- Full normative schema for policy YAML files
-- [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for init, validate, test, publish, and evaluate
-- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating policy checks into your deployment pipeline
-- [Alignment Card Management](/guides/card-management) -- Creating and managing the alignment cards that policies enforce
+- [CLI Reference](/gateway/cli) -- CLI commands including `card validate`, `card evaluate`, and `card publish`
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating card evaluation into your deployment pipeline
+- [Alignment Card Management](/guides/card-management) -- Creating and managing alignment cards with embedded policy
 - [Enforcement Modes](/gateway/enforcement) -- Alignment enforcement (observe/nudge/enforce) vs. policy enforcement

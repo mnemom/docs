@@ -23,50 +23,7 @@ The operation is:
 - Your agent must be [claimed](/gateway/overview) and linked to your Mnemom account
 - You must have your new provider API key ready before starting
 
-## Option 1: CLI
-
-<Steps>
-
-### Update the CLI (if needed)
-
-```bash
-npm update -g @mnemom/mnemom
-```
-
-### Run the rekey command
-
-```bash
-mnemom agents rekey
-# For a named agent:
-mnemom agents rekey my-coder
-```
-
-You will be prompted for your new provider API key. The key is hashed locally using SHA-256 — the raw value never leaves your machine.
-
-**CI/CD**: Set the `MNEMOM_NEW_KEY` environment variable to skip the interactive prompt:
-
-```bash
-MNEMOM_NEW_KEY=sk-ant-api03-... mnemom agents rekey
-```
-
-### Update your environment variable
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-api03-...   # your new key
-# or OPENAI_API_KEY / GOOGLE_API_KEY for other providers
-```
-
-### Verify
-
-```bash
-mnemom status
-```
-
-The agent ID should be unchanged. Existing traces and settings are intact.
-
-</Steps>
-
-## Option 2: Dashboard
+## Option 1: Dashboard
 
 <Steps>
 
@@ -92,7 +49,7 @@ A success notification confirms the re-binding. Update your `ANTHROPIC_API_KEY` 
 
 </Steps>
 
-## Option 3: API
+## Option 2: API
 
 Compute the SHA-256 hash of your new key **client-side**, then POST it:
 
@@ -140,20 +97,6 @@ Agents registered before this feature was shipped will show "Prefix not availabl
 
 Not sure which key is bound to your agent? Use verify binding to confirm without rekeying.
 
-### CLI
-
-```bash
-mnemom agents check-binding
-# For a named agent:
-mnemom agents check-binding my-coder
-```
-
-You will be prompted for the key to check. For CI use:
-
-```bash
-MNEMOM_CHECK_KEY=sk-ant-... mnemom agents check-binding
-```
-
 ### Dashboard
 
 In the agent Security tab, click **Verify my key** below the current key prefix display. Enter your key — the result appears inline.
@@ -180,11 +123,22 @@ If you registered multiple named agents from the same provider key, each holds a
 - Agent A: `SHA256(key|nameA).slice(0, 16)`
 - Agent B: `SHA256(key|nameB).slice(0, 16)`
 
-You must **rekey each agent independently**, using the correct hash for each name:
+You must **rekey each agent independently**, using the correct hash for each name. Use the dashboard or API to rekey each one:
 
 ```bash
-mnemom agents rekey agent-a
-mnemom agents rekey agent-b
+# Via API — rekey agent-a
+NEW_HASH_A=$(printf '%s' 'your-new-api-key|agent-a' | sha256sum | cut -c1-16)
+curl -X POST https://api.mnemom.ai/v1/agents/AGENT_A_ID/rekey \
+  -H "Authorization: Bearer <your-mnemom-token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"new_key_hash\": \"$NEW_HASH_A\"}"
+
+# Via API — rekey agent-b
+NEW_HASH_B=$(printf '%s' 'your-new-api-key|agent-b' | sha256sum | cut -c1-16)
+curl -X POST https://api.mnemom.ai/v1/agents/AGENT_B_ID/rekey \
+  -H "Authorization: Bearer <your-mnemom-token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"new_key_hash\": \"$NEW_HASH_B\"}"
 ```
 
 ## Resolving Key Conflicts

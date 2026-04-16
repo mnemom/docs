@@ -1,213 +1,34 @@
 ---
-title: "Policy CLI Reference"
-description: "CLI commands for policy management — init, validate, publish, list, test, and evaluate"
+title: "Policy Commands (Moved)"
+description: "Policy management is now part of the alignment card. Use mnemom card evaluate for policy evaluation."
 sidebarTitle: "Policy CLI"
 icon: "shield-check"
 ---
 
-# Policy CLI Reference
+# Policy Commands Have Moved
 
-The `mnemom policy` commands manage governance policies for your agents. Policies define which tools an agent can use, how unmapped tools are handled, and what actions are forbidden — bridging the gap between abstract alignment card declarations and concrete tool usage.
+The standalone `mnemom policy` commands have been removed. Policy -- capability mappings, forbidden rules, escalation triggers, and defaults -- is now defined directly in the alignment card using the unified schema (ADR-008).
 
-## Commands
+## What Changed
 
-<Steps>
+| Old Command | Replacement |
+|-------------|-------------|
+| `mnemom policy init` | Create a YAML alignment card with capability and enforcement sections. See [Card Management](/guides/card-management). |
+| `mnemom policy validate <file>` | `mnemom card validate <file>` -- validates the full card including policy sections |
+| `mnemom policy publish <file>` | `mnemom card publish <file>` -- publishes the card with embedded policy |
+| `mnemom policy list` | `mnemom card show --agent <name>` -- the active card includes all policy |
+| `mnemom policy test <file>` | `mnemom card evaluate <file> --tools <tools>` -- evaluates card policy against tools locally |
+| `mnemom policy evaluate` | `mnemom card evaluate <file> --tools <tools>` -- CI/CD gate evaluation |
 
-### `mnemom policy init`
+## New Workflow
 
-Generate a starter policy.yaml file with commented examples.
-
-```bash
-mnemom policy init
-```
-
-**What it does:**
-
-- Creates a `policy.yaml` in the current directory
-- Includes commented examples for capability_mappings, forbidden rules, escalation_triggers, and defaults
-- Pre-fills with sensible defaults (warn mode, 24h grace period, deny unmapped tools)
-
-**Example output:**
-
-```
-✓ Created policy.yaml
-  Edit the file to define your capability mappings and forbidden rules.
-  Run 'mnemom policy validate policy.yaml' to check your policy.
-```
-
-### `mnemom policy validate <file>`
-
-Local-only schema validation. No API call. CI-friendly exit codes.
-
-```bash
-mnemom policy validate policy.yaml
-```
-
-**Exit codes:**
-
-- `0` — Valid policy
-- `1` — Validation errors
-
-**Example output (success):**
-
-```
-Validating policy.yaml...
-  ✓ Schema version: 1.0
-  ✓ Meta: name="support-agent-policy", scope=agent
-  ✓ Capability mappings: 4 capabilities, 12 tool patterns
-  ✓ Forbidden rules: 3 rules
-  ✓ Escalation triggers: 2 triggers
-  ✓ Defaults: unmapped=deny, enforcement=warn, grace=24h
-
-Policy is valid.
-```
-
-**Example output (failure):**
-
-```
-Validating policy.yaml...
-  ✗ forbidden[1].severity: must be one of: critical, high, medium, low
-  ✗ defaults.unmapped_tool_action: required field missing
-
-2 errors found. Policy is invalid.
-```
-
-### `mnemom policy publish <file>`
-
-Upload a policy to an agent. Validates locally first.
-
-```bash
-mnemom policy publish policy.yaml
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--agent <name>` | Target agent (default: current agent) |
-| `--yes` | Skip confirmation prompt |
-
-**Example output:**
-
-```
-Validating policy.yaml...
-  ✓ Valid (4 capabilities, 3 forbidden rules)
-
-Publish this policy for agent mnm-550e8400-e29b-41d4-a716-446655440000? (y/N) y
-
-  ✓ Policy published (version 3)
-  Previous policy archived.
-```
-
-### `mnemom policy list`
-
-List published policies for your agent and organization.
-
-```bash
-mnemom policy list
-```
-
-**Example output:**
-
-```
-Organization Policy:
-  Name:     org-default-policy
-  Scope:    org
-  Version:  2
-  Updated:  2026-02-20
-
-Agent Policy (mnm-550e8400-e29b-41d4-a716-446655440000):
-  Name:     support-agent-policy
-  Scope:    agent
-  Version:  3
-  Updated:  2026-02-25
-
-Resolved policy: org + agent merged (agent strengthens org defaults)
-```
-
-### `mnemom policy test <file>`
-
-Dry-run a policy against historical traces. Shows what violations WOULD have been flagged.
-
-```bash
-mnemom policy test policy.yaml
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--agent <name>` | Target agent |
-| `--limit <N>` | Number of recent traces to test (default: 50) |
-
-**Example output:**
-
-```
-Testing policy.yaml against 50 recent traces...
-
-  Trace tr-abc123 (2026-02-25 14:32):
-    ⚠ UNMAPPED_TOOL: mcp__slack__post_message (warn)
-    ⚠ UNMAPPED_TOOL: mcp__slack__read_channel (warn)
-
-  Trace tr-def456 (2026-02-25 14:28):
-    ✗ FORBIDDEN: mcp__filesystem__delete (critical)
-      Reason: File deletion not permitted
-
-Summary:
-  50 traces analyzed
-  1 would fail, 1 would warn, 48 would pass
-  2 unmapped tools discovered
-```
-
-### `mnemom policy evaluate`
-
-Run policy evaluation as a CI/CD gate. Evaluates the agent's current resolved policy against recent activity.
-
-```bash
-mnemom policy evaluate
-```
-
-**Exit codes:**
-
-- `0` — All evaluations pass
-- `1` — One or more evaluations fail
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--agent <name>` | Target agent |
-| `--format <json\|text>` | Output format (default: text) |
-
-**Example output:**
-
-```
-Evaluating policy for agent mnm-550e8400-e29b-41d4-a716-446655440000...
-
-  Verdict: PASS
-  Violations: 0
-  Warnings: 2
-  Coverage: 85% (17/20 card actions mapped)
-
-  Warnings:
-    ⚠ 2 unmapped tools in grace period (expires in 18h)
-```
-
-</Steps>
-
-## Global Options
-
-All policy commands support:
-
-| Option | Description |
-|--------|-------------|
-| `--agent <name>` | Select which agent to use for the command |
-| `--help` | Show help for the subcommand |
+1. Define your alignment card in YAML, including `capabilities`, `enforcement`, and `escalation_triggers` sections
+2. Validate locally: `mnemom card validate card.yaml`
+3. Evaluate against tools: `mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message`
+4. Publish: `mnemom card publish card.yaml --agent my-agent`
 
 ## See Also
 
-- [Policy Engine](/concepts/policy-engine) — How policies work
-- [Policy DSL Specification](/specifications/policy-dsl) — Full schema reference
-- [Policy Management Guide](/guides/policy-management) — Step-by-step workflows
-- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — Integrating policy into CI/CD
-- [CLI Reference](/gateway/cli) — All mnemom commands
+- [CLI Reference](/gateway/cli) -- Full CLI command reference including `card evaluate`
+- [Card Management](/guides/card-management) -- Creating and managing alignment cards with embedded policy
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating card evaluation into CI/CD
