@@ -1,0 +1,144 @@
+---
+title: "GDPR Data Subject Rights"
+description: "Right to erasure (Article 17) — how Mnemom handles agent deletion requests"
+sidebarTitle: "GDPR Deletion"
+icon: "trash-can"
+---
+
+# GDPR Data Subject Rights
+
+Mnemom supports GDPR Article 17 (right to erasure) through a documented, auditable deletion cascade. When a deletion request is issued, all agent-identifiable data is removed from Mnemom's data stores within minutes, with cryptographic and regulatory audit trails preserved.
+
+<Note>
+This document describes the technical deletion mechanism. It does not constitute legal advice. Consult qualified legal counsel for your specific GDPR obligations as a data controller or processor.
+</Note>
+
+## Requesting Deletion
+
+### Agent-level deletion
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/{agent_id}
+```
+
+**Response:** `202 Accepted`
+
+```json
+{
+  "deletion_request_id": "dr-a1b2c3d4-...",
+  "status": "received",
+  "requested_at": "2026-04-16T14:30:00Z"
+}
+```
+
+The agent is immediately inaccessible — all read endpoints return `404` after the request is accepted. Data deletion proceeds asynchronously across all stores.
+
+### Org-level deletion
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/orgs/{org_id}
+```
+
+Deletes the organization and cascades deletion to all agents belonging to the org. Returns `202 Accepted` with the count of affected agents.
+
+### Checking deletion status
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/{agent_id}/deletion-status
+```
+
+Returns the current phase and completion status of the deletion cascade.
+
+### Idempotency
+
+Repeated `DELETE` requests for the same agent return `202` with the existing deletion request. The operation is safe to retry.
+
+## What Gets Deleted
+
+### Fully removed (hard delete)
+
+All agent-specific data is permanently deleted from Mnemom's primary database:
+
+| Data category | Examples |
+|---|---|
+| **Identity & cards** | Agent record, alignment cards, protection cards, canonical composed cards, policies, exemptions |
+| **Integrity & reasoning** | Integrity checkpoints, verdict proofs, enforcement nudges, containment logs |
+| **Reputation & trust** | Reputation scores, reputation events, trust edges, reputation snapshots |
+| **Detection & analysis** | Safe House evaluations, threat training traces, sideband analyses |
+| **Configuration** | Safe House configs, policy evaluations, card amendments, tool registrations |
+| **Webhooks** | Webhook registrations and delivery history |
+| **Cryptographic state** | Merkle tree state, score publication records |
+| **Cache** | All cached data across Cloudflare KV namespaces |
+
+### Pseudonymized (agent identity removed, structure retained)
+
+Certain records are retained for regulatory compliance but have all agent-identifying information replaced with an irreversible pseudonym:
+
+| Data category | Legal basis | What is retained |
+|---|---|---|
+| **Governance audit log** | SOC 2 audit trail, Art. 17(3)(e) legal claims | Timestamps, action types, actor IDs. Card snapshots scrubbed. |
+| **Usage and billing records** | Art. 17(3)(b) tax/accounting | Amounts, dates, plan types. Agent identifier replaced with pseudonym. |
+| **API audit log** | Art. 17(3)(e) security | Request metadata (method, path, status). Request/response bodies scrubbed. |
+
+### Naturally expiring (external stores)
+
+| Store | Retention | Treatment |
+|---|---|---|
+| **Observability traces** | 30 days (configurable via `audit_commitment.retention_days`) | A deletion denylist prevents traces from being surfaced in queries or API responses during the residual retention window. Traces expire naturally. |
+| **AI Gateway logs** | Per Cloudflare retention policy | Same denylist mechanism. Logs expire per platform policy. |
+
+### On-chain anchors
+
+Mnemom anchors aggregate Merkle roots to Base L2 for tamper-evidence (see [On-Chain Verification](/guides/on-chain-verification)). These on-chain records are immutable by design. However, **agent identifiers do not appear in any on-chain data**. The Merkle leaf pre-images contain only checkpoint-specific fields (checkpoint ID, verdict, thinking block hash, chain hash, timestamp). Deleting the off-chain mapping tables permanently severs the link between an agent and any on-chain anchor.
+
+## Deletion Timeline
+
+| Phase | Timing | What happens |
+|---|---|---|
+| **Immediate** (< 1 second) | On request | Agent tombstoned; all read endpoints return 404 |
+| **Cascade** (< 60 seconds typical) | Async | Database rows deleted across all tables; KV keys cleared |
+| **Pseudonymization** (< 60 seconds) | Async | Retained records scrubbed of agent identifiers |
+| **Complete** | < 5 minutes | Deletion request status transitions to `complete` |
+| **Trace expiry** | Up to 30 days | Observability traces age out naturally (denylist active) |
+
+<Warning>
+Deletion is irreversible. Once a deletion request completes, the agent and all associated data cannot be recovered. Ensure you have exported any needed data before requesting deletion.
+</Warning>
+
+## Verification
+
+After deletion completes, you can verify:
+
+1. **API verification:** `GET /v1/agents/{agent_id}` returns `404`.
+2. **Status verification:** `GET /v1/agents/{agent_id}/deletion-status` returns `{ "status": "complete", "completed_at": "..." }`.
+3. **Audit trail:** The deletion request record is retained indefinitely as proof of compliance (Art. 30 record of processing activities).
+
+## Legal Basis for Retained Data
+
+GDPR Article 17(3) permits continued processing where erasure conflicts with other legal obligations:
+
+| Carve-out | Article 17(3) paragraph | Mnemom application |
+|---|---|---|
+| **Legal claims** | (e) | Governance audit log, API audit log, admin audit log — retained as pseudonymized records for legal defense |
+| **Legal obligation** | (b) | Billing and usage records — retained under tax/accounting law with agent identifier pseudonymized |
+| **Record of processing** | Art. 30 | Deletion request record itself — retained as proof that the erasure was performed |
+
+## For Data Protection Officers
+
+If you are an enterprise customer's DPO conducting a compliance review:
+
+- **Technical specification:** The deletion cascade architecture is documented in ADR-021 (available on request), which includes the complete table inventory, FK cascade analysis, retention carve-outs with legal citations, and partial failure handling.
+- **Response time SLA:** Deletion requests are processed within 5 minutes (p99). The GDPR "without undue delay" obligation (Art. 17(1)) is satisfied by immediate tombstoning (< 1 second) and full cascade completion (< 5 minutes).
+- **Audit evidence:** Every deletion request is logged in `deletion_requests` with timestamps, status transitions, and the requesting user's identity.
+- **Scope confirmation:** To confirm that all agent data has been removed, request a deletion status check — the response confirms cascade completion across all stores.
+
+## Related
+
+- [EU AI Act Compliance](/guides/eu-compliance) — Article 50 transparency obligations (AI Act, separate regulation)
+- [Security Trust Model](/guides/security-trust-model) — Mnemom's security architecture
+- [On-Chain Verification](/guides/on-chain-verification) — How Merkle anchoring works
