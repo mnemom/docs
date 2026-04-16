@@ -1,4 +1,82 @@
 ---
-title: "Deactivate agent"
-openapi: "DELETE /agents/{agent_id}"
+title: "Delete agent"
+description: "GDPR Article 17 right-to-erasure — permanently deletes an agent and all associated data"
 ---
+
+## DELETE /v1/agents/{agent_id}
+
+Permanently deletes an agent and cascades deletion across all associated data stores. Returns `202 Accepted` — the agent is immediately inaccessible and data deletion proceeds asynchronously.
+
+**This operation is irreversible.** Once the cascade completes, the agent and all associated data cannot be recovered.
+
+### Authentication
+
+Requires a valid JWT or API key with ownership of the agent.
+
+### Parameters
+
+<ParamField path="agent_id" type="string" required>
+  The agent ID to delete (e.g., `mnm-a1b2c3d4-...`)
+</ParamField>
+
+### Response
+
+<ResponseField name="deletion_request_id" type="string">
+  Unique identifier for tracking the deletion request
+</ResponseField>
+<ResponseField name="status" type="string">
+  Current cascade status: `tombstoned`, `phase_N_complete`, `kv_cleared`, `pseudonymized`, `complete`, or `failed`
+</ResponseField>
+<ResponseField name="requested_at" type="string">
+  ISO 8601 timestamp of when the deletion was requested
+</ResponseField>
+
+### Status codes
+
+| Code | Meaning |
+|------|---------|
+| `202` | Deletion accepted — agent tombstoned, cascade in progress |
+| `401` | Authentication required |
+| `403` | Access denied — you do not own this agent |
+| `404` | Agent not found |
+
+### Idempotency
+
+Repeated `DELETE` requests for the same agent return `202` with the existing deletion request. The operation is safe to retry.
+
+### Example
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE \
+  -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/mnm-a1b2c3d4-5678-90ab-cdef-1234567890ab
+```
+
+```typescript TypeScript
+const response = await fetch(
+  `https://api.mnemom.ai/v1/agents/${agentId}`,
+  {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }
+);
+const { deletion_request_id, status } = await response.json();
+```
+</CodeGroup>
+
+```json Response (202)
+{
+  "deletion_request_id": "dr-a1b2c3d4-...",
+  "status": "tombstoned",
+  "requested_at": "2026-04-16T14:30:00.000Z"
+}
+```
+
+### What gets deleted
+
+See [GDPR Data Subject Rights](/guides/gdpr-data-subject-rights) for the complete inventory of deleted, pseudonymized, and retained data.
+
+### Tracking deletion progress
+
+Use `GET /v1/agents/{agent_id}/deletion-status` to monitor cascade progress.
