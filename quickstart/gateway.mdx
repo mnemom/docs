@@ -16,55 +16,28 @@ The Mnemom Gateway is a transparent AI gateway that sits between your applicatio
     ```
   </Step>
 
-  <Step title="Initialize">
-    Run `mnemom init` to configure your environment. The CLI detects your configured AI provider API keys (Anthropic, OpenAI, Gemini) and sets up routing through the Mnemom gateway.
+  <Step title="Authenticate">
+    Log in to your Mnemom account:
 
     ```bash
-    mnemom init
+    mnemom login
     ```
 
-    ```text Output
-    Detected providers:
-      Anthropic (ANTHROPIC_API_KEY) .... configured
-      OpenAI (OPENAI_API_KEY) ......... configured
-      Gemini (GEMINI_API_KEY) ......... not found
-
-    Agent registered: agent-a1b2c3d4
-    Gateway URL: https://gateway.mnemom.ai
-
-    Your API keys never leave your machine.
-    Only SHA-256 hashes are used for agent identification.
-    ```
+    This opens a browser-based login flow and stores your auth token in `~/.mnemom/auth.json`.
 
     <Note>
-    Your API key is **not** sent to Mnemom. Only a SHA-256 hash is used to identify your agent. The hash cannot be reversed to recover your key.
+    Your provider API keys are **not** sent to Mnemom. Only SHA-256 hashes are used to identify your agent. The hash cannot be reversed to recover your key.
     </Note>
   </Step>
 
-  <Step title="Check status">
-    Verify the gateway is reachable and your agent is registered:
-
-    ```bash
-    mnemom status
-    ```
-
-    ```text Output
-    Agent: agent-a1b2c3d4
-    Status: active
-    Providers: anthropic, openai
-    Gateway: https://gateway.mnemom.ai (healthy)
-    Traces: 0
-    Integrity: no checkpoints yet
-    ```
-  </Step>
-
   <Step title="Make an API call">
-    Use the gateway URL instead of the provider's direct URL. The gateway proxies your request to the correct provider, traces it, and returns the response unchanged.
+    Use the gateway URL instead of the provider's direct URL. Include the `x-mnemom-agent` header to name your agent -- it will be auto-created on first call. No registration step needed.
 
     ```bash
     # Instead of https://api.anthropic.com/v1/messages
     curl https://gateway.mnemom.ai/anthropic/v1/messages \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
       -H "content-type: application/json" \
       -d '{
         "model": "claude-sonnet-4-5-20250514",
@@ -86,11 +59,27 @@ The Mnemom Gateway is a transparent AI gateway that sits between your applicatio
     </Tip>
   </Step>
 
+  <Step title="Check status">
+    Verify the gateway is reachable and your agent is connected:
+
+    ```bash
+    mnemom status --agent my-agent
+    ```
+
+    ```text Output
+    Agent:    my-agent (mnm-a1b2c3d4e5f6)
+    Gateway:  https://gateway.mnemom.ai (healthy)
+    Status:   Connected
+    Providers: anthropic, openai
+    Last seen: just now
+    ```
+  </Step>
+
   <Step title="View traces">
     After making API calls through the gateway, view what was traced:
 
     ```bash
-    mnemom logs
+    mnemom logs --agent my-agent
     ```
 
     ```text Output
@@ -99,14 +88,14 @@ The Mnemom Gateway is a transparent AI gateway that sits between your applicatio
     2026-02-17T10:30:12Z  tr-abc125  respond    bounded   verified  0.91
     ```
 
-    Use `mnemom logs -l 20` to show more entries.
+    Use `mnemom logs --agent my-agent -l 20` to show more entries.
   </Step>
 
   <Step title="Check integrity">
     View AIP integrity scores for your agent's recent activity:
 
     ```bash
-    mnemom integrity
+    mnemom integrity --agent my-agent
     ```
 
     ```text Output
@@ -121,18 +110,22 @@ The Mnemom Gateway is a transparent AI gateway that sits between your applicatio
     ```
   </Step>
 
-  <Step title="Claim your agent">
-    Link your agent to your Mnemom account for a full private dashboard:
+  <Step title="View your alignment card">
+    See the alignment card assigned to your agent:
 
-    1. Run `mnemom status` to get your agent ID
-    2. Visit [mnemom.ai/claim](https://mnemom.ai/claim)
-    3. Paste your agent ID and prove ownership with your API key hash
+    ```bash
+    mnemom card show --agent my-agent
+    ```
 
-    Claiming gives you access to the full conscience timeline, trace history, integrity scores, and drift detection alerts.
+    Customize it by publishing your own card:
+
+    ```bash
+    mnemom card publish my-card.yaml --agent my-agent
+    ```
   </Step>
 
   <Step title="Explore the dashboard">
-    Once claimed, your agent's data is available at [mnemom.ai/dashboard](https://mnemom.ai/dashboard). The dashboard shows:
+    Your agent's data is available at [mnemom.ai/dashboard](https://mnemom.ai/dashboard) once you are logged in. The dashboard shows:
 
     - **Conscience timeline** -- A chronological view of every trace, integrity checkpoint, and enforcement action
     - **Alignment card** -- Your agent's declared values and boundaries
@@ -158,10 +151,10 @@ curl https://gateway.mnemom.ai/anthropic/v1/messages \
   }'
 ```
 
-Each named agent gets its own trace history, integrity scores, and drift detection -- even though they share an API key.
+Each named agent gets its own trace history, integrity scores, and drift detection -- even though they share an API key. Agents are auto-created on first API call -- no registration step is needed.
 
 <Tip>
-You can also register agents programmatically via the [Agent CRUD API](/api-reference/endpoint/post-agents). This lets you pre-register agents with metadata before they make their first request.
+You can also create agents programmatically via the [Agent CRUD API](/api-reference/endpoint/post-agents) if you want to pre-create agents with metadata before they make their first request.
 </Tip>
 
 ## Supported Providers

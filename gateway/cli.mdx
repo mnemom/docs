@@ -7,7 +7,7 @@ icon: "terminal"
 
 # CLI Reference
 
-The `mnemom` CLI configures your local environment for transparent AI agent tracing and provides commands to query your agent's transparency data.
+The `mnemom` CLI manages authentication, alignment cards, protection cards, and agent diagnostics for the Mnemom trust stack.
 
 ## Installation
 
@@ -15,47 +15,297 @@ The `mnemom` CLI configures your local environment for transparent AI agent trac
 npm install -g @mnemom/mnemom
 ```
 
-## Commands
+## Authentication
 
 <Steps>
 
-### `mnemom init`
+### `mnemom login`
 
-Configure tracing for your AI agent. This command detects your configured AI provider API keys (Anthropic, OpenAI, Gemini) and configures your local environment to route API calls through the Mnemom gateway.
+Authenticate with your Mnemom account. Opens a browser-based login flow and stores the auth token locally.
 
 ```bash
-mnemom init
+mnemom login
 ```
 
-**What it does:**
+Auth tokens are stored in `~/.mnemom/auth.json`. All subsequent commands use this token automatically.
 
-- Detects configured AI provider API keys in your environment
-- Configures your local environment to route API calls through the Mnemom gateway
-- Registers your agent automatically using a SHA-256 hash of your API key (the key itself never leaves your machine)
-- Supports multi-provider setups (Anthropic, OpenAI, Gemini)
+### `mnemom logout`
+
+Remove locally stored auth credentials.
+
+```bash
+mnemom logout
+```
+
+### `mnemom whoami`
+
+Display the currently authenticated user.
+
+```bash
+mnemom whoami
+```
+
+**Example output:**
+
+```
+Logged in as alex@example.com (org: mnemom)
+```
+
+</Steps>
+
+## Card Commands
+
+<Steps>
+
+### `mnemom card show`
+
+Fetch your agent's active alignment card and display it as structured YAML output showing principal, values, autonomy envelope, enforcement, and audit commitment.
+
+```bash
+mnemom card show --agent my-coder
+```
+
+**Example output:**
+
+```yaml
+card_id: ac-a4c12709-v2
+schema: unified-card/1.0
+issued_at: "2026-02-21"
+expires_at: "2026-08-21"
+
+principal:
+  type: human
+  relationship: delegated_authority
+
+values:
+  declared:
+    - transparency
+    - honesty
+    - harm_prevention
+    - editorial_independence
+    - source_attribution
+    - investigative_rigor
+  hierarchy: lexicographic
+
+autonomy:
+  bounded_actions:
+    - inference
+    - read
+    - write
+    - edit
+    - exec
+    - web_fetch
+    - web_search
+  forbidden_actions:
+    - fabricate_sources
+    - impersonate_human
+  escalation_triggers:
+    - condition: named_entity_critical
+      action: escalate
+    - condition: legal_claims_present
+      action: escalate
+
+enforcement:
+  mode: warn
+
+audit:
+  trace_format: ap-trace-v1
+  retention_days: 365
+  queryable: true
+  tamper_evidence: append_only
+```
+
+### `mnemom card edit`
+
+Open your agent's alignment card in your `$EDITOR` for interactive editing. Validates the card on save.
+
+```bash
+mnemom card edit --agent my-coder
+```
+
+The card is fetched from the server, opened in your editor, and published back on save. If validation fails, the CLI reports errors and gives you the option to re-edit.
+
+### `mnemom card publish <file>`
+
+Read a YAML or JSON alignment card file, validate it against the unified schema (ADR-008), confirm before publishing, and upload to your agent's alignment card via the API. Optionally triggers re-verification of existing traces against the new card.
+
+```bash
+mnemom card publish card.yaml --agent my-coder
+```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--gateway=<url>` | Use a custom gateway URL (for self-hosted deployments) |
+| `--agent <name>` | Target agent |
+| `--no-verify` | Skip re-verification prompt after publish |
+| `--yes` | Skip confirmation prompt |
 
 **Example:**
 
-```bash
-# Default setup — uses Mnemom hosted gateway
-mnemom init
-
-# Self-hosted gateway
-mnemom init --gateway=https://your-domain.com
 ```
+$ mnemom card publish card.yaml --agent my-coder
+
+  Validating card.yaml...
+  ✓ Valid YAML
+  ✓ Required blocks present (principal, values, autonomy, audit)
+  ✓ 6 declared values (3 standard, 3 custom with definitions)
+  ✓ 7 bounded actions
+  ✓ 2 escalation triggers (evaluable conditions)
+  ✓ Card not expired
+
+  Publish this card for agent my-coder? (y/N) y
+
+  ✓ Card published: ac-a4c12709-v2
+  Re-verify existing traces against new card? (y/N) y
+  ✓ 247 traces re-verified
+```
+
+### `mnemom card validate <file>`
+
+Local-only validation with no API call. Checks compliance against the unified schema (ADR-008). CI-friendly: exit code 0 on pass, 1 on fail.
+
+```bash
+mnemom card validate card.yaml
+```
+
+**Example:**
+
+```
+$ mnemom card validate card.yaml
+
+  ✓ Valid YAML
+  ✓ Required blocks: principal, values, autonomy, audit
+  ✓ values.declared: 6 values (non-empty)
+  ✓ Custom values defined: editorial_independence, source_attribution, investigative_rigor
+  ✓ bounded_actions: 7 actions (non-empty)
+  ✓ escalation_triggers: 2 triggers (evaluable conditions)
+  ✓ expires_at: 2026-08-21 (valid)
+
+  Card is valid.
+```
+
+### `mnemom card evaluate <file> --tools <tools>`
+
+Evaluate a card's policy against a set of tools locally. This replaces the old `mnemom policy evaluate` command. The alignment card now includes capability mappings and enforcement rules directly.
+
+```bash
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__delete --agent my-coder
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Target agent |
+| `--tools <tools>` | Comma-separated list of tool names to evaluate |
+| `--format <json\|text>` | Output format (default: text) |
+
+**Exit codes:**
+
+- `0` -- All evaluations pass
+- `1` -- One or more evaluations fail
+
+**Example output:**
+
+```
+Evaluating card.yaml against 2 tools...
+
+  mcp__browser__navigate .... PASS (mapped to web_fetch)
+  mcp__filesystem__delete ... FAIL (forbidden)
+    Reason: File deletion not permitted
+
+  Verdict: FAIL
+  1 pass, 1 fail
+```
+
+</Steps>
+
+## Protection Commands
+
+<Steps>
+
+### `mnemom protection show`
+
+Display the protection card for an agent as structured YAML output.
+
+```bash
+mnemom protection show --agent my-coder
+```
+
+### `mnemom protection edit`
+
+Open the protection card in your `$EDITOR` for interactive editing. Validates the card on save.
+
+```bash
+mnemom protection edit --agent my-coder
+```
+
+### `mnemom protection publish <file>`
+
+Validate and upload a protection card for an agent.
+
+```bash
+mnemom protection publish protection.yaml --agent my-coder
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--agent <name>` | Target agent |
+| `--yes` | Skip confirmation prompt |
+
+### `mnemom protection validate <file>`
+
+Local-only validation of a protection card. CI-friendly exit codes.
+
+```bash
+mnemom protection validate protection.yaml
+```
+
+</Steps>
+
+## Agent Listing
+
+### `mnemom agents`
+
+List all agents associated with your authenticated account.
+
+```bash
+mnemom agents
+```
+
+**Example output:**
+
+```
+  my-coder
+    Agent ID:  mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b
+    Created:   2/23/2026
+    Last seen: 2 minutes ago
+
+  my-researcher
+    Agent ID:  mnm-550e8400-e29b-41d4-a716-446655440000
+    Created:   2/7/2026
+    Last seen: 1 hour ago
+
+  Total: 2 agent(s)
+```
+
+<Note>
+Requires authentication via `mnemom login`. Agents are auto-created by the gateway on first API call -- there is no registration step.
+</Note>
+
+## Diagnostics
+
+<Steps>
 
 ### `mnemom status`
 
 Show agent status, connected providers, and connection info.
 
 ```bash
-mnemom status
+mnemom status --agent my-coder
 ```
 
 **Output includes:**
@@ -69,7 +319,7 @@ mnemom status
 **Example output:**
 
 ```
-Agent:    agent_abc123def456
+Agent:    my-coder (mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b)
 Gateway:  https://gateway.mnemom.ai
 Status:   Connected
 Providers:
@@ -84,7 +334,7 @@ Last seen: 2 minutes ago
 Display integrity score and verification statistics for your agent.
 
 ```bash
-mnemom integrity
+mnemom integrity --agent my-coder
 ```
 
 **Output includes:**
@@ -109,7 +359,7 @@ Window:          10 checkpoints, 2h retention
 Show recent traces and actions.
 
 ```bash
-mnemom logs [-l N]
+mnemom logs --agent my-coder [-l N]
 ```
 
 **Options:**
@@ -122,10 +372,10 @@ mnemom logs [-l N]
 
 ```bash
 # Show last 10 traces (default)
-mnemom logs
+mnemom logs --agent my-coder
 
 # Show last 50 traces
-mnemom logs -l 50
+mnemom logs --agent my-coder -l 50
 ```
 
 **Example output:**
@@ -138,203 +388,35 @@ mnemom logs -l 50
 2026-02-17 14:30:58  CLEAR      api_call    Claude Opus 4.6    "Draft email"
 ```
 
-### `mnemom card show`
+</Steps>
 
-Fetch your agent's active alignment card and display it with colored, structured output showing values, autonomy envelope, forbidden actions, escalation triggers, and audit commitment.
+## License
 
-```bash
-mnemom card show
-```
+<Steps>
 
-**Example output:**
+### `mnemom license activate`
 
-```
-═══════════════════════════════════════════════════
-  Alignment Card  ac-a4c12709-v2
-═══════════════════════════════════════════════════
-
-  Version    0.1.0
-  Issued     2026-02-21
-  Expires    2026-08-21
-
-  Values     transparency  honesty  harm_prevention
-             editorial_independence  source_attribution
-             investigative_rigor
-  Hierarchy  lexicographic
-
-  Bounded    inference  read  write  edit  exec
-             web_fetch  web_search
-  Forbidden  fabricate_sources  impersonate_human  ...
-  Escalation named_entity_critical → escalate
-             legal_claims_present → escalate
-
-  Audit      ap-trace-v1 · 365 days · queryable · append_only
-```
-
-### `mnemom card publish <file>`
-
-Read a JSON alignment card file, validate it against the AAP spec, confirm before publishing, and upload to your agent's alignment card via the API. Optionally triggers re-verification of existing traces against the new card.
+Activate a license key for your account.
 
 ```bash
-mnemom card publish <file>
+mnemom license activate <key>
 ```
 
-**Options:**
+### `mnemom license status`
 
-| Option | Description |
-|--------|-------------|
-| `--no-verify` | Skip re-verification prompt after publish |
-| `--yes` | Skip confirmation prompt |
-
-**Example:**
-
-```
-$ mnemom card publish alignment-card.json
-
-  Validating alignment-card.json...
-  ✓ Valid JSON
-  ✓ Required blocks present (principal, values, autonomy, audit)
-  ✓ 6 declared values (3 standard, 3 custom with definitions)
-  ✓ 7 bounded actions
-  ✓ 2 escalation triggers (evaluable conditions)
-  ✓ Card not expired
-
-  Publish this card for agent mnm-550e8400-e29b-41d4-a716-446655440000? (y/N) y
-
-  ✓ Card published: ac-a4c12709-v2
-  Re-verify existing traces against new card? (y/N) y
-  ✓ 247 traces re-verified
-```
-
-### `mnemom card validate <file>`
-
-Local-only validation with no API call. Checks AAP spec compliance. CI-friendly: exit code 0 on pass, 1 on fail.
+Show current license status.
 
 ```bash
-mnemom card validate <file>
+mnemom license status
 ```
 
-**Example:**
+### `mnemom license deactivate`
 
-```
-$ mnemom card validate alignment-card.json
-
-  ✓ Valid JSON
-  ✓ Required blocks: principal, values, autonomy_envelope, audit_commitment
-  ✓ values.declared: 6 values (non-empty)
-  ✓ Custom values defined: editorial_independence, source_attribution, investigative_rigor
-  ✓ bounded_actions: 7 actions (non-empty)
-  ✓ escalation_triggers: 2 triggers (evaluable conditions)
-  ✓ expires_at: 2026-08-21 (valid)
-
-  Card is valid.
-```
-
-### `mnemom register <name>`
-
-Register a new named agent. Each named agent gets its own distinct identity and trace history, even when sharing the same API key. The name is stored on the server on first traced API call and displayed on the dashboard.
+Deactivate the current license.
 
 ```bash
-mnemom register my-coder
+mnemom license deactivate
 ```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--openclaw` | Configure using OpenClaw |
-| `--standalone` | Configure standalone mode |
-| `--set-default` | Set the new agent as default |
-
-**Example:**
-
-```bash
-# Register a new agent for coding tasks
-mnemom register my-coder --openclaw
-
-# Register and set as default
-mnemom register my-researcher --set-default
-```
-
-### `mnemom agents`
-
-List all registered agents with their IDs, providers, and creation dates.
-
-```bash
-mnemom agents
-```
-
-**Example output:**
-
-```
-  default (default)
-    Agent ID:  mnm-550e8400-e29b-41d4-a716-446655440000
-    Provider:  openclaw
-    Created:   2/7/2026
-
-  my-coder
-    Agent ID:  mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b
-    Provider:  openclaw
-    Created:   2/23/2026
-
-  Total: 2 agent(s)
-```
-
-### `mnemom agents default <name>`
-
-Set the default agent used when no `--agent` flag is provided.
-
-```bash
-mnemom agents default my-coder
-```
-
-### `mnemom agents remove <name>`
-
-Remove a registered agent from the local configuration.
-
-```bash
-mnemom agents remove my-coder
-```
-
-### `mnemom agents rekey [agent-name]`
-
-Re-bind a claimed agent to a new provider API key. All history, alignment card, integrity score, and trust edges are fully preserved.
-
-```bash
-mnemom agents rekey            # rekey the default agent
-mnemom agents rekey my-coder   # rekey a named agent
-```
-
-The CLI prompts for your new API key interactively. The raw key is never transmitted — only its SHA-256 hash is sent to Mnemom.
-
-**CI/CD**: Set `MNEMOM_NEW_KEY` to skip the prompt:
-
-```bash
-MNEMOM_NEW_KEY=sk-ant-... mnemom agents rekey
-```
-
-See [Rotating Your Agent's API Key](/guides/agent-key-rotation) for the full guide.
-
-### `mnemom agents check-binding [agent-name]`
-
-Verify that a specific API key is currently bound to an agent. The key is hashed locally — never transmitted.
-
-```bash
-mnemom agents check-binding            # check default agent
-mnemom agents check-binding my-coder   # check a named agent
-```
-
-**Output:**
-```
-✓ Key is bound to this agent
-  Key prefix: sk-ant-api03-xx…
-
-# or:
-✗ Key is NOT bound to this agent
-  Current prefix: sk-ant-api03-xx…
-```
-
-**CI/CD**: Set `MNEMOM_CHECK_KEY` to skip the interactive prompt.
 
 </Steps>
 
@@ -346,22 +428,36 @@ mnemom agents check-binding my-coder   # check a named agent
 | `--version` | Show CLI version |
 | `--help` | Show help text |
 
-**Agent selection priority:**
-1. `--agent <name>` flag
+## Agent Selection
+
+Commands that operate on an agent use this priority to determine which agent:
+
+1. `--agent <name>` flag (highest priority)
 2. `MNEMOM_AGENT` environment variable
-3. Default agent from config
+
+There is no default agent concept. If neither `--agent` nor `MNEMOM_AGENT` is set, the CLI will prompt you to specify one (or error in non-interactive mode).
+
+**Environment:**
+
+Set `MNEMOM_ENV` to control which environment the CLI targets:
+
+| Value | Description |
+|-------|-------------|
+| `production` | Production environment (default) |
+| `staging` | Staging environment |
+| `local` | Local development environment |
 
 **Example:**
 
 ```bash
-# Check status of a specific agent
+# Use --agent flag
 mnemom status --agent my-coder
 
 # Use environment variable
 MNEMOM_AGENT=my-coder mnemom logs
 
-# Default agent (no flag needed)
-mnemom status
+# Target staging environment
+MNEMOM_ENV=staging mnemom status --agent my-coder
 ```
 
 ## Workflow
@@ -370,91 +466,83 @@ A typical workflow with the mnemom CLI:
 
 <Steps>
 
-### Set up tracing
+### Install and authenticate
 
 ```bash
-mnemom init
+npm install -g @mnemom/mnemom
+mnemom login
+```
+
+### Point your LLM client at the gateway
+
+Configure your application or LLM client to use `gateway.mnemom.ai` with the `x-mnemom-agent` header. The agent is auto-created on first API call -- no registration needed.
+
+```bash
+curl https://gateway.mnemom.ai/anthropic/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "x-mnemom-agent: my-coder" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
 ```
 
 ### Verify your agent is connected
 
 ```bash
-mnemom status
+mnemom status --agent my-coder
 ```
-
-### Use your AI agent normally
-
-Your API calls are automatically traced through the gateway. No code changes required.
 
 ### Check integrity
 
 ```bash
-mnemom integrity
-```
-
-### Register additional agents (optional)
-
-```bash
-mnemom register my-researcher --openclaw
-mnemom status --agent my-researcher
+mnemom integrity --agent my-coder
 ```
 
 ### Review recent activity
 
 ```bash
-mnemom logs -l 20
+mnemom logs --agent my-coder -l 20
+```
+
+### View your alignment card
+
+```bash
+mnemom card show --agent my-coder
 ```
 
 ### Customize your alignment card (optional)
 
-Create an alignment card JSON file and publish it:
+Create a YAML alignment card file and publish it:
 
 ```bash
-mnemom card validate my-card.json
-mnemom card publish my-card.json
+mnemom card validate my-card.yaml
+mnemom card publish my-card.yaml --agent my-coder
+```
+
+Or edit the existing card directly:
+
+```bash
+mnemom card edit --agent my-coder
 ```
 
 See the [Card Management guide](/guides/card-management) for how to build a card from scratch.
 
-### Define a governance policy (optional)
+### Evaluate card policy against tools (optional)
 
-Create and publish a policy that maps your agent's tools to alignment card capabilities:
+Test your card's capability mappings against a set of tools:
 
 ```bash
-mnemom policy init
-# Edit policy.yaml to define capability mappings and forbidden rules
-mnemom policy validate policy.yaml
-mnemom policy publish policy.yaml
+mnemom card evaluate my-card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-coder
 ```
-
-See the [Policy CLI Reference](/gateway/policy-cli) for all policy subcommands and the [Policy Management guide](/guides/policy-management) for a full walkthrough.
-
-### Link to your Mnemom account (optional)
-
-Associate your agent with your Mnemom account for a private dashboard:
-
-1. Run `mnemom status` to get your agent ID
-2. Visit [mnemom.ai/claim](https://mnemom.ai/claim) and sign in (or create a free account)
-3. The CLI will also offer to open this page for you after `mnemom register`
 
 </Steps>
 
-## Policy Commands
-
-The `mnemom policy` subcommands manage governance policies for your agents. For full reference, see [Policy CLI Reference](/gateway/policy-cli).
-
-| Command | Description |
-|---------|-------------|
-| `policy init` | Generate a starter policy.yaml |
-| `policy validate <file>` | Local schema validation (CI-friendly exit codes) |
-| `policy publish <file>` | Upload policy to agent |
-| `policy list` | List published policies |
-| `policy test <file>` | Dry-run against historical traces |
-| `policy evaluate` | CI/CD gate evaluation |
-
 ## Supported Providers
 
-The CLI automatically detects and configures tracing for these providers:
+The gateway supports tracing for these providers:
 
 | Provider | Models | Thinking/AIP | Auth Method |
 |----------|--------|-------------|-------------|
@@ -464,6 +552,6 @@ The CLI automatically detects and configures tracing for these providers:
 
 ## See Also
 
-- [Smoltbot Overview](/gateway/overview) — Architecture and how it works
-- [Policy CLI Reference](/gateway/policy-cli) — Policy management commands
-- [Enforcement Modes](/gateway/enforcement) — Configure violation response behavior
+- [Gateway Overview](/gateway/overview) -- Architecture and how it works
+- [Enforcement Modes](/gateway/enforcement) -- Configure violation response behavior
+- [Card Management](/guides/card-management) -- Creating and managing alignment cards

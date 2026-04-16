@@ -327,43 +327,63 @@ audit_commitment:
 
 ### Validate your card
 
-Run local validation to check AAP spec compliance before publishing. The CLI accepts both JSON and YAML files:
+Run local validation to check compliance against the unified schema (ADR-008) before publishing. The CLI accepts both YAML and JSON files:
 
 <CodeGroup>
-```bash JSON
-mnemom card validate my-card.json
-```
-
 ```bash YAML
 mnemom card validate my-card.yaml
 ```
+
+```bash JSON
+mnemom card validate my-card.json
+```
 </CodeGroup>
 
-This checks required blocks, value definitions, bounded actions, escalation trigger evaluability, and expiry dates. Exit code 0 means the card is valid; exit code 1 means there are errors.
+This checks required blocks (principal, values, autonomy, audit), value definitions, bounded actions, escalation trigger evaluability, capability mappings, enforcement rules, and expiry dates. Exit code 0 means the card is valid; exit code 1 means there are errors.
+
+### Evaluate against tools (optional)
+
+Before publishing, evaluate the card's policy against the tools your agent uses:
+
+```bash
+mnemom card evaluate my-card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
+```
+
+This checks that every tool maps to a declared bounded action and that no forbidden rules are violated. See [CI/CD Policy Gates](/guides/ci-cd-policy-gates) for integrating this into your pipeline.
 
 ### Publish the card
 
 Upload the validated card to your agent:
 
 <CodeGroup>
-```bash JSON
-mnemom card publish my-card.json
+```bash YAML
+mnemom card publish my-card.yaml --agent my-agent
 ```
 
-```bash YAML
-mnemom card publish my-card.yaml
+```bash JSON
+mnemom card publish my-card.json --agent my-agent
 ```
 </CodeGroup>
 
 The CLI validates again before uploading, asks for confirmation, and optionally re-verifies existing traces against the new card.
+
+### Edit an existing card
+
+To modify your agent's current card directly, use the edit command. It fetches the active card, opens it in your `$EDITOR`, and publishes the changes on save:
+
+```bash
+mnemom card edit --agent my-agent
+```
 
 ### Verify publication
 
 Confirm the card is active:
 
 ```bash
-mnemom card show
+mnemom card show --agent my-agent
 ```
+
+The output is displayed as structured YAML showing principal, values, autonomy, capabilities, enforcement, and audit commitment.
 
 ### CI integration
 
@@ -372,13 +392,17 @@ Add validation to your CI pipeline to catch card issues before deploy:
 ```yaml
 # GitHub Actions example
 - name: Validate alignment card
-  run: npx mnemom card validate alignment-card.json
+  run: npx mnemom card validate card.yaml
+- name: Evaluate card policy
+  run: npx mnemom card evaluate card.yaml --tools mcp__browser__navigate --agent my-agent
+  env:
+    MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
 ```
 
 ```bash
 # Pre-commit hook
 #!/bin/sh
-npx mnemom card validate alignment-card.json || exit 1
+npx mnemom card validate card.yaml || exit 1
 ```
 
 </Steps>
@@ -535,13 +559,14 @@ Reference table of all validation checks performed during `mnemom card validate`
 
 ## Policy Integration
 
-Alignment cards and [policies](/concepts/policy-engine) work together. The card declares *what* an agent can do (bounded_actions), while the policy defines *which tools* map to those capabilities:
+Policy is now part of the alignment card itself. The unified schema (ADR-008) includes capability mappings, forbidden rules, and enforcement defaults directly in the card:
 
-1. **Card defines capabilities**: Your card's `bounded_actions` lists semantic categories like `web_fetch`, `read`, `write`
-2. **Policy maps tools**: Your [policy](/guides/policy-management) maps concrete tool names (like `mcp__browser__*`) to those card categories
-3. **Evaluation bridges both**: The policy engine checks that every tool the agent uses maps to a declared bounded action
+1. **Card defines capabilities**: Your card's `autonomy.bounded_actions` lists semantic categories like `web_fetch`, `read`, `write`
+2. **Card maps tools**: The `capabilities` section maps concrete tool names (like `mcp__browser__*`) to those card categories
+3. **Card defines enforcement**: The `enforcement` section sets the mode (observe/warn/enforce) and defaults for unmapped tools
+4. **Evaluation bridges all three**: `mnemom card evaluate` checks that every tool maps to a declared bounded action
 
-When adding new tools, update both the card (add the capability to `bounded_actions`) and the policy (add the tool-to-capability mapping). The 24-hour grace period gives you time to make these updates after new tools are first observed.
+When adding new tools, update the card to add both the capability to `bounded_actions` and the tool-to-capability mapping in `capabilities`. The 24-hour grace period gives you time to make these updates after new tools are first observed.
 
 ### Amendment Tracking
 

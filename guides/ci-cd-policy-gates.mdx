@@ -11,8 +11,8 @@ Policy gates prevent misconfigurations from reaching production. By embedding po
 
 There are two types of gates:
 
-1. **Static validation** -- `mnemom policy validate` checks schema correctness. It is fast, offline, and makes no API calls.
-2. **Policy evaluation** -- `mnemom policy evaluate` checks the policy against live agent data. It requires an API key and network access.
+1. **Static validation** -- `mnemom card validate` checks schema correctness. It is fast, offline, and makes no API calls.
+2. **Card evaluation** -- `mnemom card evaluate` checks the card's policy against a set of tools. It can run locally or against live agent data.
 
 Both commands return CI-friendly exit codes: `0` on pass, `1` on failure. This means any CI system that interprets exit codes (GitHub Actions, GitLab CI, Jenkins, CircleCI, etc.) will correctly pass or fail the pipeline step.
 
@@ -20,26 +20,26 @@ Both commands return CI-friendly exit codes: `0` on pass, `1` on failure. This m
 
 ## Static Validation Gate
 
-Static validation checks that your `policy.yaml` conforms to the [Policy DSL schema](/specifications/policy-dsl) without making any API calls. This makes it fast, safe to run on every pull request, and suitable for environments without API credentials.
+Static validation checks that your alignment card conforms to the unified schema (ADR-008) without making any API calls. This makes it fast, safe to run on every pull request, and suitable for environments without API credentials.
 
 <Note>
-  Static validation catches structural errors -- missing required fields, invalid enum values, malformed glob patterns, and schema version mismatches. It does not verify that capability mappings reference real tools or that coverage is adequate. Use [policy evaluation](#policy-evaluation-gate) for that.
+  Static validation catches structural errors -- missing required fields, invalid enum values, malformed glob patterns, and schema version mismatches. It does not verify that capability mappings reference real tools or that coverage is adequate. Use [card evaluation](#policy-evaluation-gate) for that.
 </Note>
 
 <Tabs>
   <Tab title="GitHub Actions">
 
 ```yaml
-# .github/workflows/policy-validate.yml
-name: Policy Validation
+# .github/workflows/card-validate.yml
+name: Card Validation
 on:
   pull_request:
     paths:
-      - 'policy.yaml'
-      - 'policies/**'
+      - 'card.yaml'
+      - 'cards/**'
 
 jobs:
-  validate-policy:
+  validate-card:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,27 +47,27 @@ jobs:
         with:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
-      - name: Validate policy
-        run: mnemom policy validate policy.yaml
+      - name: Validate card
+        run: mnemom card validate card.yaml
 ```
 
-This workflow triggers only when `policy.yaml` or files under `policies/` change, keeping CI fast for unrelated pull requests.
+This workflow triggers only when `card.yaml` or files under `cards/` change, keeping CI fast for unrelated pull requests.
 
   </Tab>
   <Tab title="GitLab CI">
 
 ```yaml
 # .gitlab-ci.yml
-validate-policy:
+validate-card:
   stage: test
   image: node:20
   script:
     - npm install -g @mnemom/mnemom
-    - mnemom policy validate policy.yaml
+    - mnemom card validate card.yaml
   only:
     changes:
-      - policy.yaml
-      - policies/**
+      - card.yaml
+      - cards/**
 ```
 
 GitLab's `only:changes` directive provides the same path-scoped triggering as GitHub's `paths` filter.
@@ -81,26 +81,26 @@ GitLab's `only:changes` directive provides the same path-scoped triggering as Gi
 
 ---
 
-## Policy Evaluation Gate
+## Card Evaluation Gate
 
-Policy evaluation goes beyond schema validation. It evaluates your policy against the agent's actual state -- checking capability mapping coverage, verifying that referenced tools exist, and scoring the policy against recent traces. This requires an API key.
+Card evaluation goes beyond schema validation. It evaluates your card's policy against the agent's tools -- checking capability mapping coverage, verifying tool permissions, and scoring the card against tool usage. This can run locally or with an API key for live agent data.
 
 <Warning>
-  The evaluation gate makes API calls and reads live agent data. Only run it in trusted CI environments where your API key is stored as a secret. Never log the full evaluation response in public build logs if it contains agent identifiers or tool names you consider sensitive.
+  The evaluation gate may make API calls and read live agent data when using `--agent`. Only run it in trusted CI environments where your API key is stored as a secret. Never log the full evaluation response in public build logs if it contains agent identifiers or tool names you consider sensitive.
 </Warning>
 
 <Tabs>
   <Tab title="GitHub Actions">
 
 ```yaml
-# .github/workflows/policy-evaluate.yml
-name: Policy Evaluation
+# .github/workflows/card-evaluate.yml
+name: Card Evaluation
 on:
   push:
     branches: [main]
 
 jobs:
-  evaluate-policy:
+  evaluate-card:
     runs-on: ubuntu-latest
     env:
       MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
@@ -110,8 +110,8 @@ jobs:
         with:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
-      - name: Evaluate policy
-        run: mnemom policy evaluate --agent my-agent --format json
+      - name: Evaluate card
+        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --format json
 ```
 
 This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM_API_KEY` is read from GitHub Secrets and exposed as an environment variable.
@@ -121,14 +121,14 @@ This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM
 
 ```yaml
 # .gitlab-ci.yml
-evaluate-policy:
+evaluate-card:
   stage: deploy
   image: node:20
   variables:
     MNEMOM_API_KEY: $MNEMOM_API_KEY
   script:
     - npm install -g @mnemom/mnemom
-    - mnemom policy evaluate --agent my-agent
+    - mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
   only:
     - main
 ```
@@ -142,7 +142,7 @@ In GitLab, store `MNEMOM_API_KEY` as a CI/CD variable (Settings > CI/CD > Variab
 
 ## Exit Codes and Error Handling
 
-Both `policy validate` and `policy evaluate` use standard exit codes that CI systems interpret automatically:
+Both `card validate` and `card evaluate` use standard exit codes that CI systems interpret automatically:
 
 | Exit Code | Meaning | CI Behavior |
 |-----------|---------|-------------|
@@ -156,7 +156,7 @@ No special configuration is needed. If the command exits with `1`, the pipeline 
 Use `--format json` to get machine-readable output for programmatic parsing in complex pipelines:
 
 ```bash
-mnemom policy evaluate --agent my-agent --format json
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__delete --agent my-agent --format json
 ```
 
 The JSON output includes the verdict, any violations, warnings, and coverage metrics:
@@ -189,7 +189,7 @@ The JSON output includes the verdict, any violations, warnings, and coverage met
 ```
 
 <Tip>
-  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `mnemom policy evaluate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
+  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `mnemom card evaluate card.yaml --tools mcp__browser__navigate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
 </Tip>
 
 ---
@@ -206,7 +206,7 @@ on:
     branches: [main]
 
 jobs:
-  policy-gate:
+  card-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -214,8 +214,8 @@ jobs:
         with:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
-      - run: mnemom policy validate policy.yaml
-      - run: mnemom policy evaluate --agent my-agent
+      - run: mnemom card validate card.yaml
+      - run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
         env:
           MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
 
@@ -249,11 +249,11 @@ In GitHub, go to Settings > Secrets and variables > Actions, then add `MNEMOM_AP
 
 ### Create the validation workflow
 
-Add a workflow file that runs static validation on every pull request that modifies policy files. This catches schema errors before code review.
+Add a workflow file that runs static validation on every pull request that modifies card files. This catches schema errors before code review.
 
 ### Create the evaluation workflow
 
-Add a second workflow file that runs policy evaluation on pushes to `main`. This confirms the policy is valid against the live agent state before deployment proceeds.
+Add a second workflow file that runs card evaluation on pushes to `main`. This confirms the card's policy is valid against the agent's tools before deployment proceeds.
 
 ### Add the reputation gate (optional)
 
@@ -269,9 +269,9 @@ Review pipeline failures in your CI dashboard. Use `--format json` output to int
 
 ## Best Practices
 
-- **Run validation on every PR that touches policy files.** Static validation is fast and catches the most common mistakes before human review begins.
-- **Run evaluation on main branch merges (pre-deploy).** Evaluation confirms the policy works against real agent data, not just schema correctness.
-- **Store policy.yaml in version control alongside application code.** This gives you diff visibility, rollback capability, and a clear audit trail for every policy change.
+- **Run validation on every PR that touches card files.** Static validation is fast and catches the most common mistakes before human review begins.
+- **Run evaluation on main branch merges (pre-deploy).** Evaluation confirms the card's policy works against your agent's tools, not just schema correctness.
+- **Store card.yaml in version control alongside application code.** This gives you diff visibility, rollback capability, and a clear audit trail for every policy change.
 - **Use `--format json` for programmatic parsing in complex pipelines.** JSON output integrates cleanly with `jq`, custom scripts, and downstream CI steps.
 - **Set up notifications for evaluation failures.** Route CI failures to Slack, email, or your incident management tool so the team responds quickly.
 - **Keep validation fast by running it first.** Since static validation needs no API call, it should always be the first gate. If it fails, there is no reason to run the slower evaluation step.
@@ -280,7 +280,7 @@ Review pipeline failures in your CI dashboard. Use `--format json` output to int
 
 ## See Also
 
-- [Policy CLI Reference](/gateway/policy-cli) -- CLI command details for `validate`, `evaluate`, `test`, and `publish`
-- [Policy Management](/guides/policy-management) -- Full policy workflow from init to publish
-- [Policy DSL Specification](/specifications/policy-dsl) -- Schema reference for `policy.yaml`
+- [CLI Reference](/gateway/cli) -- CLI command details for `card validate`, `card evaluate`, and `card publish`
+- [Policy Management](/guides/policy-management) -- Full policy workflow from creation to publish
+- [Policy DSL Specification](/specifications/policy-dsl) -- Schema reference for policy sections within alignment cards
 - [Embeddable Trust Badges](/guides/reputation-badges) -- GitHub Action for reputation gates
