@@ -1,0 +1,65 @@
+---
+title: "Get deletion status"
+description: "Check the progress of a GDPR Article 17 deletion cascade"
+---
+
+## GET /v1/agents/{agent_id}/deletion-status
+
+Returns the current status of a deletion request for an agent. Use this endpoint to verify that a deletion cascade has completed.
+
+### Authentication
+
+Requires a valid JWT or API key.
+
+### Parameters
+
+<ParamField path="agent_id" type="string" required>
+  The agent ID to check deletion status for
+</ParamField>
+
+### Response
+
+<ResponseField name="deletion_request_id" type="string">
+  Unique identifier of the deletion request
+</ResponseField>
+<ResponseField name="status" type="string">
+  Current cascade phase. Values: `tombstoned`, `phase_1_complete` through `phase_7_complete`, `kv_cleared`, `pseudonymized`, `complete`, `failed`
+</ResponseField>
+<ResponseField name="requested_at" type="string">
+  ISO 8601 timestamp of the deletion request
+</ResponseField>
+<ResponseField name="completed_at" type="string | null">
+  ISO 8601 timestamp of cascade completion, or `null` if still in progress
+</ResponseField>
+<ResponseField name="failed_phase" type="string | null">
+  Phase where the cascade failed, or `null` if no failure
+</ResponseField>
+<ResponseField name="retry_count" type="number">
+  Number of retry attempts for a failed cascade
+</ResponseField>
+
+### Status codes
+
+| Code | Meaning |
+|------|---------|
+| `200` | Deletion request found |
+| `401` | Authentication required |
+| `404` | No deletion request found for this agent |
+
+### Example
+
+```bash cURL
+curl -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/mnm-a1b2c3d4-.../deletion-status
+```
+
+```json Response (200)
+{
+  "deletion_request_id": "dr-a1b2c3d4-...",
+  "status": "complete",
+  "requested_at": "2026-04-16T14:30:00.000Z",
+  "completed_at": "2026-04-16T14:30:42.000Z",
+  "failed_phase": null,
+  "retry_count": 0
+}
+```
