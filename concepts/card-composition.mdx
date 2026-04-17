@@ -1,0 +1,238 @@
+---
+title: "Card Composition"
+description: "How alignment and protection cards compose across platform > org > agent scope, with field-level rules, exemptions, and canonical-card semantics."
+sidebarTitle: "Card Composition"
+icon: "layer-group"
+---
+
+Every Mnemom agent has [two cards](/concepts/agent-cards) — alignment and protection. Both compose from **three scopes**: platform, org, agent. This page documents the composition rules, the canonical-card mechanism, and how exemptions change the computation.
+
+## Why composition exists
+
+Pre-UC, card merging happened per request. The gateway would fetch an agent card, an org template, and a CLPI policy, then run `mergeOrgAndAgentCard()` and `mergePolicies()` on every inbound call. That cost real latency, scattered merge logic across services, and made it hard to answer "what does this agent's effective card actually look like?"
+
+Composition moves the merge to **storage time**. When an agent's scope-level card, org template, platform policy, or exemption list changes, a background job (`compose_agent_card`, `compose_protection_card`) computes the **canonical** card — the fully-merged, fully-resolved, ready-to-serve document — and writes it to `canonical_agent_cards` or `canonical_protection_cards`.
+
+Every gateway and observer read hits the canonical table, not the raw scope rows. The request path has zero merge cost.
+
+## The three scopes
+
+| Scope | Purpose | Storage | Who edits |
+|-------|---------|---------|-----------|
+| **Platform** | Defaults for all agents on Mnemom — the absolute floor | `platform_policies` row (one per card type, singleton) | Mnemom platform team |
+| **Org** | Defaults for all agents in an organization | `orgs.card_template` (alignment) + `orgs.protection_template` (protection) | Org owner / admin |
+| **Agent** | Per-agent specialization | `alignment_cards.card_json` (active) + `sh_configs.config_json` (protection) | Agent owner |
+
+Scope ordering is **platform → org → agent**. Later scopes apply over earlier scopes according to per-field rules below.
+
+## Field-level composition rules
+
+Composition is not a single blended operation. Each card section has its own merge semantic chosen to match its governance intent:
+
+| Section / field | Rule | Intent |
+|-----------------|------|--------|
+| `values.declared` | **Union** across scopes | Platform/org can require values; agent can add more |
+| `values.conflicts_with` | **Union** | Any scope can mark a value as conflicting; agent can add more |
+| `values.definitions` | **Agent wins** (with platform/org as defaults if agent is silent) | Definitions are local semantics |
+| `conscience.mode` | **`replace` beats `augment`** (if any scope says replace, replace wins) | Replace is the stronger commitment |
+| `conscience.values` | **Union with dedup by `content`**; `BOUNDARY` entries from platform/org are inviolable | Platform conscience floors are non-negotiable |
+| `integrity.enforcement_mode` | **Strictest wins** (`enforce` > `nudge` > `observe`) | Org requires-enforce cannot be downgraded |
+| `autonomy.bounded_actions` | **Agent-scoped** (platform/org suggest defaults; agent card takes effect) | What the agent can do is agent-local |
+| `autonomy.forbidden_actions` | **Deny-overrides union** (forbidden at any scope = forbidden everywhere) | Platform/org deny cannot be un-denied by agent |
+| `autonomy.escalation_triggers` | **Union with dedup by `condition`** | Any scope can add a trigger |
+| `autonomy.max_autonomous_value` | **Min across scopes** (smallest cap wins) | Tightest cap applies |
+| `capabilities.*` | **Agent-scoped** (capabilities are local tool mappings) | Tools are per-agent |
+| `enforcement.allow_unmapped_tools` | **Strictest wins (`false` over `true`)** | Any scope can require mapped tools |
+| `audit.*` | **Platform-scoped** (compliance floor) | Audit guarantees come from the platform |
+| Protection `mode` | **Strictest wins** | Same as integrity |
+| Protection `thresholds.*` | **Floor + override** (org floor; agent may go stricter, not looser) | Org sets the alert ceiling |
+| Protection `screen_surfaces.*` | **Floor (true wins)** | Any scope can require scanning |
+| Protection `trusted_sources` | **Intersection from platform, union from org + agent** | Platform trust allowlist is the compliance ceiling |
+
+Composition metadata (`_composition`) on the canonical card records which scopes contributed which fields, so downstream readers can debug "where did this value come from?"
+
+## Exemptions
+
+An **exemption** waives a specific org- or platform-scope field for a specific agent, with explicit justification and expiry. Exemptions replace the pre-UC boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
+
+### Structure
+
+```yaml
+# POST /v1/agents/{agent_id}/exemptions
+exempt_section: "autonomy.forbidden_actions"   # the section (dotted path)
+exempt_patterns: ["deploy_code"]                # optional: specific items within the section
+reason: "Agent is the CI/CD deploy runner; needs deploy_code for its job"
+granted_by: "platform-admin@mnemom.ai"
+expires_at: "2026-07-17T00:00:00Z"              # null for permanent (rare)
+```
+
+### Rules
+
+- Exemptions are **section-specific**. A single exemption targets one field or pattern-scoped subset, not the whole card.
+- Exemptions are **audit-logged** synchronously on grant and revocation. Every composition that honors an exemption is traceable.
+- Exemptions **expire** (default 90 days). The composer refuses to honor an expired exemption; the next recompose quietly drops it.
+- Exemptions on `BOUNDARY` conscience entries are **rejected** at the API layer. Inviolable commitments cannot be waived.
+
+### Composition with exemptions
+
+When the composer runs:
+
+1. Compute the scope union (platform + org) for each field.
+2. For each active exemption, subtract the exempted patterns from the scope union before applying agent-scope.
+3. Apply agent-scope per the normal rules.
+4. Record the exemption reference in `_composition.exemptions_applied[]`.
+
+## The canonical card
+
+The canonical card is the output of composition:
+
+```typescript
+interface CanonicalAgentCard {
+  agent_id: string;
+  card_yaml: string;            // human-readable YAML
+  card_json: object;            // parsed object (query / index)
+  source_card_id: string;       // which raw agent-scope card this came from
+  composition_metadata: {
+    composed_at: string;        // ISO timestamp
+    scopes_applied: string[];   // ["platform", "org:acme", "agent:mnm-xxxx"]
+    versions: Record<string, number>;  // version of each scope's input
+    exemptions_applied: string[];      // exemption IDs
+  };
+  composed_at: string;
+  needs_recompose: boolean;     // true when an upstream scope changed
+}
+```
+
+`card_yaml` is what the CLI and dashboard surface as the "card this agent is running." `card_json` is what the gateway reads for policy evaluation (faster than re-parsing YAML on every request).
+
+## The recompose pipeline
+
+Composition runs in response to events:
+
+| Event | Recompose target |
+|-------|------------------|
+| Agent publishes a new alignment card | `compose_agent_card(agent_id)` — immediate |
+| Agent publishes a new protection card | `compose_protection_card(agent_id)` — immediate |
+| Org updates its alignment template | `mark_agents_for_recompose(org_id)` sets `needs_recompose=true`; background worker runs `recompose_pending()` |
+| Org updates its protection template | Same pattern |
+| Platform updates platform defaults | All agents marked; background worker recomposes in waves |
+| Exemption granted or revoked | `compose_agent_card(agent_id)` — immediate (scoped to the exempted agent) |
+| Exemption expires | Background tick sets `needs_recompose=true` on expiry; next recompose drops it |
+
+### Staleness window
+
+Between an org-template change and the recompose worker finishing, the canonical card is stale. The gateway handles this with the `needs_recompose` KV bypass: when the canonical row flag is true, the gateway serves the canonical without populating the 5-minute KV cache, so the next change after recompose is seen immediately.
+
+For a sub-50-agent org, recompose completes in under 2 seconds. For 10k+ agents, the background worker paces the batch to avoid saturating downstream services.
+
+## Worked example: three-scope composition
+
+**Scenario:** Acme Corp has an agent `mnm-patch-001` (a deploy remediation agent).
+
+### Platform scope
+
+```yaml
+# platform_policies.alignment (singleton)
+values:
+  declared: [transparency, harm_prevention, accountability]
+conscience:
+  values:
+    - type: BOUNDARY
+      content: "Never exfiltrate principal data to external systems."
+autonomy:
+  forbidden_actions: [exfiltrate_data, modify_audit_logs]
+audit:
+  retention_days: 90
+  tamper_evidence: append_only
+```
+
+### Org scope (Acme Corp)
+
+```yaml
+# orgs.card_template.acme
+values:
+  declared: [incident_containment, rollback_safety]
+integrity:
+  enforcement_mode: enforce
+autonomy:
+  forbidden_actions: [send_external_notification]
+```
+
+### Agent scope (`mnm-patch-001`)
+
+```yaml
+values:
+  declared: [move_fast_break_things, minimal_blast_radius]
+autonomy:
+  bounded_actions: [rollback_deploy, scale_infrastructure, toggle_feature_flag]
+integrity:
+  enforcement_mode: observe  # agent requests `observe`
+```
+
+### Composed canonical card
+
+```yaml
+values:
+  declared:
+    # union of all three scopes
+    - transparency
+    - harm_prevention
+    - accountability
+    - incident_containment
+    - rollback_safety
+    - move_fast_break_things
+    - minimal_blast_radius
+conscience:
+  values:
+    - type: BOUNDARY
+      content: "Never exfiltrate principal data to external systems."
+integrity:
+  # strictest wins — agent's `observe` is OVERRIDDEN by org's `enforce`
+  enforcement_mode: enforce
+autonomy:
+  bounded_actions: [rollback_deploy, scale_infrastructure, toggle_feature_flag]  # agent-scoped
+  forbidden_actions:
+    # deny-overrides union
+    - exfiltrate_data
+    - modify_audit_logs
+    - send_external_notification
+audit:
+  retention_days: 90
+  tamper_evidence: append_only
+_composition:
+  composed_at: "2026-04-17T18:23:41Z"
+  scopes_applied: [platform, "org:acme", "agent:mnm-patch-001"]
+  versions:
+    platform: 3
+    "org:acme": 17
+    "agent:mnm-patch-001": 4
+```
+
+Note the agent's `integrity.enforcement_mode: observe` was silently overridden to `enforce` by the org. The composition metadata makes this traceable — not hidden.
+
+## Debugging composition
+
+### CLI
+
+```bash
+mnemom card show --with-composition      # show canonical card + _composition metadata
+mnemom card show --raw                   # show agent-scope row without composition
+mnemom card trace --value transparency   # which scope contributed this value
+```
+
+### API
+
+```bash
+curl https://api.mnemom.ai/v1/agents/{id}/alignment-card?include=composition
+```
+
+### Observer
+
+Every gateway + observer card read emits a structured log entry with `card_source: canonical_hit` (or `canonical_miss_fallback` in the rare case the canonical row is missing and the composer is still catching up). The UC-14 gate review criterion is that the fallback rate is zero on production traffic.
+
+## See also
+
+- [Agent Cards](/concepts/agent-cards) — the two-card model overview
+- [Alignment Card Schema](/specifications/alignment-card-schema) — normative schema for unified alignment cards
+- [Protection Card Schema](/specifications/protection-card-schema) — normative schema for protection cards
+- [Card Lifecycle](/concepts/card-lifecycle) — amendment, reclassification, expiry

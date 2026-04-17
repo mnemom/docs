@@ -1,232 +1,203 @@
 ---
 title: "Fleet Coherence"
-description: "N-way value coherence analysis for agent fleets — aggregate scoring, outlier detection, cluster analysis, and divergence reporting."
+description: "Dimensional team coherence scoring — governance, conflict surface, structural invariants, and narrative helpers. No single fleet score."
 ---
 
 ## Overview
 
-While [pairwise value coherence](/concepts/value-coherence) checks compatibility between two agents, **fleet coherence** extends this to N agents simultaneously. It computes all C(n,2) pairwise scores and derives fleet-level insights:
+Fleet coherence answers the question "is this team of agents pulling in the same direction?" — but without collapsing that question into a single number. Mnemom's production coherence scorer (per ADR-025) is **dimensional**: it reports a vector with narrative helpers rather than a blended percentage.
 
-- **Fleet Score** — Mean of all pairwise coherence scores
-- **Outlier Detection** — Agents significantly below the fleet mean
-- **Cluster Analysis** — Groups of compatible agents
-- **Divergence Report** — Values where agents disagree
+The rationale is honesty. Any single blended score is a lossy compression, and the specific compression the classical "Jaccard-style" scorer uses actively distorts legitimate fleets:
 
-## Fleet Score
+1. **Silence counts as disagreement.** A value that one agent declares but another doesn't mention deflates the score — even though absence from a role-specialist card isn't disagreement, it's specialization.
+2. **Role specialization is punished.** A monitor agent and a remediator agent that share all 7 core governance values but differ on 5 role-specific values land at roughly 58% under Jaccard — not because they conflict, but because the denominator counts every unique value as a potential disagreement.
+3. **Fleet = mean-of-pairs loses structure.** No asymmetry between a universal conscience floor (which must be shared) and role extensions (which should diverge). No surfacing of the weakest pair, the conflict surface, or the specialization structure.
 
-The fleet score is the mean of all pairwise coherence scores:
+Production coherence uses `@mnemom/team-coherence/v2`, which reports the dimensions separately and exposes pre-computed narrative helpers.
 
-```
-fleet_score = mean(score(A,B) for all pairs A,B in fleet)
-```
-
-Additionally, the **weakest link** (minimum pairwise score) identifies the most strained relationship in the fleet.
-
-| Fleet Score | Interpretation |
-|------------|----------------|
-| ≥ 0.85 | Strong fleet alignment — safe for autonomous coordination |
-| 0.70–0.85 | Good alignment with minor divergences |
-| 0.50–0.70 | Moderate alignment — review outliers before coordination |
-| < 0.50 | Poor alignment — significant value conflicts present |
-
-## Outlier Detection
-
-Per-agent mean pairwise scores are computed. An agent is flagged as an **outlier** if its mean score is more than 1 standard deviation below the fleet mean:
-
-```
-agent_mean = mean(score(agent, peer) for all peers)
-fleet_mean = mean(all agent_means)
-stddev = std(all agent_means)
-
-is_outlier = agent_mean < fleet_mean - 1.0 * stddev
-```
-
-Outlier agents are reported with their primary conflict values — the specific value disagreements causing friction.
-
-## Cluster Analysis
-
-Agents are grouped into clusters using connected components on a compatibility graph:
-
-1. Build adjacency graph where an edge exists if `compatible === true` (score ≥ 0.70, no conflicts)
-2. Find connected components via BFS (breadth-first search)
-3. For each cluster, compute internal coherence and shared values
-
-Clusters reveal natural groupings — for example, in an incident response fleet, monitoring and classification agents may form one cluster while remediation agents form another.
-
-## Divergence Report
-
-For each value in the union of all declared values, the report shows:
-- Which agents declare it
-- Which agents are missing it
-- Which agents have it in `conflicts_with`
-- Estimated impact on fleet score
-
-Values are sorted by impact, helping fleet operators prioritize alignment work.
-
-## Fault Line Analysis
-
-The divergence report identifies *where* agents disagree. Fault line analysis goes further: it classifies each divergence into an actionable category, scores its impact, and provides resolution hints. Use `analyzeFaultLines` to classify an existing `FleetCoherenceResult`, or use `checkFleetFaultLines` as a convenience wrapper that runs both steps in one call.
-
-### The FaultLine Type
-
-Each detected fault line has the following shape:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique fault line identifier |
-| `value` | string | The value or capability where the fault line exists |
-| `classification` | string | One of `resolvable`, `priority_mismatch`, `incompatible`, `complementary` |
-| `severity` | string | `low`, `medium`, `high`, or `critical` |
-| `agents_declaring` | string[] | Agents that declare this value |
-| `agents_missing` | string[] | Agents that are missing this value |
-| `agents_conflicting` | string[] | Agents with an explicit `conflicts_with` entry for this value |
-| `impact_score` | number | Estimated impact on fleet operations (0.0 -- 1.0) |
-| `resolution_hint` | string | Suggested action to resolve this fault line |
-| `affects_capabilities` | string[] | Capabilities affected by this fault line |
-
-### Classifications
-
-| Classification | Meaning | Typical Resolution |
-|---------------|---------|-------------------|
-| `resolvable` | The value is missing from one or more agents — no explicit conflict exists. A card update fixes it. | Add the missing value to the agent's alignment card |
-| `priority_mismatch` | All agents declare the value but diverge on its priority level or definition | Review value definitions across agents and align on priority weights |
-| `incompatible` | One or more agents have an explicit `conflicts_with` entry for this value | Requires human review — this is a fundamental value conflict |
-| `complementary` | Divergence appears intentional given agent specializations — e.g., a safety-focused agent appropriately emphasizes safety more than a research agent | No action needed; this is intentional team architecture |
-
-### Impact Score Formula
-
-The impact score estimates how much a fault line affects fleet operations:
-
-```
-impact_score = impact_on_fleet_score × coordination_overlap
-```
-
-Where `coordination_overlap` is how frequently the affected agents interact. Impact scores can optionally be weighted by agent reputation scores — higher-reputation agents have their fault lines weighted more heavily since their behavior is better established.
-
-### SDK Usage
-
-<CodeGroup>
-
-```typescript TypeScript
-import { checkFleetFaultLines } from '@mnemom/agent-alignment-protocol';
-
-const { coherence, analysis } = checkFleetFaultLines([
-  { agentId: 'agent-a', card: cardA },
-  { agentId: 'agent-b', card: cardB },
-  { agentId: 'agent-c', card: cardC },
-]);
-
-console.log(`Fleet score: ${coherence.fleet_score}`);
-console.log(`Fault lines: ${analysis.summary.total}`);
-console.log(`Resolvable: ${analysis.summary.resolvable}`);
-analysis.fault_lines.forEach(fl => {
-  console.log(`${fl.value} (${fl.classification}): ${fl.resolution_hint}`);
-});
-```
-
-```python Python
-from aap import check_fleet_fault_lines
-
-result = check_fleet_fault_lines([
-    {"agentId": "agent-a", "card": card_a},
-    {"agentId": "agent-b", "card": card_b},
-    {"agentId": "agent-c", "card": card_c},
-])
-
-print(f"Fleet score: {result.coherence.fleet_score}")
-print(f"Fault lines: {result.analysis.summary.total}")
-for fl in result.analysis.fault_lines:
-    print(f"{fl.value} ({fl.classification}): {fl.resolution_hint}")
-```
-
-</CodeGroup>
-
----
-
-## Structural Fault Lines
-
-When multiple fault lines consistently split agents along the same divide, this is a **structural fault line** — also called a fault line alignment. It is substantially more serious than several independent single-value gaps, because it signals a deep architectural division in the fleet.
-
-**Example:** If agents A and B declare `accuracy`, `helpfulness`, and `safety` but agent C declares none of them, these three individual fault lines all isolate agent C. The `FaultLineAnalysis.alignments` array will contain one `FaultLineAlignment` describing this structural isolation. Agent C is not merely missing one value — it is systematically on the other side of a team divide.
-
-### The FaultLineAlignment Type
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique alignment identifier |
-| `fault_line_ids` | string[] | IDs of the individual fault lines that form this structural fault line |
-| `minority_agents` | string[] | Agents on the smaller side of the divide |
-| `majority_agents` | string[] | Agents on the larger side of the divide |
-| `alignment_score` | number | Strength of the structural alignment (0.0 -- 1.0); higher means more consistent splitting |
-| `severity` | string | `low`, `medium`, `high`, or `critical` |
-| `description` | string | Human-readable summary of the structural fault line |
-
-<Note>
-Structural fault lines are grounded in Lau & Murnighan's (1998) research on demographic faultlines in human teams, applied to agent value alignment. Just as human teams with strong demographic faultlines are prone to subgroup conflict, agent fleets with strong structural fault lines are prone to coordination failures when the minority subgroup operates under different value constraints.
-</Note>
-
----
-
-## SDK Usage
-
-### TypeScript
+## The v2 output shape
 
 ```typescript
-import { checkFleetCoherence } from '@mnemom/agent-alignment-protocol';
-import type { FleetCoherenceResult } from '@mnemom/agent-alignment-protocol';
+interface TeamCoherenceResult {
+  // Pair-level aggregates
+  pair_count: number;
+  insufficient_evidence_pairs: number;
+  pairwise_governance_floor: number | null;   // weakest pair
+  pairwise_governance_median: number | null;  // typical pair
 
-const result: FleetCoherenceResult = checkFleetCoherence([
-  { agentId: 'sentinel', card: sentinelCard },
-  { agentId: 'triage', card: triageCard },
-  { agentId: 'patch', card: patchCard },
-  { agentId: 'herald', card: heraldCard },
-]);
+  // Conflict structural signal
+  conflict_edge_count: number;                 // number of pairs with ≥1 explicit conflict
 
-console.log(`Fleet score: ${(result.fleet_score * 100).toFixed(1)}%`);
-console.log(`Weakest link: ${(result.min_pair_score * 100).toFixed(1)}%`);
-console.log(`Outliers: ${result.outliers.map(o => o.agent_id).join(', ') || 'none'}`);
-console.log(`Clusters: ${result.clusters.length}`);
+  // Diversity
+  diversity_rate_median: number;
+
+  // Structural invariants (unified-card only; null when sections absent)
+  conscience_universal: boolean | null;
+  conscience_divergence: Array<{ agent_id; diverges_on: string[] }>;
+  integrity_uniform: boolean | null;
+  integrity_divergence: Array<{ agent_id; enforcement_mode }>;
+
+  // Outlier analysis
+  outlier_agents: Array<{ agent_id; mean_pair_governance; deviation_sigma }>;
+
+  // Narrative helpers — pre-computed answers to common questions
+  weakest_pair: { agent_a; agent_b; governance_score; conflicts } | null;
+  most_conflicted_agent: { agent_id; conflict_count } | null;
+  specializations: Record<agent_id, string[]>;
+  conflict_surface: Array<{ agent_a; agent_b; value; declared_by; listed_as_conflict_by }>;
+
+  // Per-pair detail (matrix rendering)
+  pairwise: Array<PairwiseCoherence>;
+}
 ```
 
-### Python
+**There is no `fleet_score` field.** UI surfaces that need a single number must derive one from this vector and take responsibility for that compression. The Mnemom product does not — every coherence surface in the dashboard reads the vector.
 
-```python
-from aap import check_fleet_coherence
+## Pairwise scoring
 
-result = check_fleet_coherence([
-    {"agent_id": "sentinel", "card": sentinel_card},
-    {"agent_id": "triage", "card": triage_card},
-    {"agent_id": "patch", "card": patch_card},
-    {"agent_id": "herald", "card": herald_card},
-])
-
-print(f"Fleet score: {result.fleet_score:.1%}")
-print(f"Outliers: {[o.agent_id for o in result.outliers]}")
-print(f"Clusters: {len(result.clusters)}")
-```
-
-## Enterprise API
-
-For enterprise organizations, fleet coherence is available via the REST API:
+The v2 pairwise scorer is evidence-based:
 
 ```
-GET /v1/orgs/{org_id}/coherence
-Authorization: Bearer <token>
+shared             = A.values.declared ∩ B.values.declared
+conflicts          = (A.values.declared ∩ B.values.conflicts_with)
+                   ∪ (B.values.declared ∩ A.values.conflicts_with)
+
+agreement_evidence = |shared|
+conflict_evidence  = |conflicts|
+
+if agreement_evidence + conflict_evidence < MIN_EVIDENCE (default 2):
+    governance_score = null           # insufficient evidence
+else:
+    governance_score = agreement_evidence
+                     / (agreement_evidence + conflict_evidence)
 ```
 
-Results are cached for 5 minutes. Requires the `nway_coherence` feature flag (Enterprise plan).
+Key properties:
+- **Silence is neutral.** Values declared by only one agent don't enter the denominator. They contribute to the `diversity_rate` side channel as positive specialization signal.
+- **Only explicit conflicts count.** A value in one card's `conflicts_with` that the other card declares is real disagreement. Everything else is tolerated specialization.
+- **Insufficient evidence returns `null`**, not a fabricated zero. Pairs with no overlap and no conflicts surface honestly as "not enough data to score."
+- **Bounded in [0, 1].** `governance_score = 1` when there are only shared values; `governance_score = 0` when every evidence item is a conflict.
 
-## Use Cases
+### Concrete scenarios
 
-- **Fleet Management** — Monitor overall value alignment across all agents in an organization
-- **Compliance** — Identify agents whose values diverge from organizational standards
-- **Incident Response** — Verify response team coherence before coordinating autonomous actions
-- **Onboarding** — Assess how a new agent's alignment card fits with the existing fleet
+Four showcase agents from the Mnemom incident-response demo:
+
+| Pair | Shared | Conflicts | Silent | Baseline (Jaccard) | v2 governance |
+|------|--------|-----------|--------|---------------------|---------------|
+| Sentinel ↔ Sentinel (self-pair) | 9 | 0 | 0 | 1.00 | **1.00** |
+| Sentinel ↔ Patch (role specialists) | 7 | 0 | 5 | 0.58 | **1.00** |
+| Triage ↔ Patch (explicit conflict on `move_fast_break_things`) | 7 | 1 | 4 | 0.50 | **0.875** |
+| Two agents, no shared values, no conflicts | 0 | 0 | 8 | 0.00 | **null** |
+
+The Sentinel↔Patch delta (0.58 → 1.00) is the single most important signal that v2 is working as intended: governance-aligned role specialists are scored honestly instead of being punished by their specialization.
+
+## Fleet scoring: a vector, not a mean
+
+`computeTeamCoherence(cards)` returns structural information, not a single number:
+
+### Aggregates
+
+- `pairwise_governance_floor` — the weakest pair's governance score. If a fleet has one bad pair, this number tells you that directly. More actionable than a mean.
+- `pairwise_governance_median` — median across scored pairs. Typical-case health.
+- `conflict_edge_count` — how many pairs have at least one explicit conflict. If this is zero, the fleet has no hard disagreements even if some pairs have low overlap.
+- `insufficient_evidence_pairs` — pairs where scoring returned `null`. Signals sparse cards more than bad alignment.
+
+### Structural invariants
+
+When the fleet uses [unified cards](/concepts/agent-cards) with `conscience` and `integrity` sections, the scorer checks two binary invariants:
+
+- **`conscience_universal`** — `true` if every agent shares the exact same conscience commitment set. `false` if any agent's conscience set differs from the modal set (the minority diverges, not the majority). `null` if any card lacks a conscience section.
+- **`integrity_uniform`** — `true` if all agents are in the same `integrity.enforcement_mode` (`observe`, `nudge`, or `enforce`). `false` if modes differ.
+
+These are first-order signals. A fleet without a universal conscience floor has a governance problem that no continuous score can express.
+
+### Outlier analysis
+
+An agent is an **outlier** if its mean pairwise governance score is more than 1σ below the fleet mean. Outliers surface with their `deviation_sigma` so you can tell a mild outlier (1.1σ) from a severe one (2.7σ).
+
+### Narrative helpers
+
+The scorer pre-computes the answers to the most common human questions so every UI surface tells the same story:
+
+- **`weakest_pair`** — the pair with the lowest governance score, with full conflict evidence attached. Answers "where should I look first?"
+- **`most_conflicted_agent`** — the agent involved in the most conflict pairs. Answers "who needs attention?"
+- **`specializations`** — per-agent values that only that agent declares. Answers "what does each agent uniquely bring?"
+- **`conflict_surface`** — flat list of every explicit conflict, with evidence (which agent declares the value, which agent lists it as a conflict). Answers "what are all the actual disagreements?"
+
+## SDK usage
+
+`@mnemom/team-coherence/v2` is a public npm package. It accepts a structural subset interface — both [unified cards](/concepts/agent-cards) (full fidelity with `conscience` + `integrity`) and AAP 1.0 `AlignmentCard` (reduced fidelity, invariants return `null`) satisfy it.
+
+```typescript
+import { computeTeamCoherence } from "@mnemom/team-coherence/v2";
+import type { TeamCoherenceInput } from "@mnemom/team-coherence/v2";
+
+const cards: TeamCoherenceInput[] = [
+  {
+    agent_id: "sentinel",
+    values: {
+      declared: ["transparency", "harm_prevention", "signal_fidelity"],
+      conflicts_with: ["alert_suppression"],
+    },
+    conscience: {
+      declared_values: ["principal_benefit", "honesty"],
+    },
+    integrity: { enforcement_mode: "enforce" },
+  },
+  // ... more agents
+];
+
+const result = computeTeamCoherence(cards);
+
+console.log("Governance floor:", result.pairwise_governance_floor);
+console.log("Conflict edges:", result.conflict_edge_count);
+console.log("Conscience universal:", result.conscience_universal);
+if (result.weakest_pair) {
+  const { agent_a, agent_b, governance_score, conflicts } = result.weakest_pair;
+  console.log(`Weakest: ${agent_a} ↔ ${agent_b} (${governance_score})`);
+  for (const c of conflicts) {
+    console.log(`  ${c.value}: ${c.declared_by} declares; ${c.listed_as_conflict_by} conflicts`);
+  }
+}
+```
+
+For the baseline Jaccard scorer (for pedagogical comparison, or for direct AAP protocol handshake use):
+
+```typescript
+import { checkFleetCoherenceBaseline } from "@mnemom/team-coherence/baseline";
+// Returns the AAP 1.0 FleetCoherenceResult shape with fleet_score, min/max_pair_score, etc.
+```
+
+## Fault-line analysis
+
+Fault-line classification — grouping divergences into `resolvable` / `priority_mismatch` / `incompatible` / `complementary` buckets and surfacing structural fault lines — is a **separate** layer built on top of coherence scoring. It continues to be emitted by the mnemom-api `/v1/teams/fault-lines` endpoint alongside the v2 coherence vector.
+
+See the [Fault Line Analysis guide](/guides/fault-line-analysis) for the classification model, and the [Intelligence API reference](/api-reference/intelligence-overview) for the endpoint shape.
+
+## API
+
+```
+POST /v1/teams/fault-lines          → fault-line classification + v2 coherence vector
+GET  /v1/orgs/{org_id}/coherence    → v2 coherence vector for an entire org fleet
+```
+
+Both endpoints emit the v2 `TeamCoherenceResult` shape. The legacy AAP-shaped `FleetCoherenceResult` is retired from the product surface; consumers that want it can import `@mnemom/team-coherence/baseline` and compute it client-side.
+
+Results are cached for 5 minutes. The org-level endpoint requires the `nway_coherence` feature flag (Enterprise plan).
+
+## Use cases
+
+- **Fleet management** — monitor shared governance commitments across all agents; detect conscience drift before it becomes a coordination failure.
+- **Compliance** — surface explicit value conflicts for audit. Role specialization is reported as a positive signal, not as a compliance red flag.
+- **Incident response** — verify that a response team's cards actually agree on the core governance commitments before handing coordination authority to the fleet.
+- **Onboarding** — compute coherence including a new agent; see whether it lands inside or outside the existing specialization structure.
+- **Algorithm honesty** — pair with the `/baseline` re-exports on the showcase page to demonstrate the concrete delta between naive and honest scoring on your own cards.
 
 ## See Also
 
-- [Value Coherence](/concepts/value-coherence) — Pairwise coherence between two agents
-- [Team Trust Rating](/concepts/team-reputation) — Team-level reputation scoring that builds on fleet coherence metrics
-- [Risk Assessment](/concepts/risk-assessment) — Risk scoring that incorporates fleet coherence data
-- [Intelligence API](/api-reference/intelligence-overview) — Fault line analysis and risk forecasting for teams
-- [Drift Detection](/concepts/drift-detection) — Detecting behavioral drift over time
+- [Agent Cards](/concepts/agent-cards) — The two-card model (alignment + protection)
+- [Alignment Card](/concepts/alignment-cards) — Full unified alignment card schema
+- [Card Composition](/concepts/card-composition) — Platform > Org > Agent scope
+- [Fault Line Analysis](/guides/fault-line-analysis) — Classifying divergences for action
+- [Value Coherence](/concepts/value-coherence) — The pairwise AAP handshake (baseline scorer)
+- [Team Trust Rating](/concepts/team-reputation) — Team-level reputation scoring

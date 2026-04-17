@@ -1,0 +1,183 @@
+---
+title: "Protection Card Schema"
+description: "Normative YAML schema for the protection card, including every section, field type, required/optional status, and composition semantic."
+sidebarTitle: "Protection Card Schema"
+icon: "file-shield"
+---
+
+Normative reference for the **protection card** — the YAML document that configures [Safe House](/concepts/safe-house) for a specific agent, and one half of every Mnemom agent's [two cards](/concepts/agent-cards). This page specifies every section, field, required/optional status, type, and composition semantic.
+
+Conceptual overview: [/concepts/protection-card](/concepts/protection-card). Alignment-card spec: [/specifications/alignment-card-schema](/specifications/alignment-card-schema).
+
+## Top-level structure
+
+```yaml
+card_version: protection/2026-04-15   # required; string; schema version
+card_id: pc-<uuid>                    # required; string; stable ID
+agent_id: mnm-<uuid>                  # required; string
+issued_at: 2026-04-17T12:00:00Z       # required; ISO 8601 UTC
+expires_at: null                      # optional; protection cards rarely expire
+
+mode: enforce                         # required; see §mode
+thresholds: { ... }                   # optional; see §thresholds
+screen_surfaces: { ... }              # optional; see §screen-surfaces
+trusted_sources: { ... }              # optional; see §trusted-sources
+extensions: { ... }                   # optional; §extensions
+
+_composition: { ... }                 # canonical-only; see §composition-metadata
+```
+
+## §mode
+
+Top-level default action for Safe House detectors on this agent.
+
+```yaml
+mode: enforce   # "observe" | "nudge" | "enforce"
+```
+
+| Value | Behavior |
+|-------|----------|
+| `observe` | Detectors run, signals logged, no request-path action |
+| `nudge` | Detectors may return advisory guidance to the agent |
+| `enforce` | Detectors may hard-block the request |
+
+**Composition:** **strictest wins** across scopes (`enforce` > `nudge` > `observe`). An agent cannot downgrade the org's mode.
+
+`mode` is a floor; individual thresholds can still tighten within it (e.g., a specific canary threshold may escalate to block even in `observe` mode).
+
+## §thresholds
+
+Per-signal numeric cutoffs for Safe House detectors. Each key is a detector ID; each value is a 0.0–1.0 threshold on that detector's score. Signals at-or-above the threshold trigger; below pass.
+
+```yaml
+thresholds:
+  injection_score: 0.70
+  exfiltration_score: 0.85
+  canary_match: 1.0           # exact match required (the canary detector emits 0 or 1)
+  semantic_novelty: 0.90
+  dlp_confidence: 0.75
+  pattern_match: 0.95
+```
+
+| Detector | Default threshold | What it scores |
+|----------|-------------------|----------------|
+| `injection_score` | 0.70 | Prompt-injection probability per [PatternMatcher](/concepts/safe-house) |
+| `exfiltration_score` | 0.85 | Data exfiltration likelihood per SignalScorer |
+| `canary_match` | 1.0 | Canary-string exact match (0 or 1) |
+| `semantic_novelty` | 0.90 | Semantic novelty / anomaly score |
+| `dlp_confidence` | 0.75 | DLP scanner confidence |
+| `pattern_match` | 0.95 | Regex pattern match score |
+
+**Composition:** **floor + override** — org threshold is a floor; agent may go stricter (lower numeric threshold), not looser. Example: if org sets `injection_score: 0.70`, agent can set `0.60` but not `0.80`.
+
+Setting a threshold to `null` disables the detector for this agent. See `screen_surfaces` below for the cleaner alternative.
+
+## §screen_surfaces
+
+Which request surfaces Safe House inspects.
+
+```yaml
+screen_surfaces:
+  incoming: true         # the user/principal prompt entering the agent
+  outgoing: true         # the agent's response leaving the agent
+  tool_calls: true       # tool-use invocations the agent makes
+  tool_responses: true   # responses to those tool calls
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `incoming` | `true` | Scan the prompt from the principal |
+| `outgoing` | `true` | Scan the agent's generated response |
+| `tool_calls` | `true` | Scan arguments to tool invocations |
+| `tool_responses` | `true` | Scan tool return values |
+
+**Composition:** **floor, `true` wins** — if any scope sets a surface to `true`, it's scanned. Agents cannot turn off scanning that org or platform requires.
+
+Turning off a surface is a deliberate performance/coverage trade-off. Every detection event logs which surfaces were inspected, so auditors can see what was *not* seen. If you need to disable a surface for a specific agent, the recommended path is an [exemption](/concepts/card-composition#exemptions) with a documented reason, not a raw `false` in the agent card.
+
+## §trusted_sources
+
+Per-scope allowlist of upstream sources whose content Safe House may trust without full detector runs.
+
+```yaml
+trusted_sources:
+  domains:
+    - internal.mnemom.ai
+    - vendor-api.example.com
+  agent_ids:
+    - mnm-aabbccdd-...     # agent-to-agent pass-through within the same org
+  ip_ranges:
+    - 10.0.0.0/8           # RFC1918 internal space (use sparingly)
+```
+
+| Field | Type | Semantic |
+|-------|------|----------|
+| `domains` | string[] | DNS name or exact `host:port` |
+| `agent_ids` | string[] | Mnemom agent IDs (`mnm-*`) |
+| `ip_ranges` | string[] (CIDR) | IPv4 or IPv6 CIDR blocks |
+
+**Composition:**
+- **Platform → agent**: **intersection** (platform trust allowlist is the compliance ceiling; downstream scopes cannot widen).
+- **Org + agent**: **union** (either scope can add trust; platform still caps).
+
+Trusted sources still emit a low-priority trace entry (so auditors can see what was waved through), but detectors are skipped for their content.
+
+**Security note:** adding a public IP range or user-controllable domain to `trusted_sources` is a critical misconfiguration. The API validates CIDR ranges against a static deny-list (public DNS resolvers, public LLM APIs) and rejects obvious mistakes.
+
+## §extensions
+
+Free-form `Record<string, unknown>` for protocol-specific or user-defined additions. Mnemom reserves `mnemom.*`.
+
+```yaml
+extensions:
+  mnemom:
+    alert_webhook: https://ops.acme.example/safe-house-alerts
+    team_channel: "#safehouse-alerts"
+```
+
+Extensions are agent-scoped and not composed by default.
+
+## §_composition (canonical-only)
+
+Present on the canonical protection card, absent on raw agent-scope cards.
+
+```yaml
+_composition:
+  composed_at: 2026-04-17T18:23:41Z
+  scopes_applied: [platform, "org:acme", "agent:mnm-patch-001"]
+  versions:
+    platform: 2
+    "org:acme": 11
+    "agent:mnm-patch-001": 3
+  exemptions_applied: []
+  source_card_id: pc-88ccdd11
+  canonical_id: can-pc-44ee22bb
+```
+
+`_composition` is read-only on the wire. See [Card Composition](/concepts/card-composition) for how these fields are computed.
+
+## YAML safe schema
+
+All `yaml.load()` calls use `{ schema: yaml.CORE_SCHEMA }` — Node-specific tags are rejected. Plain scalars, maps, and sequences only.
+
+## Body-size limits
+
+- Full protection card payload: **64 KB** max (enforced via Content-Length + rawBody double-check).
+- `thresholds` object: no hard limit on number of keys, but detectors with no defined threshold are silently ignored.
+
+`413 Payload Too Large` for oversize bodies.
+
+## Versioning
+
+`card_version` currently:
+
+- `protection/2026-04-15` — current. All canonical cards emit this version.
+
+Version bumps follow the same additive + deprecation-by-date convention as the alignment card schema.
+
+## See also
+
+- [Protection Card](/concepts/protection-card) — conceptual overview
+- [Safe House](/concepts/safe-house) — the detection pipeline this card configures
+- [Alignment Card Schema](/specifications/alignment-card-schema) — companion spec
+- [Card Composition](/concepts/card-composition) — three-scope composition rules + exemptions

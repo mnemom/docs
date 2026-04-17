@@ -1,0 +1,176 @@
+---
+title: "Agent Cards"
+description: "Every Mnemom agent has two cards — an alignment card (who the agent is and what it's allowed to do) and a protection card (how it's defended). Both are YAML, both compose across three scopes."
+sidebarTitle: "Agent Cards"
+icon: "id-card-clip"
+---
+
+Every Mnemom agent has **two cards**:
+
+- An **[alignment card](/concepts/alignment-cards)** — who the agent is, what it values, what it's allowed to do, what it must never do, how it's enforced.
+- A **[protection card](/concepts/protection-card)** — how Safe House guards the agent against prompt injection, data exfiltration, canary triggers, and other runtime threats.
+
+Both are YAML documents. Both compose from three scopes (platform > org > agent). Both are versioned, auditable, and edit-friendly. This page is the customer-facing orientation to the two-card model — how it fits together and why.
+
+## The two cards
+
+### Alignment card
+
+The alignment card answers *who the agent is and what it may do*. Its sections:
+
+| Section | What it declares |
+|---------|------------------|
+| `identity` | Card ID, agent ID, issued_at, expires_at |
+| `principal` | Who the agent serves (org, user, agent) and the nature of the relationship |
+| `values` | Declared values, definitions, conflicts_with, priority hierarchy |
+| `conscience` | Inviolable commitments (BOUNDARY / FEAR / COMMITMENT / BELIEF / HOPE entries) |
+| `integrity` | Enforcement mode (`observe` / `nudge` / `enforce`) — how integrity checkpoints act |
+| `autonomy` | `bounded_actions`, `forbidden_actions`, escalation triggers, max autonomous value |
+| `capabilities` | Tool mappings (`capability_name → tool pattern`), enforcement semantics |
+| `enforcement` | Policy-level knobs: allow_unmapped_tools, default severities |
+| `audit` | Trace format, retention, query endpoint, tamper evidence |
+| `extensions` | Protocol-specific additions (A2A, MCP, user-defined) |
+
+The full normative schema is at [/specifications/alignment-card-schema](/specifications/alignment-card-schema).
+
+### Protection card
+
+The protection card answers *how this agent is defended at runtime*. Its sections:
+
+| Section | What it declares |
+|---------|------------------|
+| `mode` | `observe` / `nudge` / `enforce` (see below) |
+| `thresholds` | Per-signal cutoffs (injection, exfiltration, canary, semantic-novelty, etc.) |
+| `screen_surfaces` | Which surfaces Safe House inspects (`incoming`, `outgoing`, `tool_calls`) |
+| `trusted_sources` | Per-scope allowlists for data sources the agent may ingest without full scanning |
+
+The full normative schema is at [/specifications/protection-card-schema](/specifications/protection-card-schema).
+
+## Why two cards
+
+Alignment and protection are different concerns with different stakeholders:
+
+- **Alignment** is the principal's declaration: what the agent is *supposed to* care about, what it's *allowed to* do, and what it *promises* about logging. Editing the alignment card is an intentional product decision.
+- **Protection** is the operator's defense: what runtime monitoring surfaces the agent exposes, what thresholds trigger a block, what sources are pre-trusted. Editing the protection card is a security posture decision.
+
+Separating them means:
+
+1. **Different edit cadence.** Alignment changes rarely; protection tuning is frequent. Two cards = two change histories.
+2. **Different approvers.** Platform admins may need to approve alignment changes; org admins may manage protection tuning.
+3. **Honest audit trails.** You can ask "what did the agent commit to?" separately from "how hard were we watching?"
+
+Prior to UC (see ADR-007 → ADR-008), these concerns were tangled: an AAP alignment card lived alongside a CLPI policy YAML and a Safe House JSON config. The unified model collapses the alignment side of the triangle (AAP card + CLPI policy + `agents.aip_enforcement_mode` + org conscience values all absorbed into one `alignment-card.yaml`) and elevates the protection side to a proper card (`protection-card.yaml` replaces the ad-hoc Safe House config).
+
+## Three scopes
+
+Both cards compose from three scopes:
+
+| Scope | Purpose | Who edits |
+|-------|---------|-----------|
+| **Platform** | Defaults for all agents on Mnemom — the absolute floor | Mnemom platform team |
+| **Org** | Defaults for all agents in an organization — the org-level floor | Org admins |
+| **Agent** | Per-agent overrides and specialization | Agent owner |
+
+Composition runs at **storage time**, not per request. When any scope changes, affected agents are marked `needs_recompose` and the background composer regenerates their canonical cards. Every gateway read hits the pre-composed canonical card, so the request path has zero merge cost.
+
+Field-level composition semantics vary by section:
+
+- `values.declared` — **union** across scopes (platform ∪ org ∪ agent)
+- `autonomy.forbidden_actions` — **union** (deny-overrides: agent can never remove a platform or org forbidden action; they can only add more)
+- `autonomy.bounded_actions` — **agent-scoped** (platform/org suggest defaults; agent cards take effect)
+- `conscience.values` — **union with deduplication by content**; platform/org commitments are inviolable floors
+- `integrity.enforcement_mode` — **strictest wins** (if org requires `enforce`, agent cannot downgrade to `observe`)
+- `capabilities.*` — **agent-scoped** (capabilities are local to each agent's tooling)
+
+See [Card Composition](/concepts/card-composition) for the full composition rules table and worked examples.
+
+### Exemptions
+
+Granular **exemptions** let an org admin waive specific sections of the org card for a specific agent without exempting the whole card. For example: "exempt this research agent from `forbidden_actions.no_external_api_calls`, nothing else."
+
+Exemptions are:
+- Section-specific (one exemption targets one field, not the whole card).
+- Optionally pattern-scoped (specific values within the section).
+- Time-bounded (default 90-day expiry) and audit-logged.
+- Required fields: `reason`, `granted_by`, `granted_at`.
+
+This replaces the pre-UC boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
+
+## How the cards are used
+
+### Runtime (gateway)
+
+Every request through the Mnemom gateway:
+
+1. Fetches the agent's canonical **alignment card** (KV-cached, 5-min TTL; `needs_recompose` bypass on org-template updates).
+2. Maps the unified card to the locked AAP `AlignmentCard` shape for any call to `@mnemom/agent-alignment-protocol`.
+3. Extracts policy from `capabilities` + `enforcement` sections for policy evaluation via `@mnemom/policy-engine`.
+4. Fetches the canonical **protection card** for [Safe House](/concepts/safe-house) detection.
+5. Applies `autonomy.forbidden_actions` as hard deny; applies `integrity.enforcement_mode` to the checkpoint pipeline.
+
+All of this is one canonical-card read per concern, not a lazy per-request merge.
+
+### Observer (trace analysis)
+
+The observer pipeline reads the canonical alignment card for trace verification (`verifyTrace` against the card's values/autonomy contract) and drift detection. It does not touch the protection card (protection is inline at the gateway).
+
+### Website (human surfaces)
+
+Agent owners edit alignment cards in the YAML-first card editor at `mnemom.ai/dashboard/agents/{id}/card`. Protection cards are edited under the security tab. Both surfaces show the **raw** agent-scope card alongside the **canonical** card (composed with platform + org defaults), so owners can see which values are coming from where.
+
+Org admins manage org-scope templates and exemptions from the org dashboard.
+
+### CLI
+
+```bash
+mnemom card show                       # canonical alignment card (YAML)
+mnemom card edit                       # open in $EDITOR
+mnemom card publish agent.card.yaml    # validate, publish, trigger recompose
+mnemom card evaluate agent.card.yaml --tools tools.json
+
+mnemom protection show                 # canonical protection card (YAML)
+mnemom protection edit
+mnemom protection publish protection.card.yaml
+```
+
+There's no more separate `mnemom policy …` command; policy is now a section of the alignment card, exposed via `card evaluate`.
+
+## Card lifecycle
+
+- **Creation.** First publish triggers composition against platform + org scopes, writing a canonical card into `canonical_agent_cards`.
+- **Amendment.** Updating the agent-scope card triggers `compose_agent_card` and writes a new canonical row.
+- **Org template change.** Updating an org-scope template sets `needs_recompose` on all affected agents; the background composer regenerates them. Until recompose runs, reads serve the stale canonical with an explicit staleness flag.
+- **Expiry.** `expires_at` in the alignment card is advisory; the composer refuses to emit a canonical card whose `expires_at` is in the past.
+- **Audit.** Every mutation is logged to `governance_audit_log` synchronously with an `Idempotency-Key` + two-phase dedupe (reserve → finalize/release).
+
+See [Card Lifecycle](/concepts/card-lifecycle) for state transitions and [Card Composition](/concepts/card-composition) for the recompose pipeline.
+
+## Modes across both cards
+
+Both cards use the `observe` / `nudge` / `enforce` vocabulary, but apply it to different layers:
+
+| Value | Alignment card (`integrity.enforcement_mode`) | Protection card (`mode`) |
+|-------|----------------------------------------------|---------------------------|
+| `observe` | Integrity checkpoints run; violations are logged but not acted on | Safe House detectors run; signals are logged |
+| `nudge` | Violations trigger a nudge to the agent (soft warning) | Detectors return guidance; agent may choose to revise |
+| `enforce` | Violations hard-block the action | Detectors may block the action outright |
+
+A fleet is most coherent when both cards use matching modes across all agents. The [v2 fleet coherence scorer](/concepts/fleet-coherence) checks `integrity.enforcement_mode` uniformity as a structural invariant (`integrity_uniform`).
+
+## Migration from the pre-UC format
+
+For early adopters who have cards in the legacy format (separate AAP card + CLPI policy + `sh_configs` JSON):
+
+- The mnemom-api migration pipeline composed all existing data into unified cards during UC-3 rollout (2026-04-15). No customer action was required.
+- Legacy endpoints (`/v1/agents/:id/card` old shape, `/v1/agents/:id/cfd/config`, `/v1/agents/:id/policy`) are removed. Use the unified endpoints (`/v1/agents/:id/alignment-card`, `/v1/agents/:id/protection-card`).
+- The CLI no longer ships a `policy` command; use `card evaluate` instead.
+
+## See also
+
+- [Alignment Card (AAP 1.0 protocol surface)](/concepts/alignment-cards) — the protocol-level card, stable for external interop
+- [Protection Card](/concepts/protection-card) — Safe House card schema and semantics
+- [Card Composition](/concepts/card-composition) — three-scope composition rules + exemptions
+- [Alignment Card Schema](/specifications/alignment-card-schema) — normative unified-card YAML
+- [Protection Card Schema](/specifications/protection-card-schema) — normative protection YAML
+- [Safe House](/concepts/safe-house) — the runtime protection pipeline the protection card configures
+- [Policy Engine](/concepts/policy-engine) — how `capabilities` + `enforcement` sections become runtime policy
