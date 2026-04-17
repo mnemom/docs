@@ -1,0 +1,290 @@
+---
+title: "Managing Card Composition"
+description: "Practical guide: manage org templates, grant exemptions, inspect canonical cards, and debug composition across the platform > org > agent hierarchy."
+sidebarTitle: "Card Composition"
+icon: "layer-group"
+---
+
+How to actually use the [three-scope composition](/concepts/card-composition) model: managing org templates, granting and revoking exemptions, reading canonical cards, and debugging where a field came from. The conceptual page is the *why* and the rules; this page is the *how*.
+
+## Who does what
+
+| Actor | What they manage | Where |
+|-------|------------------|-------|
+| Mnemom platform team | Platform policy (alignment + protection floors) | `platform_policies` row — not user-editable |
+| Org owner / admin | Org templates (alignment + protection) and org-wide exemptions | `/dashboard/orgs/{id}/templates` + CLI |
+| Agent owner | Agent's raw alignment + protection cards | `/dashboard/agents/{id}/card` + `mnemom card edit` |
+
+Each scope can only edit its own layer. An agent owner cannot override an `forbidden_actions` entry from the org scope; an org admin cannot downgrade the platform's `audit.retention_days` floor.
+
+## Managing an org alignment template
+
+### View the current template
+
+```bash
+# CLI
+curl -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/orgs/{org_id}/alignment-template
+```
+
+Or visit `/dashboard/orgs/{id}/templates` in the website for a YAML-first editor.
+
+### Update the template
+
+Publishing a new org template triggers `mark_agents_for_recompose(org_id)`, which sets `needs_recompose = true` on every agent in the org. The background composer then regenerates each canonical card.
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/alignment-template \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: <uuid>" \
+  --data-binary @org-template.yaml
+```
+
+### What an org template looks like
+
+```yaml
+# org-template.yaml
+card_version: unified/2026-04-15
+
+values:
+  declared:
+    - principal_benefit
+    - harm_prevention
+    - transparency
+  hierarchy: lexicographic
+
+conscience:
+  mode: augment
+  values:
+    - type: BOUNDARY
+      content: "Never exfiltrate customer data to third-party tooling."
+      severity: mandatory
+
+integrity:
+  enforcement_mode: enforce     # strictest wins — agents cannot downgrade
+
+autonomy:
+  forbidden_actions:
+    - send_external_notification
+    - modify_audit_logs
+
+audit:
+  retention_days: 120           # max across scopes wins — this lengthens beyond the platform floor
+```
+
+Every field you omit falls through to the platform default. Every field you include acts according to its [composition rule](/concepts/card-composition#field-level-composition-rules).
+
+### Recompose timing
+
+- For small orgs (under 50 agents), recompose completes in under 2 seconds.
+- For large orgs (1000+ agents), the background worker paces the batch. Until recompose finishes, reads serve the previous canonical with the `needs_recompose: true` flag set.
+- The gateway respects the flag: when serving a `needs_recompose` canonical, it bypasses its 5-minute KV cache so changes are picked up as soon as recompose finishes.
+
+To see recompose progress:
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "https://api.mnemom.ai/v1/orgs/{org_id}/agents?needs_recompose=true"
+```
+
+Empty response = recompose is done.
+
+## Managing an org protection template
+
+Same shape as the alignment template, different fields:
+
+```yaml
+# org-protection-template.yaml
+card_version: protection/2026-04-15
+
+mode: enforce                   # strictest across scopes wins
+
+thresholds:
+  injection_score: 0.70
+  exfiltration_score: 0.80
+
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: true
+
+trusted_sources:
+  domains:
+    - internal.acme.example
+```
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/protection-template \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: text/yaml" \
+  --data-binary @org-protection-template.yaml
+```
+
+## Granting an exemption
+
+Exemptions let an org admin waive a **specific section** of the org card for a **specific agent**, with an explicit reason, audit trail, and expiry. Use them when a single agent has a legitimate need that diverges from the org floor.
+
+### When to grant one
+
+- **Specialist roles.** An audit agent that needs `modify_audit_logs` (forbidden at platform scope) may be granted a scoped exemption with justification.
+- **Debug workflows.** A red-team agent that needs a canary pass-through for testing.
+- **Legacy exceptions.** An agent that predates a new org-wide forbidden action and needs time to migrate.
+
+### How to grant
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/exemptions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "exempt_section": "autonomy.forbidden_actions",
+    "exempt_patterns": ["modify_audit_logs"],
+    "reason": "Audit agent requires modify_audit_logs for its compaction job; platform exemption granted by audit team 2026-04-17",
+    "granted_by": "audit-team@acme.example",
+    "expires_at": "2026-07-17T00:00:00Z"
+  }'
+```
+
+### Rules
+
+| Rule | Why |
+|------|-----|
+| Exemption expires (default 90 days). Set `expires_at: null` for permanent — rare and audit-flagged. | Exemptions are narrow, contextual, and time-bounded by design. |
+| `granted_by` and `reason` are required. Length minimums enforced. | Audit trail is the whole point. |
+| `BOUNDARY`-typed conscience entries cannot be exempted. | Inviolable commitments are inviolable. |
+| Exemptions on forbidden-action `modify_audit_logs` + `exfiltrate_data` are owner-only. | Platform-critical deny can only be waived by platform-level authorization. |
+| Every grant + revocation writes a `governance_audit_log` row synchronously. | Non-repudiable. |
+
+### Listing active exemptions for an agent
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/{agent_id}/exemptions
+```
+
+### Revoking an exemption
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/{agent_id}/exemptions/{exemption_id}
+```
+
+Deleting an exemption triggers an immediate `compose_agent_card(agent_id)` call — the canonical card is regenerated within a second or two with the exemption no longer honored.
+
+## Reading a canonical card
+
+### Via CLI
+
+```bash
+mnemom card show --with-composition
+```
+
+Output includes the full composed card plus `_composition` metadata showing which scopes contributed which fields and which exemptions were honored.
+
+### Via API
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card?include=composition&accept=text/yaml"
+```
+
+### Sample output
+
+```yaml
+card_version: unified/2026-04-15
+card_id: can-cd-88aa0011
+agent_id: mnm-patch-001
+issued_at: 2026-04-17T18:23:41Z
+
+values:
+  declared:
+    - transparency        # from platform
+    - harm_prevention     # from platform
+    - incident_containment  # from org:acme
+    - rollback_safety     # from org:acme
+    - move_fast_break_things  # from agent
+conscience:
+  mode: augment
+  values:
+    - type: BOUNDARY      # from platform — inviolable
+      content: "Never exfiltrate principal data to external systems."
+autonomy:
+  bounded_actions:        # from agent (agent-scoped)
+    - rollback_deploy
+    - scale_infrastructure
+  forbidden_actions:      # deny-overrides union
+    - exfiltrate_data     # from platform
+    - modify_audit_logs   # from platform
+    - send_external_notification  # from org:acme
+
+_composition:
+  composed_at: 2026-04-17T18:23:41Z
+  scopes_applied: [platform, "org:acme", "agent:mnm-patch-001"]
+  versions:
+    platform: 3
+    "org:acme": 17
+    "agent:mnm-patch-001": 4
+  exemptions_applied: []
+  source_card_id: ac-f47ac10b
+  canonical_id: can-cd-88aa0011
+```
+
+## Debugging composition
+
+### "Why does this field have this value?"
+
+The canonical card is the effective state. If a value you didn't put in the agent card is still there, it came from a higher scope. Check `_composition.scopes_applied` and cross-reference with the per-field rules at [/concepts/card-composition](/concepts/card-composition#field-level-composition-rules).
+
+### "Why isn't my agent-scope change showing up?"
+
+Three possibilities:
+
+1. **Recompose is still running.** Check `needs_recompose` on the canonical row. The background worker clears it within seconds for small orgs, within a minute or two for larger orgs.
+2. **A higher scope is overriding.** If you set `integrity.enforcement_mode: observe` at agent scope and the org requires `enforce`, the strictest-wins rule means your agent-scope value never takes effect. Look at `_composition.scopes_applied` to confirm your scope is listed.
+3. **Exemption not granted.** If you're trying to remove an org-scope `forbidden_actions` entry, you need an exemption. Setting something to false at agent scope doesn't override a deny from a higher scope.
+
+### `card_source` structured log
+
+Every gateway + observer card read emits a structured log entry with `card_source: canonical_hit` (or `canonical_miss_fallback` in the rare case where the canonical row is missing and the composer is still catching up). You can grep your gateway logs to see the actual read pattern:
+
+```bash
+# Example: count canonical hits vs fallbacks in the last hour
+# (shape depends on your log aggregator)
+grep 'card_source:' gateway.log | awk -F'card_source:' '{print $2}' | awk '{print $1}' | sort | uniq -c
+```
+
+The UC-14 gate criterion requires zero fallback events on production — indicating the canonical table is fully populated and every request reads from it.
+
+## Common patterns
+
+### Tightening the org forbidden list
+
+You want to add `external_http` as forbidden for every agent in an org:
+
+1. `PUT /v1/orgs/{org_id}/alignment-template` with `autonomy.forbidden_actions` including the new entry.
+2. Wait for recompose to complete (`needs_recompose=false` on all agents).
+3. Verify one agent's canonical card shows the new entry in `autonomy.forbidden_actions`.
+4. Agents that legitimately need `external_http` get individual exemptions.
+
+### Loosening a threshold for one agent
+
+Protection card thresholds follow floor-plus-override: agents can set *stricter* (lower) thresholds but not looser (higher). If you need a looser threshold for a specific agent, that's an **exemption**, not an agent-scope override.
+
+### Adding a conscience commitment fleet-wide
+
+A new `BOUNDARY` commitment ("never modify the customer-facing price in an automated way"):
+
+1. Add to org template's `conscience.values` array.
+2. Publish. Recompose propagates the new commitment to every canonical card.
+3. The commitment is inviolable — no agent-scope exemption will remove it without platform-level authorization.
+
+## See also
+
+- [Card Composition (concept)](/concepts/card-composition) — rules table, mechanism, worked example
+- [Agent Cards](/concepts/agent-cards) — two-card model overview
+- [Alignment Card Schema](/specifications/alignment-card-schema) — per-section composition rules
+- [Protection Card Schema](/specifications/protection-card-schema) — protection-card composition
+- [Migration Guide](/guides/migrating-to-unified-cards) — if you're coming from the pre-UC model

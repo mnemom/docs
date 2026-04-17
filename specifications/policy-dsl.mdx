@@ -76,7 +76,7 @@ capability_mappings:
 |---|---|---|---|
 | `description` | string | No | Human-readable description of this capability. |
 | `tools` | string[] | Yes | Array of glob patterns matching tool names. Must be non-empty. |
-| `card_actions` | string[] | Yes | Semantic action categories from the alignment card's `autonomy_envelope.bounded_actions`. Must be non-empty. |
+| `card_actions` | string[] | Yes | Semantic action categories from the alignment card's `autonomy.bounded_actions` (unified shape) / `autonomy_envelope.bounded_actions` (AAP protocol shape). Must be non-empty. |
 
 #### Tool Pattern Syntax
 
@@ -92,7 +92,11 @@ Tool patterns use glob syntax for matching:
 Each tool call is matched against patterns **in declaration order** — the first matching capability wins. If a tool matches multiple capabilities, only the first match is used for policy evaluation. Order your capability mappings from most specific to least specific.
 </Warning>
 
-The `card_actions` array must reference entries defined in the agent's alignment card under `autonomy_envelope.bounded_actions`. A mismatch between policy `card_actions` and the alignment card produces a validation warning.
+The `card_actions` array must reference entries defined in the agent's alignment card under `autonomy.bounded_actions` (unified) / `autonomy_envelope.bounded_actions` (AAP protocol). A mismatch between policy `card_actions` and the alignment card produces a validation warning.
+
+<Note>
+**Policy as a card section.** In the [unified card model](/concepts/agent-cards), what this specification describes as a standalone Policy YAML is now embedded in the alignment card under `capabilities` + `enforcement`. The DSL grammar below still describes the evaluator's internal representation and is the source of truth for anyone implementing a policy-engine client or writing CI checks against the DSL directly. But if you are authoring a card for Mnemom, you edit the card's YAML sections, not a separate policy file.
+</Note>
 
 ---
 

@@ -7,7 +7,13 @@ icon: "shield-halved"
 
 # Policy Management
 
-Policies bridge [Alignment Cards](/concepts/alignment-cards) (abstract values and bounded actions) to concrete tool usage enforcement. An alignment card declares that an agent may perform `web_fetch`. A policy defines that `web_fetch` means the agent can call `mcp__browser__navigate` and `mcp__browser__click`, but not `mcp__filesystem__delete`. The card declares intent. The policy enforces it.
+<Note>
+**Policy is now part of the alignment card.** In the [unified card model](/concepts/agent-cards) (UC-4..UC-8), the standalone CLPI Policy YAML is absorbed into the alignment card's `capabilities` and `enforcement` sections. There is no separate `PUT /v1/agents/:id/policy` endpoint — publish the alignment card and the policy travels with it. The `mnemom policy …` CLI group is removed; use `mnemom card evaluate agent.card.yaml --tools tools.json` instead.
+
+This guide has been updated for the unified model. Sections that reference the AAP protocol shape (`autonomy_envelope`) describe the protocol-level interop surface; the unified card is what you write in production.
+</Note>
+
+Policies bridge [Alignment Cards](/concepts/alignment-cards) (abstract values and bounded actions) to concrete tool usage enforcement. An alignment card declares that an agent may perform `web_fetch`. The card's `capabilities` section defines that `web_fetch` means the agent can call `mcp__browser__navigate` and `mcp__browser__click`, but not `mcp__filesystem__delete`. The card declares intent. The `enforcement` section enforces it.
 
 A policy defines three things:
 - **Capability mappings** -- which concrete MCP tools satisfy which card-level actions
@@ -124,7 +130,7 @@ Capability mappings are the core of every policy. They bridge the gap between wh
 
 ### Start from your alignment card
 
-Look at your card's `autonomy_envelope.bounded_actions`. These are the abstract actions your agent has declared:
+Look at your card's `autonomy.bounded_actions` (unified shape) or `autonomy_envelope.bounded_actions` (AAP protocol shape). These are the abstract actions your agent has declared:
 
 ```json
 {
