@@ -1,0 +1,162 @@
+---
+title: "Protection Card"
+description: "The YAML document that tells Safe House how to defend an agent at runtime. Mode, thresholds, screen surfaces, trusted sources — all edited, composed, and audited like an alignment card."
+sidebarTitle: "Protection Card"
+icon: "shield-halved"
+---
+
+The **protection card** is the YAML document that tells [Safe House](/concepts/safe-house) how to defend an agent at runtime. It is one of the [two cards](/concepts/agent-cards) every Mnemom agent has — the alignment card declares *who the agent is*; the protection card declares *how the agent is defended*.
+
+The protection card elevates what used to be an ad-hoc Safe House JSON config into a first-class YAML card with three-scope composition (platform > org > agent), granular exemptions, and the same audit + amendment semantics as the alignment card.
+
+## Structure
+
+A protection card has four top-level sections. The complete schema is at [/specifications/protection-card-schema](/specifications/protection-card-schema); this page describes each section's purpose.
+
+### `mode`
+
+Top-level default mode for Safe House on this agent:
+
+- **`observe`** — all detectors run, signals are logged to the trace + reputation pipeline, no action is taken on the agent's request.
+- **`nudge`** — detectors may return advisory guidance; the agent receives a soft warning and may choose to revise.
+- **`enforce`** — detectors may block the action outright; violations are a hard deny at the gateway.
+
+`mode` is a floor. Individual thresholds or detectors can tighten beyond it (e.g., `enforce` a specific canary even while the agent is in `observe` mode for everything else).
+
+```yaml
+mode: enforce
+```
+
+### `thresholds`
+
+Per-signal cutoffs for Safe House detectors. Each key is a detector ID; each value is a numeric threshold on that detector's 0.0–1.0 score. Signals below the threshold pass; signals at-or-above trigger.
+
+```yaml
+thresholds:
+  injection_score: 0.7
+  exfiltration_score: 0.85
+  canary_match: 1.0          # exact match required
+  semantic_novelty: 0.9
+  dlp_confidence: 0.75
+```
+
+Detectors with no entry inherit the platform default threshold. Set a threshold to `null` to disable the detector entirely for this agent — but see `screen_surfaces` for a cleaner way to express "don't look at this surface."
+
+### `screen_surfaces`
+
+Which request surfaces Safe House inspects:
+
+- `incoming` — the user/principal prompt entering the agent
+- `outgoing` — the agent's response leaving the agent
+- `tool_calls` — tool-use invocations the agent makes
+- `tool_responses` — responses to those tool calls
+
+```yaml
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: false      # don't inspect tool return values
+```
+
+Default is all-true (scan everything). Turning off a surface is a deliberate performance/coverage trade-off and is logged in every detection event so auditors can see what was *not* inspected.
+
+### `trusted_sources`
+
+Per-scope allowlist of upstream sources whose content Safe House may trust without full scanning. Typical use: internal knowledge-base URLs, vendor API domains, or agent-to-agent channels within the same org.
+
+```yaml
+trusted_sources:
+  domains:
+    - internal.mnemom.ai
+    - vendor-api.example.com
+  agent_ids:
+    - mnm-xxxx-xxxx      # agent-to-agent pass-through
+```
+
+Trusted sources still emit a low-priority trace entry (so auditors can see what was waved through), but detectors do not re-score their content.
+
+## Composition across scopes
+
+Like the alignment card, the protection card composes from platform > org > agent:
+
+| Section | Composition rule |
+|---------|------------------|
+| `mode` | **Strictest wins** (`enforce` > `nudge` > `observe`). An agent cannot downgrade below its org's mode. |
+| `thresholds.*` | **Floor + override**: org threshold is a floor; agent can set lower (stricter) but not higher. |
+| `screen_surfaces.*` | **Floor (true wins)**: if any scope sets a surface to `true`, it's scanned. |
+| `trusted_sources` | **Intersection from platform, union from org + agent**. Platform platform trust allowlist cannot be widened by a downstream scope (compliance). |
+
+See [Card Composition](/concepts/card-composition) for the full rules + worked examples.
+
+### Exemptions
+
+A protection-card exemption waives a specific threshold or surface for a specific agent with a stated reason, expiry, and audit trail.
+
+```yaml
+# Granted via:
+#   POST /v1/agents/{agent_id}/exemptions
+# Body:
+#   exempt_section: "protection.thresholds.canary_match"
+#   reason: "Agent requires canary in prompts for debugging red-team scenarios"
+#   granted_by: "org-admin@example.com"
+#   expires_at: "2026-07-17T00:00:00Z"
+```
+
+Exemptions replace the pre-UC boolean `org_card_exempt` flag — which waived the whole card at once — with section-specific, audit-logged, time-bounded grants.
+
+## How the protection card is used
+
+### Gateway (request path)
+
+Every request hits:
+
+1. `canonical_protection_cards` read (KV-cached, 5-min TTL) to get the composed protection card.
+2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`.
+3. `mode` determines the action: observe (log only), nudge (advisory), enforce (block).
+4. `trusted_sources` short-circuits detectors for allowlisted upstreams (with trace entry).
+
+The protection card is never fetched from the agent-scope row on the request path — it's always the canonical (pre-composed) version.
+
+### Observer (trace analysis)
+
+The observer pipeline does **not** read the protection card. Protection is inline at the gateway; the observer's role is to reconcile and enrich traces after the fact. Detector signals produced at the gateway are written into the trace itself.
+
+### Website + CLI
+
+```bash
+mnemom protection show                         # canonical protection card (YAML)
+mnemom protection edit                         # open in $EDITOR
+mnemom protection publish protection.card.yaml # validate + publish + recompose
+mnemom protection validate protection.card.yaml
+```
+
+The website agent detail → Security tab shows both raw agent-scope and canonical-composed views.
+
+## Modes across both cards
+
+Both the alignment card (via `integrity.enforcement_mode`) and the protection card (via `mode`) use the same three-value vocabulary — `observe` / `nudge` / `enforce` — but they apply it to different layers:
+
+| Value | Alignment (`integrity.enforcement_mode`) | Protection (`mode`) |
+|-------|-------------------------------------------|----------------------|
+| `observe` | Integrity checkpoints run; violations logged | Safe House detectors run; signals logged |
+| `nudge` | Violations nudge the agent (soft) | Detectors return guidance |
+| `enforce` | Violations hard-block | Detectors may block |
+
+A well-run fleet has both dimensions aligned across all agents. The [fleet coherence v2 scorer](/concepts/fleet-coherence) checks integrity uniformity as a first-order structural invariant.
+
+## Migration from legacy Safe House config
+
+Pre-UC, Safe House read a JSON `sh_configs` row keyed by agent_id. The UC-3 migration script composed every existing `sh_configs` row into a protection-card YAML and wrote the canonical version.
+
+- Legacy endpoint `GET/PUT /v1/agents/:id/cfd/config` is **removed**. Use `GET/PUT /v1/agents/:id/protection-card`.
+- The internal `SafeHouseConfig` TypeScript type that Safe House detectors consume is stable (per ADR-008 Edge 4); the UC work swapped the fetch source, not the type. If you're embedding Safe House detectors, your integration did not need to change.
+
+## See also
+
+- [Agent Cards](/concepts/agent-cards) — the two-card model (alignment + protection)
+- [Alignment Card (protocol surface)](/concepts/alignment-cards) — AAP 1.0 alignment card
+- [Protection Card Schema](/specifications/protection-card-schema) — normative YAML schema
+- [Card Composition](/concepts/card-composition) — three-scope composition rules
+- [Safe House](/concepts/safe-house) — the runtime detection pipeline this card configures
+- [Safe House Threat Model](/guides/safe-house-threat-model) — what Safe House defends against

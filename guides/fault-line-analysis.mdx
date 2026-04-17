@@ -1,95 +1,35 @@
 ---
 title: "Fault Line Analysis"
-description: "Identify, classify, and resolve value misalignments in multi-agent teams using fault line analysis — a practical guide with worked examples."
+description: "Identify, classify, and resolve value misalignments in multi-agent teams. Fault-line classification runs alongside v2 coherence scoring and produces an actionable triage list."
 sidebarTitle: "Fault Line Analysis"
 icon: "split"
 ---
 
-Fault line analysis transforms the raw divergence report from fleet coherence checks into a prioritized, actionable list of value gaps. Each fault line is classified by type, scored by impact, and paired with a resolution hint — so you know exactly what to fix and in what order.
+Fault line analysis turns raw divergence data into a prioritized, actionable list of value gaps. Each fault line is classified by type, scored by impact, and paired with a resolution hint — so you know exactly what to fix and in what order. Fault-line classification runs **alongside** the v2 coherence vector, not instead of it: the coherence vector tells you how the fleet is scoring; the fault-line list tells you what to do about it.
 
-## What Are Fault Lines?
+## What are fault lines?
 
 When agents in a team declare different values, priorities, or capabilities, coordination friction emerges. Some of these differences are problems to fix; others are intentional features of a well-architected team. **Fault lines** are the specific value divergences that could affect how agents coordinate — classified by their nature so you can act appropriately on each.
 
-A fleet coherence check gives you a score. A fault line analysis tells you *why* the score is what it is, and what to do about it.
+A [coherence vector](/concepts/fleet-coherence) gives you structural signal: the weakest pair, conflict surface, conscience floor. A fault-line analysis gives you the action list: which value on which card to change, in what priority order.
 
-### Why They Matter
+### Why they matter
 
-In a multi-agent team, value misalignment doesn't just reduce a score — it manifests as real operational problems:
+In a multi-agent team, value misalignment doesn't just affect the coherence scorer — it manifests as real operational problems:
 
-- An agent that doesn't declare `harm_prevention` may take actions that other agents would escalate
-- Agents with conflicting definitions of `accuracy` may contradict each other in customer-facing outputs
-- A team split cleanly into two value subgroups will tend to disagree on every joint decision
+- An agent that doesn't declare `harm_prevention` may take actions that other agents would escalate.
+- Agents with conflicting definitions of `accuracy` may contradict each other in customer-facing outputs.
+- A team split cleanly into two value subgroups will tend to disagree on every joint decision.
 
 Fault line analysis catches these patterns before they become incidents.
 
 ---
 
-## Running the Analysis
-
-### SDK
-
-The SDK offers two entry points. Use `checkFleetFaultLines` for a single call that returns both the coherence result and the fault line analysis:
-
-<CodeGroup>
-
-```typescript TypeScript
-import { checkFleetFaultLines } from '@mnemom/agent-alignment-protocol';
-
-const { coherence, analysis } = checkFleetFaultLines([
-  { agentId: 'agent-a', card: cardA },
-  { agentId: 'agent-b', card: cardB },
-  { agentId: 'agent-c', card: cardC },
-]);
-
-console.log(`Fleet score: ${coherence.fleet_score}`);
-console.log(`Fault lines: ${analysis.summary.total}`);
-console.log(`Resolvable: ${analysis.summary.resolvable}`);
-analysis.fault_lines.forEach(fl => {
-  console.log(`${fl.value} (${fl.classification}): ${fl.resolution_hint}`);
-});
-```
-
-```python Python
-from aap import check_fleet_fault_lines
-
-result = check_fleet_fault_lines([
-    {"agentId": "agent-a", "card": card_a},
-    {"agentId": "agent-b", "card": card_b},
-    {"agentId": "agent-c", "card": card_c},
-])
-
-print(f"Fleet score: {result.coherence.fleet_score}")
-print(f"Fault lines: {result.analysis.summary.total}")
-for fl in result.analysis.fault_lines:
-    print(f"{fl.value} ({fl.classification}): {fl.resolution_hint}")
-```
-
-</CodeGroup>
-
-If you already have a `FleetCoherenceResult` from a prior `checkFleetCoherence` call, use `analyzeFaultLines` directly:
-
-<CodeGroup>
-
-```typescript TypeScript
-import { checkFleetCoherence, analyzeFaultLines } from '@mnemom/agent-alignment-protocol';
-
-const coherence = checkFleetCoherence(agents);
-const analysis = analyzeFaultLines(coherence);
-```
-
-```python Python
-from aap import check_fleet_coherence, analyze_fault_lines
-
-coherence = check_fleet_coherence(agents)
-analysis = analyze_fault_lines(coherence)
-```
-
-</CodeGroup>
+## Running the analysis
 
 ### API
 
-For server-side analysis, call `POST /v1/teams/fault-lines` with the team ID. The API fetches each agent's authoritative card from the registry, so results always reflect the latest card versions:
+`POST /v1/teams/fault-lines` returns both the v2 coherence vector and the fault-line classification in one call. The API fetches each agent's canonical card from the registry, so results always reflect the latest card versions.
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/teams/fault-lines \
@@ -98,47 +38,79 @@ curl -X POST https://api.mnemom.ai/v1/teams/fault-lines \
   -d '{ "team_id": "team-abc123" }'
 ```
 
+The response includes:
+- `coherence` — the full [v2 `TeamCoherenceResult`](/concepts/fleet-coherence) vector with narrative helpers (`weakest_pair`, `specializations`, `conflict_surface`, structural invariants).
+- `fault_lines` — the classification list described below.
+- `alignments` — structural fault lines (see "Structural fault lines" below).
+- `summary` — counts by classification.
+
+There is no `fleet_score` in the response. If your UI needs a single number, derive one from `coherence.pairwise_governance_median` and take responsibility for that compression.
+
+### SDK
+
+The AAP SDK still exports `checkFleetFaultLines` for local use. It returns the AAP-era (Jaccard-flavored) `FleetCoherenceResult` alongside the fault-line analysis — useful for showcase or educational tooling, not for production surfaces.
+
+```typescript
+import { checkFleetFaultLines } from '@mnemom/agent-alignment-protocol';
+
+const { coherence, analysis } = checkFleetFaultLines([
+  { agentId: 'agent-a', card: cardA },
+  { agentId: 'agent-b', card: cardB },
+  { agentId: 'agent-c', card: cardC },
+]);
+
+// analysis.fault_lines + analysis.alignments are the same fault-line classification
+// surfaces you'd get from POST /v1/teams/fault-lines.
+```
+
+For the v2 coherence vector in pure client-side use, import from `@mnemom/team-coherence/v2`:
+
+```typescript
+import { computeTeamCoherence } from '@mnemom/team-coherence/v2';
+
+const coherence = computeTeamCoherence(teamCoherenceInputs);
+// coherence.weakest_pair, coherence.conscience_universal, etc.
+```
+
+Pair the two for the showcase "baseline vs. v2" comparison; in production the server-side `/v1/teams/fault-lines` endpoint runs both and returns them together.
+
 See the [Intelligence API reference](/api-reference/intelligence-overview) for the full response schema.
 
 ---
 
-## Reading the Results
+## Reading the results
 
-### Fleet Score
+### Coherence vector (read this first)
 
-The fleet score is the mean of all pairwise coherence scores across team members:
+The `coherence` field is the [v2 `TeamCoherenceResult`](/concepts/fleet-coherence) vector. The fields that matter most for triage:
 
-| Fleet Score | Interpretation |
-|------------|----------------|
-| ≥ 0.85 | Strong alignment — safe for autonomous coordination |
-| 0.70–0.85 | Good alignment with minor divergences |
-| 0.50–0.70 | Moderate alignment — review outliers before coordination |
-| < 0.50 | Poor alignment — significant value conflicts present |
+- `coherence.conscience_universal` and `coherence.integrity_uniform` — structural invariants. If either is `false`, that's the first-order finding; no fault-line remediation will paper over a broken governance floor.
+- `coherence.weakest_pair` — the pair with the lowest `governance_score`, with explicit conflict evidence attached. Answers "where do I look first?"
+- `coherence.conflict_edge_count` — how many pairs have at least one explicit conflict. `0` means the fleet has no hard disagreements even if some pairs have thin overlap.
+- `coherence.specializations` — per-agent values that only that agent declares. Useful context: a fault line touching a value that only one agent declares is often a `complementary` classification.
 
-A fleet score alone doesn't tell you what's wrong. The fault line analysis tells you which specific values are causing the gap.
-
-### Fault Line Classifications
+### Fault-line classifications
 
 Each fault line is assigned one of four classifications:
 
-| Classification | What It Means | Action |
+| Classification | What it means | Action |
 |---------------|---------------|--------|
 | `resolvable` | The value is missing from one or more agents but no explicit conflict exists | Update the agent's alignment card to add the missing value |
 | `priority_mismatch` | All agents declare the value but rank it differently or define it inconsistently | Review definitions across agents and align on priority weights |
 | `incompatible` | One or more agents have an explicit `conflicts_with` entry for this value | Requires human review — this is a fundamental value conflict |
 | `complementary` | The divergence is intentional given agent specializations | No action needed |
 
-### Impact Score
+### Impact score
 
 Each fault line carries an `impact_score` between 0 and 1:
 
 ```
-impact_score = impact_on_fleet_score × coordination_overlap
+impact_score = impact_on_fleet_governance × coordination_overlap
 ```
 
 Where `coordination_overlap` reflects how frequently the split agents interact. Sort by impact score descending to prioritize the fault lines that matter most for your team's actual workload.
 
-### Value Alignment Matrix
+### Value alignment matrix
 
 The `agents_declaring`, `agents_missing`, and `agents_conflicting` arrays on each fault line form a per-value alignment matrix. For a team of three agents, you might see:
 
@@ -154,7 +126,7 @@ This matrix is the raw input to the classification algorithm.
 
 ---
 
-## Worked Example: Financial Analysis Team
+## Worked example: financial analysis team
 
 Consider a three-agent financial analysis team:
 
@@ -166,7 +138,23 @@ After running fault line analysis, you might see:
 
 ```json
 {
-  "fleet_score": 0.74,
+  "coherence": {
+    "pairwise_governance_floor": 0.66,
+    "pairwise_governance_median": 0.83,
+    "conflict_edge_count": 0,
+    "conscience_universal": true,
+    "integrity_uniform": true,
+    "weakest_pair": {
+      "agent_a": "agent-analyst",
+      "agent_b": "agent-report",
+      "governance_score": 0.66,
+      "conflicts": []
+    },
+    "specializations": {
+      "agent-risk": ["caution"],
+      "agent-report": ["clarity"]
+    }
+  },
   "fault_lines": [
     {
       "value": "harm_prevention",
@@ -209,65 +197,53 @@ After running fault line analysis, you might see:
 
 **Reading these results:**
 
-1. The highest-impact fault line (`harm_prevention`, impact 0.62) is `resolvable` — agent-report is simply missing the value. Adding it to the card resolves the fault line without any architectural changes.
-2. The `accuracy` priority mismatch (impact 0.34) is worth addressing but not urgent. A team-level policy can establish a floor priority weight.
-3. The `caution` divergence (impact 0.18) is `complementary` — agent-risk is supposed to be more cautious. No action needed.
-
-After resolving the `resolvable` fault line and aligning the `accuracy` priority, the fleet score would likely improve from 0.74 to approximately 0.82.
+1. **Structural invariants first.** `conscience_universal: true` and `integrity_uniform: true` — the governance floor is healthy. No structural fault lines. Safe to proceed to fault-line triage.
+2. **Weakest pair and conflict count.** `weakest_pair` is agent-analyst ↔ agent-report at 0.66 governance, with zero conflicts. The score is low because of missing overlap, not disagreement — this matches the `resolvable` fault line on `harm_prevention`.
+3. **Fault-line triage:**
+   - Highest impact (`harm_prevention`, 0.62) is `resolvable`: agent-report is missing the value. Adding it resolves the fault line without architectural changes.
+   - `accuracy` priority mismatch (0.34) is worth addressing but not urgent. A team-level policy can establish a floor priority weight.
+   - `caution` divergence (0.18) is `complementary` — agent-risk is supposed to be more cautious. No action needed; it shows up in `specializations` for agent-risk as expected.
+4. **Expected state after fixes.** Resolving `harm_prevention` and aligning `accuracy` priority should lift the weakest pair above 0.85.
 
 ---
 
-## Resolving Each Classification
+## Resolving each classification
 
 ### Resolvable
 
 A `resolvable` fault line means one or more agents are simply missing a value that others declare. The fix is straightforward: update the missing agent's alignment card.
 
-<CodeGroup>
-
-```typescript TypeScript
+```typescript
 // Fetch the current card
-const card = await client.agents.getCard('agent-report');
+const card = await client.agents.getAlignmentCard('agent-report');
 
 // Add the missing value
 card.values.declared.push('harm_prevention');
 
 // Publish the updated card
-await client.agents.updateCard('agent-report', card);
+await client.agents.updateAlignmentCard('agent-report', card);
 ```
 
-```python Python
-# Fetch the current card
-card = client.agents.get_card("agent-report")
+After updating, re-run the analysis to confirm the fault line is resolved. Because the API reads canonical cards, the next `POST /v1/teams/fault-lines` will reflect the change without a cache-bust.
 
-# Add the missing value
-card["values"]["declared"].append("harm_prevention")
-
-# Publish the updated card
-client.agents.update_card("agent-report", card)
-```
-
-</CodeGroup>
-
-After updating the card, re-run the analysis to confirm the fault line is resolved.
-
-### Priority Mismatch
+### Priority mismatch
 
 A `priority_mismatch` means all agents declare the value but differ on its priority weight or definition. Review the value declarations across the affected agents:
 
-1. Compare each agent's priority weight for the value
-2. Decide on a team-wide standard (typically the most restrictive weight for safety-sensitive values)
-3. Update each agent's card to reflect the agreed weight
-4. Optionally, set a [team-level policy](/api-reference/intelligence-overview#post-v1-teams-recommend-policy) that enforces a minimum priority floor
+1. Compare each agent's priority weight for the value.
+2. Decide on a team-wide standard (typically the most restrictive weight for safety-sensitive values).
+3. Update each agent's card to reflect the agreed weight.
+4. Optionally, set a [team-level policy](/api-reference/intelligence-overview#post-v1-teams-recommend-policy) that enforces a minimum priority floor.
 
 ### Incompatible
 
 An `incompatible` fault line indicates a fundamental value conflict — one agent has an explicit `conflicts_with` entry pointing at a value another agent holds. These require human review because there is no automated resolution that preserves both agents' expressed values.
 
 Options:
-- **Restructure the team** — if the conflict is irreconcilable, these agents should not coordinate autonomously
-- **Create isolation boundaries** — use transaction guardrails to ensure conflicting agents operate in separate scopes
-- **Revise one agent's card** — if the `conflicts_with` declaration was unintentional or outdated, remove it and re-run the analysis
+
+- **Restructure the team** — if the conflict is irreconcilable, these agents should not coordinate autonomously.
+- **Create isolation boundaries** — use transaction guardrails to ensure conflicting agents operate in separate scopes.
+- **Revise one agent's card** — if the `conflicts_with` declaration was unintentional or outdated, remove it and re-run the analysis.
 
 <Note>
 Before removing a `conflicts_with` declaration, verify it reflects the agent's actual behavior. If the agent's model or system prompt genuinely conflicts with the value, removing the declaration creates a hidden misalignment rather than resolving it.
@@ -275,13 +251,13 @@ Before removing a `conflicts_with` declaration, verify it reflects the agent's a
 
 ### Complementary
 
-A `complementary` fault line requires no action. The divergence is intentional — a specialist agent is supposed to emphasize certain values more than generalist peers. The classifier detects this based on agent role declarations and specialization metadata in the alignment cards.
+A `complementary` fault line requires no action. The divergence is intentional — a specialist agent is supposed to emphasize certain values more than generalist peers. Complementary fault lines often appear in `coherence.specializations` for the agent that uniquely declares the value.
 
 If a fault line is incorrectly classified as `complementary` when you believe it is a real gap, check whether the agent's card accurately declares its specialization scope.
 
 ---
 
-## Structural Fault Lines
+## Structural fault lines
 
 When multiple fault lines consistently isolate the same subset of agents, this is a **structural fault line** — more serious than any individual gap. The `alignments` array in the analysis result captures these patterns.
 
@@ -305,10 +281,10 @@ A structural fault line means the team has effectively split into subgroups. Age
 
 **What to do:**
 
-1. Review all fault lines in `fault_line_ids` together as a group, not individually
-2. Determine whether the split is intentional (e.g., a distinct specialist role) or accidental (e.g., a card that was never properly updated)
-3. If accidental, resolve each constituent fault line in order of impact
-4. If intentional, consider whether the minority agent should be operating in the same team, or whether the team architecture needs to be redesigned with explicit isolation
+1. Review all fault lines in `fault_line_ids` together as a group, not individually.
+2. Determine whether the split is intentional (e.g., a distinct specialist role) or accidental (e.g., a card that was never properly updated).
+3. If accidental, resolve each constituent fault line in order of impact.
+4. If intentional, consider whether the minority agent should be operating in the same team, or whether the team architecture needs to be redesigned with explicit isolation.
 
 <Note>
 Structural fault lines are grounded in Lau & Murnighan's (1998) research on demographic faultlines in human teams. Teams with strong demographic faultlines — where multiple demographic attributes split along the same divide — are significantly more prone to subgroup conflict than teams with the same number of diverse attributes distributed across different members. The same dynamic applies to agent value alignment.
@@ -316,23 +292,24 @@ Structural fault lines are grounded in Lau & Murnighan's (1998) research on demo
 
 ---
 
-## When to Re-Run Analysis
+## When to re-run analysis
 
 Re-run fault line analysis after:
 
-- **Card updates** — any change to a team member's alignment card changes the divergence profile
-- **Adding team members** — a new agent may introduce new fault lines or resolve existing ones
-- **Removing team members** — removing an agent can eliminate fault lines or reveal new ones between remaining members
-- **After resolving a fault line** — confirm the resolution worked and check whether other fault lines are affected
-- **Before deploying for a new task type** — a team that coordinates well on content generation may have critical fault lines for financial operations
+- **Card updates** — any change to a team member's alignment card changes the divergence profile.
+- **Adding team members** — a new agent may introduce new fault lines or resolve existing ones.
+- **Removing team members** — removing an agent can eliminate fault lines or reveal new ones between remaining members.
+- **After resolving a fault line** — confirm the resolution worked and check whether other fault lines are affected.
+- **Before deploying for a new task type** — a team that coordinates well on content generation may have critical fault lines for financial operations.
 
-The Intelligence API result includes an `analysis_id` that can be passed directly to `POST /v1/teams/forecast` to generate a risk forecast based on the current fault line state.
+The Intelligence API result includes an `analysis_id` that can be passed directly to `POST /v1/teams/forecast` to generate a risk forecast based on the current fault-line state.
 
 ---
 
 ## See Also
 
-- [Fleet Coherence](/concepts/fleet-coherence) — Conceptual overview of N-way fleet analysis
+- [Fleet Coherence](/concepts/fleet-coherence) — Conceptual overview of the v2 dimensional scorer and the full coherence vector
+- [Agent Cards](/concepts/agent-cards) — The two-card model (alignment + protection)
 - [Intelligence API](/api-reference/intelligence-overview) — Full API reference including fault lines, forecasting, and policy recommendations
 - [Team Management](/guides/team-management) — Creating and managing teams
 - [Risk Engine](/guides/risk-engine) — Risk assessment that builds on fleet coherence data
