@@ -1,0 +1,219 @@
+---
+title: "Protection Card Management"
+description: "Author, publish, validate, and tune the protection card that configures Safe House for an agent."
+sidebarTitle: "Protection Card Management"
+icon: "shield-halved"
+---
+
+How to work with the [protection card](/concepts/protection-card) — the YAML document that tells [Safe House](/concepts/safe-house) how to defend an agent at runtime. Same CRUD shape as the alignment card, different semantics.
+
+If you're coming from the pre-UC `sh_configs` JSON blob, start with the [migration guide](/guides/migrating-to-unified-cards); the automatic UC-3 migration already composed your old configs into protection cards.
+
+## Viewing the current card
+
+### Via CLI
+
+```bash
+mnemom protection show            # canonical protection card (YAML)
+mnemom protection show --raw      # agent-scope raw card, pre-composition
+```
+
+### Via API
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  https://api.mnemom.ai/v1/agents/{agent_id}/protection-card
+```
+
+Or visit the Security tab on the agent detail page in the dashboard — it shows both raw (agent-scope) and canonical (composed) side by side.
+
+## Authoring a protection card
+
+Start from the [protection card schema](/specifications/protection-card-schema). A minimal card:
+
+```yaml
+# protection.card.yaml
+card_version: protection/2026-04-15
+agent_id: mnm-xxxxxxxx
+issued_at: 2026-04-17T00:00:00Z
+
+mode: enforce
+
+thresholds:
+  injection_score: 0.70
+  exfiltration_score: 0.85
+
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: true
+```
+
+Most fields are optional. Omitted fields inherit from the org template (if any), which inherits from the platform default.
+
+### Publishing
+
+```bash
+mnemom protection publish protection.card.yaml
+```
+
+Or via API:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/protection-card \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: <uuid>" \
+  --data-binary @protection.card.yaml
+```
+
+The publish triggers `compose_protection_card(agent_id)`, which generates the new canonical card within a second.
+
+### Validating without publishing
+
+```bash
+mnemom protection validate protection.card.yaml
+```
+
+Runs the full schema validator + applies an inline composition with current platform/org templates so you can see the canonical output without writing anything.
+
+## Understanding composition
+
+Protection-card composition follows the [three-scope model](/concepts/card-composition) (platform > org > agent). The per-field rules:
+
+| Field | Composition |
+|-------|-------------|
+| `mode` | **Strictest wins** (`enforce` > `nudge` > `observe`). Agent can go stricter, not looser. |
+| `thresholds.*` | **Floor + override**: org threshold is the ceiling (loosest acceptable); agent can set lower (stricter). |
+| `screen_surfaces.*` | **True wins**: any scope can require scanning a surface; agents cannot turn off scanning the org requires. |
+| `trusted_sources.domains` | **Platform intersection, org+agent union**: platform trust list caps the maximum; downstream scopes can only add from that cap. |
+
+Publishing an org protection template propagates to all agents in the org via `mark_agents_for_recompose` — the same mechanism as alignment templates. See [Managing Card Composition](/guides/card-composition) for the full flow.
+
+## Common tuning patterns
+
+### Production-grade strictness
+
+For high-stakes agents (financial, health, compliance):
+
+```yaml
+mode: enforce
+
+thresholds:
+  injection_score: 0.55            # stricter than the 0.70 platform default
+  exfiltration_score: 0.70
+  canary_match: 1.0
+  dlp_confidence: 0.60
+
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: true
+```
+
+### Observe-first for a new agent
+
+Before committing to enforcement, run in observe mode to gather a baseline:
+
+```yaml
+mode: observe                       # all detectors run, nothing is blocked
+
+thresholds:
+  injection_score: 0.50             # lower = more sensitive (more events logged)
+  exfiltration_score: 0.70
+```
+
+Review the event stream for 7-14 days. Adjust thresholds based on false-positive rate. Promote to `nudge` or `enforce` when stable.
+
+### Performance-sensitive agent (tight tool-response window)
+
+If an agent's tool responses contain large payloads and per-request latency matters:
+
+```yaml
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: false             # skip tool-response scanning
+
+mode: enforce
+```
+
+Every detection event logs which surfaces were inspected, so auditors can see what was *not* scanned. Document the reason in your internal runbook.
+
+<Note>
+If your org requires `tool_responses: true`, you cannot turn it off at agent scope (strictest wins). You'll need a section-specific [exemption](/guides/card-composition#granting-an-exemption) with a documented reason.
+</Note>
+
+### Trusted internal backend
+
+If your agent pulls from a known-safe internal API, add the domain to `trusted_sources` so Safe House skips detector runs on content from that source:
+
+```yaml
+trusted_sources:
+  domains:
+    - internal-kb.acme.example
+    - vendor-api.example.com
+```
+
+Trusted content still emits a low-priority trace entry. If your internal KB ever gets compromised, the trusted-source entry in the trace makes the blast radius auditable.
+
+**Security reminder:** never add a public DNS resolver, a user-controllable domain, or a public LLM API to `trusted_sources`. The API validates against a static deny-list and rejects obvious mistakes, but the risk model is on you.
+
+## Alerting
+
+Protection-card violations emit webhook events if your org has webhooks configured:
+
+```
+POST https://your-webhook.example/safe-house
+{
+  "event_type": "safe_house.violation",
+  "agent_id": "mnm-xxxxxxxx",
+  "detector": "injection_score",
+  "score": 0.83,
+  "threshold": 0.70,
+  "surface": "incoming",
+  "action_taken": "block",
+  "trace_id": "trace-...",
+  "timestamp": "2026-04-17T18:23:41Z"
+}
+```
+
+See [Safe House Webhooks](/guides/safe-house-webhooks) for the full event catalog.
+
+## Validating changes before deploy
+
+For CI pipelines that publish card changes, validate the card client-side before the API call:
+
+```bash
+mnemom protection validate protection.card.yaml --strict
+echo $?   # 0 = valid, 1 = validation errors
+```
+
+The `--strict` flag also checks that the card composes cleanly with the current org template (no conflicts with stricter-wins).
+
+## Rolling back a change
+
+There's no first-class rollback endpoint. To revert:
+
+1. Fetch a historical version:
+
+   ```bash
+   curl -H "Authorization: Bearer $API_KEY" \
+     "https://api.mnemom.ai/v1/agents/{agent_id}/protection-card/history?limit=10"
+   ```
+
+2. Pick the version you want, publish it as a new PUT.
+
+All publishes are amendments — the history is preserved. A "rollback" is just another amendment referencing the prior shape.
+
+## See also
+
+- [Protection Card](/concepts/protection-card) — conceptual overview
+- [Protection Card Schema](/specifications/protection-card-schema) — normative spec
+- [Safe House](/concepts/safe-house) — the detection pipeline this card configures
+- [Safe House Threat Model](/guides/safe-house-threat-model) — what Safe House defends against
+- [Safe House Webhooks](/guides/safe-house-webhooks) — alerting integration
+- [Card Composition Guide](/guides/card-composition) — managing org templates and exemptions
