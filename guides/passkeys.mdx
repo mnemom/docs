@@ -1,0 +1,134 @@
+---
+title: "Passkeys"
+description: "Sign in to Mnemom with a single biometric gesture — no password, no TOTP code. Passkeys use the WebAuthn standard and sync across your devices via iCloud Keychain, Google Password Manager, or 1Password."
+---
+
+# Passkeys
+
+Passkeys replace password + MFA for most sign-ins. A single biometric gesture (Touch ID, Face ID, Windows Hello, Android fingerprint, hardware key) unlocks your session. The cryptographic material lives in your device's keychain — **we never see it**, even during sign-in.
+
+<Tip>
+Passkeys are **additive**. You keep your password + MFA as a recovery path, and they continue to work at any time. Enrolling a passkey does not disable anything.
+</Tip>
+
+## What a passkey is
+
+- A public/private keypair created by your device when you enroll.
+- Scoped to `mnemom.ai` — a passkey that's valid at Mnemom is worthless at any other site.
+- Unlocked only with a **user-verification gesture** (biometric or PIN). A stolen device without your biometric can't use it.
+- Optionally **synced across your devices** via iCloud Keychain, Google Password Manager, 1Password, Bitwarden, etc. Your Apple ID / Google account / password manager handles the sync — we don't see the keypair during or after sync.
+
+Passkeys implement the [WebAuthn](https://www.w3.org/TR/webauthn-3/) / [FIDO2](https://fidoalliance.org/fido2/) standards. Mnemom's server-side verification is powered by `@simplewebauthn/server` (see [ADR-027](https://github.com/mnemom/scale/blob/main/decisions/ADR-027-passkey-auth.md) for the full architecture).
+
+## Enrolling a passkey
+
+1. Sign in to [mnemom.ai/dashboard](https://mnemom.ai/dashboard) the normal way (password + MFA, or SSO).
+2. Go to **Settings → Account**.
+3. Scroll to **Passkeys** → **Add a passkey**.
+4. Give the passkey a friendly name (e.g. *"MacBook Touch ID"* or *"YubiKey — office"*).
+5. Your device prompts for biometric / PIN. Confirm.
+6. The passkey is now live. The list refreshes; future sign-ins will offer it.
+
+### Recommendation: enroll on at least two devices
+
+Most consumer passkeys (iCloud Keychain, Google Password Manager, 1Password) sync automatically, so enrolling on one device effectively enrolls on all your devices sharing the same account. But for **single-device passkeys** — hardware keys, Windows Hello, Linux passkeys without a password manager — you should enroll at least two, on two different devices. If one device is lost, the other keeps you signed in.
+
+Your passkey list in Settings shows a **"synced"** badge next to multi-device passkeys so you can tell which ones have a backup.
+
+## Signing in with a passkey
+
+On the [login page](https://mnemom.ai/login):
+
+- **Button:** click **"Sign in with a passkey"**. Your device prompts for biometric / PIN. You're in.
+- **Autofill (Chrome 108+, Safari 17+):** click into the email field. Your browser surfaces any matching passkeys in the autofill dropdown. Pick one — no button needed.
+
+No email to type. No password. No MFA code. Works cross-device: a passkey synced to your phone signs you in from your laptop via a one-time QR-code pairing (your OS handles this — it's the "sign in from nearby device" prompt).
+
+## Removing a passkey
+
+1. **Settings → Account → Passkeys**.
+2. Click **Remove** on the passkey you want to delete.
+3. **MFA verification is required** for removal. If you haven't MFA'd in this session, you'll be prompted.
+4. Confirm.
+
+The passkey is immediately invalidated on our side. If it was a synced passkey, the credential may still exist in your OS keychain — remove it from your password manager / keychain UI separately if you want a full delete.
+
+## What happens if I lose all my passkeys?
+
+You can always sign in with **password + MFA**. That's the recovery path, and it never goes away.
+
+If you enrolled passkeys on multiple devices, losing one device doesn't lock you out — the others still work.
+
+If you enrolled only one passkey and it's unrecoverable (device lost + no sync to another device + no password manager backup), the flow is:
+
+1. Go to the login page.
+2. Click **Forgot password?**.
+3. Check your email for the reset link.
+4. Set a new password.
+5. Sign in with the new password + MFA.
+6. (Optional) Re-enroll a fresh passkey from your new device.
+
+<Note>
+When you complete the password-recovery flow, we log a security-review event if you had passkeys enrolled at the time (internal signal; the log never leaves our infrastructure). If that wasn't you, contact support via your account dashboard.
+</Note>
+
+## SSO organizations
+
+If your organization uses SSO (Okta, Entra ID, Google Workspace, etc.), **passkey sign-in is disabled for your user**. Your org's SSO flow is the authoritative auth path; we don't mix passkey enrollment into enforced-SSO sessions.
+
+If this changes for your org, your admin can adjust the SSO enforcement setting in the org Settings page.
+
+## Browser support
+
+Passkeys work on:
+
+- Chrome 108+ (macOS, Windows, Linux, Android)
+- Safari 16+ (macOS, iOS 16+, iPadOS 16+)
+- Firefox 121+ (macOS, Windows, Linux)
+- Edge 108+ (Windows, macOS)
+
+If your browser doesn't support passkeys, the Settings page shows a note telling you so, and no passkey button appears on the login page. Password + MFA continues to work.
+
+## Security notes
+
+- **Phishing resistance.** A passkey is scoped to `mnemom.ai`. A phishing page at `mnemom.ai.attacker.example` cannot invoke your passkey.
+- **No shared secret.** We store only the public half of the keypair. Even a full database breach on our side does not give an attacker the ability to forge your sign-in.
+- **Signature counters.** Your authenticator increments a counter on every signing. If we ever see a counter *decrease*, we reject the assertion — that's a signal of a cloned credential. You'd see this as "passkey sign-in failed, try again"; we'd see it as a security alert internally.
+- **User verification required.** Every passkey sign-in requires your biometric or PIN. A stolen device can't use your passkey without it.
+- **Audit log.** We log every passkey enrollment, removal, and sign-in to an internal audit stream. Data-subject export is governed by our [EU compliance + GDPR policy](/guides/eu-compliance).
+
+## Troubleshooting
+
+### "Passkey sign-in failed — try again"
+
+Most often, your authenticator presented a stale or damaged credential. Try one of:
+
+- Sign in with a different passkey (if you enrolled more than one).
+- Sign in with password + MFA.
+- Remove the offending passkey from **Settings → Passkeys** and enroll a fresh one.
+
+### "This device already has a passkey enrolled for your account"
+
+Your authenticator is refusing to enroll a second credential when it already holds one for Mnemom. That's the authenticator's decision, not ours — it's preventing accidental duplicate enrollment from the same hardware key. Use the existing passkey, or remove it in Settings and re-enroll.
+
+### I'm on Safari and the autofill dropdown doesn't show my passkey
+
+- Make sure you're on iOS / iPadOS / macOS 17 or later — conditional UI is a 17+ feature.
+- Make sure **iCloud Keychain** is enabled on the device where you enrolled the passkey AND on the device where you're trying to sign in.
+- Try the **"Sign in with a passkey"** button instead of the autofill flow.
+
+### Conditional UI on Chrome shows no matching passkeys
+
+- Make sure you're signed in to Chrome with the Google account you used to enroll.
+- Make sure **Google Password Manager sync** is enabled.
+- Try clicking the **"Sign in with a passkey"** button — it works even without Chrome autofill.
+
+### My hardware key (YubiKey, Solo) won't enroll
+
+Check that it supports **FIDO2** (not only legacy U2F) and has a **PIN configured**. Older U2F-only keys do not meet our `userVerification: 'required'` policy and are rejected at enrollment time. Upgrade to a FIDO2-capable key, or use a different authenticator.
+
+## Related
+
+- [API reference overview](/api-reference/overview) — six passkey REST endpoints under `/v1/auth/passkey/*`
+- [Security + trust model](/guides/security-trust-model) — full auth architecture
+- [ADR-027 — Passkey auth](https://github.com/mnemom/scale/blob/main/decisions/ADR-027-passkey-auth.md) — decision record
