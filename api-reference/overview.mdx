@@ -35,18 +35,37 @@ See the [API Versioning guide](/guides/api-versioning) for full details.
 
 ## Authentication
 
-The Mnemom API supports two authentication methods depending on your use case.
+The Mnemom API supports three authentication patterns. Pick the one that matches the caller, not the endpoint.
 
-### Bearer Token (Supabase JWT)
+### Session cookie (dashboard / SPA)
 
-For dashboard and user-facing requests, authenticate with a Supabase JWT:
+Browser sessions at `www.mnemom.ai` and `app.mnemom.ai` authenticate via an HttpOnly, `Secure`, `SameSite=Lax` cookie named `mnemom_session`, issued on sign-in by the API itself. The cookie is opaque to JavaScript — it holds an AES-256-GCM-encrypted blob of the underlying session tokens, never a raw access token.
+
+```bash
+# Browser flow — the SPA does this transparently; you rarely call it directly.
+curl -X POST https://api.mnemom.ai/v1/auth/sign-in \
+  -H "Content-Type: application/json" \
+  -H "Origin: https://www.mnemom.ai" \
+  --cookie-jar cookies.txt \
+  -d '{"email":"you@example.com","password":"..."}'
+
+# Subsequent authenticated requests attach the cookie.
+curl https://api.mnemom.ai/v1/agents \
+  --cookie cookies.txt
+```
+
+The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. MFA and SSO are carried through dedicated endpoints under `/v1/auth/mfa/*` and `/v1/auth/sso/*`. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
+
+### Bearer token (CLI)
+
+The Mnemom CLI and anything mimicking it use the classic `Authorization: Bearer <token>` header. The CLI obtains its token via a one-time browser → localhost handoff at login time (exchanged through `POST /v1/auth/cli-exchange`, which requires an already-authenticated session cookie); the raw token never leaves the CLI's local auth file after that.
 
 ```bash
 curl https://api.mnemom.ai/v1/agents \
   -H "Authorization: Bearer <token>"
 ```
 
-**How to get a Bearer token**: Sign in to the [Mnemom Dashboard](https://mnemom.ai/dashboard). Your session token is available in the dashboard settings under **API Access**, or programmatically via the Supabase Auth SDK after signing in.
+**How to get a Bearer token outside the CLI**: run `mnemom login` and read `~/.mnemom/auth.json`. Generating your own Bearer tokens from scratch is not supported — use an API key (below) for programmatic access.
 
 ### API Key
 
@@ -57,11 +76,11 @@ curl https://api.mnemom.ai/v1/agents \
   -H "X-Mnemom-Api-Key: <key>"
 ```
 
-**How to get an API key**: Generate an API key from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time.
+**How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time.
 
-API keys are accepted on **all agent management endpoints** — including agent CRUD, card and policy management, integrity operations, webhooks, enforcement, reviews, and deployments. This enables enterprise customers to manage agent fleets programmatically without user session authentication.
+API keys are accepted on **all agent management endpoints** — agent CRUD, card and policy management, integrity operations, webhooks, enforcement, reviews, and deployments. This lets enterprise customers manage agent fleets programmatically without a user session.
 
-The only endpoints that require a Bearer JWT are account self-service operations: `GET /v1/auth/me`, `DELETE /v1/auth/delete-account`, `POST /v1/agents/:id/link`, and billing management.
+The only endpoints that require an end-user identity (cookie or Bearer) are account self-service operations: `GET /v1/auth/me`, `DELETE /v1/auth/delete-account`, `POST /v1/agents/:id/link`, and billing management.
 
 <Warning>
 API keys are hashed on our servers and cannot be retrieved after creation. Store your key securely when it is first displayed.
