@@ -58,27 +58,39 @@ The SHA-256 hash of the thinking block serves two purposes: it provides tamper e
 
 ## Authentication & Authorization
 
-The Mnemom API supports three authentication patterns, each serving a different use case.
+The Mnemom API supports three end-caller authentication patterns, plus an internal service role. Each serves a different use case; the API's auth layer dual-resolves them into the same downstream principal.
 
-### Bearer Token (Supabase JWT)
+### Session cookie (`mnemom_session`)
 
-Used for authenticated user operations -- dashboard access, card management, agent configuration.
+Used for authenticated browser sessions -- the Mnemom dashboard at `www.mnemom.ai`, `app.mnemom.ai`, and any future first-party SPA.
+
+| Cookie | Shape |
+|--------|-------|
+| `mnemom_session` | HttpOnly, Secure, SameSite=Lax, Domain=`.mnemom.ai` |
+
+The cookie value is an AES-256-GCM-encrypted blob of `{access_token, refresh_token, issued_at, auth_method}`. The first byte is a key ID enabling zero-downtime key rotation. Tokens are never exposed to JavaScript (HttpOnly) and are transparently refreshed + rotated server-side when the access token nears expiry. See [ADR-024](https://github.com/mnemom/mnemom-api) for the full cookie lifecycle.
+
+MFA step-up is carried through a short-lived `mnemom_mfa_pending` cookie between `POST /v1/auth/sign-in` and `POST /v1/auth/mfa/verify`; the aal1 access token never reaches JS. SSO uses a single-use `mnemom_sso_initiator` cookie bound to an HMAC-signed state token.
+
+### Bearer token (`Authorization` header)
+
+Used by the Mnemom CLI and programmatic agents mimicking its flow.
 
 | Header | Value |
 |--------|-------|
-| `Authorization` | `Bearer <supabase-jwt>` |
+| `Authorization` | `Bearer <jwt>` |
 
-The JWT is issued by Supabase Auth and contains the user's identity, organization membership, and role. Tokens are validated on every request.
+The JWT is issued by Supabase Auth on the user's behalf and contains identity, organization membership, and role. The CLI obtains its token via a one-time browser → localhost handoff at login time (mediated by `POST /v1/auth/cli-exchange`, which itself requires a valid session cookie). Tokens are verified on every request via JWKS.
 
-### API Key (`x-api-key` header)
+### API Key (`X-Mnemom-Api-Key` header)
 
-Used for programmatic access -- billing API calls, automated agent registration, CI/CD integrations.
+Used for server-to-server and enterprise fleet management -- billing API calls, automated agent registration, CI/CD integrations.
 
 | Header | Value |
 |--------|-------|
-| `x-api-key` | `<api-key>` |
+| `X-Mnemom-Api-Key` | `<api-key>` |
 
-API keys are scoped to a user or organization. The key itself is never stored; only its SHA-256 hash is persisted for lookup and validation.
+API keys are scoped to a user or organization. The key itself is never stored; only its SHA-256 hash is persisted for lookup and validation. Keys are issued via the dashboard under **Settings > API Keys** and can be rotated at any time.
 
 ### Service Role Key
 
@@ -109,7 +121,7 @@ Role-based access is enforced at the API layer via Supabase row-level security p
 All endpoints enforce **TLS 1.2+**. This applies to:
 
 - The Mnemom gateway (Cloudflare Workers edge network)
-- The Mnemom API (Supabase edge functions)
+- The Mnemom API (Cloudflare Workers, `api.mnemom.ai`)
 - Webhook signal delivery (AIP `POST` to registered endpoints, authenticated with HMAC-SHA256)
 - Cross-protocol communication between AAP and AIP components
 
