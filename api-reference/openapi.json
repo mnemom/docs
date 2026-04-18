@@ -11900,6 +11900,367 @@
           }
         }
       }
+    },
+    "/auth/passkey/enroll": {
+      "post": {
+        "operationId": "passkeyEnroll",
+        "summary": "Begin passkey enrollment \u2014 return WebAuthn creation options",
+        "description": "Authenticated endpoint. Returns `PublicKeyCredentialCreationOptions` for the SPA to pass to `navigator.credentials.create()`. Stores the challenge in KV with a 30-second TTL; the companion `/verify-enroll` endpoint consumes it. `excludeCredentials` is pre-populated with the user's existing passkeys so the authenticator prevents duplicate enrollment of the same key.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebAuthn creation options. Shape follows the WebAuthn Level 3 spec.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicKeyCredentialCreationOptionsJSON"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Origin not allowed."
+          },
+          "503": {
+            "description": "Passkeys are not configured on this deployment."
+          }
+        }
+      }
+    },
+    "/auth/passkey/verify-enroll": {
+      "post": {
+        "operationId": "passkeyVerifyEnroll",
+        "summary": "Verify a passkey registration response + persist the credential",
+        "description": "Authenticated endpoint. Consumes the challenge issued by `/auth/passkey/enroll`, verifies the attestation via `@simplewebauthn/server`, and inserts a row into `user_passkeys`. A user-supplied `friendly_name` is stored alongside for UI display.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "response"
+                ],
+                "properties": {
+                  "response": {
+                    "$ref": "#/components/schemas/RegistrationResponseJSON"
+                  },
+                  "friendly_name": {
+                    "type": "string",
+                    "description": "User label (e.g. \"Alex's iPhone\")."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Passkey enrolled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credential_id": {
+                      "type": "string"
+                    },
+                    "friendly_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "device_type": {
+                      "type": "string",
+                      "enum": [
+                        "single_device",
+                        "multi_device"
+                      ]
+                    },
+                    "backed_up": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Origin not allowed."
+          }
+        }
+      }
+    },
+    "/auth/passkey/challenge": {
+      "post": {
+        "operationId": "passkeyChallenge",
+        "summary": "Begin passkey sign-in \u2014 return WebAuthn assertion options",
+        "description": "Unauthenticated. Returns `PublicKeyCredentialRequestOptions` with an empty `allowCredentials` list (discoverable-credentials flow). The browser surfaces any matching passkey for this RP without needing the user to enter an email. Rate-limited.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "WebAuthn assertion options.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicKeyCredentialRequestOptionsJSON"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin not allowed."
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
+    "/auth/passkey/verify-auth": {
+      "post": {
+        "operationId": "passkeyVerifyAuth",
+        "summary": "Verify a passkey assertion and issue a session",
+        "description": "Unauthenticated. Consumes the challenge issued by `/auth/passkey/challenge`, verifies the assertion via `@simplewebauthn/server`, mints Supabase tokens via `admin.generateLink(magiclink)` for the resolved user (same pattern T3-2c uses for SSO identity linking), and issues `mnemom_session` with `auth_method: 'passkey'`. Counter is enforced monotonically \u2014 a decrement rejects the assertion.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "response"
+                ],
+                "properties": {
+                  "response": {
+                    "$ref": "#/components/schemas/AuthenticationResponseJSON"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session issued.",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`mnemom_session` (HttpOnly, Secure, SameSite=Lax)."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "Unknown credential."
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          },
+          "502": {
+            "description": "Could not mint canonical session."
+          }
+        }
+      }
+    },
+    "/auth/passkeys": {
+      "get": {
+        "operationId": "passkeysList",
+        "summary": "List the current user's enrolled passkeys",
+        "description": "Returns the safe subset of `user_passkeys` for the authenticated user (omits public_key, counter, last_used_ip).",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Passkey list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "passkeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "credential_id": {
+                            "type": "string"
+                          },
+                          "friendly_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "device_type": {
+                            "type": "string",
+                            "enum": [
+                              "single_device",
+                              "multi_device"
+                            ]
+                          },
+                          "backed_up": {
+                            "type": "boolean"
+                          },
+                          "transports": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "last_used_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/passkeys/{credential_id}": {
+      "delete": {
+        "operationId": "passkeyDelete",
+        "summary": "Remove an enrolled passkey",
+        "description": "Requires aal2. Deleting a passkey does not affect other passkeys or the password/MFA fallback; those remain usable.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Passkey removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Current session isn't aal2.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "aal2_required"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Passkey not found for this user."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14566,6 +14927,136 @@
           }
         },
         "description": "Supabase user shape. Fields beyond `id` and `email` are passthrough."
+      },
+      "PublicKeyCredentialCreationOptionsJSON": {
+        "type": "object",
+        "description": "WebAuthn registration options (base64url-encoded per the WebAuthn Level 3 JSON serialization).",
+        "properties": {
+          "rp": {
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "user": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "displayName"
+            ]
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "pubKeyCredParams": {
+            "type": "array"
+          },
+          "authenticatorSelection": {
+            "type": "object"
+          },
+          "attestation": {
+            "type": "string"
+          },
+          "excludeCredentials": {
+            "type": "array"
+          },
+          "timeout": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "PublicKeyCredentialRequestOptionsJSON": {
+        "type": "object",
+        "description": "WebAuthn authentication options.",
+        "properties": {
+          "rpId": {
+            "type": "string"
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "userVerification": {
+            "type": "string"
+          },
+          "allowCredentials": {
+            "type": "array"
+          },
+          "timeout": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RegistrationResponseJSON": {
+        "type": "object",
+        "description": "Browser's `navigator.credentials.create()` response, JSON-serialized per the WebAuthn Level 3 JSON form.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "public-key"
+            ]
+          },
+          "response": {
+            "type": "object"
+          },
+          "clientExtensionResults": {
+            "type": "object"
+          },
+          "authenticatorAttachment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rawId",
+          "type",
+          "response"
+        ],
+        "additionalProperties": true
+      },
+      "AuthenticationResponseJSON": {
+        "type": "object",
+        "description": "Browser's `navigator.credentials.get()` response, JSON-serialized.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "public-key"
+            ]
+          },
+          "response": {
+            "type": "object"
+          },
+          "clientExtensionResults": {
+            "type": "object"
+          },
+          "authenticatorAttachment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rawId",
+          "type",
+          "response"
+        ],
+        "additionalProperties": true
       }
     }
   }
