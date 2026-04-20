@@ -19,7 +19,7 @@ Policies are defined in a YAML-based DSL (domain-specific language) with five to
   The policy engine is a parallel enforcement layer to [alignment enforcement](/gateway/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against policy rules. Both run independently and produce separate verdicts.
 </Note>
 
-## Policy DSL Overview
+## Policy DSL overview
 
 A policy file is a YAML document that declares how abstract card capabilities map to concrete tools, which tools are always forbidden, and what happens when a tool falls outside any mapping.
 
@@ -78,14 +78,14 @@ The two optional sections extend the policy:
 | `escalation_triggers` | Conditions that trigger escalation regardless of individual tool verdicts |
 | `meta` | Human-readable metadata: name, version, description |
 
-## Three Evaluation Contexts
+## Three evaluation contexts
 
 Policies are not evaluated once. They are evaluated at three stages, each with different inputs and different consequences.
 
 <Tabs>
   <Tab title="CI/CD (Static)">
 
-### CI/CD Evaluation
+### CI/CD evaluation
 
 Static evaluation runs in pipelines before deployment. It validates policy syntax and evaluates policy rules against historical trace data.
 
@@ -112,7 +112,7 @@ mnemom policy evaluate --file policy.yaml --agent-id agent_abc123 --days 30
   </Tab>
   <Tab title="Gateway (Live)">
 
-### Gateway Evaluation
+### Gateway evaluation
 
 Live evaluation runs in real-time as requests pass through the Mnemom gateway. The policy engine extracts tool names from the request body, checks each tool against the policy, and returns a verdict.
 
@@ -144,7 +144,7 @@ Live evaluation runs in real-time as requests pass through the Mnemom gateway. T
   </Tab>
   <Tab title="Observer (Post)">
 
-### Observer Evaluation
+### Observer evaluation
 
 Post-action evaluation runs after an action completes. It analyzes what actually happened against what the policy expected.
 
@@ -161,7 +161,7 @@ Post-action evaluation runs after an action completes. It analyzes what actually
   </Tab>
 </Tabs>
 
-## Capability Mapping
+## Capability mapping
 
 Capability mappings are the core of the policy DSL. They bridge the gap between what an alignment card declares (abstract semantic actions like `web_fetch`) and what agents actually invoke (concrete tool names like `mcp__browser__navigate`).
 
@@ -188,7 +188,7 @@ capability_mappings:
       - "read_data"
 ```
 
-### Glob Patterns
+### Glob patterns
 
 Tool patterns support standard glob syntax for flexible matching:
 
@@ -203,7 +203,7 @@ Tool patterns support standard glob syntax for flexible matching:
   Start with broad globs during initial policy development, then tighten them as you understand which specific tools your agent uses. A mapping like `mcp__browser__*` is fine for week one. By month two, you should enumerate the specific tools.
 </Tip>
 
-### How Matching Works
+### How matching works
 
 When the policy engine evaluates a tool, it follows this order:
 
@@ -213,7 +213,7 @@ When the policy engine evaluates a tool, it follows this order:
 
 A tool can match multiple capability mappings. This is not an error -- it means the tool satisfies multiple card actions.
 
-## Enforcement Modes
+## Enforcement modes
 
 The policy engine has its own enforcement mode, independent of the alignment enforcement mode (observe/nudge/enforce).
 
@@ -233,7 +233,7 @@ The policy engine has its own enforcement mode, independent of the alignment enf
   Policy enforcement and alignment enforcement are parallel systems. Setting alignment enforcement to `enforce` does not affect policy enforcement, and vice versa. An agent can be in alignment `observe` mode and policy `enforce` mode simultaneously -- meaning alignment violations are logged but policy violations are blocked.
 </Warning>
 
-### Relationship to Alignment Enforcement
+### Relationship to Alignment enforcement
 
 | System | What It Checks | Verdict Source |
 |---|---|---|
@@ -242,7 +242,7 @@ The policy engine has its own enforcement mode, independent of the alignment enf
 
 Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
 
-## Forbidden Actions
+## Forbidden actions
 
 Forbidden rules define tools that must never be used, regardless of capability mappings. They are always checked first in the evaluation pipeline.
 
@@ -274,7 +274,7 @@ Each rule has three fields:
   Policy `forbidden` rules complement alignment card `forbidden_actions`. Card forbidden actions declare intent ("this agent must never delete files"). Policy forbidden rules enforce that intent at the tool level ("block all tools matching `mcp__filesystem__delete*`"). Both are checked -- card-level by alignment enforcement, tool-level by policy enforcement.
 </Note>
 
-## Unmapped Tool Handling
+## Unmapped tool handling
 
 When a tool does not match any capability mapping or forbidden rule, the `defaults` section determines what happens.
 
@@ -285,7 +285,7 @@ defaults:
   grace_period_hours: 24
 ```
 
-### Unmapped Tool Actions
+### Unmapped tool actions
 
 | Action | Behavior |
 |---|---|
@@ -293,7 +293,7 @@ defaults:
 | `warn` | Log a warning but allow the tool invocation. Default. |
 | `allow` | Silently permit the tool. No log entry. |
 
-### Choosing the Right Default
+### Choosing the right default
 
 <Tabs>
   <Tab title="Development">
@@ -307,7 +307,7 @@ defaults:
   </Tab>
 </Tabs>
 
-## Grace Period
+## Grace period
 
 New tools appear when agents gain new MCP server connections or when tool providers add capabilities. The grace period prevents these newly discovered tools from immediately becoming violations.
 
@@ -329,11 +329,11 @@ This gives operators time to update their policy after adding new tools or MCP s
   The default grace period is 24 hours. Set it to 0 to disable grace periods entirely (strict mode). Set it higher (48-72 hours) for teams that deploy on weekly cycles and need more time to update policies.
 </Tip>
 
-## Policy Merge
+## Policy merge
 
 In organizations with multiple agents, policies exist at two levels: org-level and agent-level. These are merged at evaluation time using rules that prevent agents from weakening organizational policy.
 
-### Merge Rules
+### Merge rules
 
 | Section | Merge Strategy | Effect |
 |---|---|---|
@@ -343,7 +343,7 @@ In organizations with multiple agents, policies exist at two levels: org-level a
 | `escalation_triggers` | Union | Both org and agent triggers are evaluated |
 | `meta` | Agent overrides | Agent metadata replaces org metadata |
 
-### Strengthening Defaults
+### Strengthening defaults
 
 The org default acts as a floor. An agent can only move in the stricter direction:
 
@@ -355,7 +355,7 @@ allow → warn → deny
 
 If the org sets `unmapped_tool_action: "warn"`, an agent can set it to `deny` (stricter) but not `allow` (weaker).
 
-### Transaction Guardrails
+### Transaction guardrails
 
 Transaction-scoped policies can further restrict the merged policy via intersection semantics. A transaction guardrail can only narrow what is permitted -- never expand it.
 
@@ -368,11 +368,11 @@ transaction_guardrails:
   # All other capabilities are denied for this transaction
 ```
 
-## Coverage Report
+## Coverage report
 
 Every policy evaluation produces a coverage report that quantifies how well the policy maps to the alignment card. This helps identify gaps between what the card declares and what the policy actually covers.
 
-### Coverage Metrics
+### Coverage metrics
 
 | Metric | Description |
 |---|---|
@@ -381,7 +381,7 @@ Every policy evaluation produces a coverage report that quantifies how well the 
 | `unmapped_card_actions` | Card actions with no corresponding capability mapping |
 | `coverage_pct` | `mapped_card_actions / total_card_actions * 100` |
 
-### Example Output
+### Example output
 
 ```json
 {
@@ -410,7 +410,7 @@ Every policy evaluation produces a coverage report that quantifies how well the 
   A coverage percentage below 100% means some card actions have no policy enforcement. Tools implementing those actions will fall through to the `unmapped_tool_action` default. Aim for 100% coverage in production policies.
 </Warning>
 
-### Using Coverage in CI/CD
+### Using coverage in CI/CD
 
 ```bash
 # Evaluate policy and fail if coverage is below threshold
@@ -424,7 +424,7 @@ mnemom policy evaluate \
 
 This integrates naturally into pre-deploy gates: a policy change that reduces coverage below the threshold blocks the merge.
 
-## Putting It Together
+## Putting it together
 
 Here is a complete policy for a research agent that can browse the web and read files, but cannot delete anything or execute shell commands:
 
@@ -492,7 +492,7 @@ escalation_triggers:
 - Grace periods are tracked per-agent, not per-policy-version. Updating a policy does not reset grace period timers for previously seen tools.
 - Coverage reports require a valid alignment card. Agents without a published card receive a coverage report with 0% coverage.
 
-## See Also
+## See also
 
 - [Policy DSL Specification](/specifications/policy-dsl) -- Full normative specification for the policy YAML schema
 - [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for validating, evaluating, and managing policies

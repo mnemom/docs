@@ -5,11 +5,11 @@ sidebarTitle: "Safe House Integration"
 icon: "shield-halved"
 ---
 
-# Safe House Gateway Integration
+# Safe House gateway integration
 
 This page explains how Safe House integrates technically with the Mnemom gateway. If you are new to Safe House, start with the [concept overview](/concepts/safe-house) first.
 
-## Request Pipeline
+## Request pipeline
 
 Safe House runs as **Phase 0.5** — after agent identification resolves the agent config and policy, but before quota enforcement or message forwarding. This placement is intentional: the gateway already knows which agent is handling the request (so Safe House config can be loaded), but no downstream resources have been consumed yet.
 
@@ -57,13 +57,13 @@ Safe House runs as **Phase 0.5** — after agent identification resolves the age
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Phase-by-Phase Breakdown
+## Phase-by-Phase breakdown
 
-### Phase 0 — Agent Identification
+### Phase 0 — Agent identification
 
 The gateway resolves the `Authorization` header to an agent record and loads the agent's alignment card, Safe House configuration, and policy bundle from KV. If Safe House mode is `disabled` (the default), Phase 0.5 is skipped entirely with no performance cost.
 
-### Phase 0.5 — Safe House Screening
+### Phase 0.5 — Safe House screening
 
 Behavior depends on the configured mode:
 
@@ -110,19 +110,19 @@ This is the recommended first step when enabling Safe House on an existing agent
   </Tab>
 </Tabs>
 
-### Phase 1 — Quota Enforcement
+### Phase 1 — Quota enforcement
 
 Standard token and request quota checks run here. In enforce mode, this phase is only reached by messages that passed Safe House screening, so quota is not consumed by quarantined or blocked attempts.
 
-### Phase 2 — Policy Evaluation
+### Phase 2 — Policy evaluation
 
 The three-layer policy merge (org → agent → transaction) runs here. Safe House operates independently of the policy engine — a message can pass Safe House and fail policy, or vice versa.
 
-### Phase 3 — Forward to AI Provider
+### Phase 3 — Forward to AI provider
 
 The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemini, etc.). In enforce mode, only messages with a Safe House `pass` or `warn` verdict reach this stage.
 
-### Phase 4 — AIP Conscience Analysis
+### Phase 4 — AIP conscience analysis
 
 The streaming response is teed through the AIP analysis pipeline. If Safe House scored the inbound message with a non-zero threat score (even if the verdict was `pass`), that score and the specific threat categories detected are injected into the conscience prompt. This gives AIP additional signal to scrutinize the resulting reasoning.
 
@@ -134,7 +134,7 @@ Threat signals: social_engineering (0.38), privilege_escalation (0.21).
 Message passed Safe House threshold but apply elevated scrutiny.
 ```
 
-## KV Caching
+## KV caching
 
 Safe House configuration and session state are cached in the `BILLING_CACHE` KV binding (the same binding used for quota state). Cache TTLs:
 
@@ -147,7 +147,7 @@ Safe House configuration and session state are cached in the `BILLING_CACHE` KV 
 
 The `BILLING_CACHE` binding must be present in `wrangler.toml` for Safe House to operate. If the binding is absent and `SAFE_HOUSE_ENABLED=true`, the gateway logs a warning and skips Safe House analysis for all requests.
 
-## Pre-emptive Nudge Injection
+## Pre-emptive nudge injection
 
 When a message passes Safe House screening but its L2 score is ≥ 0.6, Safe House writes a record to the `enforcement_nudges` table. On the agent's *next* request, the gateway's standard nudge injection logic picks this up and prepends a notice to the system prompt:
 
@@ -170,7 +170,7 @@ Safe House scores are included in the attestation `inputCommitment` hash. When p
 
 This creates a tamper-evident record that the Safe House analysis was performed and what it returned, which is important for compliance use cases where you need to demonstrate that screening happened.
 
-## Sovereign Agent Template
+## Sovereign agent template
 
 For agents operating in high-trust, high-risk environments (financial automation, infrastructure management, regulated data handling), the sovereign agent template provides a hardened Safe House configuration as a starting point:
 
@@ -198,7 +198,7 @@ For agents operating in high-trust, high-risk environments (financial automation
 
 The key differences from default settings: all three surfaces are screened (not just inbound), thresholds are tighter than defaults, canaries are auto-seeded from the agent's context, and session escalation is active.
 
-## Environment Requirements
+## Environment requirements
 
 Safe House requires the following to be present in the gateway environment:
 
@@ -209,7 +209,7 @@ Safe House requires the following to be present in the gateway environment:
 
 No additional API keys or service bindings are required — L2 analysis runs through the existing Anthropic API key configured for the gateway.
 
-## See Also
+## See also
 
 - [Safe House concept](/concepts/safe-house) — What Safe House is and how the threat categories work
 - [Safe House Quickstart](/quickstart/safe-house-protection) — Enable and test Safe House in 5 minutes

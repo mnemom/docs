@@ -27,7 +27,7 @@ Checkpoints where the thinking block contains fewer than 100 tokens receive a sy
 
 ---
 
-## Score Range and Grades
+## Score range and grades
 
 Scores range from **0 to 1000** and map to letter grades inspired by bond credit ratings. Higher scores indicate stronger demonstrated trustworthiness.
 
@@ -46,7 +46,7 @@ The grade system is deliberately conservative. An "AAA" rating is rare and requi
 
 ---
 
-## Score Components
+## Score components
 
 The composite score is a weighted sum of five normalized components, each scored 0 -- 1000:
 
@@ -55,7 +55,7 @@ S = w_1 * integrity_ratio + w_2 * compliance + w_3 * drift_stability
   + w_4 * trace_completeness + w_5 * coherence_compatibility
 ```
 
-### Integrity Ratio (40%)
+### Integrity ratio (40%)
 
 The dominant component. Measures the proportion of integrity checkpoints that returned a `clear` verdict.
 
@@ -85,7 +85,7 @@ After [reclassification](/concepts/card-lifecycle), violations classified as `ca
 - **Update frequency:** Hourly
 - **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence; [reclassify card-gap violations](/guides/trust-recovery)
 
-### Drift Stability (20%)
+### Drift stability (20%)
 
 Measures the proportion of sessions where no sustained [drift alert](/concepts/drift-detection) was triggered.
 
@@ -99,7 +99,7 @@ A session is "stable" if the agent maintained consistent behavioral similarity t
 - **Update frequency:** End of each session
 - **Improvement lever:** Consistent values application, avoid aggressive behavioral pattern changes
 
-### Trace Completeness (10%)
+### Trace completeness (10%)
 
 Measures audit trail quality -- the ratio of decisions that were logged as [AP-Traces](/concepts/ap-traces) versus expected decisions.
 
@@ -113,7 +113,7 @@ Agents that log every decision create a complete audit trail. Gaps in trace cove
 - **Update frequency:** Hourly
 - **Improvement lever:** Ensure all agent decisions are logged via AAP
 
-### Coherence Compatibility (10%)
+### Coherence compatibility (10%)
 
 The mean [coherence score](/concepts/value-coherence) across fleet interactions, normalized to the 0 -- 1000 scale.
 
@@ -129,7 +129,7 @@ Defaults to **750** if the agent has no fleet interaction data. This default ens
 
 ---
 
-## Confidence Levels
+## Confidence levels
 
 The number of analyzed checkpoints determines the confidence level displayed alongside the score:
 
@@ -148,7 +148,7 @@ The 50-checkpoint minimum is a hard gate for score publication. Agents below thi
 
 ---
 
-## Score Computation
+## Score computation
 
 ### Frequency
 
@@ -156,7 +156,7 @@ The 50-checkpoint minimum is a hard gate for score publication. Agents below thi
 - **Weekly snapshots:** A frozen snapshot is saved each week for historical trend tracking. Snapshots are created every Monday at 00:00 UTC.
 - **On-demand:** The API always returns the most recently computed score
 
-### Anti-Gaming Measures
+### Anti-gaming measures
 
 The scoring methodology includes several protections against manipulation:
 
@@ -165,7 +165,7 @@ The scoring methodology includes several protections against manipulation:
 3. **Rate limiting** -- Checkpoint submission rates are monitored per agent; anomalous bursts are throttled
 4. **Independent verification** -- All checkpoints are analyzed by a separate LLM (the daimonion), not the agent itself
 
-### Trend Tracking
+### Trend tracking
 
 Every `ReputationScore` includes a `trend_30d` field -- a signed delta comparing the current score to 30 days ago. This enables at-a-glance trajectory assessment:
 
@@ -175,7 +175,7 @@ Every `ReputationScore` includes a `trend_30d` field -- a signed delta comparing
 
 ---
 
-## SDK Usage
+## SDK usage
 
 ### TypeScript
 
@@ -232,7 +232,7 @@ for snapshot in history_response.json()["snapshots"]:
 
 ---
 
-## API Reference
+## API reference
 
 The primary endpoint for fetching reputation data:
 
@@ -305,9 +305,9 @@ For the complete API reference including batch, search, compare, and benchmark e
 
 ---
 
-## Use Cases
+## Use cases
 
-### Pre-Interaction Trust Checks
+### Pre-interaction trust checks
 
 Before delegating a task to another agent via A2A, check their reputation:
 
@@ -324,7 +324,7 @@ if (!reputation || reputation.grade === 'CCC' || reputation.grade === 'NR') {
 return executeDelegation(theirCard, task);
 ```
 
-### Fleet Governance
+### Fleet governance
 
 Set minimum reputation requirements for agents in your organization:
 
@@ -337,7 +337,7 @@ for agent in org_agents:
         pause_agent(agent["id"])
 ```
 
-### Compliance Reporting
+### Compliance reporting
 
 Export weekly snapshots for audit trails:
 
@@ -354,17 +354,17 @@ const report = history.map(snapshot => ({
 }));
 ```
 
-### Marketplace Listings
+### Marketplace listings
 
 Display reputation badges on agent directories, npm packages, and documentation sites. See [Embeddable Badges](/guides/reputation-badges) for embed code.
 
 ---
 
-## Cryptographic Verification
+## Cryptographic verification
 
 Every Mnemom Trust Rating is backed by a cryptographic proof chain that enables independent verification without trusting Mnemom's infrastructure. The verification endpoint at `GET /v1/reputation/{agent_id}/verify` returns the full proof chain.
 
-### Proof Chain Structure
+### Proof chain structure
 
 The proof chain consists of three layers that independently attest to score integrity:
 
@@ -390,7 +390,7 @@ The proof chain consists of three layers that independently attest to score inte
 
 **Hash chain validation** -- Each checkpoint includes a hash of the previous checkpoint, forming a tamper-evident chain. If any checkpoint is modified or removed, the chain breaks. The `hash_chain_valid` field confirms the entire chain is intact.
 
-### Verifying a Score
+### Verifying a score
 
 ```bash
 # 1. Fetch the verification proof
@@ -411,11 +411,11 @@ Verification confirms that the score was computed from authentic, tamper-evident
 
 ---
 
-## A2A Trust Extension
+## A2A trust extension
 
 The reputation API includes a pre-built trust block for inter-agent reputation sharing via A2A. When fetching an agent's reputation, the response includes an `a2a_trust_extension` field that can be directly embedded in an A2A Agent Card.
 
-### How It Works
+### How it works
 
 ```
 Agent A ──[fetches reputation]──→ Mnemom API
@@ -451,7 +451,7 @@ Agent A embeds this as the `trust` block in its A2A Agent Card. When Agent B dis
 2. Fetch `verified_url` for the latest real-time score
 3. Fetch `verify_url` for cryptographic proof that the score is genuine
 
-### SDK Helpers
+### SDK helpers
 
 Both SDKs provide helpers to fetch and embed the trust extension:
 
@@ -481,11 +481,11 @@ For the full A2A integration guide including value coherence handshakes and repu
 
 ---
 
-## Public Trust Surfaces
+## Public trust surfaces
 
 Trust Ratings are not just internal metrics — they power public-facing trust signals across the ecosystem.
 
-### Public Reputation Pages
+### Public reputation pages
 
 Every agent with a published score gets a public page at:
 
@@ -495,7 +495,7 @@ https://mnemom.ai/agents/{agent_id}/reputation
 
 The page includes full component breakdown, trend chart, grade badge, and a cryptographic verification link. No authentication required — anyone can inspect an agent's trust history.
 
-### Trust Directory
+### Trust directory
 
 A searchable directory of all publicly rated agents at:
 
@@ -505,21 +505,21 @@ https://mnemom.ai/trust-directory
 
 Filter by grade, confidence level, and trend direction. Sort by score or checkpoint count. The directory enables discovery of trusted agents across the ecosystem.
 
-### Embeddable Badges
+### Embeddable badges
 
 Dynamic SVG badges that display an agent's current Trust Rating anywhere — GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries. Four variants available: `score`, `score_tier`, `score_trend`, and `compact`. See [Embeddable Badges](/guides/reputation-badges) for embed code.
 
-### GitHub Action
+### GitHub action
 
 The `mnemom/reputation-check@v1` GitHub Action gates CI/CD pipelines on minimum reputation scores. Fail builds when agent scores drop below a configurable threshold — integrating trust checks directly into deployment workflows.
 
-### A2A Trust Extension
+### A2A trust extension
 
 Pre-built trust blocks for inter-agent reputation sharing via Google's A2A protocol. Embed live score, grade, and verification URLs directly in an agent's A2A Agent Card. See [A2A Integration](/protocols/aap/a2a-integration).
 
 ---
 
-## How Scores Differ from Alternatives
+## How scores differ from alternatives
 
 | Dimension | Mnemom Reputation | Self-Reported Trust | Capability Benchmarks |
 |-----------|-------------------|--------------------|-----------------------|
@@ -532,7 +532,7 @@ Pre-built trust blocks for inter-agent reputation sharing via Google's A2A proto
 
 ---
 
-## Team Reputation
+## Team reputation
 
 Teams have their own parallel reputation scoring system — the [Team Trust Rating](/concepts/team-reputation). While individual Trust Ratings measure a single agent's trustworthiness, the Team Trust Rating evaluates whether a group of agents operates reliably together.
 
@@ -561,7 +561,7 @@ See the [Trust Recovery Guide](/guides/trust-recovery) for step-by-step instruct
 
 ---
 
-## On-Chain Verification
+## On-chain verification
 
 Reputation scores can be anchored on-chain via the [MnemoReputationRegistry](/concepts/on-chain-verification) smart contract on Base L2. On-chain anchoring provides:
 
@@ -573,7 +573,7 @@ See [On-Chain Verification](/concepts/on-chain-verification) for architecture de
 
 ---
 
-## See Also
+## See also
 
 - [Team Trust Rating](/concepts/team-reputation) -- Team-level reputation scoring
 - [Scoring Methodology](/protocols/aap/reputation-methodology) -- Full technical specification of the scoring algorithm

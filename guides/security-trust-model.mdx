@@ -5,13 +5,13 @@ sidebarTitle: "Security & Trust"
 icon: "shield-halved"
 ---
 
-# Security & Trust Model
+# Security & trust model
 
 This document describes the unified security and trust model across the full Mnemom stack: the [Agent Alignment Protocol (AAP)](/protocols/aap/specification), the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), and [Mnemom Gateway](/gateway/overview) -- the gateway that ties them together. It covers what data is stored, how authentication works, how data is encrypted, and what threats the system does and does not defend against.
 
 ---
 
-## Trust Model Overview
+## Trust model overview
 
 Mnemom provides **transparency, not guarantees**. The two protocols serve complementary roles:
 
@@ -29,9 +29,9 @@ AAP is a transparency protocol, not a trust protocol. A verified trace means the
 
 ---
 
-## Data Handling
+## Data handling
 
-### What Is Stored
+### What is stored
 
 | Data Type | Description | Storage Location |
 |-----------|-------------|------------------|
@@ -41,7 +41,7 @@ AAP is a transparency protocol, not a trust protocol. A verified trace means the
 | **Drift Alerts** | Alerts generated when behavioral similarity drops below threshold over sustained turns (AAP) or when integrity patterns degrade within a session window (AIP) | Supabase Postgres |
 | **Enforcement Records** | Records of enforcement actions taken (observe, nudge, enforce) in response to violations | Supabase Postgres |
 
-### What Is NOT Stored
+### What is NOT stored
 
 | Data Type | Why Not |
 |-----------|---------|
@@ -56,7 +56,7 @@ The SHA-256 hash of the thinking block serves two purposes: it provides tamper e
 
 ---
 
-## Authentication & Authorization
+## Authentication & authorization
 
 The Mnemom API supports three end-caller authentication patterns, plus an internal service role. Each serves a different use case; the API's auth layer dual-resolves them into the same downstream principal.
 
@@ -82,7 +82,7 @@ Used by the Mnemom CLI and programmatic agents mimicking its flow.
 
 The JWT is issued by Supabase Auth on the user's behalf and contains identity, organization membership, and role. The CLI obtains its token via a one-time browser → localhost handoff at login time (mediated by `POST /v1/auth/cli-exchange`, which itself requires a valid session cookie). Tokens are verified on every request via JWKS.
 
-### API Key (`X-Mnemom-Api-Key` header)
+### API key (`X-Mnemom-Api-Key` header)
 
 Used for server-to-server and enterprise fleet management -- billing API calls, automated agent registration, CI/CD integrations.
 
@@ -92,7 +92,7 @@ Used for server-to-server and enterprise fleet management -- billing API calls, 
 
 API keys are scoped to a user or organization. The key itself is never stored; only its SHA-256 hash is persisted for lookup and validation. Keys are issued via the dashboard under **Settings > API Keys** and can be rotated at any time.
 
-### Service Role Key
+### Service role key
 
 Used for internal and administrative operations -- database migrations, system maintenance, admin export endpoints. Service role access bypasses row-level security.
 
@@ -116,7 +116,7 @@ Role-based access is enforced at the API layer via Supabase row-level security p
 
 ## Encryption
 
-### In Transit
+### In transit
 
 All endpoints enforce **TLS 1.2+**. This applies to:
 
@@ -127,11 +127,11 @@ All endpoints enforce **TLS 1.2+**. This applies to:
 
 Cloudflare's edge network terminates TLS and re-encrypts traffic to origin servers. Certificate management is handled automatically.
 
-### At Rest
+### At rest
 
 Database storage uses **Supabase Postgres with encryption at rest**. This covers all persisted data: AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts, enforcement records, and user/organization data.
 
-### Thinking Block Privacy
+### Thinking block privacy
 
 Thinking blocks receive special treatment. The full thinking block content is **never written to any persistent storage** -- not in the database, not in logs, not in object storage. The analysis flow is:
 
@@ -147,11 +147,11 @@ The `IntegrityConcern.evidence` field may contain a short excerpt (recommended m
 
 ---
 
-## Threat Model
+## Threat model
 
 The Mnemom stack is designed with explicit awareness of what it can and cannot defend against. The following threat categories are addressed.
 
-### Adversarial Agents
+### Adversarial agents
 
 An agent can produce perfect AP-Traces and pass every integrity checkpoint while acting against its principal's interests. If the agent controls what it logs and reasons in ways not captured by the thinking block, the protocols provide visibility into what the agent *declares* and *exposes*, not what it *actually does*.
 
@@ -161,17 +161,17 @@ AAP provides **visibility, not prevention**. AIP provides **detection, not certa
 Do not treat protocol compliance as evidence of alignment. A verified trace and a clear integrity verdict mean the agent's observable behavior is internally consistent with its declarations. They do not mean the agent is safe.
 </Warning>
 
-### Prompt Injection
+### Prompt injection
 
 AIP detects injection patterns in thinking blocks. When an agent's reasoning reveals it is responding to injected instructions (e.g., instructions embedded in tool output rather than the user's original request), the analysis LLM flags the concern and the checkpoint verdict reflects it.
 
 However, AIP operates *after* the agent has already processed the injected content. The injection has occurred. AIP detects its effects on reasoning and can intervene before the *action* lands (in gateway or enforce mode), but it does not prevent the injected content from reaching the model in the first place.
 
-### Replay Attacks
+### Replay attacks
 
 Trace IDs (`trace_id`) and timestamps prevent AP-Trace replay. Each trace is uniquely identified and temporally bound. Integrity Checkpoint IDs (`checkpoint_id`, format `ic-{uuid}`) are unique per checkpoint. AIP webhook signals include timestamps, and receivers should reject signals older than a configurable threshold (recommended: 5 minutes). HMAC-SHA256 signatures on webhooks prevent signal forgery.
 
-### LLM-as-Judge Limits
+### LLM-as-Judge limits
 
 AIP uses an LLM to evaluate another LLM's thinking. This introduces a fundamental ceiling: the analysis model can be fooled by sophisticated adversarial content crafted specifically to manipulate the evaluation. This is the meta-injection threat -- the content under analysis attempts to subvert the analysis itself.
 
@@ -181,7 +181,7 @@ Mitigations include structured output validation, explicit meta-injection warnin
 Detection accuracy is bounded by the analysis model's capability. A smaller, cheaper analysis model will miss subtleties that a larger model would catch. AIP provides probabilistic detection, not mathematical proof of alignment.
 </Note>
 
-### Model Dependency
+### Model dependency
 
 AIP requires models that expose thinking blocks. Current provider support:
 
@@ -196,9 +196,9 @@ Models without exposed thinking blocks cannot be analyzed by AIP. In this case, 
 
 ---
 
-## Retention & Audit
+## Retention & audit
 
-### Configurable Retention
+### Configurable retention
 
 Trace and checkpoint retention is configurable via the `audit_commitment.retention_days` field in the [Alignment Card](/concepts/alignment-cards). This field declares how long the agent's operator commits to retaining audit data.
 
@@ -219,7 +219,7 @@ AP-Traces and Integrity Checkpoints are queryable via the Mnemom API:
 - [`GET /agents/{agent_id}/checkpoints/{checkpoint_id}`](/api-reference/endpoint/get-agents-agent-id-checkpoints-checkpoint-id) -- Retrieve a specific checkpoint
 - [`GET /drift/{agent_id}`](/api-reference/endpoint/get-drift-agent-id) -- Retrieve drift analysis for an agent
 
-### Compliance Exports
+### Compliance exports
 
 Enterprise customers have access to compliance export endpoints for bulk data retrieval:
 
@@ -229,11 +229,11 @@ Admin export endpoints are available for organization-level data extraction, sup
 
 ---
 
-## Cryptographic Guarantees
+## Cryptographic guarantees
 
 Beyond TLS encryption and HMAC authentication, the AIP attestation layer provides four independent layers of cryptographic evidence. Each layer addresses a distinct verification question.
 
-### Four Layers of Verification
+### Four layers of verification
 
 | Layer | Primitive | What It Proves | Verification Question |
 |-------|-----------|---------------|----------------------|
@@ -244,7 +244,7 @@ Beyond TLS encryption and HMAC authentication, the AIP attestation layer provide
 
 Each layer is independently verifiable. A verifier can check any combination of layers depending on their trust requirements.
 
-### Trust Assumptions
+### Trust assumptions
 
 The attestation system requires two trust assumptions:
 
@@ -252,7 +252,7 @@ The attestation system requires two trust assumptions:
 
 2. **Trust the analysis model.** The ZK proof demonstrates that the verdict was correctly derived from the analysis LLM's output, but it does not prove the analysis output itself was correct. If the analysis LLM produces incorrect concerns (false positives or false negatives), the verdict will be derived correctly from incorrect inputs. Analysis quality remains bounded by the analysis model's capability.
 
-### Public Verifiability
+### Public verifiability
 
 All verification endpoints are public and unauthenticated. Anyone can:
 
@@ -268,7 +268,7 @@ For full details on the certificate format and verification steps, see [Integrit
 
 ---
 
-## Responsible Disclosure
+## Responsible disclosure
 
 If you discover a security vulnerability in any Mnemom component, please report it responsibly via GitHub Security Advisories on the relevant repository:
 
@@ -284,7 +284,7 @@ Do not open public GitHub issues for security vulnerabilities. Use the Security 
 
 ---
 
-## See Also
+## See also
 
 - [AAP Security Model](/protocols/aap/security) -- Detailed threat analysis, cryptographic requirements, and adversarial scenarios for AAP
 - [AIP Security Model](/protocols/aip/security) -- Threat model and attack surface analysis for AIP

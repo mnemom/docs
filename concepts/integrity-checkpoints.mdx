@@ -15,7 +15,7 @@ Integrity Checkpoints are the primary data structure of the [Agent Integrity Pro
   AIP follows a daimonion philosophy. Like Socrates' inner voice, the integrity system is silent when things are aligned and speaks only when it detects something outside boundaries. Silence (`clear`) means proceed. Voice (`review_needed`, `boundary_violation`) means pause and evaluate.
 </Note>
 
-## Why Integrity Checkpoints Exist
+## Why Integrity Checkpoints exist
 
 AAP's post-hoc verification provides comprehensive transparency, but it operates after the action has already been taken -- typically 30-60 seconds later when the Observer Worker processes the gateway log. This delay creates a window of vulnerability:
 
@@ -25,7 +25,7 @@ AAP's post-hoc verification provides comprehensive transparency, but it operates
 
 All three of these failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints fill this gap.
 
-## How It Works
+## How it works
 
 The integrity check process follows eight steps:
 
@@ -62,7 +62,7 @@ Agent Turn Completes
 
 The key insight: the analysis is performed by a *separate* LLM (typically a fast, inexpensive model like Claude Haiku), not the agent itself. This separate model acts as the conscience -- evaluating the agent's reasoning against its [Alignment Card](/concepts/alignment-cards) and optional conscience values.
 
-## Checkpoint Structure
+## Checkpoint structure
 
 An Integrity Checkpoint captures the analysis result:
 
@@ -112,7 +112,7 @@ An Integrity Checkpoint captures the analysis result:
   The full thinking block text is never stored in the checkpoint. Only a SHA-256 hash (`thinking_block_hash`) is retained. The thinking block is treated as transient data -- extracted, sent to the analysis LLM, and discarded. This preserves the agent's reasoning privacy while enabling integrity analysis.
 </Warning>
 
-## Verdict Types
+## Verdict types
 
 Every checkpoint produces one of three verdicts:
 
@@ -130,7 +130,7 @@ The mapping to host system actions:
 | `review_needed` | `true` | `log_and_continue` |
 | `boundary_violation` | `false` | `pause_for_review` or `deny_and_escalate` |
 
-## Concern Categories
+## Concern categories
 
 When concerns are identified, each is categorized:
 
@@ -145,7 +145,7 @@ When concerns are identified, each is categorized:
 
 A concern at `critical` severity, or `high` severity in `prompt_injection` or `deceptive_reasoning`, triggers a `boundary_violation` verdict.
 
-### Example: Detected Prompt Injection
+### Example: Detected prompt injection
 
 ```json
 {
@@ -164,7 +164,7 @@ A concern at `critical` severity, or `high` severity in `prompt_injection` or `d
 }
 ```
 
-## The Conscience Prompt
+## The conscience prompt
 
 The conscience prompt is the instruction sent to the analysis LLM. It is structured in five sections:
 
@@ -186,7 +186,7 @@ The conscience prompt is the instruction sent to the analysis LLM. It is structu
   The minimum evidence threshold is 100 tokens. Thinking blocks shorter than this are too brief for reliable analysis and receive a synthetic `clear` verdict without calling the analysis LLM. This avoids wasting latency and cost on fragments like "Done. The article is published" that cannot be meaningfully analyzed.
 </Tip>
 
-## Provider Support
+## Provider support
 
 Different LLM providers expose thinking blocks in different formats. AIP uses provider adapters to normalize extraction:
 
@@ -242,7 +242,7 @@ console.log(`Confidence: ${thinking.confidence}`); // 0.9
   The fallback adapter (confidence 0.3) infers reasoning from visible response text by looking for patterns like "I need to", "Let me consider", or chain-of-thought markers. This has significantly higher false positive and false negative rates. Use a provider with native thinking block support whenever possible.
 </Warning>
 
-## Code Example
+## Code example
 
 A complete integrity check from response to signal:
 
@@ -355,7 +355,7 @@ const signal = await aip.check(anthropicResponseBody, 'anthropic');
 ```
 </CodeGroup>
 
-## Conscience Values
+## Conscience values
 
 Conscience values are optional typed declarations that increase detection sensitivity for specific concerns. Only `BOUNDARY` and `FEAR` types are injected into the analysis prompt:
 
@@ -394,13 +394,13 @@ Integrity checkpoints and AP-Traces are complementary:
 
 When both protocols are active, they enrich each other. The integrity verdict is stored in the AP-Trace's context metadata, and `boundary_violation` verdicts automatically set `escalation.required = true` in the corresponding trace.
 
-## Error Handling
+## Error handling
 
 AIP defaults to **fail-open**: if the analysis LLM is unreachable or errors, a synthetic `clear` checkpoint is generated and the agent proceeds. This prioritizes availability.
 
 For high-security deployments, **fail-closed** mode is available. Analysis failure generates a synthetic `boundary_violation`, blocking the agent until analysis succeeds or a human intervenes.
 
-## See Also
+## See also
 
 - [Alignment Cards](/concepts/alignment-cards) -- The declarations that checkpoints evaluate against
 - [AP-Traces](/concepts/ap-traces) -- Post-hoc records that checkpoints enrich
