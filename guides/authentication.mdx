@@ -1,0 +1,171 @@
+---
+title: "Authentication"
+description: "Passkey sign-in, AAL2 step-up, session lifecycle, API key rotation, and account recovery for the Mnemom dashboard and API."
+sidebarTitle: "Authentication"
+icon: "key"
+---
+
+# Authentication
+
+Mnemom supports four authentication paths — passkeys, password + MFA, SSO, and API keys — each mapped to the operations it is meant for. Sensitive actions are gated by **AAL2 step-up**: a fresh user-verification gesture within a short window, on top of the current session. This page is the operator-level reference; for the end-user passkey walkthrough, see [Passkeys](/guides/passkeys).
+
+<Note>
+The auth overhaul (passkey + AAL2) is the current system. Earlier docs that describe Bearer-JWT-only or API-key-only access on all endpoints are superseded by the tiered model below.
+</Note>
+
+---
+
+## Authentication methods at a glance
+
+| Method | Used for | AAL | Where to enroll |
+|---|---|---|---|
+| Passkey (WebAuthn / FIDO2) | Dashboard sign-in, SDK-issued sessions | AAL2 if the gesture is fresh | Settings → Account → Passkeys |
+| Password + MFA (TOTP) | Dashboard sign-in, recovery path from lost passkeys | AAL2 when MFA is completed in the current flow | Settings → Security |
+| SSO (Okta, Entra ID, Google Workspace) | Org-enforced dashboard sign-in | AAL2 when the IdP's `acr` claim asserts step-up | Org Settings → SSO |
+| API key | Server-to-server API calls | N/A — bound to the org, scoped by role | Settings → API Keys or Org Settings → API Keys |
+
+Passkeys are **phishing-resistant** (scoped to `mnemom.ai`, never presented to a wrong origin) and **not a shared secret** (Mnemom stores only the public half). They are the recommended default.
+
+---
+
+## Passkey enrollment
+
+A passkey is a public/private keypair created by your device on enrollment, unlocked only by a biometric or PIN, and usable only at `mnemom.ai`. End-user steps:
+
+1. Sign in to the dashboard the normal way (password + MFA, or SSO).
+2. Open **Settings → Account → Passkeys** and click **Add a passkey**.
+3. Give it a friendly name ("MacBook Touch ID", "YubiKey — office").
+4. Confirm the device's biometric / PIN.
+5. The passkey is live immediately; subsequent sign-ins can use it.
+
+Enrolling on at least two devices (or one device that syncs via iCloud Keychain, Google Password Manager, 1Password, Bitwarden, etc.) prevents lockout from a single-device loss.
+
+See [Passkeys](/guides/passkeys) for browser support, troubleshooting, and the full end-user flow.
+
+---
+
+## AAL2 step-up
+
+Sensitive actions — removing a passkey, rotating an API key, changing SSO enforcement, deleting an organization — require **Authenticator Assurance Level 2 (AAL2)**: a user-verification gesture completed in the current flow, not reused from an older session.
+
+The step-up is presented inline: when an AAL2-protected action is attempted and the current session has not satisfied AAL2 within the freshness window, the dashboard prompts for a passkey gesture (or a TOTP code for password users, or an IdP re-assertion for SSO users). On success, the action proceeds and the AAL2 claim is stamped on the session until the window expires.
+
+Actions that require AAL2 step-up:
+
+- Removing a passkey or adding a hardware authenticator
+- Creating, rotating, or revoking an API key
+- Changing SSO configuration or enforcement
+- Inviting or removing an org owner
+- Deleting an organization
+- Pausing, killing, or resuming an agent via the Containment API
+- Deleting your account
+
+{/* TODO: Alex — confirm the exact AAL2 freshness window (we tentatively use 5 minutes) and whether the window is sliding or fixed after the most recent gesture. Confirm the IdP `acr` values we accept for SSO step-up. */}
+
+---
+
+## Session lifecycle
+
+Dashboard sessions are issued as short-lived Supabase JWTs wrapped in an httpOnly, secure, same-site cookie. Rotation is automatic on the client; revocation is immediate on the server.
+
+| Event | Effect |
+|---|---|
+| Sign-in (any method) | JWT issued with `aal` claim (`aal1` or `aal2`), session row created in `auth_sessions` |
+| AAL2 step-up | Session `aal` upgraded, `aal2_verified_at` stamped |
+| Token refresh | Old JWT invalidated, new JWT issued with preserved claims |
+| Sign-out | Session row deleted; all JWTs derived from it fail verification |
+| Password reset | All sessions for the user invalidated |
+| Passkey removal | The specific credential invalidated server-side; other sessions are unaffected |
+| Org role change | Affected user's sessions re-issue with new claims on next refresh |
+
+Sessions expire after inactivity {/* TODO: Alex — confirm idle timeout (we tentatively use 24h) and absolute maximum session lifetime (we tentatively use 30d). */} and on explicit revocation. Active sessions are listed in **Settings → Security → Active sessions** with last-seen IP and user agent; each can be revoked individually.
+
+Server-side, sessions are revalidated on every protected request against the `auth_sessions` table. Stolen JWTs are not replayable past revocation.
+
+---
+
+## API keys
+
+API keys authenticate server-to-server calls against `api.mnemom.ai`. They are scoped to an organization and inherit the role of the creator.
+
+### Creating an API key
+
+<Steps>
+
+### Sign in and open API keys
+
+**Settings → API Keys** (user-scoped) or **Org Settings → API Keys** (org-scoped).
+
+### Create the key
+
+Click **Create API key**, name it, and pick a scope (Owner, Admin, Member — must not exceed the creator's role). AAL2 step-up is required.
+
+### Copy the secret
+
+The full key is shown exactly once. Mnemom stores only the SHA-256 hash server-side; the raw key cannot be retrieved after creation. Store it in a secrets manager, never in source control.
+
+</Steps>
+
+### Using an API key
+
+```bash
+curl https://api.mnemom.ai/v1/agents \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
+```
+
+API keys are rate-limited per plan tier (see [API reference overview](/api-reference/overview)).
+
+### Rotating an API key
+
+Rotation is **create-new-then-revoke-old**, not an in-place swap. This gives you a window to roll callers over before the old key dies.
+
+1. Create the replacement key (AAL2 step-up required).
+2. Deploy the new key to your services.
+3. Verify traffic has shifted: the old key's last-used timestamp should stop advancing.
+4. Revoke the old key.
+
+Revocation is immediate. Any in-flight request using the revoked key receives HTTP 401 on its next call.
+
+{/* TODO: Alex — confirm whether we surface a "last used at" timestamp in the dashboard today, and whether there's an automated rotation reminder (e.g., suggest rotation after 90 days). */}
+
+### Rotating a provider API key bound to an agent
+
+If you are rotating an **agent's provider key** (Anthropic / OpenAI / Gemini) — not a Mnemom API key — see [Rotating your agent's API key](/guides/agent-key-rotation). The flow preserves the agent's ID, traces, and reputation.
+
+---
+
+## Account recovery
+
+If you lose all your passkeys and cannot complete MFA, use the password recovery path:
+
+1. On the sign-in page, click **Forgot password?**.
+2. Check email for the reset link (single-use, 15-minute TTL).
+3. Set a new password.
+4. Complete MFA enrollment or re-auth.
+5. Sign in.
+6. Re-enroll a fresh passkey from your new device.
+
+Completing the password-recovery flow invalidates all existing sessions. If passkeys were enrolled at the time of the recovery, Mnemom logs an internal security-review event — surface it to support via the dashboard if it was not you.
+
+For SSO-enforced organizations, recovery goes through your IdP; Mnemom's recovery path does not apply.
+
+---
+
+## Responsible disclosure
+
+Report suspected auth vulnerabilities via GitHub Security Advisories on the affected repository. Do not file public issues. We acknowledge within 48 hours and aim to provide a fix or mitigation within 7 days.
+
+| Component | Repository |
+|---|---|
+| Mnemom API (auth surface) | [github.com/mnemom/mnemom-api](https://github.com/mnemom/mnemom-api) |
+| Passkey server-side | [@simplewebauthn/server](https://github.com/MasterKale/SimpleWebAuthn) |
+
+---
+
+## See also
+
+- [Passkeys](/guides/passkeys) — End-user enrollment, browser support, troubleshooting
+- [API reference overview](/api-reference/overview) — Base URL, auth headers, rate limits, error codes
+- [Rotating your agent's API key](/guides/agent-key-rotation) — Provider-key rotation for an existing agent
+- [Security and trust model](/guides/security-trust-model) — Full trust model spanning AAP, AIP, and the gateway
+- [XFD security architecture](/guides/xfd-security) — Request-pipeline view of Safe House enforcement

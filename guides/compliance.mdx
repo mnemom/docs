@@ -1,0 +1,97 @@
+---
+title: "Compliance posture"
+description: "Honest status across the regulatory frameworks enterprise buyers ask about — EU AI Act, SOC 2, HIPAA, FedRAMP, and more."
+sidebarTitle: "Compliance"
+icon: "scale-balanced"
+---
+
+# Compliance posture
+
+This page states Mnemom's current compliance status framework by framework. Status is reported honestly: **supported** means we implement the controls today with published evidence; **readiness assessment in progress** means the implementation work is underway but the audit is not yet complete; **not on roadmap** means we have no commitment to deliver unless a specific customer engagement drives it.
+
+<Note>
+This document reflects our technical and process posture. It is not legal advice. Consult qualified legal counsel for obligations specific to your deployment.
+</Note>
+
+---
+
+## Status at a glance
+
+| Framework | Status | What that means today | Evidence / reference |
+|---|---|---|---|
+| EU AI Act Article 50 (transparency) | **Supported** | AP-Traces and Integrity Checkpoints satisfy the Article 50 logging, marking, and transparency obligations. SDK presets wire the recommended configuration. | [EU AI Act compliance](/guides/eu-compliance) |
+| EU AI Act Article 19 (automatic logging) | **Supported** | Tier-1 commitments are append-only, hash-chained, and retained permanently without PII. | [XFD storage model](/guides/xfd-security#storage-model) |
+| GDPR | **Supported** | Three-tier storage with defined TTLs, pseudonymized Tier 2, encrypted Tier 3, Article 17 erasure path. | [GDPR data subject rights](/guides/gdpr-data-subject-rights) |
+| HIPAA | **Supported** | CBD DLP is extended to the 18 PHI identifiers; PHI is tokenized before any LLM-assisted analysis; BAA available on Enterprise engagements. See caveats below. | [XFD — CBD detectors](/guides/xfd-security#cbd-detectors) |
+| SOC 2 Type II | **Readiness assessment in progress** | Control mapping, evidence collection, and gap remediation are underway per our scale program. A Type I report is the first milestone; a Type II period follows. | Scale program M10 readiness |
+| SOC 3 | **Not on roadmap** | We will revisit with the first Enterprise customer who makes it a contractual requirement. Treat as unsupported until that time. | — |
+| FedRAMP (any impact level) | **Not on roadmap** | We will revisit with the first US federal engagement that requires authorization. Treat as unsupported until that time. | — |
+| GxP (FDA / EMA validated-system regimes) | **Not on roadmap** | Same policy as FedRAMP — revisit with a specific regulated customer engagement. | — |
+| SEC / FINRA (investment-advice guardrails) | **Partial** | CBD `RegComplianceChecker` flags investment-advice output on Sovereign / Regulated tiers. Not a substitute for a registered entity's own supervisory program. | [XFD detector registry](/guides/xfd-security#the-detector-registry) |
+| COPPA (under-13 data minimization) | **Supported** | If age ≤ 13 is detected, Tier 3 storage is prohibited, Tier 2 TTL shrinks to 24 hours, and async LLM analysis is suppressed. | [XFD storage model](/guides/xfd-security#storage-model) |
+| PCI DSS | **Not in scope** | Mnemom does not process, store, or transmit cardholder data. DLP flags card numbers inbound and outbound as a defensive measure. | — |
+
+---
+
+## HIPAA caveats
+
+HIPAA support covers the technical controls (DLP on the 18 PHI identifiers, encryption at rest and in transit, Tier-3 tokenization before any LLM analysis, audit logging). A customer seeking a BAA must:
+
+- Be on an Enterprise contract that includes the BAA as an exhibit.
+- Use the Enforce or Sovereign tier so that DLP runs synchronously on outbound responses.
+- Operate under an Alignment Card that restricts bounded actions to HIPAA-appropriate scopes.
+
+See the [CBD detector registry](/guides/xfd-security#cbd-detectors) for the detection modalities that apply to PHI.
+
+---
+
+## SOC 2 Type II progress
+
+SOC 2 readiness is the central compliance workstream on the scale program. Activities currently underway:
+
+- Automated evidence collection via a readiness tool connected to our infrastructure.
+- Control mapping across the five trust-services criteria (Security, Availability, Processing Integrity, Confidentiality, Privacy).
+- Gap remediation prior to engaging an auditor.
+- A Type I report as the first deliverable, followed by a Type II observation period.
+
+We do not quote a completion date in public documentation. Enterprise prospects under NDA can request the current status report and target window via sales.
+
+---
+
+## Shared-responsibility boundaries
+
+A few obligations are shared between Mnemom and the customer. Mnemom's controls are not a substitute for the customer's program in these areas:
+
+- **Data subject requests.** Mnemom provides the erasure path (see [GDPR data subject rights](/guides/gdpr-data-subject-rights)). The customer decides when to invoke it and maintains the legal basis for processing.
+- **Incident notification to regulators.** If a breach triggers a regulator-notification obligation under GDPR, HIPAA, or sector-specific law, the customer is the reporting party. Mnemom supports with timelines, forensic detail, and attestations under the terms of the MSA. See [SLA and incident response](/guides/sla-and-incident-response).
+- **Acceptable-use enforcement.** Mnemom's Safe House enforces technical guardrails against well-known attack classes. The customer is responsible for the content policy of their agents and for investigating anomalous legitimate behavior surfaced by the platform.
+- **Regulated advice.** `RegComplianceChecker` flags suspected investment / medical / legal advice in output. It does not replace the customer's supervisory or licensing program.
+
+---
+
+## Subprocessors
+
+Mnemom uses a small, vetted subprocessor list. Current subprocessors are published at `https://mnemom.ai/trust/subprocessors` {/* TODO: Alex — confirm this URL exists or tell me the right one */}. Customers on Enterprise contracts receive advance notice of new subprocessors under the DPA.
+
+---
+
+## Requesting evidence
+
+For Enterprise evaluations, the following artifacts are available under NDA:
+
+- Architecture and data-flow diagrams (CFD, CBD, AIP, proof chain).
+- Subprocessor list and DPA.
+- SOC 2 readiness status report (current).
+- Penetration-test summary (most recent).
+- Incident history (redacted).
+
+Reach out via the dashboard's **Enterprise contact** form or your account owner.
+
+---
+
+## See also
+
+- [EU AI Act compliance](/guides/eu-compliance) — Article 50 obligation mapping in detail
+- [GDPR data subject rights](/guides/gdpr-data-subject-rights) — Access, rectification, erasure, portability
+- [XFD security architecture](/guides/xfd-security) — The enforcement pipeline compliance relies on
+- [SLA and incident response](/guides/sla-and-incident-response) — Uptime, RTO/RPO, breach process
