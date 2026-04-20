@@ -5,11 +5,11 @@ sidebarTitle: "Enforcement"
 icon: "gavel"
 ---
 
-# Enforcement Modes
+# Enforcement modes
 
 The Mnemom Gateway supports three enforcement modes that control how the system responds when alignment or integrity violations are detected. You can choose the level of intervention appropriate for your use case — from passive observation to active blocking.
 
-## Modes Overview
+## Modes overview
 
 <CardGroup cols={3}>
   <Card title="Observe" icon="eye">
@@ -23,12 +23,12 @@ The Mnemom Gateway supports three enforcement modes that control how the system 
   </Card>
 </CardGroup>
 
-## Mode Details
+## Mode details
 
 <Tabs>
   <Tab title="Observe">
 
-### Observe Mode (Default)
+### Observe mode (Default)
 
 In observe mode, the gateway detects and records all violations but takes no action to modify agent behavior. This is the default mode for all new agents.
 
@@ -58,7 +58,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
   </Tab>
   <Tab title="Nudge">
 
-### Nudge Mode
+### Nudge mode
 
 In nudge mode, when a violation is detected, the gateway creates a pending nudge record. On the agent's next request, the gateway injects an integrity notice into the system prompt. The agent sees the notice, can review its approach, and self-correct.
 
@@ -102,7 +102,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
   </Tab>
   <Tab title="Enforce">
 
-### Enforce Mode
+### Enforce mode
 
 In enforce mode, the gateway actively blocks requests when critical violations are detected. The behavior depends on whether the request is streaming or non-streaming.
 
@@ -133,7 +133,7 @@ Enforce mode will block non-streaming API calls when violations are detected. En
   </Tab>
 </Tabs>
 
-## Setting Enforcement Mode
+## Setting enforcement mode
 
 Set enforcement mode via the API:
 
@@ -158,7 +158,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/agent_abc123/enforcement \
   -d '{"mode": "nudge"}'
 ```
 
-## Nudge Strategy
+## Nudge strategy
 
 When enforcement mode is `nudge` or `enforce`, you can further control *when* nudges are created using the nudge strategy setting:
 
@@ -181,7 +181,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
 Use `threshold` mode to avoid alert fatigue. The agent only receives a nudge after repeated violations in the same session, giving it a chance to self-correct naturally first.
 </Tip>
 
-## Per-Agent Feature Toggles
+## Per-Agent feature toggles
 
 <Note>
 Team operations require the `team_reputation` feature flag, available on Team and Enterprise plans. See [Pricing](/pricing/overview) for plan details.
@@ -214,11 +214,11 @@ curl -X PUT https://api.mnemom.ai/v1/agents/:id/settings \
 
 These settings are also available in the **Agent Settings** panel on the web dashboard for claimed agents.
 
-## Violation Types and Enforcement
+## Violation types and enforcement
 
 Enforcement applies to all violation types detected by the AAP verification engine, AIP integrity checks, and the policy engine:
 
-### Alignment Violations
+### Alignment violations
 
 | Violation Type | Severity | Enforcement Behavior |
 |----------------|----------|---------------------|
@@ -229,7 +229,7 @@ Enforcement applies to all violation types detected by the AAP verification engi
 | `CARD_EXPIRED` | HIGH | Blocked in enforce mode; nudged in nudge mode |
 | `UNDECLARED_VALUE` | MEDIUM | Nudged in nudge/enforce mode (not blocked) |
 
-### Policy Violations
+### Policy violations
 
 Policy enforcement operates as a **parallel system** alongside alignment enforcement. While alignment enforcement checks agent behavior against card values, policy enforcement checks tool usage against governance rules.
 
@@ -263,7 +263,7 @@ See [Policy Engine](/concepts/policy-engine) for full details on how policies ar
 In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode. This applies to both alignment and policy violations.
 </Note>
 
-## Conscience Timeline
+## Conscience timeline
 
 All enforcement actions are tracked in the conscience timeline, accessible via the API and the web dashboard at [mnemom.ai](https://mnemom.ai). The timeline records:
 
@@ -273,7 +273,7 @@ All enforcement actions are tracked in the conscience timeline, accessible via t
 - Whether the agent self-corrected after a nudge
 - Drift patterns across enforcement events
 
-## Provider Compatibility
+## Provider compatibility
 
 Enforcement works across all providers where AIP is supported:
 
@@ -283,7 +283,7 @@ Enforcement works across all providers where AIP is supported:
 | OpenAI | Yes | Yes | Yes | Falls back to nudge |
 | Gemini | Yes | Yes | Yes | Falls back to nudge |
 
-## See Also
+## See also
 
 - [Mnemom Gateway Overview](/gateway/overview) — Architecture and how it works
 - [CLI Reference](/gateway/cli) — CLI commands for monitoring enforcement
@@ -291,13 +291,13 @@ Enforcement works across all providers where AIP is supported:
 
 ---
 
-## Agent Containment
+## Agent containment
 
 <Note>
 Agent containment is a separate enforcement layer that operates above the per-request enforcement modes. While enforcement modes (observe/nudge/enforce) control individual request handling, containment controls whether the agent can make requests at all.
 </Note>
 
-### Containment States
+### Containment states
 
 | State | Meaning | Gateway Behavior |
 |-------|---------|-----------------|
@@ -333,7 +333,7 @@ curl https://api.mnemom.ai/v1/orgs/{org_id}/agents/{agent_id}/containment \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Error Response
+### Error response
 
 When a contained agent attempts an API request through the gateway, it receives:
 
@@ -369,7 +369,7 @@ When auto-containment triggers, it:
 - Emits an `agent.paused` webhook event
 - Purges the gateway cache so the block takes effect immediately
 
-### RBAC Requirements
+### RBAC requirements
 
 | Action | Required Role |
 |--------|--------------|
@@ -380,7 +380,7 @@ When auto-containment triggers, it:
 | View status | Any org role |
 | Set auto-containment policy | `owner` or `admin` |
 
-### Webhook Events
+### Webhook events
 
 Three webhook events are emitted for containment actions:
 
@@ -401,7 +401,7 @@ Each event includes:
 }
 ```
 
-### Containment Audit Log
+### Containment audit log
 
 Every containment action is recorded in a tamper-evident audit log. Each entry includes:
 - The action taken (pause, resume, kill, reactivate, auto_pause)

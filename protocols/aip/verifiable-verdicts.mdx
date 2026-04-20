@@ -5,13 +5,13 @@ sidebarTitle: "ZK Proofs"
 icon: "cpu"
 ---
 
-# Verifiable Verdicts
+# Verifiable verdicts
 
 Verifiable Verdicts extend the AIP attestation layer with **zero-knowledge proofs** that cryptographically demonstrate a verdict was derived correctly from its inputs. While [signatures](/protocols/aip/certificates) prove *who* signed a verdict and [hash chains](/protocols/aip/specification#15-attestation) prove *when* it was signed, ZK proofs prove *how* it was computed -- closing the remaining trust gap.
 
 ---
 
-## What Gets Proven
+## What gets proven
 
 The ZK proof covers the **verdict derivation rules**: the deterministic mapping from analysis outputs to the final verdict. Specifically, the proof demonstrates:
 
@@ -26,7 +26,7 @@ The ZK proof covers the **verdict derivation rules**: the deterministic mapping 
 
 4. **Card constraint evaluation**: The verdict accounts for the agent's declared autonomy envelope -- bounded actions, forbidden actions, and escalation triggers -- as specified in the Alignment Card.
 
-## What Does NOT Get Proven
+## What does NOT get proven
 
 The ZK proof intentionally excludes:
 
@@ -42,7 +42,7 @@ The ZK proof guarantees that the verdict was correctly derived from the analysis
 
 ---
 
-## Guest Program
+## Guest program
 
 The verdict derivation logic runs inside an [SP1](https://docs.succinct.xyz/) zkVM guest program. The guest program is a deterministic Rust binary that takes structured inputs, applies the verdict rules, and produces public outputs.
 
@@ -66,7 +66,7 @@ The guest program executes the following deterministic steps:
 4. **Compute concerns hash**: SHA-256 hash of the serialized concerns array (deterministic key ordering).
 5. **Write journal**: Output the verdict, concerns hash, and card ID as public commitments.
 
-### Outputs (Public Journal)
+### Outputs (Public journal)
 
 These are committed to the proof's public journal and are visible to verifiers:
 
@@ -78,7 +78,7 @@ These are committed to the proof's public journal and are visible to verifiers:
 
 ---
 
-## STARK Proof Format
+## STARK proof format
 
 The proof is an SP1 STARK (Scalable Transparent ARgument of Knowledge), stored and transmitted in three components:
 
@@ -96,7 +96,7 @@ The `image_id` is a content hash of the compiled guest program. It acts as a com
 
 ---
 
-## Tiered Proving Strategy
+## Tiered proving strategy
 
 Not every checkpoint receives a ZK proof. Proving has non-trivial cost and latency, so AIP uses a **tiered proving strategy** that distinguishes real violations from configuration errors:
 
@@ -107,7 +107,7 @@ Not every checkpoint receives a ZK proof. Proving has non-trivial cost and laten
 | `review_needed` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampled proofs provide statistical confidence without proving every checkpoint. |
 | `clear` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampling clear verdicts catches systematic errors in the derivation logic. |
 
-### Deferred Proofs
+### Deferred proofs
 
 When the [policy engine](/concepts/policy-engine) detects `card_gaps` alongside a `boundary_violation`, the gateway creates a proof record with `status: deferred` instead of immediately dispatching to the prover. This creates a tamper-evident audit trail without incurring GPU cost.
 
@@ -121,7 +121,7 @@ The observer's DDR (Distributed Deliberation Review) reconciliation later classi
 
 This means only **confirmed real violations** receive the expensive GPU treatment. During rapid development when alignment cards frequently drift, this can reduce proving costs by 80-95%.
 
-### On-Demand Proving
+### On-Demand proving
 
 Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id}/prove`](/api-reference/endpoint/post-checkpoints-id-prove). This is useful when:
 
@@ -132,7 +132,7 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 
 ---
 
-## Cost and Latency
+## Cost and latency
 
 | Metric | Value | Notes |
 |--------|-------|-------|
@@ -143,7 +143,7 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 
 Proving is asynchronous. The checkpoint verdict is returned immediately; the proof is generated in the background (~700ms on GPU) and attached to the certificate when complete. With GPU acceleration, proof generation completes before the next integrity checkpoint in most conversations.
 
-### Proof Input Persistence
+### Proof input persistence
 
 When the gateway creates a proof request, it stores the full proving inputs alongside the `verdict_proofs` row:
 
@@ -157,7 +157,7 @@ When the gateway creates a proof request, it stores the full proving inputs alon
 
 This ensures that proof inputs survive prover restarts, network failures, and machine stops. If the initial proving attempt fails, the retry loop can reconstruct the full proof request from the database without needing the original HTTP payload.
 
-### Self-Healing Retry Loop
+### Self-Healing retry loop
 
 The prover service runs a background retry loop every 30 seconds that:
 
@@ -181,7 +181,7 @@ If a proof fails to generate after 5 retries, it remains in `failed` status. The
 
 Submit the full certificate to [`POST /v1/verify`](/api-reference/endpoint/post-verify). The API delegates STARK verification to the prover service and returns a structured result including `checks.verdict_derivation.valid`.
 
-### Local Verification
+### Local verification
 
 Use the SP1 verifier SDK to verify locally:
 
@@ -201,7 +201,7 @@ let journal = proof.public_values.read::<VerdictJournal>();
 assert_eq!(journal.verdict, cert.claims.verdict);
 ```
 
-### Checking Proof Status
+### Checking proof status
 
 For checkpoints where proving is in progress, query the status:
 
@@ -215,7 +215,7 @@ For deferred proofs, the progression is: `deferred` -> `skipped_card_gap` | `ski
 
 ---
 
-## See Also
+## See also
 
 - [Integrity Certificates](/protocols/aip/certificates) -- The certificate format that contains ZK proofs
 - [AIP Specification -- Verification](/protocols/aip/specification#16-verification) -- Protocol-level verification specification

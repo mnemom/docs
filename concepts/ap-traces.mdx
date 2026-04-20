@@ -15,7 +15,7 @@ Where an Alignment Card says "what I claim to be," an AP-Trace says "what I actu
   AP-Traces capture significant decisions, not every computation. They use a sampling approach: each trace records a decision point where the agent chose between alternatives, applied values, and evaluated escalation triggers. The absence of a trace does not mean nothing happened.
 </Note>
 
-## Why AP-Traces Exist
+## Why AP-Traces exist
 
 Alignment Cards are declarations. Without evidence, they are just promises. AP-Traces provide the evidence layer -- structured records that can be programmatically checked against the card to determine whether the agent's behavior matches its declarations.
 
@@ -27,7 +27,7 @@ This enables three verification levels:
 | **Session verification** | One session | Was the agent consistent throughout this session? |
 | **Longitudinal verification** | Multiple sessions | Is the agent [drifting](/concepts/drift-detection) from its declared alignment? |
 
-## Trace Structure
+## Trace structure
 
 An AP-Trace contains four required blocks and one optional block:
 
@@ -40,7 +40,7 @@ AP-Trace
   +-- Context Block (optional session metadata)
 ```
 
-### Identity Fields
+### Identity fields
 
 Every trace begins with identity fields that link it to a specific agent and Alignment Card:
 
@@ -55,7 +55,7 @@ Every trace begins with identity fields that link it to a specific agent and Ali
 
 The `card_id` is critical: it binds the trace to the specific Alignment Card in effect when the decision was made. Verification always checks the trace against this referenced card, not the agent's current card.
 
-### Action Block
+### Action block
 
 The action block describes what the agent did or considered doing:
 
@@ -82,7 +82,7 @@ The action block describes what the agent did or considered doing:
 
 The `category` field is what verification checks first. A `bounded` action must appear in the card's `bounded_actions` list. A `forbidden` category should never appear in a compliant trace.
 
-### Decision Block
+### Decision block
 
 The decision block records the agent's reasoning process -- the alternatives it evaluated, how it scored them, which it selected, and why:
 
@@ -144,7 +144,7 @@ Key fields:
   The `flags` array on alternatives is particularly useful for transparency. In the example above, `"sponsored_content"` on Product C makes it auditable that the agent identified and deprioritized a sponsored result.
 </Tip>
 
-### Escalation Block
+### Escalation block
 
 The escalation block records whether escalation triggers were evaluated and what happened:
 
@@ -193,7 +193,7 @@ The escalation block records whether escalation triggers were evaluated and what
 
 The escalation block is where the autonomy envelope becomes enforceable. Verification checks that every trigger condition that matched the trace context resulted in an escalation. A matched trigger without escalation produces a `MISSED_ESCALATION` violation.
 
-### Context Block
+### Context block
 
 The context block provides optional session and environment metadata:
 
@@ -227,15 +227,15 @@ When [AIP integration](/concepts/integrity-checkpoints) is active, the context b
 }
 ```
 
-## How Traces Are Generated
+## How traces are generated
 
 AP-Traces can be generated through two mechanisms:
 
-### Gateway-Level Generation
+### Gateway-level generation
 
 In a Mnemom deployment, the Gateway Worker routes requests and the Observer Worker processes logs asynchronously. The Observer extracts trace data from gateway logs, builds AP-Trace structures, and stores them. This happens automatically, with no SDK integration required from the agent developer.
 
-### SDK-Level Generation
+### SDK-level generation
 
 Agents using the AAP SDK can generate traces directly:
 
@@ -337,7 +337,7 @@ console.log(`Similarity: ${result.similarityScore}`);
 ```
 </CodeGroup>
 
-### Violation Types
+### Violation types
 
 | Type | Severity | Description |
 |---|---|---|
@@ -348,13 +348,13 @@ console.log(`Similarity: ${result.similarityScore}`);
 | `CARD_EXPIRED` | HIGH | The referenced Alignment Card has expired |
 | `CARD_MISMATCH` | CRITICAL | Trace references a different card than the one provided |
 
-### Behavioral Similarity
+### Behavioral similarity
 
 Beyond structural checks, verification computes a behavioral similarity score using SSM (Self-Similarity Matrix) analysis. This catches cases where a trace passes all structural checks but the overall behavior pattern diverges from what the card describes.
 
 The threshold is `0.50`. A trace that passes structural checks but scores below `0.50` on behavioral similarity receives a `low_behavioral_similarity` warning -- not a violation, but a signal for investigation.
 
-## Trace Storage and Querying
+## Trace storage and querying
 
 Traces are append-only: once created, they must not be modified. Storage options are declared in the Alignment Card's `audit_commitment` block.
 
@@ -372,7 +372,7 @@ curl https://shopping.agent.example.com/api/v1/traces \
   AP-Traces are sampled records of decision points. They do not capture every computation the agent performs. Significant reasoning may occur between traced decisions. The presence of clean traces does not prove the absence of misaligned behavior -- it proves the absence of misaligned behavior at traced decision points.
 </Warning>
 
-## Complete Example
+## Complete example
 
 ```json
 {
@@ -442,7 +442,7 @@ curl https://shopping.agent.example.com/api/v1/traces \
 }
 ```
 
-## Design Principles
+## Design principles
 
 1. **Sampling, not completeness.** Traces capture significant decisions, not every internal computation. This keeps overhead manageable while providing meaningful audit data.
 
@@ -452,7 +452,7 @@ curl https://shopping.agent.example.com/api/v1/traces \
 
 4. **Append-only.** Traces must not be modified after creation. This ensures audit trail integrity.
 
-## See Also
+## See also
 
 - [Alignment Cards](/concepts/alignment-cards) -- The declarations that traces are verified against
 - [Drift Detection](/concepts/drift-detection) -- How traces across sessions reveal behavioral drift

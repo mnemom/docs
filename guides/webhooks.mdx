@@ -5,7 +5,7 @@ sidebarTitle: "Webhooks"
 icon: "bell"
 ---
 
-# Webhook Notifications
+# Webhook notifications
 
 **Real-time HTTP POST notifications for integrity and alignment events.** Pipe violations, drift alerts, conscience escalations, alignment traces, and billing events into PagerDuty, Slack, Datadog, or any HTTP endpoint.
 
@@ -33,7 +33,7 @@ Webhook notifications are available on the **Enterprise** plan. [Contact sales](
 
 ---
 
-## Quick Start
+## Quick start
 
 Get your first webhook firing in under 5 minutes:
 
@@ -79,11 +79,11 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/whe-a1b2c3d4/test \
 
 ---
 
-## Event Catalog
+## Event catalog
 
 Mnemom emits 28 event types across two systems: **AIP** (integrity checkpoints from the gateway) and **AAP** (alignment traces from the observer), plus platform events for drift, reputation, teams, and billing.
 
-### Integrity Events (AIP)
+### Integrity events (AIP)
 
 These events fire from the **gateway** during real-time request interception.
 
@@ -101,7 +101,7 @@ These events fire from the **gateway** during real-time request interception.
 
 AIP webhook payloads are signed with `X-AIP-Signature` and include `X-AIP-Version`.
 
-### Alignment Trace Events (AAP)
+### Alignment trace events (AAP)
 
 These events fire from the **observer** after post-hoc trace analysis.
 
@@ -119,7 +119,7 @@ AAP webhook payloads are signed with `X-AAP-Signature` and include `X-AAP-Versio
 A single registration can subscribe to both AIP and AAP events. For example, `event_types: ["integrity.violation", "trace.failed"]` will receive gateway violations and observer trace failures at the same endpoint. The signature header (`X-AIP-Signature` vs `X-AAP-Signature`) tells you which system sent the event.
 </Tip>
 
-### Platform Events
+### Platform events
 
 | Event Type | Description | Trigger |
 |---|---|---|
@@ -144,7 +144,7 @@ Subscribe to specific event types when creating an endpoint, or leave `event_typ
 
 ---
 
-## Payload Envelope
+## Payload envelope
 
 Every webhook delivery uses the same envelope structure:
 
@@ -168,7 +168,7 @@ Every webhook delivery uses the same envelope structure:
 | `account_id` | string | Billing account that owns the resource |
 | `data` | object | Event-specific payload |
 
-### Example Payloads
+### Example payloads
 
 <AccordionGroup>
 <Accordion title="integrity.violation">
@@ -540,7 +540,7 @@ Every webhook delivery uses the same envelope structure:
 </Accordion>
 </AccordionGroup>
 
-### AAP Trace Event Payloads
+### AAP trace event payloads
 
 AAP trace events use a different payload structure from AIP events. The envelope includes `event` (most specific event type), `all_events` (all applicable types for this trace), and a `trace` object with verification and policy results.
 
@@ -687,7 +687,7 @@ AAP events are signed with `X-AAP-Signature` (not `X-AIP-Signature`). The HMAC-S
 
 ## Security
 
-### HMAC-SHA256 Signing
+### HMAC-SHA256 signing
 
 Every webhook delivery includes three headers for signature verification:
 
@@ -703,13 +703,13 @@ The signature is computed over the string `{timestamp}.{raw_body}` using your en
 
 Always verify that the timestamp is within an acceptable window (recommended: 5 minutes) to prevent replay attacks. Reject any delivery where `X-Webhook-Timestamp` is more than 300 seconds from your server's current time.
 
-### Constant-Time Comparison
+### Constant-Time comparison
 
 Use a constant-time comparison function when verifying signatures to prevent timing attacks. All standard libraries provide one — see the verification examples below.
 
 ---
 
-## Signature Verification
+## Signature verification
 
 Verify webhook signatures in your endpoint handler to ensure payloads are authentic and untampered. Below are examples in four languages.
 
@@ -849,13 +849,13 @@ Always verify signatures against the **raw request body** (the exact bytes recei
 
 ---
 
-## Delivery & Retries
+## Delivery & retries
 
-### First Delivery
+### First delivery
 
 Mnemom attempts inline delivery immediately when an event is emitted. Most webhooks arrive within seconds of the triggering event. The first delivery attempt includes up to 4 rapid retries (at 1s, 5s, and 15s intervals). If all inline attempts fail, the event enters the **dead-letter queue (DLQ)** for persistent retry.
 
-### Retry Schedule
+### Retry schedule
 
 Failed deliveries are retried in two phases:
 
@@ -881,7 +881,7 @@ Failed deliveries are retried in two phases:
 
 After **10 total attempts**, the delivery is marked as **dead** (permanently failed). Platform alerts fire when a delivery is dead-lettered. You can redeliver dead events manually via the API.
 
-### Permanent vs. Retryable Failures
+### Permanent vs. retryable failures
 
 | Response | Behavior |
 |---|---|
@@ -911,7 +911,7 @@ Webhook deliveries are **best-effort ordered** by creation time. Due to retries 
 
 ## Testing
 
-### Test Delivery Button
+### Test delivery button
 
 Every endpoint has a "Test" action that sends a synthetic `webhook.test` event with a test payload. Use this to verify connectivity and signature verification without triggering a real integrity event.
 
@@ -930,7 +930,7 @@ Response:
 }
 ```
 
-### Development Tools
+### Development tools
 
 For local development, use [webhook.site](https://webhook.site) or [ngrok](https://ngrok.com) to expose a local endpoint:
 
@@ -942,7 +942,7 @@ ngrok http 3000
 # https://abc123.ngrok.io/webhooks/mnemom
 ```
 
-### Delivery Log
+### Delivery log
 
 View the delivery history for any endpoint to debug issues:
 
@@ -964,7 +964,7 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/deliveries/{deliver
 
 ---
 
-## Integration Examples
+## Integration examples
 
 ### PagerDuty
 
@@ -1130,7 +1130,7 @@ Events are queued and retried according to the backoff schedule. If your endpoin
 
 ---
 
-## API Reference
+## API reference
 
 | Endpoint | Description |
 |---|---|

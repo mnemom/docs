@@ -5,7 +5,7 @@ sidebarTitle: "Scoring Methodology"
 icon: "calculator"
 ---
 
-# Mnemom Trust Rating™ Methodology
+# Mnemom Trust rating™ methodology
 
 **Version**: 1.1.0
 **Status**: Stable
@@ -22,7 +22,7 @@ This methodology is designed for auditability. Every input is traceable to a spe
 
 ---
 
-## Table of Contents
+## Table of contents
 
 1. [Composite Score Formula](#1-composite-score-formula)
 2. [Component Definitions](#2-component-definitions)
@@ -37,7 +37,7 @@ This methodology is designed for auditability. Every input is traceable to a spe
 
 ---
 
-## 1. Composite Score Formula
+## 1. composite score formula
 
 The reputation score **S** is a weighted linear combination of five component scores:
 
@@ -61,9 +61,9 @@ Where each component `c_i` is normalized to the range [0, 1000] and each weight 
 
 ---
 
-## 2. Component Definitions
+## 2. component definitions
 
-### 2.1 Integrity Ratio (w = 0.40)
+### 2.1 Integrity ratio (w = 0.40)
 
 Measures the proportion of analyzed integrity checkpoints that returned a `clear` verdict.
 
@@ -84,7 +84,7 @@ integrity_ratio = (clear_count / analyzed_count) × 1000
 
 **Data source:** `GET /v1/agents/{agent_id}/integrity/aip` -- the `clear_count` and `analyzed_checks` fields.
 
-### 2.2 Compliance (w = 0.20)
+### 2.2 compliance (w = 0.20)
 
 Measures how well an agent stays within its declared boundaries. Violations are grouped by session and scored using a session-capped power curve with exponential decay.
 
@@ -134,7 +134,7 @@ Violations are grouped by `session_id`. Within each session, only the violation 
 
 **Data source:** AIP checkpoints with `verdict = "boundary_violation"`, grouped by `session_id`, filtered by 90-day window.
 
-### 2.3 Drift Stability (w = 0.20)
+### 2.3 drift stability (w = 0.20)
 
 Measures the proportion of agent sessions where no sustained drift alert was triggered.
 
@@ -155,7 +155,7 @@ drift_stability = (stable_sessions / total_sessions) × 1000
 
 **Data source:** `GET /v1/agents/{agent_id}/drift/aip` -- derived from drift alert records cross-referenced with session data.
 
-### 2.4 Trace Completeness (w = 0.10)
+### 2.4 trace completeness (w = 0.10)
 
 Measures audit trail quality -- the ratio of decisions logged as AP-Traces versus expected decisions.
 
@@ -176,7 +176,7 @@ trace_completeness = (logged_decisions / expected_decisions) × 1000
 
 **Data source:** `GET /v1/traces?agent_id={agent_id}` -- count of stored traces.
 
-### 2.5 Coherence Compatibility (w = 0.10)
+### 2.5 coherence compatibility (w = 0.10)
 
 Measures the agent's track record of value compatibility with other agents in fleet interactions.
 
@@ -197,7 +197,7 @@ Where `mean_coherence_score` is the arithmetic mean of all [pairwise coherence s
 
 ---
 
-## 3. Grade Assignment
+## 3. grade assignment
 
 The composite score **S** maps to a letter grade:
 
@@ -221,7 +221,7 @@ The composite score **S** maps to a letter grade:
 
 ---
 
-## 4. Confidence Levels
+## 4. confidence levels
 
 Confidence communicates the statistical reliability of the score:
 
@@ -236,7 +236,7 @@ Confidence communicates the statistical reliability of the score:
 
 ---
 
-## 5. Minimum Data Requirements
+## 5. minimum data requirements
 
 | Requirement | Threshold | Consequence of Not Meeting |
 |-------------|-----------|---------------------------|
@@ -249,13 +249,13 @@ The 50-checkpoint minimum is the only hard gate for score publication. All other
 
 ---
 
-## 6. Anti-Gaming Measures
+## 6. anti-Gaming measures
 
-### 6.1 Minimum Checkpoint Count
+### 6.1 minimum Checkpoint count
 
 The 50-checkpoint minimum prevents agents from submitting a small number of curated interactions to obtain an artificially high score. 50 checkpoints typically represent several days of normal operation.
 
-### 6.2 Synthetic Checkpoint Detection
+### 6.2 synthetic Checkpoint detection
 
 The AIP engine monitors for checkpoint patterns that suggest artificial generation:
 
@@ -266,21 +266,21 @@ The AIP engine monitors for checkpoint patterns that suggest artificial generati
 
 Flagged checkpoints are excluded from score computation and logged for review.
 
-### 6.3 Rate Limiting
+### 6.3 rate limiting
 
 Checkpoint submission is rate-limited per agent per time window. Agents that submit checkpoints significantly faster than their normal operational cadence trigger throttling. The specific thresholds are not published to prevent circumvention.
 
-### 6.4 Independent Verification
+### 6.4 independent verification
 
 All integrity checkpoints are analyzed by a separate LLM (the daimonion) -- not the agent itself. This separation prevents the agent from influencing its own evaluation. The analysis model, duration, and confidence are recorded in `analysis_metadata` for each checkpoint.
 
-### 6.5 Cross-Component Validation
+### 6.5 cross-Component validation
 
 Component scores are cross-validated for consistency. An agent claiming 100% integrity ratio but 0% trace completeness triggers a warning flag -- perfect integrity with no audit trail is suspicious.
 
 ---
 
-## 7. Computation Schedule
+## 7. computation schedule
 
 | Operation | Frequency | Description |
 |-----------|-----------|-------------|
@@ -293,31 +293,31 @@ Component scores are cross-validated for consistency. An agent claiming 100% int
 
 ---
 
-## 8. Known Limitations
+## 8. known limitations
 
-### 8.1 Cold Start Problem
+### 8.1 cold start problem
 
 New agents start with NR (Not Rated) and must accumulate 50 checkpoints before receiving a public score. This creates a bootstrapping challenge: agents without scores may be excluded from ecosystems that require reputation data. The "Building..." badge variant (showing progress toward 50 checkpoints) partially addresses this.
 
-### 8.2 Component Default Bias
+### 8.2 component default bias
 
 Agents without fleet interaction data receive a default Coherence Compatibility score of 750 (out of 1000). This default is generous and may overstate compatibility for agents that would score poorly in actual fleet interactions.
 
-### 8.3 Integrity Ratio Dominance
+### 8.3 Integrity ratio dominance
 
 At 40% weight, the Integrity Ratio disproportionately determines the composite score. An agent with a perfect integrity ratio but poor scores on all other components can still achieve a BBB grade. This is intentional -- integrity is the most important signal -- but consumers should inspect individual components for a complete picture.
 
-### 8.4 Temporal Bias in Compliance
+### 8.4 temporal bias in compliance
 
 The 1-week half-life and 90-day scoring window mean violations are effectively forgiven after ~8 weeks. An agent with a history of serious violations that occurred 3 months ago will show a perfect Compliance score. Session capping also means that agents with many violations concentrated in few sessions score better than agents with the same number of violations spread across many sessions. Historical snapshots (available via the history endpoint) provide the full longitudinal record.
 
-### 8.5 Trace Completeness Estimation
+### 8.5 trace completeness estimation
 
 The `expected_decisions` denominator is estimated heuristically, not measured precisely. This can lead to trace completeness scores that do not perfectly reflect actual coverage. Improvements to this estimation are planned for methodology v1.1.
 
 ---
 
-## 9. Cryptographic Verification
+## 9. cryptographic verification
 
 Every data point feeding into a reputation score is traceable to cryptographically attested artifacts:
 
@@ -347,7 +347,7 @@ curl https://api.mnemom.ai/v1/checkpoints/{checkpoint_id}/certificate
 
 ---
 
-## 10. Version History
+## 10. version history
 
 | Version | Date | Changes |
 |---------|------|---------|
@@ -356,7 +356,7 @@ curl https://api.mnemom.ai/v1/checkpoints/{checkpoint_id}/certificate
 
 ---
 
-## See Also
+## See also
 
 - [Reputation Scores](/concepts/reputation-scores) -- Conceptual overview for all audiences
 - [Integrity Checkpoints](/concepts/integrity-checkpoints) -- Primary data source (AIP)

@@ -5,7 +5,7 @@ sidebarTitle: "Drift Detection"
 icon: "chart-line-down"
 ---
 
-# Drift Detection
+# Drift detection
 
 Drift is the gradual or sudden divergence of an agent's behavior from its declared alignment posture. A single verified [AP-Trace](/concepts/ap-traces) or a single clear [integrity checkpoint](/concepts/integrity-checkpoints) tells you the agent was aligned at that moment. Drift detection tells you whether the agent is *staying* aligned over time.
 
@@ -18,7 +18,7 @@ Mnemom detects drift at two timescales through two complementary protocols:
 
 Both protocols store alerts in the same `drift_alerts` database table, surfaced through a unified API and dashboard.
 
-## What Drift Looks Like
+## What drift looks like
 
 Drift rarely appears as a single dramatic violation. More commonly, it manifests as a pattern:
 
@@ -29,11 +29,11 @@ Drift rarely appears as a single dramatic violation. More commonly, it manifests
 
 Each individual action might pass verification. The problem is the trend.
 
-## AAP Drift Detection (Post-Hoc)
+## AAP drift detection (Post-Hoc)
 
 AAP drift detection analyzes AP-Trace structural features across sessions to detect behavioral patterns that diverge from a computed baseline.
 
-### How It Works
+### How it works
 
 1. **Feature extraction**: Extract structural features from each trace -- action types, values applied, escalation patterns, confidence scores. Content features (reasoning text) are excluded because they dilute cosine similarity without adding alignment signal.
 
@@ -45,7 +45,7 @@ AAP drift detection analyzes AP-Trace structural features across sessions to det
 
 5. **Divergence tracking**: Track similarity over time. Alert when similarity drops below the threshold for a sustained number of consecutive traces.
 
-### Structural Features
+### Structural features
 
 AAP drift uses only structural features extracted from traces and cards:
 
@@ -62,7 +62,7 @@ AAP drift uses only structural features extracted from traces and cards:
   Content features (TF-IDF from reasoning text) are available for text-to-text comparison (e.g., SSM pairwise similarity between traces) but are not used for drift detection. Alignment Cards declare structural constraints -- values, bounded actions, principal relationships -- and contain no reasoning text. Including content tokens dilutes similarity without adding alignment signal.
 </Note>
 
-### Calibration Thresholds
+### Calibration thresholds
 
 These thresholds are calibrated from empirical analysis of approximately 50 multi-turn agent conversations totaling around 2,500 messages:
 
@@ -73,7 +73,7 @@ These thresholds are calibrated from empirical analysis of approximately 50 mult
 | `BEHAVIORAL_SIMILARITY_THRESHOLD` | 0.50 | Warn on single-trace verification when below |
 | `MIN_COHERENCE_FOR_PROCEED` | 0.70 | Minimum coherence score for automatic proceed |
 
-### Code Example
+### Code example
 
 <CodeGroup>
 ```python Python
@@ -117,7 +117,7 @@ for (const alert of alerts) {
 ```
 </CodeGroup>
 
-### AAP Drift Alert Structure
+### AAP drift alert structure
 
 ```json
 {
@@ -144,7 +144,7 @@ for (const alert of alerts) {
 }
 ```
 
-### AAP Drift Categories
+### AAP drift categories
 
 | Category | Description | Indicators |
 |---|---|---|
@@ -153,11 +153,11 @@ for (const alert of alerts) {
 | `principal_misalignment` | Decisions not serving principal | Declining principal-benefit scores |
 | `communication_drift` | Explanations becoming inconsistent | Selection reasoning diverging from values |
 
-## AIP Drift Detection (Real-Time)
+## AIP drift detection (Real-Time)
 
 AIP drift detection monitors the pattern of integrity verdicts within a session. It is deliberately simpler than AAP drift because it operates on a faster timescale where complex statistical methods are unnecessary.
 
-### How It Works
+### How it works
 
 1. Maintain a running count of consecutive non-clear verdicts (`sustained_nonclear`).
 2. On each checkpoint:
@@ -167,7 +167,7 @@ AIP drift detection monitors the pattern of integrity verdicts within a session.
 4. Compute `integrity_similarity` as the ratio of clear verdicts in the current window: `clear_count / window_size`.
 5. Derive severity from `integrity_similarity`.
 
-### Severity Thresholds
+### Severity thresholds
 
 | Severity | integrity_similarity | Meaning |
 |---|---|---|
@@ -175,7 +175,7 @@ AIP drift detection monitors the pattern of integrity verdicts within a session.
 | `medium` | 0.4 -- 0.7 | Notable pattern, warrants attention |
 | `high` | < 0.4 | Significant drift, review recommended |
 
-### AIP Drift Direction Types
+### AIP drift direction types
 
 | Direction | Description |
 |---|---|
@@ -187,7 +187,7 @@ AIP drift detection monitors the pattern of integrity verdicts within a session.
 
 The direction is inferred from the dominant `ConcernCategory` across the non-clear checkpoints in the streak.
 
-### Code Example
+### Code example
 
 <CodeGroup>
 ```python Python
@@ -226,7 +226,7 @@ for (const alert of alerts) {
 ```
 </CodeGroup>
 
-### AIP Drift Alert Structure
+### AIP drift alert structure
 
 ```json
 {
@@ -248,14 +248,14 @@ for (const alert of alerts) {
   AIP drift alerts are always informative, never prescriptive. They describe what was observed ("3 consecutive integrity concerns"), not what to do ("stop the agent immediately"). The host system decides how to respond.
 </Tip>
 
-## SSM: Semantic Similarity Mapping
+## SSM: Semantic similarity mapping
 
 Both protocols use a technique called SSM (Self-Similarity Matrix) for measuring semantic similarity. In the context of drift detection:
 
 - **AAP** uses SSM to compute cosine similarity between trace feature vectors and a baseline centroid.
 - **AIP** uses a simpler version: the ratio of clear verdicts in a session window.
 
-### How SSM Works for AAP Drift
+### How SSM works for AAP drift
 
 1. Extract a feature vector from each AP-Trace (structural features only).
 2. Compute the baseline centroid from early traces.
@@ -277,7 +277,7 @@ def cosine_similarity(a: dict, b: dict) -> float:
     return dot_product / (mag_a * mag_b)
 ```
 
-### TF-IDF (Term Frequency-Inverse Document Frequency) Weighting (Text-to-Text Only)
+### TF-IDF (term frequency-inverse document frequency) weighting (text-to-text only)
 
 For text-to-text similarity (e.g., comparing reasoning text between traces), AAP uses a 60/30/10 weighting:
 
@@ -291,7 +291,7 @@ For text-to-text similarity (e.g., comparing reasoning text between traces), AAP
   This weighting is for text-to-text comparison only. Drift detection uses structural features exclusively. These are different operations -- do not conflate them.
 </Warning>
 
-## Policy-Aware Drift Detection
+## Policy-aware drift detection
 
 With the [Policy Engine](/concepts/policy-engine), drift detection gains additional context for distinguishing genuine misalignment from configuration issues:
 
@@ -305,7 +305,7 @@ With the [Policy Engine](/concepts/policy-engine), drift detection gains additio
 When investigating a drift alert, check the [policy evaluation results](/api-reference/policy-overview) first. If the drift correlates with unmapped tools or policy violations classified as `card_gap`, the fix is a card amendment and policy update -- not a behavioral correction.
 </Tip>
 
-## Responding to Drift
+## Responding to drift
 
 When drift is detected, the recommended investigation workflow is:
 
@@ -321,7 +321,7 @@ When drift is detected, the recommended investigation workflow is:
 
 6. **Reset the baseline**: After addressing the drift, allow new traces to establish a new baseline centroid for future detection.
 
-## Unified Storage
+## Unified storage
 
 Both AAP and AIP drift alerts are stored in the same `drift_alerts` database table, distinguished by the `alert_type` field:
 
@@ -338,7 +338,7 @@ This unified storage enables dashboards and APIs to surface all drift signals to
   Drift detection identifies statistical patterns. It does not determine intent or cause. A drift alert means "behavior is changing" -- not "the agent is misaligned." False positives occur when operating context shifts legitimately (new user requests, new tool availability). False negatives occur when drift is too subtle to exceed thresholds or when the agent games the structural features.
 </Warning>
 
-## See Also
+## See also
 
 - [Alignment Cards](/concepts/alignment-cards) -- The baseline that drift is measured against
 - [Policy Engine](/concepts/policy-engine) -- Policy-aware drift context

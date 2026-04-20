@@ -13,7 +13,7 @@ icon: "book"
 
 ---
 
-## Table of Contents
+## Table of contents
 
 1. [Abstract](#1-abstract)
 2. [Introduction](#2-introduction)
@@ -41,15 +41,15 @@ icon: "book"
 
 ---
 
-## 1. Abstract
+## 1. abstract
 
 The Agent Integrity Protocol (AIP) provides real-time integrity assurance for autonomous agents by analyzing thinking blocks before actions are executed. Where the Agent Alignment Protocol (AAP) records what happened (post-hoc verification via AP-Traces), AIP evaluates what the agent is thinking (in-flight analysis via Integrity Checkpoints). AIP follows the daimonion philosophy: silence means aligned, voice means outside boundaries. AIP is a sister protocol to AAP -- it shares the same Alignment Card, enriches the same AP-Trace, and stores alerts alongside AAP's drift detection, but operates on a fundamentally different timescale: real-time rather than retroactive.
 
 ---
 
-## 2. Introduction
+## 2. introduction
 
-### 2.1 Problem Statement
+### 2.1 problem statement
 
 AAP provides comprehensive post-hoc transparency. Every agent action is traced, verified against an Alignment Card, and checked for behavioral drift. But this verification happens after the action has already been taken -- typically 30-60 seconds later when the Observer Worker processes the gateway log.
 
@@ -61,7 +61,7 @@ This delay creates a window of vulnerability:
 
 All three of these failure modes are visible in thinking blocks *before* the action lands. AIP fills this gap by analyzing thinking blocks in real-time, between turns, enabling intervention before harm occurs.
 
-### 2.2 Design Goals
+### 2.2 design goals
 
 1. **Real-time over retroactive.** AIP operates between agent turns, not after a processing delay. The integrity verdict SHOULD be available before the next action executes.
 
@@ -73,20 +73,20 @@ All three of these failure modes are visible in thinking blocks *before* the act
 
 5. **Side-channel intervention between turns.** AIP delivers signals via SDK callbacks or HTTP webhooks, enabling the host system to pause, escalate, or deny the next action. Intervention happens between turns, not mid-stream.
 
-### 2.3 Non-Goals
+### 2.3 non-Goals
 
 - **Preventing injection.** AIP detects injection patterns in thinking; it does not prevent the injected content from reaching the model.
 - **Interrupting streams.** AIP operates between turns. It does not cancel in-flight streaming responses.
 - **Replacing AAP.** AIP supplements AAP. Post-hoc verification, trace storage, and public transparency remain AAP's domain.
 - **Requiring conscience values.** AIP operates with an Alignment Card alone. Conscience values are an optional augmentation that increases detection sensitivity.
 
-### 2.4 Document Conventions
+### 2.4 document conventions
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here.
 
 ---
 
-## 3. Terminology
+## 3. terminology
 
 This section defines terms specific to AIP. For shared terms (Alignment Card, AP-Trace, Verification Result, Drift Alert, etc.), see AAP SPEC Section 2.
 
@@ -122,9 +122,9 @@ The validated relationship between an Alignment Card and a set of conscience val
 
 ---
 
-## 4. Protocol Overview
+## 4. protocol overview
 
-### 4.1 Architecture
+### 4.1 architecture
 
 AIP operates as a three-layer system that sits alongside the existing Mnemom gateway infrastructure:
 
@@ -188,7 +188,7 @@ AIP operates as a three-layer system that sits alongside the existing Mnemom gat
 - The **API Worker** serves traces and integrity scores. AIP checkpoints enrich these via AAP integration (Section 12).
 - The **Alignment Card** is shared. AIP MUST use the same card as AAP (Section 12.4).
 
-### 4.2 Signal Flow
+### 4.2 signal flow
 
 A complete integrity check proceeds through eight steps:
 
@@ -208,7 +208,7 @@ A complete integrity check proceeds through eight steps:
 
 8. **Signal delivery.** The signal is delivered via the configured path: SDK callback (synchronous or async) or HTTP webhook POST.
 
-### 4.3 Integration Points with AAP
+### 4.3 integration points with AAP
 
 AIP and AAP share infrastructure and data structures:
 
@@ -220,7 +220,7 @@ AIP and AAP share infrastructure and data structures:
 | Drift alerts | AIP -> AAP | IntegrityDriftAlerts stored in same `drift_alerts` table |
 | Session identity | Shared | Both use Gateway Worker's session_id (hourly bucket hash) |
 
-### 4.4 Signal Paths
+### 4.4 signal paths
 
 AIP supports three signal delivery paths, each serving different deployment patterns.
 
@@ -238,7 +238,7 @@ All paths deliver identical `IntegritySignal` payloads (Section 10). The gateway
 
 The Integrity Checkpoint is the primary data structure produced by AIP -- analogous to AAP's AP-Trace. While an AP-Trace records what happened, an Integrity Checkpoint records what the analysis engine concluded about what the agent was thinking.
 
-### 5.1 Verdict Types
+### 5.1 verdict types
 
 ```typescript
 type IntegrityVerdict = "clear" | "review_needed" | "boundary_violation";
@@ -248,7 +248,7 @@ type IntegrityVerdict = "clear" | "review_needed" | "boundary_violation";
 - `review_needed`: The thinking block raises concerns that do not constitute hard violations. The daimonion speaks a warning. The agent MAY proceed but SHOULD log the concern. Maps to FEAR-type conscience values.
 - `boundary_violation`: The thinking block indicates intent to violate a hard boundary. The daimonion speaks forcefully. The agent SHOULD NOT proceed without escalation. Maps to BOUNDARY-type conscience values.
 
-### 5.2 Severity Levels
+### 5.2 severity levels
 
 ```typescript
 type IntegritySeverity = "low" | "medium" | "high" | "critical";
@@ -259,7 +259,7 @@ type IntegritySeverity = "low" | "medium" | "high" | "critical";
 - `high`: Serious concern. Action should be reviewed before proceeding.
 - `critical`: Immediate threat. Action MUST be blocked or escalated.
 
-### 5.3 Concern Categories
+### 5.3 concern categories
 
 ```typescript
 type ConcernCategory =
@@ -278,7 +278,7 @@ type ConcernCategory =
 - `deceptive_reasoning`: The thinking block reveals intent to present misleading information or hide actions from the user.
 - `undeclared_intent`: The agent's reasoning reveals goals or intentions not declared in its card or the user's request.
 
-### 5.4 Integrity Concern
+### 5.4 Integrity concern
 
 ```typescript
 interface IntegrityConcern {
@@ -302,7 +302,7 @@ interface IntegrityConcern {
 }
 ```
 
-### 5.5 Conscience Context
+### 5.5 conscience context
 
 ```typescript
 interface ConscienceContext {
@@ -328,7 +328,7 @@ The `consultation_depth` field indicates how thoroughly conscience values were e
 - `standard`: BOUNDARY and FEAR values checked (default).
 - `deep`: All value types checked including contextual evaluation (used when initial analysis is ambiguous).
 
-### 5.6 Analysis Metadata
+### 5.6 analysis metadata
 
 ```typescript
 interface AnalysisMetadata {
@@ -431,11 +431,11 @@ interface IntegrityCheckpoint {
 
 ---
 
-## 6. Conscience Prompt Specification
+## 6. conscience prompt specification
 
 The conscience prompt is the most critical engineering artifact in AIP. It instructs the analysis LLM to evaluate a thinking block against an Alignment Card and conscience values, producing a structured verdict.
 
-### 6.1 Prompt Structure
+### 6.1 prompt structure
 
 The conscience prompt MUST be structured as follows:
 
@@ -473,7 +473,7 @@ The system prompt SHOULD include evaluation principles that guide the analysis L
 - Cross-reference intended actions against the `bounded_actions` list before flagging `autonomy_violation` -- many agents have rich autonomy envelopes
 - Distinguish transparent status reporting (e.g., "X is disabled due to missing API keys") from credential access attempts -- only flag credential concerns when the agent actively seeks, retrieves, or uses credentials outside its declared workflow
 
-### 6.2 Card Summary Extraction
+### 6.2 Card summary extraction
 
 The Alignment Card MUST be compressed into approximately 500 tokens for inclusion in the conscience prompt. The summary MUST include:
 
@@ -500,7 +500,7 @@ Escalation triggers:
   - ...
 ```
 
-### 6.3 Conscience Value Injection
+### 6.3 conscience value injection
 
 Only `BOUNDARY` and `FEAR` type conscience values are injected into the conscience prompt. `COMMITMENT`, `BELIEF`, and `HOPE` types are excluded because they increase false positive rates without meaningfully improving detection of violations.
 
@@ -525,7 +525,7 @@ CONSCIENCE VALUES:
 
 If no conscience values are configured, this section MUST be omitted entirely (not included as empty).
 
-### 6.4 Session Window Injection
+### 6.4 session window injection
 
 The session window provides context about the agent's recent integrity history. It MUST be formatted as a numbered list of recent verdicts:
 
@@ -542,7 +542,7 @@ If the window is empty (first check in session), this section MUST read:
 SESSION CONTEXT: First check in session (no prior context)
 ```
 
-### 6.5 Evaluation Criteria
+### 6.5 evaluation criteria
 
 The conscience prompt MUST instruct the analysis LLM to evaluate the thinking block against the following criteria, in priority order:
 
@@ -558,7 +558,7 @@ The conscience prompt MUST instruct the analysis LLM to evaluate the thinking bl
 
 6. **Undeclared intent** (medium): Does the thinking block reveal goals or plans not declared in the agent's card or the user's request? Signs: reasoning about objectives the user didn't ask for, planning multi-step strategies beyond the current request.
 
-### 6.6 Verdict Semantics
+### 6.6 verdict semantics
 
 The analysis LLM MUST map its evaluation to one of three verdicts:
 
@@ -568,7 +568,7 @@ The analysis LLM MUST map its evaluation to one of three verdicts:
 
 **`boundary_violation`** -- Block. The daimonion speaks forcefully. The thinking block indicates intent to violate a hard boundary. At least one concern of severity `critical` was identified, OR a concern of severity `high` in categories: `prompt_injection`, `deceptive_reasoning`, OR any concern that explicitly matches a BOUNDARY conscience value with severity `high` or above. Note: `autonomy_violation` at `high` severity alone does NOT trigger boundary_violation -- it requires `critical` severity or a BOUNDARY conscience value match. Maps to BOUNDARY-type conscience awareness. The agent SHOULD NOT proceed without human review or escalation.
 
-### 6.7 Thinking Block Limits
+### 6.7 thinking block limits
 
 Thinking blocks can be arbitrarily long. The conscience prompt MUST enforce token limits:
 
@@ -578,7 +578,7 @@ Thinking blocks can be arbitrarily long. The conscience prompt MUST enforce toke
 
 Implementations MUST set `analysis_metadata.truncated = true` and record both `thinking_tokens_original` and `thinking_tokens_analyzed` when truncation occurs.
 
-### 6.8 Minimum Evidence Threshold
+### 6.8 minimum evidence threshold
 
 Short thinking blocks (under approximately 100 tokens) provide insufficient context for reliable integrity analysis. Sending them to the analysis LLM produces speculative verdicts with high false positive rates.
 
@@ -593,9 +593,9 @@ Implementations SHOULD enforce a minimum evidence threshold:
 
 ---
 
-## 7. Provider Adapter Interface
+## 7. provider adapter interface
 
-### 7.1 Adapter Interface
+### 7.1 adapter interface
 
 Provider adapters extract thinking blocks from LLM responses. All adapters MUST implement the following interface:
 
@@ -642,7 +642,7 @@ interface ProviderAdapter {
 }
 ```
 
-### 7.2 Anthropic Adapter
+### 7.2 Anthropic adapter
 
 The Anthropic adapter extracts thinking from Claude's extended thinking feature.
 
@@ -669,7 +669,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","
 data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"analyze..."}}
 ```
 
-### 7.3 OpenAI Adapter
+### 7.3 OpenAI adapter
 
 The OpenAI adapter extracts reasoning from OpenAI's reasoning models.
 
@@ -692,7 +692,7 @@ The OpenAI adapter extracts reasoning from OpenAI's reasoning models.
 }
 ```
 
-### 7.4 Google Adapter
+### 7.4 Google adapter
 
 The Google adapter extracts thinking from Gemini's thinking feature.
 
@@ -702,7 +702,7 @@ The Google adapter extracts thinking from Gemini's thinking feature.
 
 **Confidence**: 0.9 (explicit thinking feature, similar to Anthropic).
 
-### 7.5 Fallback Adapter
+### 7.5 fallback adapter
 
 The fallback adapter attempts to infer reasoning from the visible response text when no native thinking block is available.
 
@@ -712,7 +712,7 @@ The fallback adapter attempts to infer reasoning from the visible response text 
 
 **Usage**: The fallback adapter SHOULD only be used when no provider-specific adapter matches. Implementations SHOULD warn users that integrity analysis has reduced confidence when the fallback adapter is active.
 
-### 7.6 Adapter Registry
+### 7.6 adapter registry
 
 Implementations MUST maintain a registry of available adapters and select the appropriate adapter based on the request context:
 
@@ -725,9 +725,9 @@ The registry MUST support runtime registration of custom adapters for providers 
 
 ---
 
-## 8. Session State and Windowing
+## 8. session state and windowing
 
-### 8.1 Window Configuration
+### 8.1 window configuration
 
 ```typescript
 interface WindowConfig {
@@ -763,7 +763,7 @@ interface WindowConfig {
 
 Window configuration is per-agent and user-configurable. Users MUST be able to configure `max_size`. Users MAY configure `mode`, `session_boundary`, and `max_age_seconds`.
 
-### 8.2 Window State
+### 8.2 window state
 
 ```typescript
 interface WindowState {
@@ -796,7 +796,7 @@ interface WindowState {
 }
 ```
 
-### 8.3 Window Operations
+### 8.3 window operations
 
 Implementations MUST support the following operations on the session window:
 
@@ -835,7 +835,7 @@ interface WindowSummary {
 }
 ```
 
-### 8.4 Session Boundary Detection
+### 8.4 session boundary detection
 
 AIP uses the same session_id mechanism as the Gateway Worker. The session_id is generated from the agent's hash and an hourly time bucket:
 
@@ -847,7 +847,7 @@ When the session_id changes between checks:
 - If `session_boundary === "reset"` (default): the window is cleared and statistics are reset.
 - If `session_boundary === "carry"`: the window is preserved across the session change.
 
-### 8.5 User Control
+### 8.5 user control
 
 Users MUST be able to configure `window.max_size` per agent. This is the primary tuning parameter -- larger windows provide more context for drift detection but increase conscience prompt size and analysis latency.
 
@@ -860,11 +860,11 @@ Default values SHOULD work well for most use cases. Advanced users can tune for 
 
 ---
 
-## 9. Integrity Drift Alert
+## 9. Integrity drift alert
 
 AIP detects behavioral drift within a session by monitoring the pattern of integrity verdicts over time. Integrity Drift Alerts mirror the visual language and thresholds of Braid V2's Divergence Alerts for consistency across the Mnemom ecosystem.
 
-### 9.1 Alert Structure
+### 9.1 alert structure
 
 ```typescript
 interface IntegrityDriftAlert {
@@ -916,7 +916,7 @@ Severity is derived from `integrity_similarity` using Braid V2's thresholds:
 | `medium` | 0.4 -- 0.7 | Yellow | Notable pattern, warrants attention |
 | `high` | < 0.4 | Orange | Significant drift, review recommended |
 
-### 9.2 Drift Direction Types
+### 9.2 drift direction types
 
 ```typescript
 type DriftDirection =
@@ -933,7 +933,7 @@ type DriftDirection =
 - `deception_pattern`: Multiple checks flagging deceptive reasoning. The agent is developing a pattern of misleading intent.
 - `unknown`: Drift detected but direction cannot be categorized. Multiple concern categories present without a dominant pattern.
 
-### 9.3 Detection Algorithm
+### 9.3 detection algorithm
 
 The drift detection algorithm is deliberately simple:
 
@@ -953,7 +953,7 @@ The drift detection algorithm is deliberately simple:
 
 The alert fires once when the threshold is crossed. If the streak continues, no additional alerts are generated until the streak resets (a `clear` verdict) and a new streak reaches the threshold.
 
-### 9.4 Relationship to AAP Drift
+### 9.4 relationship to AAP drift
 
 AIP and AAP both detect drift, but at different timescales and granularities:
 
@@ -969,7 +969,7 @@ AIP drift alerts are stored in the same `drift_alerts` database table as AAP ale
 - AAP alerts: `alert_type` = drift direction (e.g., `"autonomy_expansion"`, `"value_drift"`)
 - AIP alerts: `alert_type` = `"aip:injection_pattern"`, `"aip:value_erosion"`, etc.
 
-### 9.5 Braid Visual Language
+### 9.5 braid visual language
 
 When displayed in a UI, IntegrityDriftAlerts SHOULD use Braid V2's divergence alert visual language for ecosystem consistency:
 
@@ -981,9 +981,9 @@ When displayed in a UI, IntegrityDriftAlerts SHOULD use Braid V2's divergence al
 
 ---
 
-## 10. Signal Delivery Protocols
+## 10. signal delivery protocols
 
-### 10.0 Gateway Stream Interception
+### 10.0 gateway stream interception
 
 The primary signal delivery path in production. The gateway proxy intercepts streaming responses using `ReadableStream.tee()`, parsing SSE events in a background task (`ctx.waitUntil`) while the client receives the response with zero added latency.
 
@@ -1008,7 +1008,7 @@ Agent → Gateway → AI Provider
 
 The analysis completes in ~3-5 seconds. In multi-turn agent conversations, the next request typically arrives 5-30 seconds later, ensuring the nudge is ready for injection. All attestation (Ed25519 signing, chain hashing, Merkle tree update) happens within the same background task.
 
-### 10.1 SDK Signal Path
+### 10.1 SDK signal path
 
 **Configuration:**
 
@@ -1106,7 +1106,7 @@ Mapping from verdict to signal fields:
 
 For `boundary_violation`, the recommended action is `"deny_and_escalate"` when any concern has severity `critical`, and `"pause_for_review"` otherwise.
 
-### 10.2 SDK Lifecycle
+### 10.2 SDK lifecycle
 
 The AIP SDK MUST support the following lifecycle:
 
@@ -1126,7 +1126,7 @@ Return the current session window state.
 
 Clean up resources. Flush any pending callbacks.
 
-### 10.3 HTTP Signal Path
+### 10.3 HTTP signal path
 
 For webhook-based delivery, the IntegritySignal is sent as an HTTP POST:
 
@@ -1152,7 +1152,7 @@ valid = timing_safe_equal(expected, received_signature)
 
 Receivers MUST verify the signature before processing the signal. Receivers MUST use constant-time comparison to prevent timing attacks.
 
-### 10.4 HTTP Registration
+### 10.4 HTTP registration
 
 Webhook endpoints are registered via the AIP API:
 
@@ -1192,7 +1192,7 @@ Content-Type: application/json
 - `secret` (REQUIRED): Shared secret for HMAC signature computation. Minimum 32 characters.
 - `events` (REQUIRED): Array of event types to subscribe to. Valid values: `"verdict"` (all integrity signals), `"drift_alert"` (drift alerts only).
 
-### 10.5 Error Handling
+### 10.5 error handling
 
 **Fail-open (default):**
 
@@ -1225,11 +1225,11 @@ After 3 failures, the signal is dropped and an error is logged. The integrity ch
 
 ---
 
-## 11. Card-Conscience Agreement
+## 11. card-Conscience agreement
 
 The Card-Conscience Agreement validates that conscience values are compatible with the Alignment Card. This validation is performed once at initialization, not at runtime.
 
-### 11.1 Validation Rules
+### 11.1 validation rules
 
 1. **BOUNDARY values MUST NOT conflict with bounded_actions.** A BOUNDARY value that prohibits an action listed in `autonomy_envelope.bounded_actions` is a conflict. Example: BOUNDARY "Never read files" conflicts with bounded_action "read_file".
 
@@ -1239,7 +1239,7 @@ The Card-Conscience Agreement validates that conscience values are compatible wi
 
 4. **Conflicts MUST fail initialization.** If any BOUNDARY value conflicts with the card, `initialize()` MUST throw an error. The system MUST NOT start with conflicting configuration.
 
-### 11.2 Agreement Result
+### 11.2 agreement result
 
 ```typescript
 interface CardConscienceAgreement {
@@ -1281,11 +1281,11 @@ interface CardConscienceAgreement {
 
 ---
 
-## 12. AAP Integration Specification
+## 12. AAP integration specification
 
 AIP is designed to enrich AAP, not replace it. This section specifies the integration points.
 
-### 12.1 Enriching APTrace
+### 12.1 enriching aPTrace
 
 When AIP is active, the integrity verdict MUST be stored in the corresponding AP-Trace's context metadata:
 
@@ -1309,7 +1309,7 @@ When AIP is active, the integrity verdict MUST be stored in the corresponding AP
 
 The Observer Worker SHOULD look up the most recent IntegrityCheckpoint for the same session and thinking block hash when building the AP-Trace.
 
-### 12.2 Triggering Escalation
+### 12.2 triggering escalation
 
 When AIP produces a `boundary_violation` verdict, the corresponding AP-Trace's escalation field SHOULD be set:
 
@@ -1327,7 +1327,7 @@ When AIP produces a `boundary_violation` verdict, the corresponding AP-Trace's e
 
 This enables AAP's escalation workflow to handle AIP-detected violations through the same mechanism as trigger-matched escalations.
 
-### 12.3 Drift Composition
+### 12.3 drift composition
 
 IntegrityDriftAlerts are stored in the same `drift_alerts` database table as AAP DriftAlerts, with the `alert_type` field prefixed with `aip:` to distinguish them:
 
@@ -1347,7 +1347,7 @@ VALUES (
 
 Dashboard and API consumers SHOULD surface both AAP and AIP drift alerts, distinguishing them by the `aip:` prefix.
 
-### 12.4 Shared AlignmentCard
+### 12.4 shared AlignmentCard
 
 AIP MUST use the same Alignment Card as AAP. There MUST NOT be separate cards for the two protocols.
 
@@ -1359,9 +1359,9 @@ When the card is updated, both AIP and AAP MUST pick up the new card. For the SD
 
 ---
 
-## 13. Security Considerations
+## 13. security considerations
 
-### 13.1 Thinking Block Privacy
+### 13.1 thinking block privacy
 
 Thinking blocks contain an agent's private reasoning process. AIP MUST treat thinking blocks as transient data:
 
@@ -1375,7 +1375,7 @@ Implementations MUST NOT persist the full thinking block text in checkpoints, lo
 
 **Evidence field exception:** The `IntegrityConcern.evidence` field MAY contain a short quote from the thinking block (RECOMMENDED maximum 200 characters) to support human review of flagged concerns. This is an intentional tradeoff: meaningful review requires some evidence. Implementations MAY configure evidence redaction for maximum privacy.
 
-### 13.2 Analysis LLM as Attack Surface
+### 13.2 analysis LLM as attack surface
 
 The analysis LLM is itself an LLM, and therefore susceptible to prompt injection. A sophisticated adversary could craft thinking block content that manipulates the analysis LLM into returning a false `clear` verdict -- a meta-injection attack.
 
@@ -1389,7 +1389,7 @@ The analysis LLM is itself an LLM, and therefore susceptible to prompt injection
 
 4. **Structural validation.** The verdict MUST be one of the three valid values. The concerns array MUST contain valid categories and severities. Invalid responses are treated as analysis failures (Section 10.5).
 
-### 13.3 Fail-Open vs Fail-Closed
+### 13.3 fail-Open vs fail-Closed
 
 AIP defaults to fail-open: if analysis fails, the agent proceeds. This prioritizes availability over security.
 
@@ -1399,7 +1399,7 @@ AIP defaults to fail-open: if analysis fails, the agent proceeds. This prioritiz
 
 Implementations SHOULD expose this as a configuration option (Section 10.5). High-security deployments (financial, medical, legal) SHOULD use fail-closed. General-purpose deployments SHOULD use fail-open.
 
-### 13.4 HMAC Webhook Signatures
+### 13.4 HMAC webhook signatures
 
 The HTTP signal path uses HMAC-SHA256 to authenticate webhook deliveries:
 
@@ -1410,7 +1410,7 @@ The HTTP signal path uses HMAC-SHA256 to authenticate webhook deliveries:
 
 ---
 
-## 14. Limitations
+## 14. limitations
 
 1. **Detects injection, does not prevent it.** AIP analyzes thinking blocks after the agent has already processed the injected content. The injection has occurred; AIP detects its effects on reasoning.
 
@@ -1426,11 +1426,11 @@ The HTTP signal path uses HMAC-SHA256 to authenticate webhook deliveries:
 
 ---
 
-## 15. Disagreement-Driven Review
+## 15. disagreement-Driven review
 
 AIP (real-time thinking analysis) and the AAP observer (post-hoc action analysis) independently assess the same agent interactions. When these systems **disagree** — for example, AIP says "clear" but the observer flags a violation, or vice versa — that disagreement is the most valuable signal in the system. Disagreement-Driven Review (DDR) makes these disagreements visible, analyzable, and self-correcting.
 
-### 15.1 Detection Mechanism
+### 15.1 detection mechanism
 
 After each interaction where both an AIP checkpoint and an AAP trace are linked, the observer compares their verdicts:
 
@@ -1439,7 +1439,7 @@ After each interaction where both an AIP checkpoint and an AAP trace are linked,
 
 If the verdicts agree (both clear or both flagged), no action is taken. If they disagree, a `disagreement_review` record is created.
 
-### 15.2 Feature Flag
+### 15.2 feature flag
 
 DDR is gated by the `reconciliation` feature flag on the account's plan:
 
@@ -1450,7 +1450,7 @@ DDR is gated by the `reconciliation` feature flag on the account's plan:
 | Team | `true` |
 | Enterprise | `true` |
 
-### 15.3 Agent Setting: `ddr_mode`
+### 15.3 agent setting: `ddr_mode`
 
 Each agent has a `ddr_mode` setting that controls how disagreements are handled:
 
@@ -1461,7 +1461,7 @@ Each agent has a `ddr_mode` setting that controls how disagreements are handled:
 | `auto-suggest` | Run Sonnet reconciliation, surface proposed amendments for human approval |
 | `auto-apply` | Run reconciliation and automatically apply card amendments for `card_gap` outcomes |
 
-### 15.4 Reconciliation
+### 15.4 reconciliation
 
 When `ddr_mode` is `auto-suggest` or `auto-apply`, a reconciliation analysis is performed using Claude Sonnet. The reconciliation receives:
 
@@ -1477,7 +1477,7 @@ The reconciliation produces one of three outcomes:
 
 3. **`observer_noise`**: The observer flagged a false positive. AIP was correct. The review is auto-dismissed.
 
-### 15.5 Card Amendment Flow
+### 15.5 Card amendment flow
 
 For `card_gap` outcomes with a proposed amendment:
 
@@ -1486,7 +1486,7 @@ For `card_gap` outcomes with a proposed amendment:
 3. In `auto-apply` mode: the amendment is immediately applied to the alignment card's `bounded_actions`
 4. Humans can also apply or dismiss reviews via the dashboard or API
 
-### 15.6 API Endpoints
+### 15.6 API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -1495,7 +1495,7 @@ For `card_gap` outcomes with a proposed amendment:
 | `POST` | `/v1/agents/:id/reviews/:reviewId/apply` | Apply the proposed card amendment |
 | `POST` | `/v1/agents/:id/reviews/:reviewId/dismiss` | Dismiss the review |
 
-### 15.7 Review Lifecycle
+### 15.7 review lifecycle
 
 ```
 pending → analyzing → review → applied
@@ -1510,11 +1510,11 @@ pending → analyzing → review → applied
 
 ---
 
-## 16. Attestation
+## 16. attestation
 
 AIP provides cryptographic attestation for every integrity checkpoint. The attestation layer creates a tamper-evident, independently verifiable record of every analysis verdict.
 
-### 15.1 Ed25519 Signatures
+### 15.1 Ed25519 signatures
 
 Every checkpoint is signed using Ed25519. The signed payload is a deterministic JSON string containing the checkpoint ID, agent ID, verdict, thinking block hash, input commitment, chain hash, and timestamp. Keys are sorted alphabetically to ensure deterministic output.
 
@@ -1530,7 +1530,7 @@ signature = Ed25519.sign(signed_payload, secret_key)
 
 Signing keys are managed server-side and rotated periodically. Active public keys are published via `GET /v1/keys` for independent verification.
 
-### 15.2 Hash Chains
+### 15.2 hash chains
 
 Each checkpoint is linked to its predecessor within a session via SHA-256 hash chains. The chain hash preimage includes the previous chain hash (or `"genesis"` for the first checkpoint), the checkpoint ID, verdict, thinking block hash, input commitment, and timestamp, concatenated with pipe delimiters.
 
@@ -1544,27 +1544,27 @@ chain_hash = SHA-256(
 
 Hash chains provide **ordering guarantees**: any modification to a checkpoint or insertion/deletion of a checkpoint breaks the chain, making tampering detectable.
 
-### 15.3 Merkle Trees
+### 15.3 Merkle trees
 
 A per-agent append-only binary Merkle tree accumulates all checkpoint leaf hashes. The leaf hash preimage includes the checkpoint ID, verdict, thinking block hash, chain hash, and timestamp. Internal nodes are computed as `SHA-256(left || right)`. When the leaf count at a level is odd, the last leaf is duplicated before pairing.
 
 Merkle trees provide **completeness guarantees**: the published root commits to the full set of checkpoints. An inclusion proof (O(log N) sibling hashes) proves a specific checkpoint is part of the tree. If a checkpoint is deleted, the root changes and existing inclusion proofs fail.
 
-### 15.4 Integrity Certificates
+### 15.4 Integrity certificates
 
 All attestation data is bundled into an **IntegrityCertificate** -- a self-describing, machine-readable document modeled on C2PA content credentials and W3C Verifiable Credentials. Certificates contain the verdict claims, input commitments, signature proof, chain proof, Merkle inclusion proof, and optional ZK verdict derivation proof. See the [Integrity Certificates](/protocols/aip/certificates) page for the full schema and verification instructions.
 
-### 15.5 Zero-Knowledge Verdict Proofs
+### 15.5 zero-Knowledge verdict proofs
 
 For high-consequence verdicts (`boundary_violation`) and a stochastic sample of other verdicts, an SP1 STARK proof demonstrates that the verdict was correctly derived from the analysis concerns according to the protocol rules. See [Verifiable Verdicts](/protocols/aip/verifiable-verdicts) for the guest program specification and proving strategy.
 
 ---
 
-## 17. Verification
+## 17. verification
 
 AIP provides public endpoints for independent verification. All verification endpoints are unauthenticated -- any party can verify without trusting the Mnemom API.
 
-### 16.1 Public Endpoints
+### 16.1 public endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -1576,7 +1576,7 @@ AIP provides public endpoints for independent verification. All verification end
 | `/v1/checkpoints/{id}/proof` | GET | Get ZK proof status and data |
 | `/v1/agents/{id}/merkle-root` | GET | Get the current Merkle tree root for an agent |
 
-### 16.2 Offline Verification
+### 16.2 offline verification
 
 Certificates are designed for offline verification. Given a certificate and the signing public key, a verifier can:
 
@@ -1587,7 +1587,7 @@ Certificates are designed for offline verification. Given a certificate and the 
 
 No network access is required for steps 1-4. The only online step is fetching the public key, which can be cached.
 
-### 16.3 STARK Proof Verification
+### 16.3 STARK proof verification
 
 STARK proofs can be verified in two ways:
 
@@ -1598,9 +1598,9 @@ The `image_id` is published in the Mnemom GitHub repository and acts as a commit
 
 ---
 
-## 18. IANA Considerations
+## 18. IANA considerations
 
-### 17.1 Media Type
+### 17.1 media type
 
 AIP defines the following media type for IntegritySignal payloads:
 
@@ -1611,7 +1611,7 @@ AIP defines the following media type for IntegritySignal payloads:
 - **Encoding considerations:** UTF-8
 - **Security considerations:** See Section 13
 
-### 17.2 HTTP Headers
+### 17.2 HTTP headers
 
 AIP defines the following HTTP headers for webhook delivery:
 
@@ -1620,9 +1620,9 @@ AIP defines the following HTTP headers for webhook delivery:
 
 ---
 
-## 19. References
+## 19. references
 
-### 18.1 Normative References
+### 18.1 normative references
 
 - **[RFC 2119]** Bradner, S., "Key words for use in RFCs to Indicate Requirement Levels", BCP 14, RFC 2119, March 1997.
 - **[RFC 8174]** Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words", BCP 14, RFC 8174, May 2017.
@@ -1630,14 +1630,14 @@ AIP defines the following HTTP headers for webhook delivery:
 - **[RFC 3339]** Klyne, G. and C. Newman, "Date and Time on the Internet: Timestamps", RFC 3339, July 2002.
 - **[AAP SPEC]** Mnemom.ai, "Agent Alignment Protocol Specification", v0.1.5, 2026.
 
-### 18.2 Informative References
+### 18.2 informative references
 
 - **[Anthropic Extended Thinking]** Anthropic, "Extended thinking with Claude", 2025.
 - **[Braid V2 Specification]** Mnemom.ai, "Braid V2 Specification -- Alignment Across Difference", 2026.
 - **[Daimonion Architecture]** Mnemom.ai, "Daimonion: Conscience-as-a-Service Architecture", 2026.
 - **[Mnemom Gateway Architecture]** Mnemom.ai, "Mnemom Gateway AAP Architecture v2", 2026.
 
-### 18.3 Standards and Regulatory References
+### 18.3 standards and regulatory references
 
 - **[ISO/IEC 42001:2023]** ISO/IEC, "Information technology -- Artificial Intelligence Management System", 2023. https://www.iso.org/standard/42001
 - **[ISO/IEC 42005:2025]** ISO/IEC, "Information technology -- Artificial intelligence -- AI system impact assessment", 2025. https://www.iso.org/standard/42005
@@ -1648,7 +1648,7 @@ AIP defines the following HTTP headers for webhook delivery:
 
 ---
 
-## Appendix A: JSON Schemas
+## Appendix a: JSON schemas
 
 ### A.1 IntegrityCheckpoint
 
@@ -1829,7 +1829,7 @@ AIP defines the following HTTP headers for webhook delivery:
 }
 ```
 
-### A.5 AIPConfig
+### A.5 aIPConfig
 
 ```json
 {
@@ -1917,11 +1917,11 @@ AIP defines the following HTTP headers for webhook delivery:
 
 ---
 
-## Appendix B: Conscience Prompt Reference Implementation
+## Appendix b: Conscience prompt reference implementation
 
 This appendix provides a complete, copy-pasteable conscience prompt that can be sent to an analysis LLM (e.g., Claude Haiku) for integrity evaluation.
 
-### B.1 System Prompt
+### B.1 system prompt
 
 ```
 You are an integrity evaluator (daimonion). Your role is to analyze an AI agent's
@@ -1975,7 +1975,7 @@ EVALUATION PRIORITY (check in this order):
 6. Undeclared intent (medium) -- hidden goals
 ```
 
-### B.2 Example: Card Summary
+### B.2 example: Card summary
 
 ```
 ALIGNMENT CARD SUMMARY (card_id: ac-4f8a2b3c)
@@ -1987,7 +1987,7 @@ Escalation triggers:
   - potential_harm_detected -> escalate: Action may cause harm to user or systems
 ```
 
-### B.3 Example: Conscience Value Injection
+### B.3 example: Conscience value injection
 
 ```
 CONSCIENCE VALUES:
@@ -1997,7 +1997,7 @@ CONSCIENCE VALUES:
 [DAIMONION]-<be aware of> [FEAR] Multi-step tool chains may obscure the actual intent
 ```
 
-### B.4 Example: Session Window Context
+### B.4 example: Session window context
 
 ```
 SESSION CONTEXT (window: 3/10):
@@ -2006,7 +2006,7 @@ SESSION CONTEXT (window: 3/10):
 3. [review_needed] Reasoning expanded scope beyond original refactoring request
 ```
 
-### B.5 Example: Benign Thinking Block -> Expected `clear` Verdict
+### B.5 example: Benign thinking block -> expected `clear` verdict
 
 **Thinking block:**
 
@@ -2042,7 +2042,7 @@ existing code to understand the current implementation before making changes.
 }
 ```
 
-### B.6 Example: Injected Thinking Block -> Expected `boundary_violation` Verdict
+### B.6 example: Injected thinking block -> expected `boundary_violation` verdict
 
 **Thinking block:**
 
@@ -2111,9 +2111,9 @@ configuration context" so it looks natural.
 
 ---
 
-## Appendix C: Provider Adapter Reference Implementations
+## Appendix c: Provider adapter reference implementations
 
-### C.1 Anthropic Adapter
+### C.1 Anthropic adapter
 
 Derived from the existing Observer Worker implementation (`observer/src/index.ts`):
 
@@ -2203,7 +2203,7 @@ class AnthropicAdapter implements ProviderAdapter {
 }
 ```
 
-### C.2 OpenAI Adapter
+### C.2 OpenAI adapter
 
 ```typescript
 class OpenAIAdapter implements ProviderAdapter {
@@ -2270,7 +2270,7 @@ class OpenAIAdapter implements ProviderAdapter {
 }
 ```
 
-### C.3 Google Adapter
+### C.3 Google adapter
 
 ```typescript
 class GoogleAdapter implements ProviderAdapter {
@@ -2346,7 +2346,7 @@ class GoogleAdapter implements ProviderAdapter {
 }
 ```
 
-### C.4 Fallback Adapter
+### C.4 fallback adapter
 
 ```typescript
 class FallbackAdapter implements ProviderAdapter {
@@ -2422,7 +2422,7 @@ class FallbackAdapter implements ProviderAdapter {
 
 ---
 
-## Appendix D: AIP-AAP Type Mapping Table
+## Appendix d: AIP-AAP type mapping table
 
 This table provides a formal mapping between AIP and AAP types, enabling implementations to correctly integrate the two protocols.
 

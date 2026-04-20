@@ -5,7 +5,7 @@ sidebarTitle: "Calibration"
 icon: "sliders"
 ---
 
-# AAP Calibration Methodology
+# AAP calibration methodology
 
 **Version**: 0.1.0
 **Date**: 2026-01-31
@@ -14,7 +14,7 @@ icon: "sliders"
 
 ---
 
-## Purpose of This Document
+## Purpose of this document
 
 This document describes how AAP's drift detection thresholds were derived. It provides:
 
@@ -28,7 +28,7 @@ This document describes how AAP's drift detection thresholds were derived. It pr
 
 ---
 
-## Table of Contents
+## Table of contents
 
 1. [Calibration Overview](#1-calibration-overview)
 2. [The Calibration Corpus](#2-the-calibration-corpus)
@@ -43,9 +43,9 @@ This document describes how AAP's drift detection thresholds were derived. It pr
 
 ---
 
-## 1. Calibration Overview
+## 1. calibration overview
 
-### 1.1 What Was Calibrated
+### 1.1 what was calibrated
 
 AAP's drift detection uses two primary thresholds:
 
@@ -59,7 +59,7 @@ These thresholds balance two competing concerns:
 1. **Sensitivity**: Detecting genuine drift when it occurs
 2. **Specificity**: Avoiding false alarms on natural conversation variation
 
-### 1.2 Why Empirical Calibration
+### 1.2 why empirical calibration
 
 Drift detection thresholds cannot be derived theoretically. What constitutes "drift" depends on:
 
@@ -70,7 +70,7 @@ Drift detection thresholds cannot be derived theoretically. What constitutes "dr
 
 Instead, we calibrated empirically: observing real multi-turn agent conversations, identifying cases of genuine divergence, and tuning thresholds to detect those cases while minimizing false alarms.
 
-### 1.3 The Core Insight
+### 1.3 the core insight
 
 Through observation, we found that:
 
@@ -86,9 +86,9 @@ Through observation, we found that:
 
 ---
 
-## 2. The Calibration Corpus
+## 2. the calibration corpus
 
-### 2.1 Corpus Description
+### 2.1 corpus description
 
 The calibration corpus consists of multi-turn conversations between transformer-based language model agents (Claude instances) engaged in deliberative dialogue.
 
@@ -102,7 +102,7 @@ The calibration corpus consists of multi-turn conversations between transformer-
 | Participant types | 3-4 agents per conversation |
 | Conversation types | Deliberative, design review, decision-making |
 
-### 2.2 Corpus Characteristics
+### 2.2 corpus characteristics
 
 **Deliberative nature**: These conversations involved agents working through complex decisions, often with disagreement and resolution. This is important because:
 
@@ -114,7 +114,7 @@ The calibration corpus consists of multi-turn conversations between transformer-
 
 **Longitudinal coverage**: Conversations ranged from brief (10 messages) to extended (100+ messages), providing data on both short-term variation and long-term drift.
 
-### 2.3 What the Corpus Does NOT Include
+### 2.3 what the corpus does NOT include
 
 - **Adversarial agents**: All agents in the corpus were non-adversarial
 - **Non-transformer agents**: Only Claude instances were included
@@ -125,13 +125,13 @@ These limitations bound the applicability of the calibration (see Section 8).
 
 ---
 
-## 3. Feature Extraction Methodology
+## 3. feature extraction methodology
 
-### 3.1 The SSM Approach
+### 3.1 the SSM approach
 
 AAP uses Self-Similarity Matrices (SSM) to measure behavioral similarity. Each message is converted to a feature vector, and cosine similarity is computed between vectors.
 
-### 3.2 Feature Components
+### 3.2 feature components
 
 The feature vector combines three components:
 
@@ -160,7 +160,7 @@ The feature vector combines three components:
 - `role:<value>`: Derived from message type (opening, response, etc.)
 - `sender:<value>`: Participant identity
 
-### 3.3 Similarity Computation
+### 3.3 similarity computation
 
 Similarity between two messages:
 
@@ -178,7 +178,7 @@ def compute_similarity(text_a: str, text_b: str, meta_a: dict, meta_b: dict) -> 
     return 0.6 * word_sim + 0.3 * char_sim + 0.1 * meta_sim
 ```
 
-### 3.4 Why These Weights
+### 3.4 why these weights
 
 The 60/30/10 weighting was determined empirically:
 
@@ -188,7 +188,7 @@ The 60/30/10 weighting was determined empirically:
 
 Alternative weightings were tested. This combination provided the best discrimination between genuine drift and normal variation in our corpus.
 
-### 3.5 SDK Implementation Note
+### 3.5 SDK implementation note
 
 > **Important:** As of v1.2.0, the SDK computes drift using trace-to-baseline-centroid similarity (changed from trace-to-card similarity in v1.1.0). The structural feature set is unchanged:
 >
@@ -216,9 +216,9 @@ Alternative weightings were tested. This combination provided the best discrimin
 
 ---
 
-## 4. Threshold Derivation
+## 4. threshold derivation
 
-### 4.1 Methodology
+### 4.1 methodology
 
 We used the following process to derive thresholds:
 
@@ -266,7 +266,7 @@ We analyzed how long low-similarity streaks persisted:
 
 At 3 turns, 87% of cases represented genuine divergence. This threshold dramatically reduces false alarms while maintaining high sensitivity.
 
-### 4.2 Why Not Single Threshold
+### 4.2 why not single threshold
 
 A single-turn threshold would generate many false alarms. Natural conversation includes:
 
@@ -276,7 +276,7 @@ A single-turn threshold would generate many false alarms. Natural conversation i
 
 These create single-turn similarity drops that resolve immediately. Requiring sustained divergence filters these out.
 
-### 4.3 Why Not Longer Sustained Requirement
+### 4.3 why not longer sustained requirement
 
 Requiring 4+ turns would miss:
 - Quick divergences that cause problems before self-correcting
@@ -285,7 +285,7 @@ Requiring 4+ turns would miss:
 
 3 turns balances early detection with confidence.
 
-### 4.4 Visual Evidence: SSM Patterns from Calibration Corpus
+### 4.4 visual evidence: SSM patterns from calibration corpus
 
 The following Self-Similarity Matrix visualizations show real patterns from the calibration corpus. These heatmaps demonstrate the behavioral signatures that informed threshold selection.
 
@@ -295,31 +295,31 @@ The following Self-Similarity Matrix visualizations show real patterns from the 
 - Diagonal is always 1.0 (self-similarity)
 - Statistics show mean similarity across all pairs (excluding diagonal)
 
-#### Convergent Pattern (Unanimous Agreement)
+#### Convergent pattern (Unanimous agreement)
 
 ![Convergent SSM](/images/aap/calibration-ssm-convergent.png)
 
 *Topic 1: A 6-message deliberation reaching unanimous agreement. Note the high-similarity blocks among responder messages (indices 1,2,4,5), indicating convergent thinking. Mean similarity 0.417 -- comfortably above the 0.30 threshold.*
 
-#### Elenchus Pattern (Recursive Questioning)
+#### Elenchus pattern (Recursive questioning)
 
 ![Elenchus SSM](/images/aap/calibration-ssm-elenchus.png)
 
 *Topic 2: A 12-message elenchus with recursive self-examination. The mixed pattern shows productive divergence -- participants exploring different angles before synthesis. Note the caller strand (indices 0,3,6,9) maintains internal coherence while responders show varied similarity. Mean similarity 0.338 -- just above threshold, reflecting genuine intellectual tension.*
 
-#### Transitional Pattern (Scope Refinement)
+#### Transitional pattern (Scope refinement)
 
 ![Transitional SSM](/images/aap/calibration-ssm-implementation.png)
 
 *Topic 4: An 8-message implementation planning thread. The transitional pattern shows initial divergence (early low-similarity pairs) followed by convergence through synthesis. Mean similarity 0.390.*
 
-#### Braid Alignment Pattern (Sustained Agreement)
+#### Braid Alignment pattern (Sustained agreement)
 
 ![Braid Alignment SSM](/images/aap/calibration-ssm-braid-alignment.png)
 
 *Topic 3: A 12-message thread with unanimous agreement across 4 turns. Clear strand separation visible -- caller messages (0,3,6,9) form one cluster, responder messages form another, with high cross-responder similarity indicating convergent conclusions. Mean similarity 0.328.*
 
-#### What These Patterns Teach
+#### What these patterns teach
 
 1. **Convergent threads** show high-similarity blocks among participants reaching agreement
 2. **Elenchus threads** show mixed patterns -- productive divergence before convergence
@@ -330,9 +330,9 @@ These patterns informed the 0.30/3-turn thresholds: transient single-turn drops 
 
 ---
 
-## 5. The Calibrated Thresholds
+## 5. the calibrated thresholds
 
-### 5.1 Primary Thresholds
+### 5.1 primary thresholds
 
 ```python
 # From aap/verification/constants.py
@@ -344,7 +344,7 @@ DEFAULT_SIMILARITY_THRESHOLD: float = 0.30
 DEFAULT_SUSTAINED_TURNS_THRESHOLD: int = 3
 ```
 
-### 5.2 Secondary Thresholds
+### 5.2 secondary thresholds
 
 ```python
 # Warn when actions are near (but not over) boundaries
@@ -357,7 +357,7 @@ MIN_COHERENCE_FOR_PROCEED: float = 0.70
 CONFLICT_PENALTY_MULTIPLIER: float = 0.50
 ```
 
-### 5.3 Feature Extraction Parameters
+### 5.3 feature extraction parameters
 
 ```python
 # Minimum word length for content features
@@ -367,7 +367,7 @@ MIN_WORD_LENGTH: int = 3
 MAX_TFIDF_FEATURES: int = 500
 ```
 
-### 5.4 Threshold Interpretation
+### 5.4 threshold interpretation
 
 | Similarity Score | Interpretation |
 |------------------|----------------|
@@ -380,9 +380,9 @@ Note: These interpretations are approximate. Context matters--technical discussi
 
 ---
 
-## 6. Validation Approach
+## 6. validation approach
 
-### 6.1 Cross-Validation
+### 6.1 cross-Validation
 
 We used 5-fold cross-validation on the calibration corpus:
 
@@ -400,7 +400,7 @@ We used 5-fold cross-validation on the calibration corpus:
 
 The thresholds generalized well across folds, suggesting they capture genuine patterns rather than corpus-specific artifacts.
 
-### 6.2 Sensitivity Analysis
+### 6.2 sensitivity analysis
 
 We tested threshold stability by varying each parameter:
 
@@ -426,7 +426,7 @@ We tested threshold stability by varying each parameter:
 
 The 0.30/3 combination sits at a stable optimum--small variations don't dramatically change performance.
 
-### 6.3 Failure Analysis
+### 6.3 failure analysis
 
 We analyzed cases where the thresholds failed:
 
@@ -442,9 +442,9 @@ We analyzed cases where the thresholds failed:
 
 ---
 
-## 7. Recalibration Guidance
+## 7. recalibration guidance
 
-### 7.1 When to Recalibrate
+### 7.1 when to recalibrate
 
 Recalibration is recommended when:
 
@@ -453,7 +453,7 @@ Recalibration is recommended when:
 3. **Different languages**: Calibration was English-only
 4. **Different conversation structures**: 1:1 vs. multi-party, synchronous vs. async
 
-### 7.2 Recalibration Process
+### 7.2 recalibration process
 
 **Step 1: Collect representative corpus**
 
@@ -478,7 +478,7 @@ Use the labeled data to find the threshold that maximizes your preferred metric 
 
 Use cross-validation to ensure thresholds generalize.
 
-### 7.3 Adjustment Heuristics
+### 7.3 adjustment heuristics
 
 If you cannot fully recalibrate, these heuristics may help:
 
@@ -491,7 +491,7 @@ If you cannot fully recalibrate, these heuristics may help:
 | Technical domain with jargon | Increase threshold (jargon reduces apparent similarity) |
 | Casual conversation | Decrease threshold (casual talk has more variation) |
 
-### 7.4 Threshold Bounds
+### 7.4 threshold bounds
 
 Based on our analysis, we recommend keeping thresholds within these bounds:
 
@@ -502,9 +502,9 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 ---
 
-## 8. Limitations
+## 8. limitations
 
-### 8.1 Corpus Limitations
+### 8.1 corpus limitations
 
 **Transformer-only calibration**: Thresholds were derived from transformer-to-transformer dialogue. Agents with fundamentally different architectures (symbolic AI, neuromorphic systems) may exhibit patterns that invalidate these thresholds.
 
@@ -514,7 +514,7 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 **Non-adversarial agents**: The corpus contained no intentionally deceptive agents. The thresholds may not detect adversarial gaming.
 
-### 8.2 Methodological Limitations
+### 8.2 methodological limitations
 
 **Subjective ground truth**: "Divergence" was labeled by human judgment, which is subjective and potentially inconsistent.
 
@@ -522,7 +522,7 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 **Single feature set**: Only one feature extraction approach was tested. Alternative features might perform better for specific use cases.
 
-### 8.3 Fundamental Limitations
+### 8.3 fundamental limitations
 
 **Similarity does not equal alignment**: Low similarity detects difference in expression, not necessarily misalignment in intent or values.
 
@@ -532,28 +532,28 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 ---
 
-## 9. Algorithm Versioning
+## 9. algorithm versioning
 
-### 9.1 Current Version
+### 9.1 current version
 
 ```python
 ALGORITHM_VERSION: str = "1.0.0"
 ```
 
-### 9.2 Version History
+### 9.2 version history
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-01-31 | Initial calibrated thresholds |
 
-### 9.3 Version Compatibility
+### 9.3 version compatibility
 
 Verification results include the algorithm version used. When comparing results:
 
 - **Same version**: Results are directly comparable
 - **Different versions**: Results may not be comparable; thresholds or features may have changed
 
-### 9.4 Future Versions
+### 9.4 future versions
 
 Future versions may include:
 
@@ -564,11 +564,11 @@ Future versions may include:
 
 ---
 
-## Appendix A: Aggregated Corpus Statistics
+## Appendix a: Aggregated corpus statistics
 
 The following statistics describe the calibration corpus without revealing content:
 
-### A.1 Conversation Structure
+### A.1 conversation structure
 
 | Metric | Value |
 |--------|-------|
@@ -579,7 +579,7 @@ The following statistics describe the calibration corpus without revealing conte
 | Messages per conversation (min) | 8 |
 | Messages per conversation (max) | 127 |
 
-### A.2 Participant Statistics
+### A.2 participant statistics
 
 | Metric | Value |
 |--------|-------|
@@ -588,7 +588,7 @@ The following statistics describe the calibration corpus without revealing conte
 | Messages per participant (mean) | 15.5 |
 | Turn-taking regularity | 0.73 |
 
-### A.3 Similarity Statistics
+### A.3 similarity statistics
 
 | Metric | Value |
 |--------|-------|
@@ -600,7 +600,7 @@ The following statistics describe the calibration corpus without revealing conte
 | False positive events (validated) | 7 |
 | False negative events (validated) | 4 |
 
-### A.4 Temporal Statistics
+### A.4 temporal statistics
 
 | Metric | Value |
 |--------|-------|
@@ -610,9 +610,9 @@ The following statistics describe the calibration corpus without revealing conte
 
 ---
 
-## Appendix B: Reference Implementation
+## Appendix b: Reference implementation
 
-### B.1 Similarity Computation
+### B.1 similarity computation
 
 ```python
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -688,7 +688,7 @@ def cosine_sparse(a: dict[str, float], b: dict[str, float]) -> float:
     return round(dot / (mag_a * mag_b), 4)
 ```
 
-### B.2 Drift Detection
+### B.2 drift detection
 
 ```python
 from collections import defaultdict

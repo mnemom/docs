@@ -5,7 +5,7 @@ sidebarTitle: "Certificates"
 icon: "shield-check"
 ---
 
-# Integrity Certificates
+# Integrity certificates
 
 An **IntegrityCertificate** is a machine-readable cryptographic document that bundles all verification evidence for a single integrity checkpoint. It is modeled on [C2PA content credentials](https://c2pa.org/) and [W3C Verifiable Credentials](https://www.w3.org/TR/vc-data-model-2.0/), adapted for AI agent integrity attestation.
 
@@ -13,11 +13,11 @@ Certificates are self-describing: they contain the verdict, the cryptographic pr
 
 ---
 
-## Certificate Schema
+## Certificate schema
 
 An IntegrityCertificate has four top-level sections: **subject**, **claims**, **input_commitments**, and **proofs**.
 
-### Envelope Fields
+### Envelope fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -51,7 +51,7 @@ The analysis verdict and supporting evidence.
 | `analysis_model` | `string` | The LLM model used for analysis (e.g., `"claude-sonnet-4-20250514"`). |
 | `analysis_duration_ms` | `number` | Wall-clock time for the analysis in milliseconds. |
 
-### Input Commitments
+### Input commitments
 
 Cryptographic commitments to the inputs used for analysis. These enable verification that the analysis was performed over the claimed inputs without revealing the inputs themselves.
 
@@ -125,7 +125,7 @@ Self-contained links for independent verification.
 
 ---
 
-## Signed Payload Format
+## Signed payload format
 
 The `signed_payload` field contains the exact JSON string that the Ed25519 signature covers. It is constructed with **deterministic key ordering** (alphabetically sorted) to ensure the same payload produces the same bytes regardless of property insertion order.
 
@@ -147,7 +147,7 @@ The JSON is produced using `JSON.stringify(payload, Object.keys(payload).sort())
 
 ---
 
-## Input Commitment Computation
+## Input commitment computation
 
 The `combined_commitment` is computed as follows:
 
@@ -175,11 +175,11 @@ This commitment proves the analysis was performed over specific inputs without r
 
 ---
 
-## Verification Instructions
+## Verification instructions
 
 Any party can verify an IntegrityCertificate using the following five steps. Steps 1-4 can be performed offline with the certificate and the public key. Step 5 requires a network call to the prover service.
 
-### Step 1: Fetch the Public Key
+### Step 1: Fetch the public key
 
 Retrieve the signing key referenced by `proofs.signature.key_id`:
 
@@ -193,7 +193,7 @@ Find the key entry matching `key_id`. The `public_key` field is the hex-encoded 
 Public keys can be cached. They rotate infrequently, and the `is_active` field indicates whether a key is currently in use for new signatures.
 </Note>
 
-### Step 2: Verify the Ed25519 Signature
+### Step 2: Verify the Ed25519 signature
 
 Verify `proofs.signature.value` (base64-encoded) against `proofs.signature.signed_payload` (UTF-8 string) using the public key from Step 1.
 
@@ -209,7 +209,7 @@ const valid = await ed.verifyAsync(signature, message, publicKey);
 
 If the signature is invalid, the certificate has been tampered with. Reject it.
 
-### Step 3: Recompute and Verify the Chain Hash
+### Step 3: Recompute and verify the chain hash
 
 Recompute the chain hash from the certificate fields and compare to `proofs.chain.chain_hash`:
 
@@ -226,7 +226,7 @@ expected = SHA-256(preimage)
 
 If `expected !== proofs.chain.chain_hash`, the chain link has been altered.
 
-### Step 4: Walk the Merkle Inclusion Proof
+### Step 4: Walk the Merkle inclusion proof
 
 If `proofs.merkle` is present, verify that the checkpoint is included in the agent's Merkle tree:
 
@@ -238,7 +238,7 @@ If `proofs.merkle` is present, verify that the checkpoint is included in the age
 
 If they match, the checkpoint is included in the tree. Cross-reference the root against the agent's published Merkle root via [`GET /v1/agents/{agent_id}/merkle-root`](/api-reference/endpoint/get-agents-id-merkle-root).
 
-### Step 5: Verify the STARK Proof (Optional)
+### Step 5: Verify the STARK proof (Optional)
 
 If `proofs.verdict_derivation` is present, the verdict was proven via an SP1 STARK proof. Verification can be performed:
 
@@ -247,7 +247,7 @@ If `proofs.verdict_derivation` is present, the verdict was proven via an SP1 STA
 
 ---
 
-## Example Certificate
+## Example certificate
 
 ```json
 {
@@ -314,7 +314,7 @@ If `proofs.verdict_derivation` is present, the verdict was proven via an SP1 STA
 
 ---
 
-## Design Influences
+## Design influences
 
 The IntegrityCertificate format draws from two established standards:
 
@@ -326,7 +326,7 @@ Key differences from these standards: AIP certificates use Ed25519 instead of JW
 
 ---
 
-## See Also
+## See also
 
 - [Verifiable Verdicts](/protocols/aip/verifiable-verdicts) -- Zero-knowledge proofs for verdict derivation
 - [AIP Specification -- Attestation](/protocols/aip/specification#15-attestation) -- Protocol-level attestation specification

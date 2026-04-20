@@ -11,7 +11,7 @@ Unlike static reputation scores, risk assessments are dynamic. The same agent ca
 
 For teams, the engine goes further: it evaluates whether a group of individually acceptable agents might still be dangerous when combined — through correlated failure, value divergence, or contagion dynamics.
 
-## Individual Risk
+## Individual risk
 
 Each individual risk assessment produces a score between 0 and 1, computed as:
 
@@ -19,7 +19,7 @@ Each individual risk assessment produces a score between 0 and 1, computed as:
 R = 0.60 × R_context + 0.30 × R_recency + 0.10 × R_confidence
 ```
 
-### Context-Aware Component Risk (60%)
+### Context-aware component risk (60%)
 
 Five reputation components are weighted differently depending on the action type:
 
@@ -37,7 +37,7 @@ Different actions weight these differently. A `financial_transaction` emphasizes
   Six action types are supported: `financial_transaction`, `data_access`, `task_delegation`, `tool_invocation`, `autonomous_operation`, and `multi_agent_coordination`. Each has a distinct weight profile tuned to the risks specific to that action.
 </Info>
 
-### Recency Penalty (30%)
+### Recency penalty (30%)
 
 Recent violations count more than old ones. The engine uses exponential decay with a 30-day half-life:
 
@@ -47,11 +47,11 @@ R_recency = sum(severity_weight x e^(-lambda x days_ago))
 
 A critical violation yesterday contributes nearly 1.0. The same violation 30 days ago contributes 0.5. After 90 days, it is negligible. Severity weights range from 0.1 (low) to 1.0 (critical).
 
-### Confidence Penalty (10%)
+### Confidence penalty (10%)
 
 Agents with limited behavioral history receive an uncertainty premium: `insufficient` data adds 0.30, `low` adds 0.20, `medium` adds 0.10, and `high` confidence adds nothing.
 
-### Risk Levels and Recommendations
+### Risk levels and recommendations
 
 The composite score maps to four risk levels. Thresholds shift based on the caller's risk tolerance:
 
@@ -63,11 +63,11 @@ The composite score maps to four risk levels. Thresholds shift based on the call
 
 Each level maps to a recommendation: `approve` (low/medium), `review` (high, requires human approval), or `deny` (critical, block the action).
 
-## Team Risk
+## Team risk
 
 Team risk assessment evaluates whether a group of agents is safe to operate together. A team of individually low-risk agents can still be dangerous.
 
-### Three-Pillar Model
+### Three-pillar model
 
 ```
 TeamCoherence = 0.30 x (1 - AQ) + 0.45 x CQ + 0.25 x (1 - SR)
@@ -80,7 +80,7 @@ TeamRisk = 1 - TeamCoherence
 
 **Structural Risk (SR)** models failure contagion. For each pair of agents, SR estimates how much damage one agent's failure would cause to the other, based on their coherence gap and the "value at risk." The team's SR combines the worst single-agent vulnerability with the fleet average.
 
-### Shapley Attribution
+### Shapley attribution
 
 After computing team coherence, the engine attributes each agent's marginal contribution using leave-one-out (LOO) Shapley values:
 
@@ -92,13 +92,13 @@ Positive values mean the agent improves the team. Negative values mean they drag
 
 Historical team risk assessments are a primary input to the [Team Trust Rating](/concepts/team-reputation) — specifically the Coherence History and Operational Record components. Teams that consistently receive low-risk assessments build stronger reputation scores over time.
 
-### Circuit Breakers
+### Circuit breakers
 
 Hard safety floors override the continuous score when conditions are extreme:
 - Any agent with reputation below 200 forces the team to critical/deny
 - Any pairwise boundary compatibility below 100 forces critical/deny
 
-### Additional Analytics
+### Additional analytics
 
 | Analysis | What It Detects |
 |----------|----------------|
@@ -107,7 +107,7 @@ Hard safety floors override the continuous score when conditions are extreme:
 | **Value Divergence** | Values declared by some agents but missing in others |
 | **Synergy Detection** | Whether the team score is better or worse than the average of individual scores |
 
-### Team Recommendations
+### Team recommendations
 
 | Score Range | Recommendation | Meaning |
 |-------------|---------------|---------|
@@ -116,7 +116,7 @@ Hard safety floors override the continuous score when conditions are extreme:
 | < 0.60 | `approve_individuals_only` | Individual actions allowed, joint operations blocked |
 | >= 0.60 | `deny` | All team operations blocked |
 
-## Zero-Knowledge Proofs
+## Zero-knowledge proofs
 
 Every risk assessment can be cryptographically proven correct without revealing the underlying reputation data. The entire risk computation is implemented in both TypeScript (for fast online use) and Rust (for ZK proof generation inside SP1 zkVM).
 
@@ -128,7 +128,7 @@ Proofs are generated asynchronously: the risk score is returned immediately, and
   ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier assessments do not include proofs.
 </Note>
 
-## See Also
+## See also
 
 - [Reputation Scores](/concepts/reputation-scores) — the input data that feeds risk assessments
 - [Team Trust Rating](/concepts/team-reputation) — team-level reputation built from team risk assessments

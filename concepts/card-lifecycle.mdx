@@ -21,7 +21,7 @@ Card lifecycle management tracks these changes through versioned amendments, dis
 
 ---
 
-## Card Amendments
+## Card amendments
 
 Every change to an alignment card is tracked as an **amendment** -- a versioned, diffable record that preserves the full history of the card's evolution.
 
@@ -37,7 +37,7 @@ When you update an alignment card (via CLI, API, or dashboard), the system does 
 
 Amendments can be linked to reclassification requests, proving that a card gap existed at the time of a violation. This linkage is critical for trust recovery -- it provides auditable evidence that the violation was a configuration error, not agent misbehavior.
 
-### Retrieving Amendment History
+### Retrieving amendment history
 
 ```bash
 # Via CLI
@@ -71,7 +71,7 @@ curl https://api.mnemom.ai/v1/agents/agent_abc123/card-amendments
 
 ---
 
-## Violation Reclassification
+## Violation reclassification
 
 The core insight behind card lifecycle management: **not all violations indicate agent misbehavior**. Some violations are card gaps -- the agent used a tool correctly, but the alignment card did not declare that capability.
 
@@ -98,7 +98,7 @@ This distinction matters because only `behavior_gap` violations should count aga
 
 Card gaps also affect [proving costs](/protocols/aip/verifiable-verdicts#deferred-proofs): when the policy engine detects card gaps alongside a `boundary_violation`, ZK proving is **deferred** instead of immediately dispatched to GPUs. The observer's DDR reconciliation later resolves the deferred proof -- skipping it entirely for confirmed card gaps, or upgrading it to a full proof for confirmed behavioral violations.
 
-### Reclassification Workflow
+### Reclassification workflow
 
 <Steps>
   <Step title="Detect">
@@ -159,7 +159,7 @@ Card gaps also affect [proving costs](/protocols/aip/verifiable-verdicts#deferre
 
 ---
 
-## Trust Graph Propagation
+## Trust graph propagation
 
 When reclassification triggers a score recomputation, the effects can propagate through the trust graph. Agents do not exist in isolation -- they operate in [fleets](/concepts/fleet-coherence), teams, and delegation chains. A score change for one agent can affect trust assessments for related agents.
 
@@ -180,11 +180,11 @@ Propagation uses breadth-first traversal from the reclassified agent with the fo
 
 ---
 
-## Score Recovery Mechanics
+## Score recovery mechanics
 
 Reclassification enables trust recovery by excluding card gap violations from the score components they would otherwise penalize.
 
-### What Changes After Reclassification
+### What changes after reclassification
 
 | Score Component | Effect of `card_gap` Reclassification |
 |---|---|
@@ -194,7 +194,7 @@ Reclassification enables trust recovery by excluding card gap violations from th
 | **Trace Completeness (10%)** | Not affected. Trace coverage is independent of violation type. |
 | **Coherence Compatibility (10%)** | May be indirectly affected through trust graph propagation. |
 
-### Recovery Boundaries
+### Recovery boundaries
 
 Score recovery is bounded and specific:
 
@@ -213,11 +213,11 @@ After reclassifying 2 violations as card_gap:
 
 ---
 
-## Session Re-Proofing
+## Session re-proofing
 
 When a reclassification includes a card amendment, affected sessions are re-verified against the updated card. This is not just a score adjustment -- the sessions are actually re-evaluated to determine whether they now pass.
 
-### How Re-Proofing Works
+### How re-proofing works
 
 1. **Identify affected sessions** -- The system finds all sessions that contain the reclassified violation. These are sessions where the agent used the capability that was missing from the original card.
 
@@ -233,7 +233,7 @@ When a reclassification includes a card amendment, affected sessions are re-veri
 
 ---
 
-## OTel Reclassification Events
+## OTel reclassification events
 
 Reclassification emits [OpenTelemetry](https://opentelemetry.io/) spans for observability integration. These spans provide structured data about every reclassification event for monitoring dashboards, alerting pipelines, and audit systems.
 
@@ -252,7 +252,7 @@ Emitted when a reclassification is processed:
 | `reclassification.score_before` | int | Agent's trust score before recomputation |
 | `reclassification.score_after` | int | Agent's trust score after recomputation |
 
-### Example OTel Export
+### Example OTel export
 
 ```json
 {
@@ -276,7 +276,7 @@ These spans integrate with any OTel-compatible backend (Grafana, Datadog, Honeyc
 
 ---
 
-## Compliance Export
+## Compliance export
 
 For audit trails and regulatory compliance, the compliance export endpoint provides a complete, tamper-evident record of an agent's lifecycle.
 
@@ -285,7 +285,7 @@ curl https://api.mnemom.ai/v1/agents/agent_abc123/compliance-export \
   -H "Authorization: Bearer $MNEMOM_API_KEY"
 ```
 
-### What the Export Includes
+### What the export includes
 
 | Section | Contents |
 |---|---|
@@ -295,7 +295,7 @@ curl https://api.mnemom.ai/v1/agents/agent_abc123/compliance-export \
 | **Score history** | Weekly score snapshots with component breakdowns |
 | **Session results** | Verification results for all sessions, including re-proofing outcomes |
 
-### Tamper Evidence
+### Tamper evidence
 
 The compliance export is cryptographically linked to the agent's [integrity certificate chain](/protocols/aip/certificates). Each record in the export references a certificate hash, enabling independent verification that the data has not been modified since it was recorded.
 
@@ -305,7 +305,7 @@ The compliance export is cryptographically linked to the agent's [integrity cert
 
 ---
 
-## See Also
+## See also
 
 - [Alignment Cards](/concepts/alignment-cards) -- Card structure and schema
 - [Policy Engine](/concepts/policy-engine) -- How policies detect violations
