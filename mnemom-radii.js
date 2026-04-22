@@ -23,6 +23,16 @@
     "  --rounded: 0.25rem;",
     "  --rounded-search: 0.25rem;",
     "}",
+    /* Tailwind arbitrary-value radius classes bypass the custom-property
+     * system (they compile to direct `border-radius: 10px` etc.). Override
+     * the ones Mintlify actually emits — seen on API-reference sidebar
+     * widgets. `.rounded-full` is left alone (intentional circles). */
+    ".rounded-\\[10px\\],",
+    ".rounded-\\[8px\\],",
+    ".rounded-\\[6px\\],",
+    ".rounded-\\[14px\\] {",
+    "  border-radius: 0.25rem !important;",
+    "}",
   ].join("\n");
   document.head.appendChild(style);
 })();
