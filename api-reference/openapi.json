@@ -2062,6 +2062,578 @@
         }
       }
     },
+    "/agents/{agent_id}/reviews": {
+      "get": {
+        "operationId": "listReviews",
+        "summary": "List disagreement reviews for an agent",
+        "description": "Lists review records created when an action was disagreed-with enough to require human adjudication. Filter by `status` (`pending`, `review`, `applied`, `dismissed`). Reviews propose a card amendment that can be accepted or rejected via the apply/dismiss endpoints.",
+        "tags": [
+          "Enforcement"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "review",
+                "applied",
+                "dismissed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reviews, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reviews"
+                  ],
+                  "properties": {
+                    "reviews": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DisagreementReview"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/reviews/{review_id}": {
+      "get": {
+        "operationId": "getReview",
+        "summary": "Get a single review",
+        "tags": [
+          "Enforcement"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Review detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisagreementReview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Review not found."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/reviews/{review_id}/apply": {
+      "post": {
+        "operationId": "applyReview",
+        "summary": "Apply a review's proposed amendment",
+        "description": "Applies the review's `proposed_amendment.action` to the agent's active alignment card by appending it to `autonomy_envelope.bounded_actions`. Updates the review status to `applied`. Only reviews in `pending` or `review` status may be applied.",
+        "tags": [
+          "Enforcement"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Amendment applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "review_id",
+                    "status",
+                    "card_modified"
+                  ],
+                  "properties": {
+                    "review_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "applied"
+                      ]
+                    },
+                    "resolved_by": {
+                      "type": "string"
+                    },
+                    "card_modified": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Review is not in a state that can be applied, or has no proposed amendment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Review or alignment card not found."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/reviews/{review_id}/dismiss": {
+      "post": {
+        "operationId": "dismissReview",
+        "summary": "Dismiss a review without applying",
+        "tags": [
+          "Enforcement"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Review dismissed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "review_id",
+                    "status"
+                  ],
+                  "properties": {
+                    "review_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "dismissed"
+                      ]
+                    },
+                    "resolved_by": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/settings": {
+      "get": {
+        "operationId": "getAgentSettings",
+        "summary": "Get agent observability + enforcement settings",
+        "description": "Returns per-agent AAP/AIP toggles, proof settings, nudge strategy, DDR (drift-detection response) mode, and analyze-output opt-in.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSettings"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found."
+          }
+        }
+      },
+      "put": {
+        "operationId": "putAgentSettings",
+        "summary": "Update agent settings",
+        "description": "Partial update — include only the fields to change. Enabling `proof_enabled` requires the `zk_proofs` feature flag on the agent's plan (403 otherwise). Enabling any `ddr_mode` other than `off` requires the `reconciliation` feature flag.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "aap_enabled": {
+                    "type": "boolean"
+                  },
+                  "aip_enabled": {
+                    "type": "boolean"
+                  },
+                  "proof_enabled": {
+                    "type": "boolean",
+                    "description": "Requires `zk_proofs` feature flag."
+                  },
+                  "proof_rate": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Percentage of checkpoints to prove (0–100)."
+                  },
+                  "nudge_strategy": {
+                    "type": "string",
+                    "enum": [
+                      "always",
+                      "sampling",
+                      "threshold",
+                      "off"
+                    ]
+                  },
+                  "ddr_mode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "flag",
+                      "auto-suggest",
+                      "auto-apply"
+                    ],
+                    "description": "Non-`off` values require `reconciliation` feature flag."
+                  },
+                  "analyze_output": {
+                    "type": "boolean"
+                  }
+                },
+                "minProperties": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentSettings"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "updated": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Plan does not include the required feature flag (`zk_proofs` or `reconciliation`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/deletion-status": {
+      "get": {
+        "operationId": "getDeletionStatus",
+        "summary": "Poll the status of a pending agent deletion",
+        "description": "Returns the most-recent `deletion_request` row for the agent. Status progresses: `tombstoned` → `phase_N_complete` → `kv_cleared` → `pseudonymized` → `complete` (or `failed` at any phase). Used to track the async GDPR Art. 17 cascade kicked off by `DELETE /agents/{agent_id}`. See ADR-021.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion request status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionRequestStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "No deletion request has been filed for this agent."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/zk-proof-count": {
+      "get": {
+        "operationId": "getZkProofCount",
+        "summary": "Count completed ZK proofs for an agent",
+        "description": "Public endpoint. Returns the count of `verdict_proofs` rows in `completed` state across all of the agent's checkpoints. Intended for embeddable verification widgets.",
+        "tags": [
+          "Verification"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count of completed ZK proofs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "count"
+                  ],
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/topology": {
+      "get": {
+        "operationId": "getAgentTopology",
+        "summary": "Graph of the caller's agents + trust edges",
+        "description": "Returns a `{nodes, edges}` graph of every agent linked to the authenticated user, suitable for dashboard topology rendering. **Feature-gated:** requires the `trust_topology` feature flag on the caller's plan. Falls back to `{nodes: [], edges: []}` if the backing RPC fails.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "x-feature-gate": "trust_topology",
+        "responses": {
+          "200": {
+            "description": "Topology graph.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "nodes",
+                    "edges"
+                  ],
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Plan does not include the `trust_topology` feature."
+          }
+        }
+      }
+    },
     "/aip/webhooks": {
       "post": {
         "operationId": "registerAipWebhook",
@@ -13896,6 +14468,173 @@
           "type",
           "response"
         ],
+        "additionalProperties": true
+      },
+      "AgentSettings": {
+        "type": "object",
+        "description": "Per-agent observability + enforcement knobs.",
+        "required": [
+          "agent_id",
+          "aap_enabled",
+          "aip_enabled",
+          "proof_enabled",
+          "proof_rate",
+          "nudge_strategy",
+          "ddr_mode",
+          "analyze_output"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "aap_enabled": {
+            "type": "boolean"
+          },
+          "aip_enabled": {
+            "type": "boolean"
+          },
+          "proof_enabled": {
+            "type": "boolean"
+          },
+          "proof_rate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "nudge_strategy": {
+            "type": "string",
+            "enum": [
+              "always",
+              "sampling",
+              "threshold",
+              "off"
+            ]
+          },
+          "ddr_mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "flag",
+              "auto-suggest",
+              "auto-apply"
+            ]
+          },
+          "analyze_output": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DeletionRequestStatus": {
+        "type": "object",
+        "description": "Tracks progress of the async GDPR Art. 17 deletion cascade (ADR-021).",
+        "required": [
+          "deletion_request_id",
+          "status",
+          "requested_at",
+          "retry_count"
+        ],
+        "properties": {
+          "deletion_request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "tombstoned",
+              "phase_1_complete",
+              "phase_2_complete",
+              "phase_3_complete",
+              "phase_4_complete",
+              "kv_cleared",
+              "pseudonymized",
+              "complete",
+              "failed"
+            ]
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "failed_phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retry_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "DisagreementReview": {
+        "type": "object",
+        "description": "Row from `disagreement_reviews` — a human-adjudicable action that failed to find consensus during enforcement.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "review",
+              "applied",
+              "dismissed"
+            ]
+          },
+          "proposed_amendment": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "description": "Action the reviewer proposes to add to `autonomy_envelope.bounded_actions`."
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "additionalProperties": true
       }
     }
