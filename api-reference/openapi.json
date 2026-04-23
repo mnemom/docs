@@ -11101,6 +11101,266 @@
           }
         }
       }
+    },
+    "/agents/{agent_id}/trust-edges": {
+      "get": {
+        "operationId": "listTrustEdges",
+        "summary": "List trust edges from or to an agent",
+        "description": "Returns trust-relationship edges that the agent participates in. `direction=outbound` returns edges originating from this agent; `inbound` returns edges pointing at this agent; `both` (default) deduplicates.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "outbound",
+                "inbound",
+                "both"
+              ],
+              "default": "both"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Edges.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent_id",
+                    "direction",
+                    "edges",
+                    "count"
+                  ],
+                  "properties": {
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "type": "string"
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrustEdge"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTrustEdge",
+        "summary": "Create a trust edge from this agent to another",
+        "description": "Caller must own the `from` agent (or be an admin). `weight` is clamped to [0, 1] with default 0.5. Returns 409 if an edge already exists in the same direction.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "to_agent"
+                ],
+                "properties": {
+                  "to_agent": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.5
+                  },
+                  "reason": {
+                    "type": "string",
+                    "default": "manual"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Edge created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/TrustEdge"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "created": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing `to_agent` or self-loop.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller does not own the source agent."
+          },
+          "404": {
+            "description": "Source or target agent not found."
+          },
+          "409": {
+            "description": "A trust edge already exists between these agents in this direction."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/trust-edges/{edge_id}": {
+      "delete": {
+        "operationId": "deleteTrustEdge",
+        "summary": "Delete a trust edge",
+        "description": "Caller must own the source agent (`from_agent`) or be an admin. Either source or target agent id may appear in the path.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "edge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller does not own the source agent."
+          },
+          "404": {
+            "description": "Edge not found, or the edge does not touch this agent."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13897,6 +14157,35 @@
           "response"
         ],
         "additionalProperties": true
+      },
+      "TrustEdge": {
+        "type": "object",
+        "description": "Directed trust-relationship edge between two agents (CLPI Phase 3). Used by the trust-topology RPC and the team reputation scorer.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Prefixed `te-…` identifier."
+          },
+          "from_agent": {
+            "type": "string"
+          },
+          "to_agent": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-form label (e.g. `manual`, `roster_coherence`, `co_deployment`)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }
