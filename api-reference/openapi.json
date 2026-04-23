@@ -11101,6 +11101,496 @@
           }
         }
       }
+    },
+    "/deployments/heartbeat": {
+      "post": {
+        "operationId": "deploymentHeartbeat",
+        "summary": "Self-hosted deployment heartbeat",
+        "description": "Called periodically by a self-hosted Mnemom instance to report liveness, version, and metadata back to the managed control plane. Uses a **License JWT** bearer token (not a user JWT) — the token is issued during license validation. The response includes `next_heartbeat_seconds` telling the instance when to call back.",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "LicenseJwtAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "deployment_id",
+                  "instance_id"
+                ],
+                "properties": {
+                  "deployment_id": {
+                    "type": "string"
+                  },
+                  "instance_id": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "heartbeat_data": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Free-form liveness telemetry (uptime, resource usage, component versions …)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Heartbeat accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deployment_id",
+                    "status",
+                    "next_heartbeat_seconds",
+                    "server_time"
+                  ],
+                  "properties": {
+                    "deployment_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "inactive",
+                        "degraded"
+                      ]
+                    },
+                    "next_heartbeat_seconds": {
+                      "type": "integer",
+                      "default": 300
+                    },
+                    "server_time": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "License token invalid or expired."
+          },
+          "404": {
+            "description": "Deployment not found or instance_id mismatch."
+          },
+          "503": {
+            "description": "License verification not configured, or the heartbeat RPC is temporarily unavailable."
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/deployments": {
+      "get": {
+        "operationId": "listOrgDeployments",
+        "summary": "List self-hosted deployments for an org",
+        "description": "Any org member (owner / admin / member / viewer / auditor) may list deployments. Filter by `status` (`active`, `inactive`, `degraded`).",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "inactive",
+                "degraded"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "deployments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SelfHostedDeployment"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerOrgDeployment",
+        "summary": "Register a new self-hosted deployment",
+        "description": "Requires org `owner` or `admin`. The `license_id` must already exist and belong to this org (verified via `verify_org_license` RPC). The deployment starts in `active` status.",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "instance_name",
+                  "instance_id",
+                  "license_id"
+                ],
+                "properties": {
+                  "instance_name": {
+                    "type": "string"
+                  },
+                  "instance_id": {
+                    "type": "string"
+                  },
+                  "license_id": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "instance_metadata": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deployment registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfHostedDeployment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "License not found or does not belong to this organization."
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/deployments/{deployment_id}": {
+      "get": {
+        "operationId": "getOrgDeployment",
+        "summary": "Get a self-hosted deployment",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "deployment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfHostedDeployment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Deployment not found."
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateOrgDeployment",
+        "summary": "Update a self-hosted deployment",
+        "description": "Partial update. Requires org `owner` or `admin`. Allowed fields: `instance_name`, `region`, `status` (`active`/`inactive`/`degraded`), `version`, `instance_metadata`.",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "deployment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "minProperties": 1,
+                "properties": {
+                  "instance_name": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "inactive",
+                      "degraded"
+                    ]
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "instance_metadata": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Update accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deployment_id": {
+                      "type": "string"
+                    },
+                    "updated": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Deployment not found."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgDeployment",
+        "summary": "Delete a self-hosted deployment",
+        "description": "Requires org `owner` or `admin`. Hard-deletes the `self_hosted_deployments` row. The license remains valid — re-register to replace.",
+        "tags": [
+          "Licensing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "deployment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deployment_id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Deployment not found."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11128,6 +11618,12 @@
         "in": "cookie",
         "name": "mnemom_session",
         "description": "HttpOnly, Secure, SameSite=Lax cookie issued by /v1/auth/sign-in (or the SSO / email-callback flows). The value is an AES-256-GCM-encrypted blob of {access_token, refresh_token, issued_at, auth_method}. Browser clients include this automatically with `credentials: \"include\"`."
+      },
+      "LicenseJwtAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "License JWT (HS256, HMAC-signed with LICENSE_SIGNING_SECRET). Used by self-hosted deployment instances to authenticate `/v1/deployments/heartbeat`. Not interchangeable with the Supabase user JWT."
       }
     },
     "parameters": {
@@ -13897,6 +14393,71 @@
           "response"
         ],
         "additionalProperties": true
+      },
+      "SelfHostedDeployment": {
+        "type": "object",
+        "description": "A self-hosted Mnemom deployment registered by an org.",
+        "properties": {
+          "deployment_id": {
+            "type": "string",
+            "description": "Prefixed `dep-…` identifier assigned on registration."
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "license_id": {
+            "type": "string"
+          },
+          "instance_name": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "degraded"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeat_data": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "instance_metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "last_heartbeat_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }
