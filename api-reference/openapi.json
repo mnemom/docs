@@ -558,6 +558,603 @@
         }
       }
     },
+    "/agents/{agent_id}/alignment-card": {
+      "get": {
+        "operationId": "getAlignmentCard",
+        "summary": "Get the agent's canonical alignment card",
+        "description": "Returns the UC-4 unified alignment card. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scope sources (platform / org template / agent card / exemptions) were merged. See ADR-008.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "include_composition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Include the `_composition` metadata block."
+          },
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "text/yaml",
+                "application/yaml",
+                "application/json"
+              ]
+            },
+            "description": "Response format. YAML is canonical; JSON is returned only on explicit `application/json`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical alignment card.",
+            "headers": {
+              "X-Mnemom-Schema": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Schema identity for this response."
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No canonical alignment card found for this agent. Publish one with `PUT /agents/{agent_id}/alignment-card`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putAlignmentCard",
+        "summary": "Publish or replace the agent's alignment card",
+        "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON (`application/json`). Body is the full UnifiedAlignmentCard; server-side composition merges it with platform defaults, the org alignment template, and any active exemptions, then stores the canonical composed card. Requires `Idempotency-Key` — replays within 24 hours return the stored result. Body cap: 128 KiB. See ADR-008 and ADR-023.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Replay key (24 h window)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Card accepted, composed, and stored. Body is the post-composition canonical card.",
+            "headers": {
+              "X-Mnemom-Schema": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Card failed schema validation (e.g. missing `values.declared`, bad enforcement mode, unknown escalation action).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/protection-card": {
+      "get": {
+        "operationId": "getProtectionCard",
+        "summary": "Get the agent's canonical protection card",
+        "description": "Returns the UC-4 unified protection card (Safe House thresholds + trusted sources). YAML by default, JSON with `Accept: application/json`. See ADR-008.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "include_composition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical protection card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedProtectionCard"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedProtectionCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No canonical protection card found. Publish one with `PUT /agents/{agent_id}/protection-card`."
+          }
+        }
+      },
+      "put": {
+        "operationId": "putProtectionCard",
+        "summary": "Publish or replace the agent's protection card",
+        "description": "Accepts YAML or JSON. Body cap: 64 KiB. Requires `Idempotency-Key`. Server composes with platform protection defaults and any org-level protection template. See ADR-008.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Card accepted, composed, and stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedProtectionCard"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedProtectionCard"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/exemptions": {
+      "get": {
+        "operationId": "listAgentExemptions",
+        "summary": "List active exemptions for an agent",
+        "description": "Exemptions relax an org-level template floor for a single agent (replaces the old coarse `org_card_exempt` boolean). Only non-expired, status=active entries are returned. Any org member (owner/admin/member/viewer/auditor) may read. See ADR-008 (UC-4).",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active exemptions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "agent_id",
+                    "exemptions",
+                    "total"
+                  ],
+                  "properties": {
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "exemptions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentExemption"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "grantAgentExemption",
+        "summary": "Grant an exemption to an agent",
+        "description": "Requires org `owner` or `admin` of the agent's org. Personal agents (no org) cannot have exemptions and receive 400. Reason is required (20–500 chars). `expires_at` defaults to +90 days if omitted; pass `null` for permanent (opt-in only). Requires `Idempotency-Key`. Emits a `agent.exemption.granted` webhook and writes a governance audit row. Triggers a recompose of the agent's canonical cards. See ADR-008.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "exempt_section",
+                  "reason"
+                ],
+                "properties": {
+                  "exempt_section": {
+                    "type": "string",
+                    "enum": [
+                      "autonomy.forbidden_actions",
+                      "enforcement.forbidden_tools",
+                      "autonomy.max_autonomous_value"
+                    ],
+                    "description": "Template section this exemption relaxes."
+                  },
+                  "exempt_patterns": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    "maxItems": 50,
+                    "description": "Specific patterns to exempt within the section. `null` exempts the entire section."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 500,
+                    "description": "Business justification for the exemption (required, ≥20 chars)."
+                  },
+                  "expires_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Expiry. Omit for default +90 days. `null` = permanent (explicit opt-in)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Exemption granted; canonical cards recomposed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "exemption",
+                    "agent_id",
+                    "recomposed"
+                  ],
+                  "properties": {
+                    "exemption": {
+                      "$ref": "#/components/schemas/AgentExemption"
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "recomposed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, or agent has no org.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "Request body exceeds 8 KiB."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/exemptions/{exemption_id}": {
+      "delete": {
+        "operationId": "revokeAgentExemption",
+        "summary": "Revoke an active exemption",
+        "description": "Hard-deletes the exemption row (the governance audit log is the permanent record). Requires org `owner`/`admin`. Idempotency-Key required. Emits `agent.exemption.revoked` and recomposes the agent. See ADR-008.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "name": "exemption_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exemption revoked; agent recomposed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    },
+                    "exemption_id": {
+                      "type": "string"
+                    },
+                    "recomposed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Exemption not found for this agent."
+          }
+        }
+      }
+    },
     "/agents/{agent_id}/link": {
       "post": {
         "operationId": "linkAgent",
@@ -7037,6 +7634,423 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/alignment-template": {
+      "get": {
+        "operationId": "getOrgAlignmentTemplate",
+        "summary": "Get the org alignment template",
+        "description": "Returns the org-level alignment template that is composed into every member agent's canonical card (between platform defaults and the agent's own card). Any org role (owner/admin/member/viewer/auditor) may read. Returns `template: null, enabled: false` if none is set. See ADR-008 (UC-4).",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Alignment template (YAML or JSON).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putOrgAlignmentTemplate",
+        "summary": "Publish or replace the org alignment template",
+        "description": "Requires org `owner` or `admin`. Accepts YAML or JSON. Body cap: 128 KiB. The first PUT auto-enables the template; subsequent PUTs leave `enabled` unchanged unless explicitly overridden. Every member agent is flagged for canonical recompose. Requires `Idempotency-Key`. See ADR-008.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template stored and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "agents_flagged_for_recompose": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Template failed schema validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgAlignmentTemplate",
+        "summary": "Delete the org alignment template",
+        "description": "Clears the org alignment template (stored as `null`, `enabled: false`) and flags every member agent for recompose so their canonical cards fall back to platform defaults + agent card. Requires org `owner`/`admin` and `Idempotency-Key`. See ADR-008.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template cleared and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "type": "null"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/protection-template": {
+      "get": {
+        "operationId": "getOrgProtectionTemplate",
+        "summary": "Get the org protection template",
+        "description": "Returns the org-level protection (Safe House) template composed into every member agent's canonical protection card. Any org role may read. See ADR-008 (UC-4).",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protection template (YAML or JSON).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putOrgProtectionTemplate",
+        "summary": "Publish or replace the org protection template",
+        "description": "Requires org `owner`/`admin`. Body cap: 64 KiB. Every member agent is flagged for canonical recompose. Requires `Idempotency-Key`. See ADR-008.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template stored and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/OrgCardTemplateResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "agents_flagged_for_recompose": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOrgProtectionTemplate",
+        "summary": "Delete the org protection template",
+        "description": "Clears the org protection template and flags every member agent for recompose. Requires org `owner`/`admin` and `Idempotency-Key`. See ADR-008.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template cleared and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "type": "null"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -13897,6 +14911,598 @@
           "response"
         ],
         "additionalProperties": true
+      },
+      "UnifiedAlignmentCard": {
+        "type": "object",
+        "description": "UC-4 unified alignment card (ADR-008). Authored in YAML or JSON; composed server-side with platform defaults, org template, and active exemptions before storage.",
+        "required": [
+          "card_version",
+          "agent_id",
+          "values",
+          "autonomy",
+          "audit"
+        ],
+        "properties": {
+          "card_version": {
+            "type": "string",
+            "description": "Card schema version (e.g. `0.5.0`)."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Card row id. Server-assigned on PUT (`ac-{uuid}`)."
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Target agent id. On PUT, server overwrites to match the URL path."
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "principal": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "human",
+                  "organization",
+                  "agent",
+                  "unspecified"
+                ]
+              },
+              "identifier": {
+                "type": "string"
+              },
+              "relationship": {
+                "type": "string",
+                "enum": [
+                  "delegated_authority",
+                  "advisory",
+                  "autonomous"
+                ]
+              },
+              "escalation_contact": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "relationship"
+            ]
+          },
+          "values": {
+            "type": "object",
+            "required": [
+              "declared"
+            ],
+            "properties": {
+              "declared": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Ordered list of declared values (e.g. `['helpfulness','honesty','harmlessness']`)."
+              },
+              "definitions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "conflicts_with": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "hierarchy": {
+                "type": "string",
+                "enum": [
+                  "lexicographic",
+                  "weighted",
+                  "contextual"
+                ]
+              }
+            }
+          },
+          "conscience": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "augment",
+                  "replace"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "content"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "BOUNDARY",
+                        "FEAR",
+                        "COMMITMENT",
+                        "BELIEF",
+                        "HOPE"
+                      ]
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "advisory",
+                        "mandatory"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "mode",
+              "values"
+            ]
+          },
+          "integrity": {
+            "type": "object",
+            "properties": {
+              "enforcement_mode": {
+                "type": "string",
+                "enum": [
+                  "observe",
+                  "nudge",
+                  "enforce"
+                ]
+              }
+            }
+          },
+          "autonomy": {
+            "type": "object",
+            "required": [
+              "bounded_actions",
+              "escalation_triggers"
+            ],
+            "properties": {
+              "bounded_actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "forbidden_actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "escalation_triggers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "condition",
+                    "action",
+                    "reason"
+                  ],
+                  "properties": {
+                    "condition": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "escalate",
+                        "deny",
+                        "log"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "max_autonomous_value": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "required_actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "enforcement": {
+            "type": "object",
+            "properties": {
+              "forbidden_tools": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "pattern",
+                    "reason",
+                    "severity"
+                  ],
+                  "properties": {
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "critical",
+                        "high",
+                        "medium",
+                        "low"
+                      ]
+                    }
+                  }
+                }
+              },
+              "unmapped_tool_action": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny",
+                  "warn"
+                ]
+              },
+              "fail_open": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "warn",
+                  "enforce"
+                ]
+              },
+              "grace_period_hours": {
+                "type": "integer"
+              }
+            }
+          },
+          "audit": {
+            "type": "object",
+            "required": [
+              "retention_days",
+              "queryable"
+            ],
+            "properties": {
+              "trace_format": {
+                "type": "string"
+              },
+              "retention_days": {
+                "type": "integer"
+              },
+              "queryable": {
+                "type": "boolean"
+              },
+              "query_endpoint": {
+                "type": "string"
+              },
+              "tamper_evidence": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "append_only",
+                  "signed",
+                  "merkle",
+                  null
+                ]
+              },
+              "storage": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "remote",
+                      "distributed"
+                    ]
+                  },
+                  "location": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "_composition": {
+            "$ref": "#/components/schemas/CompositionMetadata"
+          }
+        }
+      },
+      "UnifiedProtectionCard": {
+        "type": "object",
+        "description": "UC-4 unified protection card (ADR-008). Safe House thresholds + trusted-source policy for a single agent.",
+        "required": [
+          "card_version",
+          "agent_id",
+          "mode",
+          "thresholds",
+          "screen_surfaces",
+          "trusted_sources"
+        ],
+        "properties": {
+          "card_version": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "observe",
+              "enforce",
+              "enforce_sync",
+              "sovereign"
+            ]
+          },
+          "thresholds": {
+            "type": "object",
+            "required": [
+              "warn",
+              "quarantine",
+              "block"
+            ],
+            "properties": {
+              "warn": {
+                "type": "number"
+              },
+              "quarantine": {
+                "type": "number"
+              },
+              "block": {
+                "type": "number"
+              }
+            }
+          },
+          "screen_surfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trusted_sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pattern",
+                "trust_tier",
+                "risk_multiplier"
+              ],
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "trust_tier": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low",
+                    "unknown"
+                  ]
+                },
+                "risk_multiplier": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "_composition": {
+            "$ref": "#/components/schemas/CompositionMetadata"
+          }
+        }
+      },
+      "CompositionMetadata": {
+        "type": "object",
+        "description": "System-managed block describing which scope sources merged into the canonical card. Only returned when `?include_composition=true`.",
+        "properties": {
+          "canonical_id": {
+            "type": "string"
+          },
+          "composed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scopes_applied": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "description": "`platform`, `org:<id>`, or `agent:<id>`."
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "template_version": {
+                  "type": "integer"
+                },
+                "card_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "exemptions_applied": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_card_id": {
+            "type": "string"
+          },
+          "source_policy_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentExemption": {
+        "type": "object",
+        "description": "A single exemption row relaxing an org-template floor for one agent (UC-4, ADR-008).",
+        "required": [
+          "id",
+          "agent_id",
+          "exempt_section",
+          "reason",
+          "granted_by",
+          "granted_at",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "exempt_section": {
+            "type": "string",
+            "enum": [
+              "autonomy.forbidden_actions",
+              "enforcement.forbidden_tools",
+              "autonomy.max_autonomous_value"
+            ]
+          },
+          "exempt_patterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "granted_by": {
+            "type": "string"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active"
+            ],
+            "description": "Always `active` in UC-4 (forward-compat stub for future dual-control approval workflow)."
+          }
+        }
+      },
+      "OrgCardTemplateResponse": {
+        "type": "object",
+        "required": [
+          "org_id",
+          "template",
+          "enabled"
+        ],
+        "properties": {
+          "org_id": {
+            "type": "string"
+          },
+          "template": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              },
+              {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }
