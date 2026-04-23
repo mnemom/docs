@@ -119,6 +119,10 @@
     {
       "name": "On-Chain",
       "description": "On-chain Merkle root anchoring and score publishing. Anchor integrity proofs to blockchain, publish scores, and verify on-chain proofs."
+    },
+    {
+      "name": "Safe House",
+      "description": "Inbound prompt quarantine, outbound (CBD) screening, threat patterns, canary credentials, evaluation feed + query, metrics, campaigns, audit, and compliance reports. Internal codename in the source tree is \"Context Front Door (CFD)\"; customer-facing routes live under `/v1/safe-house/*`."
     }
   ],
   "security": [
@@ -11101,6 +11105,1402 @@
           }
         }
       }
+    },
+    "/safe-house/quarantine": {
+      "get": {
+        "operationId": "listQuarantine",
+        "summary": "List quarantined messages",
+        "description": "Returns quarantined messages for the caller's org, filterable by status. Internal codename for this subsystem is \"Context Front Door (CFD)\"; the customer-facing name is **Safe House**.",
+        "tags": [
+          "Safe House"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "released",
+                "deleted",
+                "confirmed_threat",
+                "all"
+              ],
+              "default": "pending"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quarantine page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QuarantineItem"
+                      }
+                    },
+                    "total": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/quarantine/{quarantine_id}": {
+      "get": {
+        "operationId": "getQuarantineItem",
+        "summary": "Get a single quarantined message",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "quarantine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quarantine record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineItem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Quarantine item not found."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteQuarantineItem",
+        "summary": "Delete a quarantine item without releasing",
+        "description": "Marks the item `deleted`. The underlying content hash is retained for audit. No refund of the original (blocked) prompt to the calling agent.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "quarantine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quarantine_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "deleted"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/quarantine/{quarantine_id}/release": {
+      "post": {
+        "operationId": "releaseQuarantineItem",
+        "summary": "Release a quarantined message back to the agent",
+        "description": "Flip status to `released`. Pass `is_false_positive: true` in the body to record a calibration signal and write a benign-labeled pattern (helps tune L1/L2 detection).",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "quarantine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "is_false_positive": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Released.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quarantine_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "released"
+                      ]
+                    },
+                    "false_positive_recorded": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/quarantine/{quarantine_id}/report": {
+      "post": {
+        "operationId": "reportQuarantineThreat",
+        "summary": "Confirm a quarantined message as a threat",
+        "description": "Marks the item `confirmed_threat` for arena sideband analysis. Does **not** write to `sh_threat_patterns` — the quarantine store holds only a content hash, and the pattern table requires plaintext.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "quarantine_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quarantine_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "confirmed_threat"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Quarantine item not found."
+          }
+        }
+      }
+    },
+    "/safe-house/patterns": {
+      "get": {
+        "operationId": "listSafeHousePatterns",
+        "summary": "List active threat patterns",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "threat_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active patterns.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SafeHousePattern"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSafeHousePattern",
+        "summary": "Add a new threat pattern",
+        "description": "Requires API key or bearer JWT. `label: \"benign\"` adds a known-safe pattern (reduces false positives).",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "threat_type",
+                  "content",
+                  "label"
+                ],
+                "properties": {
+                  "threat_type": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string",
+                    "enum": [
+                      "malicious",
+                      "benign"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "default": "arena"
+                  },
+                  "minhash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pattern created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHousePattern"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/safe-house/stats": {
+      "get": {
+        "operationId": "getSafeHouseStats",
+        "summary": "Aggregate Safe House evaluation stats",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "default": 7
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verdict counts + threat-type histogram.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verdicts": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "threat_types": {
+                      "type": "array"
+                    },
+                    "period_days": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/canaries": {
+      "get": {
+        "operationId": "listSafeHouseCanaries",
+        "summary": "List canary credentials for an agent",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canary list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SafeHouseCanary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSafeHouseCanary",
+        "summary": "Create a canary credential",
+        "description": "Generates a format-valid but non-functional credential (api_key / password / database_url / ssh_key / oauth_token). The canary value is **only returned on creation** — plant it in the agent's context so exfiltration attempts trip it.",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "agent_id",
+                  "canary_type"
+                ],
+                "properties": {
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "canary_type": {
+                    "type": "string",
+                    "enum": [
+                      "api_key",
+                      "password",
+                      "database_url",
+                      "ssh_key",
+                      "oauth_token"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Canary created. `canary_value` is returned once and must be captured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SafeHouseCanary"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "canary_value"
+                      ],
+                      "properties": {
+                        "canary_value": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/safe-house/canaries/{canary_id}/status": {
+      "get": {
+        "operationId": "getCanaryStatus",
+        "summary": "Check whether a canary has been triggered",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "canary_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canary status (no value returned).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHouseCanary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Canary not found."
+          }
+        }
+      }
+    },
+    "/safe-house/config/bulk-apply": {
+      "post": {
+        "operationId": "safeHouseBulkApply",
+        "summary": "Bulk apply a Safe House config to up to 500 agents",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "agent_ids",
+                  "config"
+                ],
+                "properties": {
+                  "agent_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "disabled",
+                          "off",
+                          "observe",
+                          "enforce",
+                          "enforce_sync",
+                          "sovereign"
+                        ]
+                      },
+                      "thresholds": {
+                        "type": "object",
+                        "properties": {
+                          "warn": {
+                            "type": "number"
+                          },
+                          "quarantine": {
+                            "type": "number"
+                          },
+                          "block": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "screen_surfaces": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "trusted_sources": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "settings": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/safe-house/feed": {
+      "get": {
+        "operationId": "safeHouseFeed",
+        "summary": "Server-Sent Events stream of Safe House evaluations",
+        "description": "Long-lived SSE stream that pushes new Safe House evaluations in near-real-time. Polls internally every 2s, heartbeats every ~15s, and closes after 5 minutes (client should reconnect). Filter by agent, org, surface, verdict list (comma-separated), and minimum risk.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated verdict filter (e.g. `quarantine,block`)."
+          },
+          {
+            "name": "min_risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream; each `data:` line is a JSON event (agent_id, verdict, overall_risk, top_threat, …).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/evaluations": {
+      "get": {
+        "operationId": "listSafeHouseEvaluations",
+        "summary": "Query inbound Safe House evaluations",
+        "description": "Paginated query of `sh_evaluations` (inbound prompt screening). Time-bounded by `from`/`to` (default last 24h). Cursor-paginated via `after`.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "threat_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "min_risk",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHouseEvaluationPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/evaluations/{evaluation_id}": {
+      "get": {
+        "operationId": "getSafeHouseEvaluation",
+        "summary": "Get a single Safe House evaluation",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "evaluation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHouseEvaluation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Evaluation not found."
+          }
+        }
+      }
+    },
+    "/safe-house/cbd/evaluations": {
+      "get": {
+        "operationId": "listCbdEvaluations",
+        "summary": "Query outbound (CBD) Safe House evaluations",
+        "description": "Same shape as `/safe-house/evaluations`, but scoped to CBD = Context Back Door (outbound / exfiltration screening).",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHouseEvaluationPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/cbd/evaluations/{evaluation_id}": {
+      "get": {
+        "operationId": "getCbdEvaluation",
+        "summary": "Get a single outbound (CBD) evaluation",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "evaluation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafeHouseEvaluation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Evaluation not found."
+          }
+        }
+      }
+    },
+    "/safe-house/metrics/summary": {
+      "get": {
+        "operationId": "safeHouseMetricsSummary",
+        "summary": "Aggregate verdict counts over a window",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pass": {
+                      "type": "integer"
+                    },
+                    "warn": {
+                      "type": "integer"
+                    },
+                    "quarantine": {
+                      "type": "integer"
+                    },
+                    "block": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "block_rate": {
+                      "type": "number"
+                    },
+                    "warn_rate": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/metrics/timeseries": {
+      "get": {
+        "operationId": "safeHouseMetricsTimeseries",
+        "summary": "Time-series of verdict counts",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "default": "hour"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Buckets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "buckets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/metrics/threats": {
+      "get": {
+        "operationId": "safeHouseMetricsThreats",
+        "summary": "Threat-type histogram over a window",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Histogram.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/metrics/risk-dist": {
+      "get": {
+        "operationId": "safeHouseMetricsRiskDist",
+        "summary": "Risk-score distribution over a window",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Distribution buckets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/sessions": {
+      "get": {
+        "operationId": "listSafeHouseSessions",
+        "summary": "List Safe House sessions (threat clusters)",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Session list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/audit": {
+      "get": {
+        "operationId": "safeHouseAuditLog",
+        "summary": "Audit log for Safe House actions",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compliance/safe-house-report": {
+      "get": {
+        "operationId": "safeHouseComplianceReport",
+        "summary": "Compliance-formatted Safe House report",
+        "description": "Phase-7 compliance report combining aggregate detection stats, retention state, and GDPR/SOC2-friendly formatting.",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/campaigns": {
+      "get": {
+        "operationId": "listSafeHouseCampaigns",
+        "summary": "List detected threat campaigns",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Campaigns.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/campaigns/{campaign_id}/resolve": {
+      "post": {
+        "operationId": "resolveSafeHouseCampaign",
+        "summary": "Resolve a detected campaign",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resolution": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved."
+          },
+          "404": {
+            "description": "Campaign not found."
+          }
+        }
+      }
+    },
+    "/safe-house/threshold-suggestions": {
+      "get": {
+        "operationId": "safeHouseThresholdSuggestions",
+        "summary": "Adaptive threshold recommendations",
+        "description": "Returns suggested warn/quarantine/block thresholds based on recent evaluation history, to reduce false positives without losing threat coverage.",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggested thresholds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safe-house/sovereign-setup": {
+      "post": {
+        "operationId": "safeHouseSovereignSetup",
+        "summary": "Enable sovereign (self-hosted) Safe House mode",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Setup accepted."
+          }
+        }
+      }
+    },
+    "/safe-house/ingest-pattern": {
+      "post": {
+        "operationId": "safeHouseIngestPattern",
+        "summary": "Ingest a customer-supplied threat pattern",
+        "description": "Customer-submitted patterns feed the L1/L2 detection pipeline. See also the arena's public pattern feed.",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pattern ingested."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/safe-house/report-incident": {
+      "post": {
+        "operationId": "safeHouseReportIncident",
+        "summary": "Report a security incident",
+        "tags": [
+          "Safe House"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Incident recorded."
+          }
+        }
+      }
+    },
+    "/safe-house/context-cards": {
+      "get": {
+        "operationId": "safeHouseContextCards",
+        "summary": "List customer-authored context cards used for trust inference",
+        "tags": [
+          "Safe House"
+        ],
+        "responses": {
+          "200": {
+            "description": "Context cards.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/agents/safe-house-summary": {
+      "get": {
+        "operationId": "getOrgAgentsSafeHouseSummary",
+        "summary": "Fleet view of each member agent's Safe House posture",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-agent posture summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13897,6 +15297,248 @@
           "response"
         ],
         "additionalProperties": true
+      },
+      "QuarantineItem": {
+        "type": "object",
+        "description": "Quarantined message row. Stores only `content_hash` — the original plaintext is not retained once the message is quarantined.",
+        "properties": {
+          "quarantine_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "released",
+              "deleted",
+              "confirmed_threat"
+            ]
+          },
+          "threat_type": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true
+      },
+      "SafeHousePattern": {
+        "type": "object",
+        "description": "Row from `sh_threat_patterns`. `label: \"benign\"` patterns are used to suppress false positives; `label: \"malicious\"` patterns add to L1/L2 detection.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threat_type": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "malicious",
+              "benign"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "minhash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SafeHouseCanary": {
+        "type": "object",
+        "description": "Canary credential planted in an agent context. `canary_value` is only returned on creation.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "canary_type": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "password",
+              "database_url",
+              "ssh_key",
+              "oauth_token"
+            ]
+          },
+          "triggered": {
+            "type": "boolean"
+          },
+          "triggered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SafeHouseEvaluation": {
+        "type": "object",
+        "description": "Row from `sh_evaluations` — one screening decision (inbound or outbound). `threats` and `detector_scores` depend on detector config.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "surface": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "quarantine",
+              "block"
+            ]
+          },
+          "threats": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "overall_risk": {
+            "type": "number"
+          },
+          "detector_scores": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "detection_sources": {
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "session_multiplier": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": true
+      },
+      "SafeHouseEvaluationPage": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SafeHouseEvaluation"
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "after": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
       }
     }
   }
