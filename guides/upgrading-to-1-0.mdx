@@ -1,0 +1,288 @@
+---
+title: "Upgrading to AAP & AIP 1.0.0"
+description: "Step-by-step migration from the 0.x series to the 1.0.0 stability commitment release."
+sidebarTitle: "Upgrading to 1.0.0"
+icon: "arrow-up-right-dots"
+---
+
+# Upgrading to AAP & AIP 1.0.0
+
+On 2026-04-13 both protocol SDKs — [`@mnemom/agent-alignment-protocol`](https://github.com/mnemom/aap) and [`@mnemom/agent-integrity-protocol`](https://github.com/mnemom/aip) — shipped **1.0.0**. This is a **stability commitment** release: the public API surface is now locked, and breaking changes require a major bump to 2.0.
+
+The migration itself is small. There are no schema changes, no endpoint removals, and no signature changes on the customer-facing surface. Upgrading from 0.5.x is a version-string bump plus a rebuild.
+
+<Info>
+  **Backward compatible.** Existing alignment cards with `aap_version: "0.5.0"` or `"0.1.0"` continue to work unchanged. The 1.0.0 server accepts every 0.x card shape. Update at your own pace.
+</Info>
+
+## The 1.0.0 stability commitment
+
+The 1.0.0 release makes three explicit promises about what happens next:
+
+1. **Breaking changes now require a major bump to 2.0.** Field renames, removals, type changes, or required-parameter additions cannot ship within 1.x.
+2. **Each major version is supported for 18 months** from the release of its successor (see [API versioning](/guides/api-versioning) and ADR-006). That 18-month window is longer than most APIs and reflects our commitment to agentic callers that cannot self-update in response to deprecation notices.
+3. **Deprecation signals are explicit.** Deprecated versions return `Deprecation`, `Sunset`, and `Link` response headers, and API key owners receive email notifications at T+0, T+12 months, T+16 months, and T+17 months.
+
+The 1.x line will receive bug fixes and strictness improvements. New *card-format* features are reserved for 2.0.
+
+## What changed
+
+| Area | Before (0.5.x) | After (1.0.0) |
+|---|---|---|
+| AAP npm package | `@mnemom/agent-alignment-protocol@0.5.0` | `@mnemom/agent-alignment-protocol@1.0.0` |
+| AAP PyPI package | `agent-alignment-protocol==0.5.0` | `agent-alignment-protocol==1.0.0` |
+| AIP npm package | `@mnemom/agent-integrity-protocol@0.4.x–0.8.0` | `@mnemom/agent-integrity-protocol@1.0.0` |
+| AIP PyPI package | `agent-integrity-proto==0.4.x–0.8.0` | `agent-integrity-proto==1.0.0` |
+| `aap_version` emitted on new cards | `"0.5.0"` | `"1.0.0"` |
+| Python `__version__` (AAP) / `AIP_VERSION` | `"0.5.0"` / `"0.4.x"` | `"1.0.0"` / `"1.0.0"` |
+| Breaking-change policy | 0.x semantics — breaking changes at minor bumps | Locked — breaking changes require 2.0 |
+
+Nothing else changed. No alignment card schema edits, no endpoint removals, no signature changes.
+
+<Warning>
+**AIP callers on 0.7.x or earlier:** AIP 0.8.0 (also shipped 2026-04-13 as the pre-1.0 audit) removed `WindowManager` and `createWindowState` from the public exports. Window state is now managed internally by `createClient()`. If you import either symbol directly, migrate to `createClient()` before bumping to 1.0.0. The `WindowState` *type* remains exported.
+</Warning>
+
+## Migration
+
+<Steps>
+
+### Update your SDKs
+
+Install the 1.0.0 releases. Both protocols shipped on the same day with coordinated semver.
+
+<Tabs>
+  <Tab title="TypeScript / npm">
+    ```bash
+    npm install @mnemom/agent-alignment-protocol@1.0.0 \
+                @mnemom/agent-integrity-protocol@1.0.0
+    ```
+
+    Or with pnpm:
+
+    ```bash
+    pnpm add @mnemom/agent-alignment-protocol@1.0.0 \
+             @mnemom/agent-integrity-protocol@1.0.0
+    ```
+  </Tab>
+  <Tab title="Python / PyPI">
+    ```bash
+    pip install 'agent-alignment-protocol==1.0.0' \
+                'agent-integrity-proto==1.0.0'
+    ```
+
+    Or with uv:
+
+    ```bash
+    uv pip install 'agent-alignment-protocol==1.0.0' \
+                   'agent-integrity-proto==1.0.0'
+    ```
+  </Tab>
+</Tabs>
+
+After updating, any new alignment card created via the SDK defaults to `aap_version: "1.0.0"`.
+
+### Update your alignment cards
+
+Set `aap_version` to `"1.0.0"` on your existing cards. You can leave them on `"0.5.0"` — the server accepts both — but updating keeps reports consistent.
+
+<Tabs>
+  <Tab title="Via API">
+    ```bash
+    curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
+      -H "Authorization: Bearer $API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "card_json": {
+          "aap_version": "1.0.0",
+          "card_id": "ac-your-card-id",
+          "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
+          "issued_at": "2026-04-13T00:00:00Z",
+          "expires_at": "2026-10-13T00:00:00Z",
+          "principal": { "type": "human", "relationship": "delegated_authority" },
+          "values": {
+            "declared": ["transparency", "honesty", "harm_prevention"],
+            "hierarchy": "lexicographic"
+          },
+          "autonomy_envelope": {
+            "bounded_actions": ["inference", "read", "write"],
+            "escalation_triggers": [],
+            "forbidden_actions": ["exfiltrate_data"]
+          },
+          "audit_commitment": {
+            "trace_format": "ap-trace-v1",
+            "retention_days": 90,
+            "queryable": true,
+            "tamper_evidence": "append_only"
+          }
+        }
+      }'
+    ```
+  </Tab>
+  <Tab title="Via YAML / JSON file">
+    If you version-control your card as a local file, update the `aap_version` field and republish:
+
+    ```bash
+    # JSON
+    sed -i '' 's/"aap_version": "0.5.0"/"aap_version": "1.0.0"/' alignment-card.json
+
+    # YAML
+    sed -i '' 's/aap_version: "0.5.0"/aap_version: "1.0.0"/' alignment-card.yaml
+
+    # Validate and publish
+    mnemom card validate alignment-card.yaml
+    mnemom card publish alignment-card.yaml
+    ```
+  </Tab>
+</Tabs>
+
+See [Alignment Card Management](/guides/card-management) for the full lifecycle (claim, link, rekey).
+
+### Rebuild and redeploy
+
+Rebuild your service with the updated lockfiles and deploy. There are no runtime flags to flip, no environment variables to set, and no compatibility shims to configure.
+
+```bash
+# TypeScript
+npm ci && npm run build
+
+# Python
+pip install -r requirements.txt
+```
+
+### Verify 1.0.0 is in use
+
+Confirm the upgrade from three places:
+
+**SDK version at runtime.**
+
+<Tabs>
+  <Tab title="TypeScript">
+    ```typescript
+    import { AIP_VERSION } from '@mnemom/agent-integrity-protocol';
+
+    console.log(AIP_VERSION);
+    // → "1.0.0"
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import aap
+    from aip import AIP_VERSION
+
+    print(aap.__version__)   # → "1.0.0"
+    print(AIP_VERSION)       # → "1.0.0"
+    ```
+  </Tab>
+</Tabs>
+
+**API response headers.** Every response echoes the date-header API version in use:
+
+```bash
+curl -i https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Version: 2026-04-13" | grep -i x-mnemom-version
+# → X-Mnemom-Version: 2026-04-13
+```
+
+See [API versioning](/guides/api-versioning) for how to pin to a specific date. The 1.0.0 SDKs pin to `2026-04-13` by default.
+
+**Card contents.** Fetch a card you just wrote and confirm `aap_version`:
+
+```bash
+curl https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
+  -H "Authorization: Bearer $API_KEY" | jq '.card.aap_version'
+# → "1.0.0"
+```
+
+</Steps>
+
+## Coming from 0.1.0? You can skip 0.5
+
+The 0.x series was backward-compatible throughout — a `0.1.0` card is still accepted by the 1.0.0 server. If you are on 0.1.0, you do **not** need to pass through the [0.1.0 → 0.5.0 guide](/guides/upgrading-to-0-5) first. Bump directly to 1.0.0 using the steps above; replace `"0.5.0"` with `"1.0.0"` wherever it appears in that guide's examples.
+
+The 0.5.0 guide remains online as a historical migration record (useful mainly for the YAML authoring and Trust Edges context it introduced, both of which carry forward unchanged).
+
+## What's *not* in 1.0.0
+
+Because 1.0.0 is a stability commitment rather than a redesign, several things you might expect are not here:
+
+- **No new endpoints.** The API surface is the same as 0.5.x.
+- **No schema changes.** Alignment card, AP-trace, and integrity checkpoint schemas are unchanged.
+- **No deprecations yet.** No `Deprecation` or `Sunset` headers are emitted on any endpoint as of the 1.0.0 cut. The deprecation machinery is in place for future use.
+- **No unified agent card.** The unified YAML agent card (AAP + CLPI) is a 2.0 target, not a 1.0 feature. See [Forward-looking](#forward-looking-2-0-roadmap) below.
+- **No changes to ZK proof formats or Merkle tree structure.** Those are versioned separately by the AAP/AIP protocol specs, not by the SDK semver.
+
+## Forward-looking: 2.0 roadmap
+
+The 1.0.0 CHANGELOG entries include a forward-looking note: a 2.0 is planned that unifies AAP alignment cards and CLPI policy YAML into a single YAML agent card with runtime composition. The target is **6–12 months post-1.0**, informed by production data from the 1.0 install base.
+
+Until then, 1.x receives bug fixes and strictness improvements only — new card-format features are reserved for 2.0. When 2.0 ships, the 1.x line will enter the standard 18-month deprecation window per [ADR-006](/guides/api-versioning#support-window).
+
+<Note>
+The forward-looking note in the AAP and AIP 1.0.0 CHANGELOGs references ADR-007. That ADR has since been superseded by ADR-008 (Unified Cards), which describes the actual card model shipped in mnemom-api today. The 2.0 unified *YAML* agent card remains a planned future evolution on top of the ADR-008 foundation.
+</Note>
+
+## Support window
+
+Under [ADR-006](/guides/api-versioning#support-window), each major version is supported for **18 months** from the date its successor ships. In concrete terms:
+
+- 1.0.0 is the current major. It will be supported for at least 18 months after 2.0 ships.
+- When a new dated API version deprecates an endpoint or field in 1.0.0, you will receive `Deprecation` and `Sunset` response headers plus email notifications at T+0, T+12 months, T+16 months, and T+17 months.
+- Enterprise contracts may negotiate extended support; security vulnerabilities use an accelerated 30-day minimum window.
+
+Pin your integrations to `X-Mnemom-Version: 2026-04-13` in production so behavior stays stable until you choose to migrate. See [API versioning](/guides/api-versioning) for pinning details.
+
+## Checklist
+
+<Steps>
+
+### Update SDK packages
+
+Install `@mnemom/agent-alignment-protocol@1.0.0` and `@mnemom/agent-integrity-protocol@1.0.0` (or the PyPI equivalents).
+
+### Update alignment cards
+
+Set `aap_version` to `"1.0.0"` on every agent card, via API, CLI, or dashboard.
+
+### Rebuild and redeploy
+
+Ship the bumped lockfiles to every environment that calls the Mnemom API or emits AIP checkpoints.
+
+### Pin your API version
+
+Send `X-Mnemom-Version: 2026-04-13` on every production request. The 1.0.0 SDKs do this by default.
+
+### Verify
+
+Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version` on a live response, and confirm `aap_version` on a freshly-written card.
+
+</Steps>
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="Is this a breaking change?">
+    No. The 1.0.0 server accepts every 0.x card shape, and no endpoint signatures changed. 1.0.0 is a commitment that future breaking changes will require a 2.0 bump, not a redesign of the current surface.
+  </Accordion>
+  <Accordion title="Do I need to update all my agents at once?">
+    No. Cards with different `aap_version` values coexist without issues. Roll the update at whatever cadence suits you.
+  </Accordion>
+  <Accordion title="What if I'm still on AIP 0.7.x with `WindowManager`?">
+    AIP 0.8.0 (shipped the same day as 1.0.0 as the pre-1.0 audit) removed `WindowManager` and `createWindowState` from public exports. Switch to `createClient()`, which manages window state internally, before jumping to 1.0.0.
+  </Accordion>
+  <Accordion title="Will 1.x get new features?">
+    Bug fixes and strictness improvements, yes. New card-format features are reserved for 2.0 per the 1.0.0 CHANGELOG's forward-looking note.
+  </Accordion>
+  <Accordion title="When does the 18-month support window start?">
+    The 18-month clock for 1.0.0 starts the day 2.0 ships. Until then, 1.0.0 is the current major and receives ongoing support.
+  </Accordion>
+</AccordionGroup>
+
+## See also
+
+- [API versioning](/guides/api-versioning) — Pinning to a specific `X-Mnemom-Version` date header and understanding the support window.
+- [Alignment Card Management](/guides/card-management) — Creating, claiming, and linking cards.
+- [Alignment Cards](/concepts/alignment-cards) — Schema reference for the card model 1.0.0 locks in.
+- [Upgrading to AAP 0.5.0](/guides/upgrading-to-0-5) — Historical migration record for the `0.1.0 → 0.5.0` jump.
+- [Changelog](/changelog) — Full release history.
