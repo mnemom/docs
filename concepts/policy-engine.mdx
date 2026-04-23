@@ -1,6 +1,6 @@
 ---
 title: "Policy Engine"
-description: "Governance-as-code: a declarative policy DSL that bridges alignment cards to concrete tool enforcement"
+description: "Governance-as-code: capability mappings, forbidden rules, and enforcement modes, all declared in the alignment card's capabilities + enforcement sections"
 sidebarTitle: "Policy Engine"
 icon: "shield-halved"
 ---
@@ -8,122 +8,118 @@ icon: "shield-halved"
 # Policy Engine
 
 <Note>
-  The Policy Engine is **Phase 1 of [CLPI (Card Lifecycle & Policy Intelligence)](/concepts/clpi)** -- the governance layer that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring.
+The Policy Engine is **Phase 1 of [CLPI (Card Lifecycle & Policy Intelligence)](/concepts/clpi)** — the governance layer that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring.
 </Note>
 
-The policy engine translates [Alignment Card](/concepts/alignment-cards) declarations into enforceable rules over concrete tools. An Alignment Card says an agent may perform `web_fetch`. The policy says that `web_fetch` means the agent can call `mcp__browser__navigate` and `mcp__browser__click`, but not `mcp__filesystem__delete`. The card declares intent. The policy enforces it.
-
-Policies are defined in a YAML-based DSL (domain-specific language) with five top-level sections: `capability_mappings`, `forbidden`, `defaults`, and optionally `escalation_triggers` and `meta`. They are evaluated in three contexts -- CI/CD pipelines, live gateway requests, and post-action observation -- giving operators governance coverage across the full agent lifecycle.
+The policy engine translates [Alignment Card](/concepts/alignment-cards) declarations into enforceable rules over concrete tools. An alignment card says an agent may perform `web_fetch`. The `capabilities` section of the same card says `web_fetch` means `mcp__browser__navigate` and `mcp__browser__click` — but not `mcp__filesystem__delete`. The card declares intent. The `enforcement` section enforces it.
 
 <Note>
-  The policy engine is a parallel enforcement layer to [alignment enforcement](/gateway/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against policy rules. Both run independently and produce separate verdicts.
+**Since UC-4 (2026-04-15), policy is part of the alignment card, not a separate artifact.** The `capabilities`, `enforcement`, and per-capability `forbidden` rules live as sections of the unified card. There is no standalone policy YAML file, no `PUT /v1/agents/:id/policy` endpoint, and no `mnemom policy` CLI group. Use `mnemom card evaluate` + `PUT /v1/agents/{id}/alignment-card` instead. See the [policy management guide](/guides/policy-management) for the customer workflow and the [migration guide](/guides/migrating-to-unified-cards) if you're coming from the pre-UC model.
 </Note>
 
-## Policy DSL overview
+<Note>
+The policy engine is a parallel enforcement layer to [alignment enforcement](/gateway/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against the card's `capabilities` + `enforcement` sections. Both run independently and produce separate verdicts.
+</Note>
 
-A policy file is a YAML document that declares how abstract card capabilities map to concrete tools, which tools are always forbidden, and what happens when a tool falls outside any mapping.
+## How the engine reads the card
+
+The policy engine reads three sections of the canonical (composed) alignment card:
+
+| Section | Purpose |
+|---|---|
+| `capabilities` | Bridge card-level semantic actions (`web_fetch`, `read_file`) to concrete tool glob patterns (`mcp__browser__*`) |
+| `enforcement.forbidden` | Tools that are always blocked, regardless of mappings |
+| `enforcement` (top-level knobs) | Fallback behavior for unmatched tools — `default_mode`, `unmapped_tool_action`, `grace_period_hours` |
+
+Two optional card sections extend the model:
+
+| Section | Purpose |
+|---|---|
+| `autonomy.escalation_triggers` | Conditions that trigger escalation regardless of individual tool verdicts |
+| `autonomy.max_autonomous_value` | Currency-denominated ceiling on autonomous actions |
+
+The full normative schema for these sections is at [/specifications/alignment-card-schema](/specifications/alignment-card-schema).
+
+### Example excerpt of a card's policy sections
 
 ```yaml
-meta:
-  name: "research-agent-policy"
-  version: "1.2.0"
-  description: "Policy for research agents with web and filesystem access"
+# ... (values, principal, autonomy sections omitted) ...
 
-capability_mappings:
+capabilities:
   web_browsing:
+    description: "Browser-based research and navigation"
     tools:
       - "mcp__browser__*"
     card_actions:
-      - "web_fetch"
-      - "web_search"
+      - web_fetch
+      - web_search
 
   file_reading:
     tools:
       - "mcp__filesystem__read*"
       - "mcp__filesystem__list*"
     card_actions:
-      - "read_file"
+      - read_file
 
-forbidden:
-  - pattern: "mcp__filesystem__delete*"
-    reason: "File deletion not permitted"
-    severity: "critical"
-  - pattern: "mcp__shell__*"
-    reason: "Shell execution not permitted"
-    severity: "high"
-
-defaults:
-  unmapped_tool_action: "warn"
-  unmapped_severity: "medium"
+enforcement:
+  default_mode: warn              # warn | enforce | off
+  unmapped_tool_action: warn      # allow | warn | deny
+  unmapped_severity: medium
   grace_period_hours: 24
-
-escalation_triggers:
-  - condition: "tool_count > 50"
-    action: "escalate"
-    reason: "Excessive tool usage in single session"
+  forbidden:
+    - pattern: "mcp__filesystem__delete*"
+      reason: "File deletion not permitted"
+      severity: critical
+    - pattern: "mcp__shell__*"
+      reason: "Shell execution not permitted"
+      severity: high
 ```
-
-The three required sections serve distinct purposes:
-
-| Section | Purpose |
-|---|---|
-| `capability_mappings` | Bridge card-level categories to concrete tool patterns |
-| `forbidden` | Tools that are always blocked, regardless of mappings |
-| `defaults` | Fallback behavior for tools that match no mapping |
-
-The two optional sections extend the policy:
-
-| Section | Purpose |
-|---|---|
-| `escalation_triggers` | Conditions that trigger escalation regardless of individual tool verdicts |
-| `meta` | Human-readable metadata: name, version, description |
 
 ## Three evaluation contexts
 
-Policies are not evaluated once. They are evaluated at three stages, each with different inputs and different consequences.
+The same `capabilities` + `enforcement` sections are evaluated at three stages, each with different inputs and consequences.
 
 <Tabs>
   <Tab title="CI/CD (Static)">
 
 ### CI/CD evaluation
 
-Static evaluation runs in pipelines before deployment. It validates policy syntax and evaluates policy rules against historical trace data.
+Static evaluation runs in pipelines before deployment. It validates the card against the unified schema and evaluates its policy sections against a declared tool list.
 
 **Commands:**
 
 ```bash
-# Validate policy schema (syntax + structure)
-mnemom policy validate --file policy.yaml
+# Validate the card (schema + structure)
+mnemom card validate card.yaml
 
-# Evaluate policy against historical traces
-mnemom policy evaluate --file policy.yaml --agent-id agent_abc123 --days 30
+# Evaluate the card's policy against a tool list
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message
 ```
 
 **What it checks:**
 
-- Policy YAML conforms to the DSL schema
-- All glob patterns are syntactically valid
-- Capability mappings reference card actions that exist in the agent's alignment card
-- Historical traces would pass/fail under the proposed policy
-- Coverage report identifies unmapped card actions
+- Card YAML conforms to the unified schema (capability glob validity, enforcement-mode enums, forbidden-rule structure).
+- Capability `card_actions` reference actions that exist in `autonomy.bounded_actions`.
+- Each tool in the `--tools` list matches a capability, hits a forbidden rule, or falls through to the `unmapped_tool_action` default.
+- Coverage report identifies card actions with no backing capability mapping.
 
-**Use case:** Pre-deploy gates. A CI job runs `mnemom policy validate` and `mnemom policy evaluate` before merging policy changes. If evaluation shows violations in recent traces, the merge is blocked.
+**Use case:** pre-deploy gates. See the [CI/CD policy gates guide](/guides/ci-cd-policy-gates) for GitHub Actions + GitLab CI templates.
 
   </Tab>
   <Tab title="Gateway (Live)">
 
 ### Gateway evaluation
 
-Live evaluation runs in real-time as requests pass through the Mnemom gateway. The policy engine extracts tool names from the request body, checks each tool against the policy, and returns a verdict.
+Live evaluation runs in real-time as requests pass through the Mnemom gateway. The policy engine extracts tool names from the request body, checks each tool against the agent's canonical card, and returns a verdict.
 
 **How it works:**
 
-1. Request arrives at the gateway
-2. Policy engine extracts tool names from the request body
-3. Each tool is checked against `forbidden` rules first
-4. Remaining tools are matched against `capability_mappings`
-5. Unmatched tools fall through to `defaults.unmapped_tool_action`
-6. A verdict is returned via the `X-Policy-Verdict` response header
+1. Request arrives at the gateway.
+2. Gateway reads the canonical alignment card (KV-cached, 5-min TTL).
+3. Each tool in the request is checked against `enforcement.forbidden` first.
+4. Remaining tools are matched against `capabilities[*].tools` globs.
+5. Unmatched tools fall through to `enforcement.unmapped_tool_action`.
+6. A verdict is returned via the `X-Policy-Verdict` response header.
 
 **Verdict headers:**
 
@@ -133,59 +129,59 @@ Live evaluation runs in real-time as requests pass through the Mnemom gateway. T
 | `X-Policy-Verdict: warn` | One or more tools triggered warnings (logged, not blocked) |
 | `X-Policy-Verdict: fail` | One or more tools violated policy (blocked in enforce mode) |
 
-**Enforcement interaction:** The policy verdict determines the gateway response based on the policy enforcement mode (separate from the alignment enforcement mode):
+**Enforcement interaction:** `enforcement.default_mode` determines the gateway response:
 
-| Policy Mode | `pass` | `warn` | `fail` |
+| `default_mode` | `pass` | `warn` | `fail` |
 |---|---|---|---|
 | `off` | No evaluation | No evaluation | No evaluation |
 | `warn` | Allow | Allow + log | Allow + log |
-| `enforce` | Allow | Allow + log | HTTP 403 block |
+| `enforce` | Allow | Allow + log | HTTP 403 block (non-streaming); nudge-fallback (streaming) |
 
   </Tab>
   <Tab title="Observer (Post)">
 
 ### Observer evaluation
 
-Post-action evaluation runs after an action completes. It analyzes what actually happened against what the policy expected.
+Post-action evaluation runs after an action completes. It analyzes what actually happened against what the card expected.
 
 **What it detects:**
 
-- **card_gap violations**: Tools that the agent used successfully but that are not represented in any capability mapping. These are tools that should be in the card but are not.
-- **Frequency anomalies**: Tools used at rates that exceed expected patterns
-- **New tool discovery**: Tools appearing for the first time, subject to grace period handling
+- **card_gap violations** — tools the agent used successfully but that are not represented in any capability mapping. These are tools that should be in the card but are not.
+- **Frequency anomalies** — tools used at rates that exceed expected patterns.
+- **New tool discovery** — tools appearing for the first time, subject to grace-period handling.
 
-**Feeds into reclassification:** Observer findings feed into the [AIP reclassification pipeline](/protocols/aip/specification). A `card_gap` detection triggers a proposed card amendment -- suggesting that the alignment card should be updated to include the newly observed capability.
+**Feeds into reclassification:** observer findings feed the reclassification pipeline at `POST /v1/agents/{id}/reclassify`. A `card_gap` detection is a candidate for reclassification + an amendment to the card's `capabilities` section — see [Trust Recovery](/guides/trust-recovery).
 
-**Feeds into proving:** When the gateway's policy evaluation detects `card_gaps` alongside a `boundary_violation`, [ZK proving is deferred](/protocols/aip/verifiable-verdicts#deferred-proofs) instead of immediately dispatched to GPUs. This prevents stale alignment cards from driving up proving costs during rapid development.
+**Feeds into proving:** when the gateway's policy evaluation detects `card_gap` signals alongside a `boundary_violation`, [ZK proving is deferred](/protocols/aip/verifiable-verdicts#deferred-proofs) instead of immediately dispatched to GPUs. This prevents stale alignment cards from driving up proving costs during rapid iteration.
 
   </Tab>
 </Tabs>
 
 ## Capability mapping
 
-Capability mappings are the core of the policy DSL. They bridge the gap between what an alignment card declares (abstract semantic actions like `web_fetch`) and what agents actually invoke (concrete tool names like `mcp__browser__navigate`).
+Capability mappings are the core of the card's policy sections. They bridge the gap between what the card declares (abstract actions like `web_fetch`) and what agents actually invoke (concrete tool names like `mcp__browser__navigate`).
 
 ### Structure
 
-Each capability mapping has a name, a list of tool glob patterns, and a list of card actions it satisfies:
+Each capability has a name, a list of tool glob patterns, and a list of card actions it satisfies:
 
 ```yaml
-capability_mappings:
+capabilities:
   web_browsing:
     tools:
       - "mcp__browser__navigate"
       - "mcp__browser__click"
       - "mcp__browser__screenshot"
     card_actions:
-      - "web_fetch"
-      - "web_search"
+      - web_fetch
+      - web_search
 
   database_read:
     tools:
       - "mcp__postgres__query"
       - "mcp__postgres__list_tables"
     card_actions:
-      - "read_data"
+      - read_data
 ```
 
 ### Glob patterns
@@ -200,26 +196,26 @@ Tool patterns support standard glob syntax for flexible matching:
 | `custom_tool_v?` | `custom_tool_v1`, `custom_tool_v2`, etc. |
 
 <Tip>
-  Start with broad globs during initial policy development, then tighten them as you understand which specific tools your agent uses. A mapping like `mcp__browser__*` is fine for week one. By month two, you should enumerate the specific tools.
+Start with broad globs during initial card development, then tighten them as you understand which specific tools your agent uses. A mapping like `mcp__browser__*` is fine for week one. By month two, enumerate the specific tools.
 </Tip>
 
 ### How matching works
 
 When the policy engine evaluates a tool, it follows this order:
 
-1. **Forbidden check**: Does the tool match any `forbidden` pattern? If yes, the tool is a violation regardless of capability mappings.
-2. **Capability match**: Does the tool match any `capability_mappings` tool pattern? If yes, the tool is allowed and mapped to the corresponding card actions.
-3. **Default fallback**: If neither forbidden nor mapped, apply `defaults.unmapped_tool_action`.
+1. **Forbidden check:** does the tool match any `enforcement.forbidden[].pattern`? If yes, the tool is a violation regardless of capability mappings.
+2. **Capability match:** does the tool match any `capabilities[*].tools` glob? If yes, the tool is allowed and mapped to the corresponding card actions.
+3. **Default fallback:** if neither forbidden nor mapped, apply `enforcement.unmapped_tool_action`.
 
-A tool can match multiple capability mappings. This is not an error -- it means the tool satisfies multiple card actions.
+A tool can match multiple capabilities. This isn't an error — it means the tool satisfies multiple card actions (e.g., a file-read tool satisfying both `read_file` and `read_source_code`).
 
 ## Enforcement modes
 
-The policy engine has its own enforcement mode, independent of the alignment enforcement mode (observe/nudge/enforce).
+`enforcement.default_mode` is the card's policy-enforcement posture:
 
 <CardGroup cols={3}>
   <Card title="Warn" icon="triangle-exclamation">
-    Log violations but do not block. `X-Policy-Verdict: warn` header returned. This is the **default mode**.
+    Log violations but do not block. `X-Policy-Verdict: warn` header returned. **Default mode.**
   </Card>
   <Card title="Enforce" icon="ban">
     Block requests with policy violations. `X-Policy-Verdict: fail` header returned. HTTP 403 for non-streaming requests.
@@ -230,36 +226,37 @@ The policy engine has its own enforcement mode, independent of the alignment enf
 </CardGroup>
 
 <Warning>
-  Policy enforcement and alignment enforcement are parallel systems. Setting alignment enforcement to `enforce` does not affect policy enforcement, and vice versa. An agent can be in alignment `observe` mode and policy `enforce` mode simultaneously -- meaning alignment violations are logged but policy violations are blocked.
+Policy enforcement (`enforcement.default_mode`) and alignment enforcement (`integrity.enforcement_mode`) are parallel systems. Setting alignment enforcement to `enforce` does not affect policy enforcement, and vice versa. An agent can be in alignment `observe` mode and policy `enforce` mode simultaneously — meaning alignment violations are logged but policy violations are blocked.
 </Warning>
 
-### Relationship to Alignment enforcement
+### Relationship to alignment enforcement
 
-| System | What It Checks | Verdict Source |
-|---|---|---|
-| **Alignment enforcement** (observe/nudge/enforce) | Agent behavior against card values and autonomy envelope | AIP integrity checkpoints, AAP verification |
-| **Policy enforcement** (warn/enforce/off) | Tool usage against policy rules and capability mappings | Policy engine evaluation |
+| System | Card section | What it checks | Verdict source |
+|---|---|---|---|
+| **Alignment enforcement** | `integrity.enforcement_mode` | Agent behavior against card values and autonomy envelope | AIP integrity checkpoints, AAP verification |
+| **Policy enforcement** | `enforcement.default_mode` | Tool usage against policy rules and capability mappings | Policy engine evaluation |
 
 Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
 
-## Forbidden actions
+## Forbidden rules
 
-Forbidden rules define tools that must never be used, regardless of capability mappings. They are always checked first in the evaluation pipeline.
+`enforcement.forbidden` defines tools that must never be used, regardless of capability mappings. They're always checked first in the evaluation pipeline.
 
 ```yaml
-forbidden:
-  - pattern: "mcp__filesystem__delete*"
-    reason: "File deletion not permitted"
-    severity: "critical"
-  - pattern: "mcp__shell__*"
-    reason: "Shell execution not permitted"
-    severity: "high"
-  - pattern: "mcp__*__drop_table"
-    reason: "Table deletion not permitted"
-    severity: "critical"
-  - pattern: "mcp__email__send_bulk*"
-    reason: "Bulk email sending restricted"
-    severity: "medium"
+enforcement:
+  forbidden:
+    - pattern: "mcp__filesystem__delete*"
+      reason: "File deletion not permitted"
+      severity: critical
+    - pattern: "mcp__shell__*"
+      reason: "Shell execution not permitted"
+      severity: high
+    - pattern: "mcp__*__drop_table"
+      reason: "Table deletion not permitted"
+      severity: critical
+    - pattern: "mcp__email__send_bulk*"
+      reason: "Bulk email sending restricted"
+      severity: medium
 ```
 
 Each rule has three fields:
@@ -271,17 +268,17 @@ Each rule has three fields:
 | `severity` | enum | `critical`, `high`, `medium`, or `low` |
 
 <Note>
-  Policy `forbidden` rules complement alignment card `forbidden_actions`. Card forbidden actions declare intent ("this agent must never delete files"). Policy forbidden rules enforce that intent at the tool level ("block all tools matching `mcp__filesystem__delete*`"). Both are checked -- card-level by alignment enforcement, tool-level by policy enforcement.
+Policy `enforcement.forbidden` rules complement alignment card `autonomy.forbidden_actions`. Card forbidden actions declare intent ("this agent must never delete files"). Policy forbidden rules enforce that intent at the tool level ("block all tools matching `mcp__filesystem__delete*`"). Both are checked — card-level by alignment enforcement, tool-level by policy enforcement.
 </Note>
 
 ## Unmapped tool handling
 
-When a tool does not match any capability mapping or forbidden rule, the `defaults` section determines what happens.
+When a tool does not match any capability or forbidden rule, `enforcement.unmapped_tool_action` determines what happens.
 
 ```yaml
-defaults:
-  unmapped_tool_action: "warn"
-  unmapped_severity: "medium"
+enforcement:
+  unmapped_tool_action: warn
+  unmapped_severity: medium
   grace_period_hours: 24
 ```
 
@@ -290,7 +287,7 @@ defaults:
 | Action | Behavior |
 |---|---|
 | `deny` | Treat the unmapped tool as a violation. Blocked in enforce mode. |
-| `warn` | Log a warning but allow the tool invocation. Default. |
+| `warn` | Log a warning but allow the tool invocation. **Default.** |
 | `allow` | Silently permit the tool. No log entry. |
 
 ### Choosing the right default
@@ -303,7 +300,7 @@ defaults:
     Use `warn` in staging environments. This surfaces unmapped tools in logs and coverage reports without blocking agent functionality. This is the default.
   </Tab>
   <Tab title="Production">
-    Use `deny` in production when you have a mature, stable policy. Every tool the agent uses should be explicitly mapped or explicitly forbidden.
+    Use `deny` in production when you have a mature, stable card. Every tool the agent uses should be explicitly mapped or explicitly forbidden.
   </Tab>
 </Tabs>
 
@@ -312,7 +309,7 @@ defaults:
 New tools appear when agents gain new MCP server connections or when tool providers add capabilities. The grace period prevents these newly discovered tools from immediately becoming violations.
 
 ```yaml
-defaults:
+enforcement:
   grace_period_hours: 24
 ```
 
@@ -323,62 +320,61 @@ defaults:
 3. If the tool was first seen within the grace period window, it is treated as `allow` regardless of `unmapped_tool_action`.
 4. After the grace period expires, the tool falls back to the configured `unmapped_tool_action`.
 
-This gives operators time to update their policy after adding new tools or MCP servers, without immediately triggering violations in enforce mode.
+This gives operators time to amend the card's `capabilities` section after adding new tools or MCP servers, without immediately triggering violations in enforce mode.
 
 <Tip>
-  The default grace period is 24 hours. Set it to 0 to disable grace periods entirely (strict mode). Set it higher (48-72 hours) for teams that deploy on weekly cycles and need more time to update policies.
+The default grace period is 24 hours. Set it to 0 to disable grace periods entirely (strict mode). Set it higher (48–72 hours) for teams that deploy on weekly cycles and need more time to update cards.
 </Tip>
 
-## Policy merge
+## Composition across scopes
 
-In organizations with multiple agents, policies exist at two levels: org-level and agent-level. These are merged at evaluation time using rules that prevent agents from weakening organizational policy.
+In organizations with multiple agents, the `capabilities` and `enforcement` sections compose from platform → org → agent scopes per [card composition](/concepts/card-composition) rules. These are merged at storage time, not request time: every gateway read hits the pre-composed canonical card.
 
 ### Merge rules
 
-| Section | Merge Strategy | Effect |
+| Section | Merge strategy | Effect |
 |---|---|---|
-| `capability_mappings` | Union | Agent can add new mappings but cannot remove org-level mappings |
-| `forbidden` | Union | Both org and agent forbidden rules are enforced |
-| `defaults` | Org is floor | Agent can strengthen (`allow` to `warn` to `deny`) but cannot weaken |
-| `escalation_triggers` | Union | Both org and agent triggers are evaluated |
-| `meta` | Agent overrides | Agent metadata replaces org metadata |
+| `capabilities` | Union | Agent can add new capabilities but cannot remove platform or org capabilities |
+| `enforcement.forbidden` | Deny-overrides union | Both org and agent forbidden rules are enforced; agent cannot subtract |
+| `enforcement.default_mode` | Strictest wins (`enforce` > `warn` > `off`) | Agent can tighten, not loosen |
+| `enforcement.unmapped_tool_action` | Org is floor | Agent can strengthen (`allow` → `warn` → `deny`) but cannot weaken |
+| `autonomy.escalation_triggers` | Union | Both org and agent triggers are evaluated |
 
-### Strengthening defaults
+### Strengthening enforcement
 
-The org default acts as a floor. An agent can only move in the stricter direction:
+The org mode acts as a floor; the agent can only move in the stricter direction:
 
 ```
-allow → warn → deny
- ↑                ↑
- weaker          stricter
+allow → warn → deny     (unmapped_tool_action)
+off   → warn → enforce  (default_mode)
 ```
 
-If the org sets `unmapped_tool_action: "warn"`, an agent can set it to `deny` (stricter) but not `allow` (weaker).
+If the org sets `unmapped_tool_action: warn`, an agent can set it to `deny` (stricter) but not `allow` (weaker).
 
 ### Transaction guardrails
 
-Transaction-scoped policies can further restrict the merged policy via intersection semantics. A transaction guardrail can only narrow what is permitted -- never expand it.
+Transaction-scoped cards can further restrict the composed enforcement via intersection semantics. A transaction guardrail can only narrow what's permitted — never expand it.
 
 ```yaml
 # Transaction-level override: restrict to read-only tools for this operation
 transaction_guardrails:
   allowed_capabilities:
-    - "file_reading"
-    - "database_read"
+    - file_reading
+    - database_read
   # All other capabilities are denied for this transaction
 ```
 
 ## Coverage report
 
-Every policy evaluation produces a coverage report that quantifies how well the policy maps to the alignment card. This helps identify gaps between what the card declares and what the policy actually covers.
+Every `mnemom card evaluate` run produces a coverage report that quantifies how well the card's `capabilities` section maps to its `autonomy.bounded_actions`. This identifies gaps between what the card declares and what the policy actually covers.
 
 ### Coverage metrics
 
 | Metric | Description |
 |---|---|
-| `total_card_actions` | Number of actions declared in the alignment card's `bounded_actions` |
-| `mapped_card_actions` | Number of card actions covered by at least one capability mapping |
-| `unmapped_card_actions` | Card actions with no corresponding capability mapping |
+| `total_card_actions` | Number of actions declared in the card's `autonomy.bounded_actions` |
+| `mapped_card_actions` | Number of card actions covered by at least one capability |
+| `unmapped_card_actions` | Card actions with no corresponding capability |
 | `coverage_pct` | `mapped_card_actions / total_card_actions * 100` |
 
 ### Example output
@@ -407,95 +403,109 @@ Every policy evaluation produces a coverage report that quantifies how well the 
 ```
 
 <Warning>
-  A coverage percentage below 100% means some card actions have no policy enforcement. Tools implementing those actions will fall through to the `unmapped_tool_action` default. Aim for 100% coverage in production policies.
+A coverage percentage below 100% means some card actions have no backing capability mapping. Tools implementing those actions will fall through to `enforcement.unmapped_tool_action`. Aim for 100% coverage in production cards.
 </Warning>
 
 ### Using coverage in CI/CD
 
 ```bash
-# Evaluate policy and fail if coverage is below threshold
-mnemom policy evaluate \
-  --file policy.yaml \
-  --agent-id agent_abc123 \
+# Evaluate a card and fail if coverage is below threshold
+mnemom card evaluate \
+  card.yaml \
+  --tools mcp__browser__navigate,mcp__filesystem__read_file \
   --min-coverage 90
 
 # Exit code 1 if coverage < 90%
 ```
 
-This integrates naturally into pre-deploy gates: a policy change that reduces coverage below the threshold blocks the merge.
+This integrates naturally into pre-deploy gates: a card change that reduces coverage below the threshold blocks the merge. See [CI/CD policy gates](/guides/ci-cd-policy-gates) for the full pipeline template.
 
 ## Putting it together
 
-Here is a complete policy for a research agent that can browse the web and read files, but cannot delete anything or execute shell commands:
+Here's the full alignment card for a research agent that can browse the web and read files but cannot delete anything or execute shell commands:
 
 ```yaml
-meta:
-  name: "research-agent-v2"
-  version: "2.0.0"
-  description: "Read-only research agent with web and filesystem access"
+card_version: unified/2026-04-15
+card_id: ac-research-agent-v2
+agent_id: mnm-your-agent-id
+issued_at: "2026-03-04T00:00:00Z"
 
-capability_mappings:
+principal:
+  type: human
+  relationship: delegated_authority
+
+values:
+  declared: [transparency, harm_prevention, accuracy]
+
+autonomy:
+  bounded_actions:
+    - inference
+    - web_fetch
+    - web_search
+    - read_file
+    - search
+  forbidden_actions:
+    - delete_files
+    - execute_shell
+    - exfiltrate_data
+
+capabilities:
   web_browsing:
+    description: "Browser-based research and navigation"
     tools:
       - "mcp__browser__navigate"
       - "mcp__browser__click"
       - "mcp__browser__screenshot"
       - "mcp__browser__evaluate_script"
-    card_actions:
-      - "web_fetch"
-      - "web_search"
+    card_actions: [web_fetch, web_search]
 
   file_reading:
     tools:
       - "mcp__filesystem__read_file"
       - "mcp__filesystem__list_directory"
-    card_actions:
-      - "read_file"
+    card_actions: [read_file]
 
   search:
     tools:
       - "mcp__search__query"
       - "mcp__search__suggest"
-    card_actions:
-      - "search"
-      - "compare"
+    card_actions: [search]
 
-forbidden:
-  - pattern: "mcp__filesystem__delete*"
-    reason: "File deletion not permitted for research agents"
-    severity: "critical"
-  - pattern: "mcp__filesystem__write*"
-    reason: "File writing not permitted for research agents"
-    severity: "high"
-  - pattern: "mcp__shell__*"
-    reason: "Shell execution never permitted"
-    severity: "critical"
-
-defaults:
-  unmapped_tool_action: "warn"
-  unmapped_severity: "medium"
+enforcement:
+  default_mode: warn
+  unmapped_tool_action: warn
+  unmapped_severity: medium
   grace_period_hours: 24
+  forbidden:
+    - pattern: "mcp__filesystem__delete*"
+      reason: "File deletion not permitted for research agents"
+      severity: critical
+    - pattern: "mcp__filesystem__write*"
+      reason: "File writing not permitted for research agents"
+      severity: high
+    - pattern: "mcp__shell__*"
+      reason: "Shell execution never permitted"
+      severity: critical
 
-escalation_triggers:
-  - condition: "tool_count > 100"
-    action: "escalate"
-    reason: "Unusually high tool usage in single session"
-  - condition: "unmapped_tool_count > 5"
-    action: "escalate"
-    reason: "Multiple unmapped tools detected"
+audit:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  tamper_evidence: append_only
 ```
 
 ## Limitations
 
-- Policy evaluation adds latency to gateway requests (typically under 5ms for policies with fewer than 100 rules).
-- Glob patterns match tool names only, not tool arguments. A tool can be permitted by policy but still violate alignment constraints based on how it is called.
-- Grace periods are tracked per-agent, not per-policy-version. Updating a policy does not reset grace period timers for previously seen tools.
-- Coverage reports require a valid alignment card. Agents without a published card receive a coverage report with 0% coverage.
+- Policy evaluation adds latency to gateway requests (typically under 5 ms for cards with fewer than 100 capability patterns).
+- Glob patterns match tool names only, not tool arguments. A tool can be permitted by policy but still violate alignment constraints based on how it's called.
+- Grace periods are tracked per-agent, not per-card-version. Updating a card doesn't reset grace-period timers for previously seen tools.
+- Coverage reports require a valid `autonomy.bounded_actions` list. Agents with an empty envelope get a coverage report with 0% coverage (no denominator).
 
 ## See also
 
-- [Policy DSL Specification](/specifications/policy-dsl) -- Full normative specification for the policy YAML schema
-- [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for validating, evaluating, and managing policies
-- [Policy Management Guide](/guides/policy-management) -- Step-by-step guide to writing and deploying policies
-- [Card Lifecycle](/concepts/card-lifecycle) -- How alignment cards evolve and interact with policy
-- [Enforcement Modes](/gateway/enforcement) -- Alignment enforcement modes (observe/nudge/enforce)
+- [Alignment Card Schema](/specifications/alignment-card-schema) — normative schema for the unified alignment card (including capabilities + enforcement sections)
+- [Policy Management Guide](/guides/policy-management) — step-by-step guide to authoring and deploying the `capabilities` + `enforcement` sections
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — `mnemom card evaluate` in GitHub Actions and GitLab CI
+- [Card Lifecycle](/concepts/card-lifecycle) — how alignment cards evolve and interact with policy
+- [Card Composition](/concepts/card-composition) — how platform / org / agent scopes merge
+- [Migrating to Unified Cards](/guides/migrating-to-unified-cards) — if you're coming from the pre-UC policy model
+- [Enforcement Modes](/gateway/enforcement) — alignment enforcement (observe/nudge/enforce) vs. policy enforcement
