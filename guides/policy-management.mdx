@@ -202,139 +202,88 @@ The coverage report tells you which card actions are mapped and which are missin
 
 ## API-based management
 
-Manage policies programmatically via the REST API or SDKs.
+Policy is part of the alignment card. Get, set, and resolve it through the alignment-card endpoints — there's no separate `/v1/agents/{id}/policy` surface after UC-4 (2026-04-15).
 
-### Set agent policy
+### Publish policy (set the alignment card)
+
+Publish the alignment card with your `capabilities` and `enforcement` sections embedded. The server validates the card against the unified schema, recomposes it against platform + org scopes, and writes the canonical output.
 
 <CodeGroup>
-```bash cURL
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
-  -H "Authorization: Bearer $API_KEY" \
+```bash cURL (YAML)
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  --data-binary @alignment-card.yaml
+```
+
+```bash cURL (JSON)
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
-  -d @policy.json
-```
-
-```typescript TypeScript
-import { MnemomClient } from '@mnemom/sdk';
-
-const client = new MnemomClient({ apiKey: process.env.API_KEY });
-
-await client.agents.setPolicy('mnm-550e8400-e29b-41d4-a716-446655440000', {
-  meta: {
-    schema_version: '1.0',
-    name: 'support-agent-policy',
-    description: 'Policy for customer support agents',
-    scope: 'agent',
-  },
-  capability_mappings: {
-    web_browsing: {
-      description: 'Browser-based research and navigation',
-      tools: ['mcp__browser__*'],
-      card_actions: ['web_fetch', 'web_search'],
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{
+    "card_version": "unified/2026-04-15",
+    "card_id": "ac-support-agent-v2",
+    "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
+    "issued_at": "2026-03-04T00:00:00Z",
+    "values": { "declared": ["transparency", "honesty"] },
+    "autonomy": {
+      "bounded_actions": ["inference", "read", "web_fetch", "web_search"],
+      "forbidden_actions": ["exfiltrate_data"]
     },
-  },
-  forbidden: [
-    {
-      pattern: 'mcp__filesystem__delete*',
-      reason: 'File deletion not permitted',
-      severity: 'critical',
+    "capabilities": {
+      "web_browsing": {
+        "tools": ["mcp__browser__*"],
+        "card_actions": ["web_fetch", "web_search"]
+      }
     },
-  ],
-  defaults: {
-    unmapped_tool_action: 'warn',
-    enforcement_mode: 'warn',
-    grace_period_hours: 24,
-  },
-});
-```
-
-```python Python
-from mnemom import MnemomClient
-
-client = MnemomClient(api_key="your-api-key")
-
-client.agents.set_policy("mnm-550e8400-e29b-41d4-a716-446655440000", {
-    "meta": {
-        "schema_version": "1.0",
-        "name": "support-agent-policy",
-        "description": "Policy for customer support agents",
-        "scope": "agent",
-    },
-    "capability_mappings": {
-        "web_browsing": {
-            "description": "Browser-based research and navigation",
-            "tools": ["mcp__browser__*"],
-            "card_actions": ["web_fetch", "web_search"],
-        },
-    },
-    "forbidden": [
+    "enforcement": {
+      "default_mode": "warn",
+      "unmapped_tool_action": "warn",
+      "grace_period_hours": 24,
+      "forbidden": [
         {
-            "pattern": "mcp__filesystem__delete*",
-            "reason": "File deletion not permitted",
-            "severity": "critical",
-        },
-    ],
-    "defaults": {
-        "unmapped_tool_action": "warn",
-        "enforcement_mode": "warn",
-        "grace_period_hours": 24,
+          "pattern": "mcp__filesystem__delete*",
+          "reason": "File deletion not permitted",
+          "severity": "critical"
+        }
+      ]
     },
-})
+    "audit": {
+      "trace_format": "ap-trace-v1",
+      "retention_days": 90,
+      "tamper_evidence": "append_only"
+    }
+  }'
 ```
 </CodeGroup>
 
-### Get agent policy
+The response is the canonical card — your input composed with platform + org scopes (strictest-wins on enforcement mode, deny-overrides union on forbidden patterns, etc). See [Card Composition](/concepts/card-composition) for the per-field rules.
 
-<CodeGroup>
-```bash cURL
-curl https://api.mnemom.ai/v1/agents/{agent_id}/policy \
-  -H "Authorization: Bearer $API_KEY"
+### Fetch the canonical card
+
+```bash
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card"
 ```
 
-```typescript TypeScript
-const policy = await client.agents.getPolicy('mnm-550e8400-e29b-41d4-a716-446655440000');
-console.log(policy.meta.name);
-console.log(policy.capability_mappings);
+Add `?include_composition=true` to include the `_composition` metadata block showing which scope contributed which section — useful when debugging "why did this org-level forbidden pattern end up on my agent's canonical card?"
+
+```bash
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card?include_composition=true"
 ```
 
-```python Python
-policy = client.agents.get_policy("mnm-550e8400-e29b-41d4-a716-446655440000")
-print(policy.meta.name)
-print(policy.capability_mappings)
-```
-</CodeGroup>
+YAML is the canonical content type; pass `Accept: application/json` to get JSON back.
 
-### Get resolved policy (Org + agent merged)
+### Evaluate tools against the active policy
 
-The resolved policy shows the effective policy after merging the org-level baseline with the agent-level overlay:
+Test a set of tools against the agent's current policy (the `capabilities` + `enforcement` sections of its canonical card) without making a real gateway request:
 
-<CodeGroup>
-```bash cURL
-curl https://api.mnemom.ai/v1/agents/{agent_id}/policy/resolved \
-  -H "Authorization: Bearer $API_KEY"
-```
-
-```typescript TypeScript
-const resolved = await client.agents.getResolvedPolicy('mnm-550e8400-e29b-41d4-a716-446655440000');
-console.log(resolved.capability_mappings); // merged org + agent
-console.log(resolved.forbidden);           // union of both
-```
-
-```python Python
-resolved = client.agents.get_resolved_policy("mnm-550e8400-e29b-41d4-a716-446655440000")
-print(resolved.capability_mappings)  # merged org + agent
-print(resolved.forbidden)            # union of both
-```
-</CodeGroup>
-
-### Evaluate policy
-
-Test a set of tools against the active policy without making a real agent request:
-
-<CodeGroup>
-```bash cURL
+```bash
 curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
@@ -343,30 +292,24 @@ curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
   }'
 ```
 
-```typescript TypeScript
-const result = await client.policies.evaluate({
-  agentId: 'mnm-550e8400-e29b-41d4-a716-446655440000',
-  tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
-  context: 'gateway',
-});
+The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and per-tool detail: which capability each tool matched, which forbidden rule it tripped, or whether it fell through to `unmapped_tool_action`. Use this in CI to catch regressions before publishing a card — `POST /v1/policies/evaluate/historical` does the same thing against a date range of actual past traces.
 
-console.log(result.verdict);    // 'fail'
-console.log(result.violations); // [{ tool: 'mcp__filesystem__delete', ... }]
+### Historical evaluation
+
+To evaluate against an actual trace window (rather than a hypothetical tool list), use the historical endpoint:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/policies/evaluate/historical \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
+    "from": "2026-02-01T00:00:00Z",
+    "to": "2026-03-01T00:00:00Z"
+  }'
 ```
 
-```python Python
-result = client.policies.evaluate(
-    agent_id="mnm-550e8400-e29b-41d4-a716-446655440000",
-    tools=["mcp__browser__navigate", "mcp__filesystem__delete"],
-    context="gateway",
-)
-
-print(result.verdict)    # 'fail'
-print(result.violations) # [{'tool': 'mcp__filesystem__delete', ...}]
-```
-</CodeGroup>
-
-The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and details for each tool: whether it matched a capability mapping, hit a forbidden rule, or fell through to defaults.
+This replays every tool the agent actually used in the window against the current policy, surfacing any tool that would violate today's rules. It's the primary input for `card_gap` reclassification (see [Trust Recovery](/guides/trust-recovery)).
 
 ## Multi-environment strategies
 
