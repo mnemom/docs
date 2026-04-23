@@ -89,32 +89,30 @@ Set `aap_version` to `"1.0.0"` on your existing cards. You can leave them on `"0
 <Tabs>
   <Tab title="Via API">
     ```bash
-    curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
-      -H "Authorization: Bearer $API_KEY" \
+    curl -X PUT https://api.mnemom.ai/v1/agents/$AGENT_ID/alignment-card \
+      -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
       -H "Content-Type: application/json" \
+      -H "Idempotency-Key: $(uuidgen)" \
       -d '{
-        "card_json": {
-          "aap_version": "1.0.0",
-          "card_id": "ac-your-card-id",
-          "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-          "issued_at": "2026-04-13T00:00:00Z",
-          "expires_at": "2026-10-13T00:00:00Z",
-          "principal": { "type": "human", "relationship": "delegated_authority" },
-          "values": {
-            "declared": ["transparency", "honesty", "harm_prevention"],
-            "hierarchy": "lexicographic"
-          },
-          "autonomy_envelope": {
-            "bounded_actions": ["inference", "read", "write"],
-            "escalation_triggers": [],
-            "forbidden_actions": ["exfiltrate_data"]
-          },
-          "audit_commitment": {
-            "trace_format": "ap-trace-v1",
-            "retention_days": 90,
-            "queryable": true,
-            "tamper_evidence": "append_only"
-          }
+        "card_version": "unified/2026-04-15",
+        "card_id": "ac-your-card-id",
+        "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
+        "issued_at": "2026-04-13T00:00:00Z",
+        "expires_at": "2026-10-13T00:00:00Z",
+        "principal": { "type": "human", "relationship": "delegated_authority" },
+        "values": {
+          "declared": ["transparency", "honesty", "harm_prevention"],
+          "hierarchy": "lexicographic"
+        },
+        "autonomy": {
+          "bounded_actions": ["inference", "read", "write"],
+          "forbidden_actions": ["exfiltrate_data"]
+        },
+        "audit": {
+          "trace_format": "ap-trace-v1",
+          "retention_days": 90,
+          "queryable": true,
+          "tamper_evidence": "append_only"
         }
       }'
     ```
@@ -179,8 +177,8 @@ Confirm the upgrade from three places:
 **API response headers.** Every response echoes the date-header API version in use:
 
 ```bash
-curl -i https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
-  -H "Authorization: Bearer $API_KEY" \
+curl -i https://api.mnemom.ai/v1/agents/$AGENT_ID/alignment-card \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "X-Mnemom-Version: 2026-04-13" | grep -i x-mnemom-version
 # → X-Mnemom-Version: 2026-04-13
 ```
@@ -190,8 +188,8 @@ See [API versioning](/guides/api-versioning) for how to pin to a specific date. 
 **Card contents.** Fetch a card you just wrote and confirm `aap_version`:
 
 ```bash
-curl https://api.mnemom.ai/v1/agents/$AGENT_ID/card \
-  -H "Authorization: Bearer $API_KEY" | jq '.card.aap_version'
+curl https://api.mnemom.ai/v1/agents/$AGENT_ID/alignment-card \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" | jq '.aap_version'
 # → "1.0.0"
 ```
 
