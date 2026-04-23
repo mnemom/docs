@@ -361,27 +361,31 @@ In addition to CLI-based setup, you can register and manage agents programmatica
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | [`/v1/agents`](/api-reference/endpoint/post-agents) | Register a new agent with name, hash proof, and optional card/policy |
+| `POST` | [`/v1/agents`](/api-reference/endpoint/post-agents) | Register a new agent with name and hash proof |
 | `GET` | [`/v1/agents`](/api-reference/endpoint/get-agents) | List all agents owned by the authenticated user |
 | `PUT` | [`/v1/agents/:id`](/api-reference/endpoint/put-agents-agent-id) | Update an agent's name |
-| `DELETE` | [`/v1/agents/:id`](/api-reference/endpoint/delete-agents-agent-id) | Deactivate an agent (soft-delete, preserves traces) |
+| `DELETE` | [`/v1/agents/:id`](/api-reference/endpoint/delete-agents-agent-id) | GDPR Art. 17 deletion — async cascade, returns `202 Accepted`; poll `GET /v1/agents/{id}/deletion-status` for progress |
 
 When registering an agent, you must provide a `hash_proof` -- the SHA-256 hex digest of your API key combined with the agent name (`SHA256(apiKey + '|' + agentName)`). This proves ownership of the API key without transmitting it.
 
 ```bash
-# Register a new agent with an Alignment Card
+# Register a new agent. A default alignment card is attached automatically.
 curl -X POST https://api.mnemom.ai/v1/agents \
   -H "Authorization: Bearer $MNEMOM_JWT" \
   -H "content-type: application/json" \
   -d '{
     "name": "shopping-agent",
-    "hash_proof": "a1b2c3...",
-    "card_json": { ... },
-    "policy_yaml": "version: 1\nrules: ..."
+    "hash_proof": "a1b2c3..."
   }'
 ```
 
-The response includes the `agent_hash` (the gateway-computed identity), `card_id` (if a card was attached), and `policy_created` (if a policy was attached). If an agent with the same hash already exists, the API returns `409 Conflict`.
+The response includes the `agent_hash` (the gateway-computed identity) and `card_id` (the default alignment card attached on registration). If an agent with the same hash already exists, the API returns `409 Conflict`.
+
+To customize the card post-registration, publish a [unified alignment card](/concepts/agent-cards) with `PUT /v1/agents/{agent_id}/alignment-card` — see the [card management guide](/guides/card-management) for the full flow. Policy (capability mappings + enforcement rules) is now embedded in the alignment card's `capabilities` and `enforcement` sections; there is no separate `policy_yaml` field.
+
+<Note>
+`DELETE /v1/agents/:id` is a GDPR Art. 17 deletion per [ADR-021](https://github.com/mnemom/scale/blob/main/decisions/ADR-021-gdpr-cascade.md). The API responds `202 Accepted` immediately with a `deletion_request_id`; the server then cascades through traces, checkpoints, drift alerts, reclassifications, and other agent-owned records asynchronously. Poll `/v1/agents/{id}/deletion-status` or subscribe to the deletion webhook to know when the cascade completes.
+</Note>
 
 ## Next steps
 

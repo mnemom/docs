@@ -32,33 +32,34 @@ Update the `aap_version` field in your existing alignment cards from `"0.1.0"` t
 
 ### Via API
 
+<Note>
+Endpoint updated for historical accuracy. The original `PATCH /v1/agents/{id}/card` this page was written against was replaced by `PUT /v1/agents/{id}/alignment-card` in UC-4 (2026-04-15). If you're following this guide end-to-end today, use the unified alignment-card endpoint and the body shape shown below.
+</Note>
+
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/card \
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "card_json": {
-      "aap_version": "0.5.0",
-      "card_id": "ac-your-card-id",
-      "agent_id": "your-agent-id",
-      "issued_at": "2026-03-04T00:00:00Z",
-      "expires_at": "2026-09-04T00:00:00Z",
-      "principal": { "type": "human", "relationship": "delegated_authority" },
-      "values": {
-        "declared": ["transparency", "honesty", "harm_prevention"],
-        "hierarchy": "lexicographic"
-      },
-      "autonomy_envelope": {
-        "bounded_actions": ["inference", "read", "write"],
-        "escalation_triggers": [],
-        "forbidden_actions": ["exfiltrate_data"]
-      },
-      "audit_commitment": {
-        "trace_format": "ap-trace-v1",
-        "retention_days": 90,
-        "queryable": true,
-        "tamper_evidence": "append_only"
-      }
+    "card_version": "unified/2026-04-15",
+    "card_id": "ac-your-card-id",
+    "agent_id": "your-agent-id",
+    "issued_at": "2026-03-04T00:00:00Z",
+    "expires_at": "2026-09-04T00:00:00Z",
+    "principal": { "type": "human", "relationship": "delegated_authority" },
+    "values": {
+      "declared": ["transparency", "honesty", "harm_prevention"],
+      "hierarchy": "lexicographic"
+    },
+    "autonomy": {
+      "bounded_actions": ["inference", "read", "write"],
+      "forbidden_actions": ["exfiltrate_data"]
+    },
+    "audit": {
+      "trace_format": "ap-trace-v1",
+      "retention_days": 90,
+      "queryable": true,
+      "tamper_evidence": "append_only"
     }
   }'
 ```
@@ -72,8 +73,8 @@ If you manage your card as a local JSON file, update the `aap_version` field and
 sed -i '' 's/"aap_version": "0.1.0"/"aap_version": "0.5.0"/' alignment-card.json
 
 # Validate and publish
-smoltbot card validate alignment-card.json
-smoltbot card publish alignment-card.json
+mnemom card validate alignment-card.json
+mnemom card publish alignment-card.json
 ```
 
 ### Via dashboard
@@ -109,53 +110,40 @@ After updating, any new cards created via the SDK will default to `aap_version: 
 
 The Mnemom API now accepts policies in YAML format alongside JSON. YAML policies are easier to read, support comments, and are the recommended format going forward.
 
-### Before: JSON only
+<Note>
+The standalone `PUT /v1/agents/{id}/policy` endpoint this section originally used was removed in UC-4 (2026-04-15). Policy is now embedded in the unified alignment card's `capabilities` and `enforcement` sections — publish it via `PUT /v1/agents/{id}/alignment-card`. The YAML body below is the shape of just those sections; the full card has more required fields (see [alignment-card schema](/specifications/alignment-card-schema)).
+</Note>
 
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "meta": { "schema_version": "1.0", "name": "my-policy", "scope": "agent" },
-    "capability_mappings": {
-      "web_browsing": {
-        "tools": ["mcp__browser__*"],
-        "card_actions": ["web_fetch"]
-      }
-    },
-    "defaults": { "enforcement_mode": "warn" }
-  }'
-```
+### YAML policy sections (embedded in the alignment card)
 
-### After: YAML supported
-
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/policy \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: text/yaml" \
-  -d '
-meta:
-  schema_version: "1.0"
-  name: my-policy
-  scope: agent
-
-# Map concrete tools to card-level actions
-capability_mappings:
+```yaml
+# Map concrete tools to card-level capability categories
+capabilities:
   web_browsing:
     tools:
       - "mcp__browser__*"
     card_actions:
       - web_fetch
 
-defaults:
-  enforcement_mode: warn
-'
+enforcement:
+  default_mode: warn
+  unmapped_tool_action: warn
+  grace_period_hours: 24
+```
+
+Publish the whole alignment card (with the sections above embedded) to activate the policy:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: text/yaml" \
+  --data-binary @alignment-card.yaml
 ```
 
 Both `text/yaml` and `application/yaml` content types are accepted. JSON remains fully supported — use whichever format fits your workflow.
 
 <Tip>
-  YAML policies support inline comments, making them ideal for documenting the reasoning behind specific rules directly in the policy file.
+  YAML cards support inline comments, making them ideal for documenting the reasoning behind specific policy rules directly in the card file.
 </Tip>
 
 ## New feature: YAML card authoring
@@ -220,10 +208,10 @@ The CLI accepts both `.yaml` and `.json` card files:
 
 ```bash
 # Validate a YAML card
-smoltbot card validate my-card.yaml
+mnemom card validate my-card.yaml
 
 # Publish it to your agent
-smoltbot card publish my-card.yaml
+mnemom card publish my-card.yaml
 ```
 
 The CLI detects the file extension and handles conversion automatically. Validation rules are identical for both formats.
@@ -322,7 +310,7 @@ If you version-control alignment card files (JSON or YAML), update `aap_version`
 
 ### Verify
 
-Run `smoltbot card show` for each agent to confirm the updated version is active.
+Run `mnemom card show` for each agent to confirm the updated version is active.
 
 </Steps>
 

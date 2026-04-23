@@ -13,7 +13,7 @@ Once Safe House is running, the Security Observatory gives you a live view of th
 
 ## The security observatory
 
-The Security Observatory is the Safe House section of the Mnemom dashboard at [app.mnemom.com/safe-house](https://app.mnemom.com/safe-house). It has five main panels.
+The Security Observatory is the Safe House section of the Mnemom dashboard at [app.mnemom.ai/safe-house](https://app.mnemom.ai/safe-house). It has five main panels.
 
 ### Threat feed
 
@@ -173,16 +173,31 @@ curl https://api.mnemom.ai/v1/safe-house/threshold-suggestions \
 
 **Apply a suggestion:**
 
+Threshold tuning happens through the agent's [protection card](/concepts/protection-card). Fetch the current card, amend the relevant threshold(s), and PUT it back.
+
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/mnm-550e8400-e29b-41d4-a716-446655440000/safe-house/config \
+AGENT_ID=mnm-550e8400-e29b-41d4-a716-446655440000
+
+# 1. Fetch the current protection card (YAML is the canonical format)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.mnemom.ai/v1/agents/${AGENT_ID}/protection-card" \
+  > protection.card.yaml
+
+# 2. Edit protection.card.yaml — update the threshold the suggestion flagged.
+#    Example diff:
+#      thresholds:
+#    -   bec_fraud: 0.70
+#    +   bec_fraud: 0.55
+
+# 3. Publish the amendment
+curl -X PUT "https://api.mnemom.ai/v1/agents/${AGENT_ID}/protection-card" \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "thresholds": {
-      "bec_fraud": { "warn": 0.55, "block": 0.88 }
-    }
-  }'
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  --data-binary @protection.card.yaml
 ```
+
+The publish triggers a protection-card recompose against the org template and platform floor. If the org sets a stricter threshold than your suggestion, the canonical card clamps to the org value (strictest-wins; see [card composition](/concepts/card-composition)). The legacy `PUT /v1/agents/{id}/safe-house/config` endpoint was removed in UC-4 — use the protection card.
 
 <Tip>
 When the calibration engine produces suggestions for multiple threat types on the same agent, apply them one at a time over successive days rather than all at once. This lets you observe the effect of each change in isolation.

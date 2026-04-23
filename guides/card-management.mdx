@@ -29,7 +29,7 @@ Every card requires five blocks: identity, principal, values, autonomy envelope,
   <Tab title="JSON">
 ```json
 {
-  "aap_version": "0.5.0",
+  "aap_version": "1.0.0",
   "card_id": "ac-YOUR_CARD_ID",
   "agent_id": "YOUR_AGENT_ID",
   "issued_at": "2026-02-21T00:00:00Z",
@@ -63,7 +63,7 @@ Every card requires five blocks: identity, principal, values, autonomy envelope,
   </Tab>
   <Tab title="YAML">
 ```yaml
-aap_version: "0.5.0"
+aap_version: "1.0.0"
 card_id: ac-YOUR_CARD_ID
 agent_id: YOUR_AGENT_ID
 issued_at: "2026-02-21T00:00:00Z"
@@ -179,7 +179,7 @@ Declare how your agent logs decisions and whether external parties can query tra
   <Tab title="JSON">
 ```json
 {
-  "aap_version": "0.5.0",
+  "aap_version": "1.0.0",
   "card_id": "ac-cs-agent-001-v1",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
   "issued_at": "2026-02-21T00:00:00Z",
@@ -260,7 +260,7 @@ Declare how your agent logs decisions and whether external parties can query tra
   <Tab title="YAML">
 ```yaml
 # Customer support agent alignment card
-aap_version: "0.5.0"
+aap_version: "1.0.0"
 card_id: ac-cs-agent-001-v1
 agent_id: mnm-550e8400-e29b-41d4-a716-446655440000
 issued_at: "2026-02-21T00:00:00Z"
@@ -445,67 +445,81 @@ The card panel updates immediately after saving. You can also confirm via CLI wi
 
 ## Publishing via API
 
-Update your agent's alignment card directly with a `PATCH` request. If the agent does not yet have a card, one will be created automatically.
+Update your agent's alignment card directly with a `PUT` request to `/v1/agents/{agent_id}/alignment-card`. The body is the [unified alignment card](/specifications/alignment-card-schema) in YAML (canonical) or JSON. Publishing triggers composition — the server regenerates the agent's canonical card against platform + org scopes before the response returns.
 
-Authenticate with either a Bearer JWT or an API key:
+Authenticate with either an API key or a Bearer JWT. Send `Idempotency-Key` so retries are safe to replay.
 
 <CodeGroup>
-```bash API Key
-curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+```bash API Key (YAML)
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
   -H "X-Mnemom-Api-Key: mnm_your_key_here" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "card_json": {
-      "aap_version": "0.5.0",
-      "agent_id": "your-agent-id",
-      "issued_at": "2026-02-21T00:00:00Z",
-      "expires_at": "2026-08-21T00:00:00Z",
-      "principal": { "type": "human", "relationship": "delegated_authority" },
-      "values": { "declared": ["transparency", "honesty"], "hierarchy": "lexicographic" },
-      "autonomy_envelope": {
-        "bounded_actions": ["inference", "read"],
-        "escalation_triggers": [],
-        "forbidden_actions": ["exfiltrate_data"]
-      },
-      "audit_commitment": {
-        "trace_format": "ap-trace-v1",
-        "retention_days": 90,
-        "queryable": true,
-        "tamper_evidence": "append_only"
-      }
-    }
-  }'
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  --data-binary @- <<'YAML'
+card_version: unified/2026-04-15
+card_id: ac-your-card-id
+agent_id: your-agent-id
+issued_at: "2026-02-21T00:00:00Z"
+expires_at: "2026-08-21T00:00:00Z"
+
+principal:
+  type: human
+  relationship: delegated_authority
+
+values:
+  declared:
+    - transparency
+    - honesty
+  hierarchy: lexicographic
+
+autonomy:
+  bounded_actions:
+    - inference
+    - read
+  forbidden_actions:
+    - exfiltrate_data
+
+audit:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  queryable: true
+  tamper_evidence: append_only
+YAML
 ```
 
-```bash Bearer Token
-curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+```bash Bearer Token (JSON)
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d '{
-    "card_json": {
-      "aap_version": "0.5.0",
-      "agent_id": "your-agent-id",
-      "issued_at": "2026-02-21T00:00:00Z",
-      "expires_at": "2026-08-21T00:00:00Z",
-      "principal": { "type": "human", "relationship": "delegated_authority" },
-      "values": { "declared": ["transparency", "honesty"], "hierarchy": "lexicographic" },
-      "autonomy_envelope": {
-        "bounded_actions": ["inference", "read"],
-        "escalation_triggers": [],
-        "forbidden_actions": ["exfiltrate_data"]
-      },
-      "audit_commitment": {
-        "trace_format": "ap-trace-v1",
-        "retention_days": 90,
-        "queryable": true,
-        "tamper_evidence": "append_only"
-      }
+    "card_version": "unified/2026-04-15",
+    "card_id": "ac-your-card-id",
+    "agent_id": "your-agent-id",
+    "issued_at": "2026-02-21T00:00:00Z",
+    "expires_at": "2026-08-21T00:00:00Z",
+    "principal": { "type": "human", "relationship": "delegated_authority" },
+    "values": {
+      "declared": ["transparency", "honesty"],
+      "hierarchy": "lexicographic"
+    },
+    "autonomy": {
+      "bounded_actions": ["inference", "read"],
+      "forbidden_actions": ["exfiltrate_data"]
+    },
+    "audit": {
+      "trace_format": "ap-trace-v1",
+      "retention_days": 90,
+      "queryable": true,
+      "tamper_evidence": "append_only"
     }
   }'
 ```
 </CodeGroup>
 
-See the [Unified Cards overview](/api-reference/unified-cards-overview) for the current unified alignment-card endpoints, which supersede the legacy card PATCH surface (UC-4, 2026-04-15).
+The response is the **canonical** card — your agent-scope input composed with platform + org scopes. Pass `?include_composition=true` to include the `_composition` metadata block showing which scope contributed which fields.
+
+The legacy `PATCH /v1/agents/{id}/card` endpoint was removed in UC-4 (2026-04-15) along with the separate `/v1/agents/{id}/cfd/config` and `/v1/agents/{id}/policy` endpoints. All three are now absorbed into the unified alignment-card and [protection-card](/concepts/protection-card) shapes. See the [migration guide](/guides/migrating-to-unified-cards) if you're upgrading an older client.
 
 ## Organization card templates (Enterprise)
 
