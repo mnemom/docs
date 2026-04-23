@@ -35,66 +35,70 @@ if (sources.length === 0) {
   exit(2);
 }
 
-const apiSource = sources.map((p) => readFileSync(p, 'utf8')).join('\n');
-
 // ---------------------------------------------------------------------------
-// Extract routes from the concatenated worker source(s)
+// Extract routes from each worker source independently
 // ---------------------------------------------------------------------------
-
-// Two patterns in use (see the comment block near line 14 of mnemom-api/src/index.ts):
+//
+// Sources are processed one at a time so that regex-variable names do not
+// collide across workers. Example collision we hit in production: both
+// mnemom-api (`/v1/checkpoints/{id}/inclusion-proof`) and mnemom-risk
+// (`/v1/risk/proofs/{id}`) declare `const proofMatch = path.match(...)`.
+// When processed as a single concatenated blob, the later definition
+// clobbers the earlier one and the first route disappears from the spec
+// surface entirely.
+//
+// Two source patterns we parse:
 //   if (path === '/v1/foo' && method === 'GET') { ... }
 //   const fooMatch = path.match(/^\/v1\/foo\/([^/]+)$/);
 //   if (fooMatch && method === 'POST') { ... }
-//
-// Strategy: find all `if (path === '...'` occurrences with method nearby,
-// and all `path.match(...)` regex patterns paired with their surrounding
-// method checks.
 
-/** Collected routes: array of { method, path } (path has {x}-normalized params). */
+/** Collected routes: `"METHOD /v1/path"` (path has {x}-normalized params). */
 const routes = new Set();
 
-// Pattern 1: exact-match routes
-//   if (path === '/v1/foo/bar' && method === 'GET') {
+// Pattern 1: exact-match routes — `if (path === '/v1/foo' && method === 'GET')`.
 const exactMatchPattern = /if\s*\(\s*path\s*===\s*'([^']+)'\s*&&\s*method\s*===\s*'([A-Z]+)'/g;
-for (const m of apiSource.matchAll(exactMatchPattern)) {
-  const [, p, method] = m;
-  routes.add(`${method} ${normalize(p)}`);
-}
 
-// Pattern 2: startsWith-based routes
-//   if (path.startsWith('/v1/foo/') && method === 'DELETE') {
+// Pattern 2: startsWith-based routes — `if (path.startsWith('/v1/foo/') && method === 'DELETE')`.
 const startsWithPattern = /if\s*\(\s*path\.startsWith\(\s*'([^']+)'\s*\)\s*&&\s*method\s*===\s*'([A-Z]+)'/g;
-for (const m of apiSource.matchAll(startsWithPattern)) {
-  const [, prefix, method] = m;
-  // Best-effort: record the prefix as a catch-all (Step 5 analysis already
-  // confirmed the only startsWith route pair is /v1/sonar/track/:id DELETE).
-  routes.add(`${method} ${normalize(prefix.replace(/\/$/, ''))}/{x}`);
-}
 
-// Pattern 3: regex-match routes
-//   const fooMatch = path.match(/^\/v1\/foo\/([^/]+)$/);
-//   if (fooMatch && method === 'POST') { ... }
-// We collect the regex + its subsequent `if (xMatch && method === 'Y')`
-// guards (the same var may be re-used across multiple methods).
+// Pattern 3: regex-match declarations — `const fooMatch = path.match(/^\/v1\/foo\/([^/]+)$/);`.
 const regexDeclPattern = /const\s+(\w+)\s*=\s*path\.match\(\/\^(.+?)\$\/i?\)/g;
-const regexByVar = new Map();
-for (const m of apiSource.matchAll(regexDeclPattern)) {
-  const [, varName, regexBody] = m;
-  // Convert the regex body (JS source form) to a template path with
-  // {x} params. In source, `/` is escaped as `\/`, so unescape first.
-  const pathTemplate = regexBody
-    .replace(/\\\//g, '/')                   // \/ -> /
-    .replace(/\\-/g, '-')                    // \- -> -
-    .replace(/\([^)]+\)/g, '{x}');           // (capture) -> {x}
-  regexByVar.set(varName, pathTemplate);
-}
 
-// Find method checks that reference each var.
+// Pattern 4: method checks against a regex var — `if (fooMatch && method === 'POST')`.
 const matchCheckPattern = /if\s*\(\s*(\w+)\s*&&\s*method\s*===\s*'([A-Z]+)'/g;
-for (const m of apiSource.matchAll(matchCheckPattern)) {
-  const [, varName, method] = m;
-  const path = regexByVar.get(varName);
-  if (path) routes.add(`${method} ${path}`);
+
+for (const sourcePath of sources) {
+  const source = readFileSync(sourcePath, 'utf8');
+
+  for (const m of source.matchAll(exactMatchPattern)) {
+    const [, p, method] = m;
+    routes.add(`${method} ${normalize(p)}`);
+  }
+
+  for (const m of source.matchAll(startsWithPattern)) {
+    const [, prefix, method] = m;
+    // Best-effort: record the prefix as a catch-all (Step 5 analysis
+    // confirmed the only startsWith route pair is /v1/sonar/track/:id DELETE).
+    routes.add(`${method} ${normalize(prefix.replace(/\/$/, ''))}/{x}`);
+  }
+
+  // Per-source regex-var map so names don't collide across workers.
+  const regexByVar = new Map();
+  for (const m of source.matchAll(regexDeclPattern)) {
+    const [, varName, regexBody] = m;
+    const pathTemplate = regexBody
+      .replace(/\\\//g, '/')                   // \/ -> /
+      .replace(/\\-/g, '-')                    // \- -> -
+      .replace(/\\\./g, '.')                   // \. -> .   (e.g. badge\.svg)
+      .replace(/\([^)]+\)/g, '{x}');           // (capture) -> {x}
+    regexByVar.set(varName, pathTemplate);
+  }
+
+  for (const m of source.matchAll(matchCheckPattern)) {
+    const [, varName, method] = m;
+    const path = regexByVar.get(varName);
+    if (path) routes.add(`${method} ${path}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +125,7 @@ const OUT_OF_SCOPE_PREFIXES = [
 // with unusual regex shapes, or multi-method handlers with var-name
 // overwrites). Add entries here with a brief reason; clear them out as
 // the extractor is improved.
-const KNOWN_EXTRACTOR_GAPS = new Set([
-  'GET /checkpoints/{x}/inclusion-proof', // proofMatch var name conflict
-]);
+const KNOWN_EXTRACTOR_GAPS = new Set([]);
 
 const customerRoutes = new Set();
 for (const r of routes) {
