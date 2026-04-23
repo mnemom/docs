@@ -1,0 +1,50 @@
+name: OpenAPI Drift Check
+
+# Guards against drift between mnemom-api route handlers and
+# docs/api-reference/openapi.json. Step 8 of the docs drift audit
+# (docs-audit/code-bugs.md + docs-audit/04-generator-options.md).
+#
+# Runs on:
+#   - pull_request to main (catches drift introduced in doc PRs)
+#   - schedule daily (catches drift introduced by mnemom-api changes
+#     that didn't trigger a docs PR)
+#   - workflow_dispatch (manual trigger)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "api-reference/openapi.json"
+      - "scripts/check-openapi-drift.mjs"
+      - ".github/workflows/openapi-drift-check.yml"
+  schedule:
+    - cron: "30 6 * * *" # daily, 30 min after mintlify-ci
+  workflow_dispatch:
+
+jobs:
+  check-drift:
+    name: Detect openapi.json vs mnemom-api route drift
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      - name: Checkout mnemom-api (private) via read-only PAT
+        uses: actions/checkout@v6
+        with:
+          repository: mnemom/mnemom-api
+          ref: main
+          path: mnemom-api
+          token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
+
+      - name: Check for drift
+        run: |
+          node scripts/check-openapi-drift.mjs mnemom-api/src/index.ts
