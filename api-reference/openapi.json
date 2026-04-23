@@ -11101,6 +11101,383 @@
           }
         }
       }
+    },
+    "/plans/public": {
+      "get": {
+        "operationId": "listPublicPlansAlias",
+        "summary": "List public pricing plans (alias of `/plans`)",
+        "description": "Returns non-archived, public-visibility plans sorted by `sort_order`. Identical to `GET /plans`; this alias exists for stable linking from marketing pages.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public plan list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "plans"
+                  ],
+                  "properties": {
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Plan"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/drift": {
+      "get": {
+        "operationId": "getOrgDrift",
+        "summary": "Paginated drift alerts for an org fleet",
+        "description": "Returns active and recent drift alerts for every agent in the org, plus a summary block (total_active, agents_drifting, high_severity, trend). Any org member may read. Feature-gated: `fleet_dashboard`.",
+        "tags": [
+          "Drift"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "x-feature-gate": "fleet_dashboard",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Drift alerts + summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "alerts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DriftAlert"
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total_active": {
+                          "type": "integer"
+                        },
+                        "agents_drifting": {
+                          "type": "integer"
+                        },
+                        "high_severity": {
+                          "type": "integer"
+                        },
+                        "trend": {
+                          "type": "string",
+                          "enum": [
+                            "stable",
+                            "worsening",
+                            "improving"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Plan does not include `fleet_dashboard`."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/drift/{alert_id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeOrgDriftAlert",
+        "summary": "Acknowledge a drift alert",
+        "description": "Marks a drift alert as acknowledged. Only org owner / admin / member may acknowledge (viewers and auditors cannot). Emits a `drift.resolved` webhook (fail-open). Feature-gated: `fleet_dashboard`.",
+        "tags": [
+          "Drift"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "x-feature-gate": "fleet_dashboard",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Acknowledged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "acknowledged": {
+                      "type": "boolean"
+                    },
+                    "alert_id": {
+                      "type": "string"
+                    },
+                    "acknowledged_by": {
+                      "type": "string"
+                    },
+                    "acknowledged_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Plan does not include `fleet_dashboard`."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Alert not found in this org."
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/export/fleet": {
+      "get": {
+        "operationId": "exportOrgFleet",
+        "summary": "Export a snapshot of the org's agent fleet",
+        "description": "Returns a fleet roster in CSV (default) or PDF format, suitable for compliance review / board reporting. Any org member may export. Feature-gated: `fleet_dashboard`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "x-feature-gate": "fleet_dashboard",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "pdf"
+              ],
+              "default": "csv"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet export.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Plan does not include `fleet_dashboard`."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/coherence": {
+      "get": {
+        "operationId": "getOrgCoherence",
+        "summary": "N-Way value coherence for the org fleet",
+        "description": "Returns a dimensional team-coherence vector (pairwise_governance_median / floor / max, conflict_edge_count, outlier_agents, pairwise) computed from the active alignment cards of every agent in the org. Requires at least 2 agents with alignment cards — returns `insufficient_agents` otherwise. Cached 5 minutes in `fleet_coherence_snapshots`. Feature-gated: `nway_coherence`. See ADR-025 (E-05).",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "x-feature-gate": "nway_coherence",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team-coherence result (or `insufficient_agents` stub).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "description": "Team-coherence vector (v2 / ADR-025).",
+                      "additionalProperties": true,
+                      "properties": {
+                        "pair_count": {
+                          "type": "integer"
+                        },
+                        "pairwise_governance_median": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "pairwise_governance_floor": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "conflict_edge_count": {
+                          "type": "integer"
+                        },
+                        "outlier_agents": {
+                          "type": "array"
+                        },
+                        "pairwise": {
+                          "type": "array"
+                        },
+                        "conscience_universal": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "insufficient_agents"
+                          ]
+                        },
+                        "agent_count": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Plan does not include `nway_coherence`."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
