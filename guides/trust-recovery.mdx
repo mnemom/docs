@@ -68,19 +68,19 @@ Fetch existing reclassifications and pending violations:
 
 ```bash
 curl https://api.mnemom.ai/v1/agents/{agent_id}/reclassifications \
-  -H "Authorization: Bearer $API_KEY"
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
 ```
 
 Or check the agent's canonical alignment card and evaluate it against the tools the agent actually uses — the composed card's `capabilities` and `enforcement` sections are what the policy engine enforces, and unmapped tools surface as `card_gap` candidates:
 
 ```bash
 # Fetch the canonical alignment card (includes composition metadata)
-curl -H "Authorization: Bearer $API_KEY" \
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card?include_composition=true"
 
 # Or evaluate a tool set against the current policy to see coverage + violations
 curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "{agent_id}",
@@ -105,7 +105,7 @@ Submit a reclassification for each checkpoint that was a card gap. Include a cle
 
 ```bash curl
 curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/reclassify \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "checkpoint_id": "ic-abc12345",
@@ -156,7 +156,7 @@ Update the card to include the missing capability. The full unified-card shape i
 
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: text/yaml" \
   -H "Idempotency-Key: $(uuidgen)" \
   --data-binary @- <<'YAML'
@@ -183,7 +183,7 @@ Or link the card amendment directly to the reclassification for a cleaner audit 
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/reclassify \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "checkpoint_id": "ic-abc12345",
@@ -202,7 +202,7 @@ After reclassification and card amendment, trigger a score recomputation to refl
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/reputation/{agent_id}/recompute \
-  -H "Authorization: Bearer $API_KEY"
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
 ```
 
 The recomputation recalculates all five scoring components (Integrity Ratio, Compliance, Drift Stability, Trace Completeness, and Coherence Compatibility) using the updated violation classifications.
@@ -221,7 +221,7 @@ Monitor propagation via the dashboard or subscribe to webhook events:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://your-server.com/webhooks/mnemom",
@@ -235,7 +235,7 @@ After recovery, export the full compliance record for audit purposes. The export
 
 ```bash
 curl https://api.mnemom.ai/v1/agents/{agent_id}/compliance-export \
-  -H "Authorization: Bearer $API_KEY"
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
 ```
 
 The export is a JSON document suitable for regulatory review, SOC 2 evidence, or internal governance reporting.
