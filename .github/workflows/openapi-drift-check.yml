@@ -37,7 +37,19 @@ jobs:
         with:
           node-version: "22.x"
 
+      - name: Preflight — check PAT is configured
+        id: preflight
+        run: |
+          if [ -z "${{ secrets.MNEMOM_API_READ_TOKEN }}" ]; then
+            echo "::warning::MNEMOM_API_READ_TOKEN secret is not set. Drift check skipped."
+            echo "Set a read-only PAT for mnemom/mnemom-api in repo secrets to enable this guard."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout mnemom-api (private) via read-only PAT
+        if: steps.preflight.outputs.skip == 'false'
         uses: actions/checkout@v6
         with:
           repository: mnemom/mnemom-api
@@ -45,6 +57,32 @@ jobs:
           path: mnemom-api
           token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
 
+      - name: Checkout mnemom-reputation (private) via read-only PAT
+        if: steps.preflight.outputs.skip == 'false'
+        uses: actions/checkout@v6
+        with:
+          repository: mnemom/mnemom-reputation
+          ref: main
+          path: mnemom-reputation
+          token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
+        continue-on-error: true
+
+      - name: Checkout mnemom-risk (private) via read-only PAT
+        if: steps.preflight.outputs.skip == 'false'
+        uses: actions/checkout@v6
+        with:
+          repository: mnemom/mnemom-risk
+          ref: main
+          path: mnemom-risk
+          token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
+        continue-on-error: true
+
       - name: Check for drift
+        if: steps.preflight.outputs.skip == 'false'
         run: |
-          node scripts/check-openapi-drift.mjs mnemom-api/src/index.ts
+          # Include reputation + risk worker sources if they were checked out;
+          # fall back to mnemom-api only if the optional checkouts failed.
+          sources="mnemom-api/src/index.ts"
+          [ -f mnemom-reputation/server/src/index.ts ] && sources="$sources mnemom-reputation/server/src/index.ts"
+          [ -f mnemom-risk/server/src/index.ts ] && sources="$sources mnemom-risk/server/src/index.ts"
+          node scripts/check-openapi-drift.mjs $sources
