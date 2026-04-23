@@ -151,6 +151,22 @@ The `IntegrityConcern.evidence` field may contain a short excerpt (recommended m
 
 The Mnemom stack is designed with explicit awareness of what it can and cannot defend against. The following threat categories are addressed.
 
+### Out of scope — what Mnemom does NOT defend against
+
+State these upfront so customers under enterprise security review can answer them without reading the whole page.
+
+- **Agent trustworthiness.** Mnemom makes agent behavior *observable*; it does not make it trustworthy. A clear integrity verdict is not a safety certificate.
+- **Honest thinking blocks.** AIP analyzes what the model *emits* as its thinking. A sufficiently sophisticated model can reason silently in one channel and produce sanitized thinking content in another. AIP detects inconsistency between thinking and action; it cannot detect silent deception that never surfaces in the thinking channel at all.
+- **Model inference correctness.** The zero-knowledge proof layer proves that the deterministic verdict-derivation rules were applied honestly to the model's output. It does **not** prove the model inference itself was run correctly. Proving model inference at current scale is prohibitively expensive; see the [whitepaper](/concepts/whitepaper) for the rationale.
+- **Upstream prompt injection.** AIP detects injection *patterns in thinking blocks* after the agent has processed injected content. It does not prevent untrusted content from reaching the model. Safe House reduces exposure on inbound and outbound channels (see [Safe House threat model](/guides/safe-house-threat-model)), but the broader prompt-injection attack surface — including novel injections the L1 patterns do not match — remains open.
+- **Model-provider compromise.** Mnemom trusts the LLM provider's API responses. A compromised or malicious provider (returning fabricated thinking blocks, omitting content, or replaying cached responses) is not detected by AIP or AAP.
+- **Out-of-band agent behavior.** If the agent operator disables the Mnemom gateway and calls the LLM provider directly, none of the trust-plane signals apply. AP-Traces, integrity checkpoints, and reputation scoring all require traffic to flow through the gateway (or an SDK-Direct equivalent path).
+- **Supply-chain and infrastructure attacks** on the LLM providers, Mnemom's hosting (Cloudflare, Supabase, Modal), or the package registries that distribute the Mnemom SDKs. These are mitigated by provider-side controls and Mnemom's own [supply-chain trust](/guides/supply-chain-trust) practices, not by the protocols themselves.
+- **Physical-layer tampering** with on-chain Merkle anchors on Base L2. The on-chain layer inherits Base/Ethereum's security assumptions; Mnemom does not defend against 51% attacks, censorship, or chain reorgs beyond L2 finality depth.
+- **Replacement for human oversight.** Mnemom is a transparency and integrity layer, not an autonomous enforcement system. High-stakes decisions — financial transactions above material thresholds, irreversible real-world actions, safety-critical operations — require human-in-the-loop controls set via [policy escalation triggers](/guides/policy-management), not full reliance on automated verdicts.
+
+Every item below describes a threat Mnemom *does* address — treat the list above as the explicit boundary of those claims.
+
 ### Adversarial agents
 
 An agent can produce perfect AP-Traces and pass every integrity checkpoint while acting against its principal's interests. If the agent controls what it logs and reasons in ways not captured by the thinking block, the protocols provide visibility into what the agent *declares* and *exposes*, not what it *actually does*.
