@@ -11101,6 +11101,361 @@
           }
         }
       }
+    },
+    "/auth/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List the caller's active sessions",
+        "description": "Returns every non-revoked session for the authenticated user. Each row is safe to render in an \"Active sessions\" UI — no tokens are disclosed. The session matching the request cookie is marked `is_current: true`, and sessions originating from the same hashed source IP as the current request are marked `same_network_as_current: true`. See ADR-028.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active sessions for the current user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sessions"
+                  ],
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sid",
+                          "auth_method",
+                          "device_label",
+                          "issued_at",
+                          "last_seen_at",
+                          "is_current",
+                          "same_network_as_current"
+                        ],
+                        "properties": {
+                          "sid": {
+                            "type": "string",
+                            "description": "Opaque session id. Pass to `DELETE /auth/sessions/{sid}` to revoke."
+                          },
+                          "auth_method": {
+                            "type": "string",
+                            "enum": [
+                              "password",
+                              "sso",
+                              "passkey"
+                            ]
+                          },
+                          "device_label": {
+                            "type": "string",
+                            "description": "Best-effort human label derived from the original User-Agent and IP at sign-in time (e.g. \"Safari on macOS — San Francisco\")."
+                          },
+                          "issued_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "last_seen_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "is_current": {
+                            "type": "boolean",
+                            "description": "True for the session tied to the request cookie."
+                          },
+                          "same_network_as_current": {
+                            "type": "boolean",
+                            "description": "True when this session's hashed source IP matches the current request's."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeAllOtherSessions",
+        "summary": "Revoke all other sessions",
+        "description": "Revokes every active session for the current user _except_ the one making this call. Requires aal2 (MFA-verified session). Sessions issued before per-session revocation (v=1 cookies) cannot identify themselves as \"current\" and receive `409 legacy_session_requires_reauth` — the user must sign in again to use this action. See ADR-028.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional idempotency key; repeated calls with the same key return the same result within 24 hours."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Number of sessions revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "revoked"
+                  ],
+                  "properties": {
+                    "revoked": {
+                      "type": "integer",
+                      "description": "Count of sessions revoked (excludes the current session)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Current session isn't aal2.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "aal2_required"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Current session predates per-session revocation and must be re-signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "legacy_session_requires_reauth"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/sessions/{sid}": {
+      "delete": {
+        "operationId": "revokeSession",
+        "summary": "Revoke a specific session",
+        "description": "Revokes one non-current session by its `sid`. The KV blocklist is updated so the gateway rejects the next request bearing that session on its next hit. Cannot be used to revoke the session making this request — use `POST /auth/sign-out` for that. Requires aal2. Idempotent: a sid that is already revoked or never belonged to the user returns 404 (non-enumeration). See ADR-028.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Session identifier returned by `GET /auth/sessions`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "revoked_at"
+                  ],
+                  "properties": {
+                    "revoked_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Attempted to revoke the current session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "cannot_revoke_current"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Current session isn't aal2.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "aal2_required"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found (or already revoked)."
+          }
+        }
+      }
+    },
+    "/auth/sessions/revoke-via-email": {
+      "post": {
+        "operationId": "revokeSessionViaEmail",
+        "summary": "Revoke a session using a signed email token",
+        "description": "Consumes a signed token minted at email-send time by the new-device notification flow. Possession of the token is the auth factor — no existing session cookie is required, no MFA. Returns 200 on any verified-valid token even if the underlying sid is already revoked (idempotent, non-enumerating). Returns 400 on malformed, tampered, expired, or key-mismatched tokens. Public endpoint, rate-limited. See ADR-031.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "HS256-signed token from the new-device email link."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session revocation accepted (idempotent — 200 returned even if the session was already gone).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "revoked_at"
+                  ],
+                  "properties": {
+                    "revoked_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, expired, tampered, or key-mismatched token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "bad_body",
+                        "missing_token",
+                        "invalid_token"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
     }
   },
   "components": {
