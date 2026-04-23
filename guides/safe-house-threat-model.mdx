@@ -205,19 +205,28 @@ Indicators that you should raise thresholds for a specific threat type:
 - The adaptive threshold suggestion API is consistently recommending a higher threshold
 - Your team is spending more time releasing quarantined items than investigating actual threats
 
-Raise thresholds per-agent or per-threat-type via the config API:
+Raise thresholds per-agent or per-threat-type by editing the agent's [protection card](/concepts/protection-card) and publishing the amendment:
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/mnm-550e8400-e29b-41d4-a716-446655440000/safe-house/config \
+AGENT_ID=mnm-550e8400-e29b-41d4-a716-446655440000
+
+# Fetch, edit, and PUT the protection card.
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.mnemom.ai/v1/agents/${AGENT_ID}/protection-card" \
+  > protection.card.yaml
+
+# Adjust the threshold fields in protection.card.yaml, e.g.:
+#   thresholds:
+#     bec_fraud: 0.85
+#     social_engineering: 0.80
+
+curl -X PUT "https://api.mnemom.ai/v1/agents/${AGENT_ID}/protection-card" \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "thresholds": {
-      "bec_fraud": { "warn": 0.5, "block": 0.85 },
-      "social_engineering": { "warn": 0.55, "block": 0.80 }
-    }
-  }'
+  -H "Content-Type: text/yaml" \
+  --data-binary @protection.card.yaml
 ```
+
+(The legacy `PUT /v1/agents/{id}/safe-house/config` endpoint was removed in UC-4. See the [safe-house config guide](/guides/safe-house-config) for the full protection-card lifecycle.)
 
 ### Marking false positives
 

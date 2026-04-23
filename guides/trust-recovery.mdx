@@ -71,11 +71,21 @@ curl https://api.mnemom.ai/v1/agents/{agent_id}/reclassifications \
   -H "Authorization: Bearer $API_KEY"
 ```
 
-Or check policy evaluation results -- the policy engine often surfaces `card_gap` hints in its recommendations:
+Or check the agent's canonical alignment card and evaluate it against the tools the agent actually uses — the composed card's `capabilities` and `enforcement` sections are what the policy engine enforces, and unmapped tools surface as `card_gap` candidates:
 
 ```bash
-curl https://api.mnemom.ai/v1/agents/{agent_id}/policy/resolved \
-  -H "Authorization: Bearer $API_KEY"
+# Fetch the canonical alignment card (includes composition metadata)
+curl -H "Authorization: Bearer $API_KEY" \
+  "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card?include_composition=true"
+
+# Or evaluate a tool set against the current policy to see coverage + violations
+curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "{agent_id}",
+    "tools": ["mcp__browser__navigate", "mcp__filesystem__read_file"]
+  }'
 ```
 
 Look for checkpoints where:
@@ -142,17 +152,31 @@ The API returns a reclassification record with a unique ID and status. Reclassif
 
 Reclassification removes the penalty for past violations, but without updating the card, the same violation will recur on the next checkpoint. Always amend the card alongside reclassification.
 
-Update the card to include the missing capability:
+Update the card to include the missing capability. The full unified-card shape is in [/specifications/alignment-card-schema](/specifications/alignment-card-schema); this example shows just the section that needs to change:
 
 ```bash
-curl -X PATCH https://api.mnemom.ai/v1/agents/{agent_id}/card \
+curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
   -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "autonomy_envelope": {
-      "bounded_actions": ["inference", "read", "write", "web_fetch", "web_search"]
-    }
-  }'
+  -H "Content-Type: text/yaml" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  --data-binary @- <<'YAML'
+card_version: unified/2026-04-15
+card_id: ac-your-card-id
+agent_id: {agent_id}
+issued_at: "2026-02-21T00:00:00Z"
+
+values:
+  declared: [transparency, honesty]
+
+autonomy:
+  bounded_actions: [inference, read, write, web_fetch, web_search]
+  forbidden_actions: [exfiltrate_data]
+
+audit:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  tamper_evidence: append_only
+YAML
 ```
 
 Or link the card amendment directly to the reclassification for a cleaner audit trail:
@@ -238,8 +262,8 @@ The export is a JSON document suitable for regulatory review, SOC 2 evidence, or
   <Card title="Review history before publishing" icon="clock-rotate-left">
     Before publishing a new card version, review reclassification history to ensure all known gaps are addressed in the updated card.
   </Card>
-  <Card title="Test with mnemom policy" icon="flask-vial">
-    Use `mnemom policy test` to catch card gaps before they become violations. Run this in CI after any card or tool configuration change.
+  <Card title="Test cards against your tools" icon="flask-vial">
+    Use `mnemom card evaluate card.yaml --tools <tool-list>` to catch card gaps before they become violations. Run this in CI after any card or tool configuration change — see [CI/CD policy gates](/guides/ci-cd-policy-gates).
   </Card>
 </CardGroup>
 
