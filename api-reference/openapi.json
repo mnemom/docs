@@ -10279,6 +10279,74 @@
         }
       }
     },
+    "/auth/password": {
+      "post": {
+        "operationId": "updatePassword",
+        "summary": "Update the authenticated user's password",
+        "description": "Authenticated password update. Used by both the `/reset-password` recovery flow (after the recovery email callback issues a session) and voluntary password changes from account settings. Cookie session auth required (`mnemom_session`); bearer tokens are not accepted on this route. After a successful update, every other session for the same user is revoked with audit reason `password_reset`.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "description": "New password. Must be at least 12 characters. The upstream identity provider applies additional weak-password and breach-list checks; failures surface as 400 with a `password_rejected` error code."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password updated. Other sessions for the same user are revoked best-effort.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — missing `password`, password under minimum length (`password_too_short`), or upstream rejection (`password_rejected`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
     "/auth/resend-confirmation": {
       "post": {
         "operationId": "resendConfirmation",
