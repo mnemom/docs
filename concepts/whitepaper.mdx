@@ -40,15 +40,11 @@ This paper articulates Mnemom as a governance stance. Section 2 defines the thre
 
 ### 1.1 The problem
 
-For decades, competitive advantage in digital commerce derived from information asymmetry. Platforms accumulated knowledge about users — search history, purchase patterns, social connections — and leveraged this asymmetry to extract value.
+Modern AI agents take actions on behalf of principals across systems the principal does not directly observe. The substrate that makes this practical — LLMs routing through tool surfaces, agents coordinating with other agents, autonomous transactions at machine speed — does not yet have a governance layer that lets principals, auditors, or downstream agents see what an agent is doing and verify that what they see is honest.
 
-This paradigm is collapsing.
+Four gaps leave this governance problem open. The post-hoc audit layer does not exist by default; where it exists, it is operator-controlled. The real-time reasoning layer is not addressed by current products, which observe behavior after the fact. The contextual-defense layer is fragmented across web application firewalls, guardrail libraries, and red-team products that do not share observability with the audit layer. And none of these layers, today, produce evidence an independent verifier can check without trusting the oversight service.
 
-When AI agents act on behalf of humans, they bring equal reasoning power, equal tool access, and equal information retrieval capabilities. An AI agent shopping for a consumer has the same access to product databases, reviews, and pricing data as the merchant's AI. The asymmetry that powered trillion-dollar advertising businesses evaporates when agents negotiate with agents.
-
-**When capability is symmetric, alignment becomes the differentiator.**
-
-The market recognizes this gap. McKinsey's 2025 survey identifies "lack of governance and risk-management tools" as the #1 barrier to AI adoption. PwC reports 28% of executives cite "lack of trust in AI agents" as their top challenge. Bain finds 50% of consumers remain cautious of fully autonomous purchasing.
+This paper describes a single governance stance that addresses all four gaps.
 
 ### 1.2 The gap in the current stack
 
@@ -110,7 +106,7 @@ Each mode is visible at a different point in the request lifecycle and requires 
 
 ### 2.2 Why the failure modes don't decompose
 
-It is tempting to ship three independent products. Many incumbents do — a logging tool, a guardrail tool, and a WAF. The tempting story is false for three reasons.
+It is tempting to ship three independent products — a logging tool, a guardrail tool, and a WAF. Several incumbent stacks are shaped this way. The approach has three structural problems.
 
 **Observability is shared.** A prompt injection that slips past a WAF produces behavioral evidence downstream (the agent takes a forbidden action), cognitive evidence upstream (the thinking block reveals the injection), and contextual evidence at the entry point (the injection payload). Three independent products cannot correlate these into a single incident. One platform can.
 
@@ -407,6 +403,8 @@ AIP produces a signal with a `proceed` boolean and a recommended action (`contin
 
 **Failure policy.** AIP defaults to fail-open — if the analysis LLM is unreachable, the agent proceeds with a logged warning. For high-security deployments, fail-closed mode blocks until analysis succeeds or a human approves continuation.
 
+**Latency posture.** AIP analysis runs near-synchronously in the managed-gateway path. End-to-end cost is dominated by the conscience-prompt LLM call to a small model (Claude Haiku-class), which in production observation averages 800–2000 ms depending on thinking-block length. This places AIP outside sub-second synchronous critical paths. Customers who require user-facing latency at p99 below that range should deploy AIP in `observe` mode — analysis runs asynchronously via `ctx.waitUntil` with zero perceptible latency — and reserve `enforce` mode for non-user-facing workflows or for flows where a near-second pause is acceptable.
+
 ---
 
 ### 5.3 Safe House — contextual oversight
@@ -509,7 +507,7 @@ A centralized oversight service could, in principle:
 
 These failure modes are not hypothetical for any centralized service. The verification gap is the distance between *"this service says the agent is aligned"* and *"we can independently confirm this service applied its stated rules honestly."*
 
-Cryptographic attestation closes this gap. It transforms oversight verdicts from claims into evidence — evidence that can be verified by any party, without trusting the Mnemom API, without trusting the analysis service, without trusting anything except mathematics.
+Cryptographic attestation closes this gap. It transforms oversight verdicts from claims into evidence — evidence that can be verified by any party, without trusting the Mnemom API, without trusting the analysis service, and without trusting any component beyond the underlying cryptographic primitives.
 
 ### 6.2 The attestation chain
 
@@ -689,7 +687,7 @@ The central conceptual move of the attestation layer is the distinction between 
 
 The platform occupies a practical middle ground: stronger than signature-only attestation, because computation is proven rather than only signed; far cheaper than full inference proofs, because only the deterministic judgment layer is proven; complementary to hardware attestation, which could cover the LLM analysis stage that the proof explicitly does not cover.
 
-The guarantee is precise: *"Given these concerns, the verdict derivation was honest."* The non-guarantee is equally precise: *"The concerns themselves were correctly identified."* Both are communicated to verifiers. This honesty is what makes the layer credible.
+The guarantee is precise: *"Given these concerns, the verdict derivation was honest."* The non-guarantee is equally precise: *"The concerns themselves were correctly identified."* Both are communicated to verifiers alongside the certificate.
 
 ---
 
@@ -699,10 +697,10 @@ An agent rarely operates alone. The trust plane's per-agent primitives — cards
 
 ### 7.1 Why fleets need a different primitive
 
-The natural first instinct is to compute a single "fleet coherence score" from pairwise comparisons. The platform ran this at first. In production, on real fleets, single-number fleet scores were **actively dishonest**:
+The natural first instinct is to compute a single "fleet coherence score" from pairwise comparisons. The platform shipped this shape first, with Jaccard-flavored scoring over declared value sets. Observations on the platform's showcase fixtures revealed three structural problems with the single-number output:
 
-1. **Silence counted as disagreement.** A value declared by one agent that another agent does not mention deflates a Jaccard-flavored score — even though absence from a role-specialist card is specialization, not disagreement.
-2. **Role specialization was punished.** A monitoring agent and a remediation agent sharing all seven governance commitments but differing on five role-specific values landed at ≈58% coherence — not because they conflict, but because the denominator counted every unique value as potential disagreement.
+1. **Silence counted as disagreement.** A value declared by one agent that another agent does not mention deflates the score — even though absence from a role-specialist card is specialization, not disagreement.
+2. **Role specialization was penalized.** A monitoring agent and a remediation agent sharing every governance commitment but differing on role-specific values scored substantially below parity under Jaccard — not because they conflict, but because the denominator counted every unique value as potential disagreement. The effect is reproducible on the `@mnemom/team-coherence` baseline fixtures.
 3. **Mean-of-pairs obscured structure.** There was no asymmetry between a universal conscience floor (which *must* be shared) and role extensions (which *should* diverge). No surfacing of the weakest pair, the conflict surface, or the specialization structure.
 
 A single blended percentage is a lossy compression, and the specific compression that naive coherence scorers apply distorts legitimate fleets.
@@ -740,7 +738,7 @@ Key properties: **silence is neutral** (values declared by only one agent do not
 - **Outliers.** Per-agent `mean_pair_governance` and `deviation_sigma` — an agent whose mean pairwise score is more than 1σ below the fleet mean is surfaced as an outlier.
 - **Narrative helpers.** Pre-computed answers to common human questions, so every UI surface tells the same story: `weakest_pair` (answers *"where should I look first?"*), `most_conflicted_agent`, `specializations` (per-agent unique values), `conflict_surface` (flat list of every explicit conflict with evidence).
 
-Absence of a single fleet score is not a gap; it is the contribution. Consumers that require a scalar must derive one from the vector themselves and take responsibility for that compression. See [Fleet Coherence](/concepts/fleet-coherence).
+The absence of a single fleet score is intentional. Consumers that require a scalar must derive one from the vector themselves and take responsibility for that compression. See [Fleet Coherence](/concepts/fleet-coherence).
 
 ### 7.4 Package structure
 
@@ -830,7 +828,7 @@ The platform assumes agents may be:
 
 ### 9.3 Defense in depth
 
-No single layer provides complete protection. The layered design is the point. Ordered from fastest to slowest:
+No single layer provides complete protection. The layering is load-bearing: each layer narrows the failure modes the next layer has to handle. Ordered from fastest to slowest:
 
 1. **Safe House** (inbound contextual defense, canaries, outbound screening).
 2. **AIP** (real-time cognitive analysis between turns).
@@ -1006,23 +1004,9 @@ The following directions are under design or internal exploration; no dates are 
 
 ## 15. Conclusion
 
-The agentic internet is arriving with or without a trust plane. The question is not whether agents will coordinate — they already are — but whether that coordination will be observable, auditable, contextually defended, and *provably* honest.
+The three oversight layers — AAP for behavior, AIP for cognition, Safe House for context — address the three failure modes defined in §2. Unified alignment cards give the layers a common contract. The managed gateway gives customers a single integration point that activates them together. Each layer's output flows into a shared attestation chain rather than living in a product silo, so correlation across layers is structural rather than operational.
 
-This paper frames Mnemom as a single governance stance, composed of three oversight layers and a cryptographic attestation system, unified behind a managed gateway and one declared contract.
-
-**Post-hoc behavioral oversight (AAP).** Alignment cards declare what the agent claims. AP-Traces record what the agent did. Drift detection tracks divergence across sessions. This layer makes behavior *observable* — but the agent controls what it logs.
-
-**Real-time cognitive oversight (AIP).** Integrity checkpoints reveal what the agent was thinking. Conscience prompts evaluate reasoning against declared values. Side-channel signals enable intervention before harm occurs. This layer makes intent *analyzable* — but the analysis engine is a new trust dependency.
-
-**Contextual oversight (Safe House).** Inbound screening catches what reaches the agent; outbound screening catches what leaves it. Canaries convert silent compromise into loud evidence. This layer extends oversight across the agent's context boundary — but depends on pattern coverage and adversary sophistication.
-
-**Cryptographic attestation.** Ed25519 signatures prevent verdict fabrication. Hash chains prevent retroactive modification. Merkle trees prevent selective deletion. SP1 STARK proofs prove the deterministic judgment was applied honestly. Base L2 anchors make the attestation chain independently verifiable. This layer makes oversight *verifiable* — removing the need to trust the oversight service itself.
-
-The three oversight layers address the three failure modes a trust plane owes the agentic internet. The attestation chain removes the recursive trust problem that each oversight layer introduces. The unified alignment contract prevents the modes from fragmenting into three disjoint products. The managed gateway makes all of it reachable with a single configuration change.
-
-The critical conceptual move of the attestation layer is the auditor-model distinction. By proving the deterministic judgment rules rather than the LLM inference, we produce a system that is practical at per-checkpoint cost, fast enough for near-synchronous delivery, and meaningful (the verdict derivation was honest) — without waiting for the still-distant day when full inference proofs become viable for frontier models.
-
-The infrastructure is open. Protocol specifications, schemas, SDKs, the dimensional team-coherence scorer, and the on-chain registry ABIs are publicly available. Certificates are publicly verifiable. Limitations are stated.
+Cryptographic attestation makes the oversight verifiable. Ed25519 signatures, per-session hash chains, and per-agent Merkle accumulators make verdicts non-fabricatable; SP1 STARK proofs show that the deterministic verdict-derivation rules were applied honestly; aggregated Merkle roots anchored on Base L2 let any third party confirm the chain without trusting Mnemom's infrastructure. The conceptual move that makes this practical at per-checkpoint cost is the auditor-model distinction — proving deterministic judgment rather than model inference, and naming the residual trust assumption (the LLM analysis stage) explicitly rather than eliding it.
 
 What remains is the work of building alignment infrastructure that scales with the agents we are deploying — infrastructure where the response to *"why should I trust this?"* is not *"because we said so"* but *"because the math checks out, and the things the math does not reach are named explicitly."*
 
