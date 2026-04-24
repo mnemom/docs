@@ -15885,6 +15885,82 @@
         }
       }
     },
+    "/orgs/{org_id}/safe-house/enable": {
+      "post": {
+        "operationId": "enableOrgSafeHouse",
+        "summary": "Enable or change the Safe House posture for an org",
+        "description": "Customer-admin entry point to set the Safe House mode for an organization. Mirrors the staff-only `POST /v1/admin/safe-house/enable` route; both call the same `enable_sh_for_org(p_org_id, p_mode)` RPC. Caller must be an `owner` or `admin` of the target org.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "disabled",
+                      "off",
+                      "observe",
+                      "enforce",
+                      "enforce_sync",
+                      "sovereign"
+                    ],
+                    "default": "observe",
+                    "description": "Target Safe House mode. Defaults to `observe` when omitted."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Mode applied. Response shape mirrors the staff endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `mode` value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not an owner or admin of the target org, or is operating cross-tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/deployments/heartbeat": {
       "post": {
         "operationId": "deploymentHeartbeat",
