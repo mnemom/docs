@@ -2,14 +2,23 @@
 /**
  * check-openapi-drift.mjs
  *
- * Compares the customer-facing route table in `mnemom-api/src/index.ts`
- * against `docs/api-reference/openapi.json` and reports drift.
+ * Two guards in one script:
+ *
+ *  1. Staff-surface leak guard. /v1/admin/* is permanently Mnemom-staff-only
+ *     and must never appear in customer docs. Fails if any /admin/ path is
+ *     in api-reference/openapi.json, or any /v1/admin/ reference appears in
+ *     customer-facing MDX / docs.json. The customer org-admin surface lives
+ *     under /v1/orgs/{org_id}/*.
+ *
+ *  2. OpenAPI drift guard. Compares customer-facing routes declared in
+ *     mnemom-api (plus optional reputation + risk workers) against
+ *     api-reference/openapi.json and reports drift.
  *
  * Customer-facing is defined by docs-audit/00-scope.md §0:
  *   - /v1/* customer routes are in scope
- *   - /internal/*, /v1/admin/* (until BUG-4 role split),
- *     /v1/arena/internal/*, webhook inbound endpoints, and any
- *     X-Service-Key or X-Internal-Key route are out of scope
+ *   - /v1/admin/*, /internal/*, /v1/arena/internal/*, webhook inbound
+ *     endpoints, and any X-Service-Key or X-Internal-Key route are out
+ *     of scope (staff / service surfaces)
  *
  * Usage:
  *   node scripts/check-openapi-drift.mjs <path-to-source> [<path-to-source> ...]
@@ -23,10 +32,11 @@
  *     mnemom-reputation/server/src/index.ts \
  *     mnemom-risk/server/src/index.ts
  *
- * Exits 0 on clean. Exits 1 with a drift report on mismatch.
+ * Exits 0 on clean. Exits 1 with a report on any leak or drift.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { argv, exit } from 'node:process';
 
 const sources = argv.slice(2);
@@ -107,7 +117,8 @@ for (const sourcePath of sources) {
 
 const OUT_OF_SCOPE_PREFIXES = [
   '/internal/',        // service-key internal routes
-  '/v1/admin/',        // Mnemom-staff-only (until BUG-4 wires org_admin)
+  '/v1/admin/',        // permanently Mnemom-staff-only; customer org-admin
+                       // surface lives under /v1/orgs/{org_id}/*
   '/v1/arena/internal/', // arena-simulator internal
   '/v1/on-chain/anchor-root',
   '/v1/on-chain/publish-scores',
@@ -115,6 +126,7 @@ const OUT_OF_SCOPE_PREFIXES = [
   '/v1/sonar/',        // sonar is admin/inbound-webhook
   '/v1/rb2b/webhook',
   '/v1/billing/webhooks/stripe', // inbound from Stripe
+  '/v1/auth/send-email-hook',    // Supabase auth-hook receiver (signature-authed)
   '/v1/contact/notify', // marketing
   '/v1/teams/{x}/coherence-history', // internal-key
   '/v1/internal/',
@@ -150,7 +162,79 @@ for (const [path, methods] of Object.entries(openapi.paths ?? {})) {
 }
 
 // ---------------------------------------------------------------------------
-// Diff
+// Guard 1 — staff-surface leak check
+// ---------------------------------------------------------------------------
+// /v1/admin/* is permanently Mnemom-staff-only and must not surface in
+// customer docs. This guard fails the build if:
+//   - openapi.json declares a path under /admin/
+//   - any customer-docs MDX / docs.json references /v1/admin/
+//
+// If a customer org-admin capability is needed, add it under
+// /v1/orgs/{org_id}/* in mnemom-api and document it there.
+
+// openapi.json paths don't carry the /v1 prefix (it's in `servers`), so a
+// leak shows up as a top-level path that begins with /admin/.
+const staffPathsInSpec = Object.keys(openapi.paths ?? {}).filter((p) =>
+  p.startsWith('/admin/'),
+);
+
+// Scan customer-docs content for any /v1/admin/ mention. Exclude the
+// scripts/ dir (this file references /v1/admin/ in comments and the
+// OUT_OF_SCOPE_PREFIXES list) and typical dependency/metadata dirs.
+const CONTENT_EXTENSIONS = ['.mdx', '.md', '.json'];
+const SCAN_EXCLUDE_DIRS = new Set([
+  '.git',
+  '.github',
+  '.claude',
+  'node_modules',
+  'scripts',
+  'fonts',
+  'images',
+  'logo',
+]);
+
+function walkContent(dir, acc = []) {
+  for (const entry of readdirSync(dir)) {
+    if (SCAN_EXCLUDE_DIRS.has(entry)) continue;
+    const full = join(dir, entry);
+    const s = statSync(full);
+    if (s.isDirectory()) walkContent(full, acc);
+    else if (CONTENT_EXTENSIONS.some((e) => entry.endsWith(e))) acc.push(full);
+  }
+  return acc;
+}
+
+const STAFF_PREFIX_IN_TEXT = /\/v1\/admin\//;
+const mdxLeaks = [];
+for (const file of walkContent('.')) {
+  // openapi.json is already checked explicitly above — skip to avoid
+  // double-reporting the same path as both a spec path and a text leak.
+  if (file === 'api-reference/openapi.json') continue;
+  const content = readFileSync(file, 'utf8');
+  if (STAFF_PREFIX_IN_TEXT.test(content)) mdxLeaks.push(file);
+}
+
+if (staffPathsInSpec.length > 0 || mdxLeaks.length > 0) {
+  console.log('❌ Staff-only surface leaked into customer docs.');
+  console.log();
+  console.log('   /v1/admin/* is permanently Mnemom-staff-only. Customer');
+  console.log('   org-admin routes live under /v1/orgs/{org_id}/*.');
+  console.log();
+  if (staffPathsInSpec.length > 0) {
+    console.log(`   openapi.json paths (${staffPathsInSpec.length}):`);
+    for (const p of staffPathsInSpec) console.log(`     - ${p}`);
+    console.log();
+  }
+  if (mdxLeaks.length > 0) {
+    console.log(`   Files referencing /v1/admin/ (${mdxLeaks.length}):`);
+    for (const f of mdxLeaks) console.log(`     - ${f}`);
+    console.log();
+  }
+  exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// Guard 2 — drift diff
 // ---------------------------------------------------------------------------
 
 const missing = [...customerRoutes].filter((r) => !specRoutes.has(r)).sort();

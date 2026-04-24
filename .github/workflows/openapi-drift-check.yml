@@ -1,11 +1,18 @@
 name: OpenAPI Drift Check
 
-# Guards against drift between mnemom-api route handlers and
-# docs/api-reference/openapi.json. Step 8 of the docs drift audit
-# (docs-audit/code-bugs.md + docs-audit/04-generator-options.md).
+# Runs two guards via scripts/check-openapi-drift.mjs:
+#   1. Staff-surface leak — fails if /v1/admin/* appears in customer docs
+#      (openapi.json path, or /v1/admin/ reference in any MDX/docs.json).
+#      /v1/admin/* is permanently Mnemom-staff-only; customer org-admin
+#      routes live under /v1/orgs/{org_id}/*.
+#   2. OpenAPI drift — fails if routes in mnemom-api (+ reputation, risk)
+#      diverge from api-reference/openapi.json. Step 8 of the docs drift
+#      audit (docs-audit/code-bugs.md + 04-generator-options.md).
 #
-# Runs on:
-#   - pull_request to main (catches drift introduced in doc PRs)
+# Triggers:
+#   - pull_request to main (any docs change that could leak /v1/admin/
+#     into the customer surface, or any change that might add/remove a
+#     customer route in openapi.json)
 #   - schedule daily (catches drift introduced by mnemom-api changes
 #     that didn't trigger a docs PR)
 #   - workflow_dispatch (manual trigger)
@@ -14,7 +21,9 @@ on:
   pull_request:
     branches: ["main"]
     paths:
-      - "api-reference/openapi.json"
+      - "api-reference/**"
+      - "docs.json"
+      - "**/*.mdx"
       - "scripts/check-openapi-drift.mjs"
       - ".github/workflows/openapi-drift-check.yml"
   schedule:
