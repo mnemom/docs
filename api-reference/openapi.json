@@ -10279,6 +10279,74 @@
         }
       }
     },
+    "/auth/password": {
+      "post": {
+        "operationId": "updatePassword",
+        "summary": "Update the authenticated user's password",
+        "description": "Authenticated password update. Used by both the `/reset-password` recovery flow (after the recovery email callback issues a session) and voluntary password changes from account settings. Cookie session auth required (`mnemom_session`); bearer tokens are not accepted on this route. After a successful update, every other session for the same user is revoked with audit reason `password_reset`.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "CookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "description": "New password. Must be at least 12 characters. The upstream identity provider applies additional weak-password and breach-list checks; failures surface as 400 with a `password_rejected` error code."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password updated. Other sessions for the same user are revoked best-effort.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — missing `password`, password under minimum length (`password_too_short`), or upstream rejection (`password_rejected`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "description": "Rate limit exceeded."
+          }
+        }
+      }
+    },
     "/auth/resend-confirmation": {
       "post": {
         "operationId": "resendConfirmation",
@@ -15810,6 +15878,82 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/safe-house/enable": {
+      "post": {
+        "operationId": "enableOrgSafeHouse",
+        "summary": "Enable or change the Safe House posture for an org",
+        "description": "Customer-admin entry point to set the Safe House mode for an organization. Mirrors the staff-only `POST /v1/admin/safe-house/enable` route; both call the same `enable_sh_for_org(p_org_id, p_mode)` RPC. Caller must be an `owner` or `admin` of the target org.",
+        "tags": [
+          "Safe House"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "disabled",
+                      "off",
+                      "observe",
+                      "enforce",
+                      "enforce_sync",
+                      "sovereign"
+                    ],
+                    "default": "observe",
+                    "description": "Target Safe House mode. Defaults to `observe` when omitted."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Mode applied. Response shape mirrors the staff endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `mode` value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not an owner or admin of the target org, or is operating cross-tenant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
