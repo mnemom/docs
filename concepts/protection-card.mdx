@@ -15,13 +15,16 @@ A protection card has four top-level sections. The complete schema is at [/speci
 
 ### `mode`
 
-Top-level default mode for Safe House on this agent:
+Top-level action policy for Safe House on this agent. Mirrors the alignment card's `integrity.enforcement_mode` enum plus an `off` value for explicit opt-out.
 
-- **`observe`** — all detectors run, signals are logged to the trace + reputation pipeline, no action is taken on the agent's request.
-- **`nudge`** — detectors may return advisory guidance; the agent receives a soft warning and may choose to revise.
-- **`enforce`** — detectors may block the action outright; violations are a hard deny at the gateway.
+- **`off`** — detection skipped entirely (cost / latency / non-applicability cases). No telemetry.
+- **`observe`** — all detectors run, signals are logged asynchronously to the trace + reputation pipeline, no action is taken on the agent's request.
+- **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Safe-House-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context.
+- **`enforce`** — detectors run synchronously; matches block the request (quarantine ≥ quarantine threshold, hard block ≥ block threshold).
 
-`mode` is a floor. Individual thresholds or detectors can tighten beyond it (e.g., `enforce` a specific canary even while the agent is in `observe` mode for everything else).
+`enforce` is implicitly synchronous — to block a request, the gateway must wait for the verdict. There is no separate `enforce_sync` mode.
+
+**Composition: strictest wins** across `enforce > nudge > observe > off`. An agent cannot drop below the platform/org floor.
 
 ```yaml
 mode: enforce
@@ -29,18 +32,16 @@ mode: enforce
 
 ### `thresholds`
 
-Per-signal cutoffs for Safe House detectors. Each key is a detector ID; each value is a numeric threshold on that detector's 0.0–1.0 score. Signals below the threshold pass; signals at-or-above trigger.
+Three-band escalation ladder for Safe House detector scores. All values are floats in `[0, 1]`.
 
 ```yaml
 thresholds:
-  injection_score: 0.7
-  exfiltration_score: 0.85
-  canary_match: 1.0          # exact match required
-  semantic_novelty: 0.9
-  dlp_confidence: 0.75
+  warn: 0.60         # informational annotation in observe/nudge; soft annotation in enforce
+  quarantine: 0.80   # quarantine in enforce; informational in observe/nudge
+  block: 0.95        # hard block in enforce
 ```
 
-Detectors with no entry inherit the platform default threshold. Set a threshold to `null` to disable the detector entirely for this agent — but see `screen_surfaces` for a cleaner way to express "don't look at this surface."
+Three bands map cleanly onto the SOC severity ladder familiar to most operators. Per-detector tuning is an internal calibration concern and not exposed in the schema. Validation enforces `warn ≤ quarantine ≤ block`.
 
 ### `screen_surfaces`
 
@@ -63,18 +64,22 @@ Default is all-true (scan everything). Turning off a surface is a deliberate per
 
 ### `trusted_sources`
 
-Per-scope allowlist of upstream sources whose content Safe House may trust without full scanning. Typical use: internal knowledge-base URLs, vendor API domains, or agent-to-agent channels within the same org.
+Per-bucket allowlist of upstream sources whose content Safe House skips detection for. Buckets are typed so the validator can apply per-bucket deny-lists and the composer can apply per-bucket intersection rules.
 
 ```yaml
 trusted_sources:
   domains:
     - internal.mnemom.ai
-    - vendor-api.example.com
+    - vendor-api.example.com:8080
   agent_ids:
-    - mnm-xxxx-xxxx      # agent-to-agent pass-through
+    - mnm-aabbccdd-eeff-0011    # agent-to-agent pass-through
+  ip_ranges:
+    - 10.0.0.0/8                # RFC1918 internal space
 ```
 
-Trusted sources still emit a low-priority trace entry (so auditors can see what was waved through), but detectors do not re-score their content.
+The validator deny-lists public LLM endpoints (`api.openai.com`, etc.), public DNS resolvers (`8.8.8.0/24`, `1.1.1.0/24`), and any-host CIDRs (`0.0.0.0/0`, `::/0`). Adding a publicly-routable IP range or a customer-controllable domain is a critical misconfiguration even if it passes the deny-list.
+
+Trusted sources cause Safe House to skip detection (no detector cycles spent), and every match emits an `sh_trusted_source_skip` audit trace so reviewers can see what was waved through.
 
 ## Composition across scopes
 
@@ -82,10 +87,10 @@ Like the alignment card, the protection card composes from platform > org > agen
 
 | Section | Composition rule |
 |---------|------------------|
-| `mode` | **Strictest wins** (`enforce` > `nudge` > `observe`). An agent cannot downgrade below its org's mode. |
-| `thresholds.*` | **Floor + override**: org threshold is a floor; agent can set lower (stricter) but not higher. |
-| `screen_surfaces.*` | **Floor (true wins)**: if any scope sets a surface to `true`, it's scanned. |
-| `trusted_sources` | **Intersection from platform, union from org + agent**. Platform platform trust allowlist cannot be widened by a downstream scope (compliance). |
+| `mode` | **Strictest wins** (`enforce > nudge > observe > off`). An agent cannot drop below the platform/org floor. |
+| `thresholds.*` | **Min across scopes** — lowest = strictest wins. An agent can tighten further than the platform/org but not loosen. |
+| `screen_surfaces.*` | **OR per field — true wins.** If any scope requires scanning a surface, it's scanned. |
+| `trusted_sources` | **Platform → agent intersection** (compliance ceiling); **org + agent union** within that ceiling. An agent cannot widen trust beyond what the platform allows. |
 
 See [Card Composition](/concepts/card-composition) for the full rules + worked examples.
 
@@ -135,13 +140,14 @@ The website agent detail → Security tab shows both raw agent-scope and canonic
 
 ## Modes across both cards
 
-Both the alignment card (via `integrity.enforcement_mode`) and the protection card (via `mode`) use the same three-value vocabulary — `observe` / `nudge` / `enforce` — but they apply it to different layers:
+Both the alignment card (via `integrity.enforcement_mode`) and the protection card (via `mode`) share the `observe / nudge / enforce` vocabulary; the protection card also adds `off` for explicit opt-out:
 
 | Value | Alignment (`integrity.enforcement_mode`) | Protection (`mode`) |
 |-------|-------------------------------------------|----------------------|
+| `off` | (n/a — alignment integrity always runs) | Detection skipped entirely |
 | `observe` | Integrity checkpoints run; violations logged | Safe House detectors run; signals logged |
-| `nudge` | Violations nudge the agent (soft) | Detectors return guidance |
-| `enforce` | Violations hard-block | Detectors may block |
+| `nudge` | Violations nudge the agent (soft) | Detectors attach advisory; request proceeds |
+| `enforce` | Violations hard-block | Detectors may block (quarantine / block) |
 
 A well-run fleet has both dimensions aligned across all agents. The [fleet coherence v2 scorer](/concepts/fleet-coherence) checks integrity uniformity as a first-order structural invariant.
 
