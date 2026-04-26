@@ -33,21 +33,27 @@ Start from the [protection card schema](/specifications/protection-card-schema).
 
 ```yaml
 # protection.card.yaml
-card_version: protection/2026-04-15
+card_version: protection/2026-04-26
 agent_id: mnm-xxxxxxxx
-issued_at: 2026-04-17T00:00:00Z
+issued_at: 2026-04-26T00:00:00Z
 
-mode: enforce
+mode: enforce            # "off" | "observe" | "nudge" | "enforce"
 
 thresholds:
-  injection_score: 0.70
-  exfiltration_score: 0.85
+  warn: 0.60             # informational threshold
+  quarantine: 0.80       # quarantine in enforce mode
+  block: 0.95            # hard block in enforce mode
 
 screen_surfaces:
   incoming: true
   outgoing: true
   tool_calls: true
   tool_responses: true
+
+trusted_sources:
+  domains: ["internal.acme.com"]
+  agent_ids: []
+  ip_ranges: ["10.0.0.0/8"]
 ```
 
 Most fields are optional. Omitted fields inherit from the org template (if any), which inherits from the platform default.
@@ -84,10 +90,10 @@ Protection-card composition follows the [three-scope model](/concepts/card-compo
 
 | Field | Composition |
 |-------|-------------|
-| `mode` | **Strictest wins** (`enforce` > `nudge` > `observe`). Agent can go stricter, not looser. |
-| `thresholds.*` | **Floor + override**: org threshold is the ceiling (loosest acceptable); agent can set lower (stricter). |
-| `screen_surfaces.*` | **True wins**: any scope can require scanning a surface; agents cannot turn off scanning the org requires. |
-| `trusted_sources.domains` | **Platform intersection, org+agent union**: platform trust list caps the maximum; downstream scopes can only add from that cap. |
+| `mode` | **Strictest wins** (`enforce > nudge > observe > off`). Agent can go stricter, not looser. |
+| `thresholds.*` | **Min across scopes** — lowest = strictest wins. An agent can tighten further than the platform/org but not loosen. |
+| `screen_surfaces.*` | **OR per field — true wins**. Any scope can require scanning a surface; agents cannot turn off scanning the org or platform requires. |
+| `trusted_sources.{domains,agent_ids,ip_ranges}` | **Platform intersection, org+agent union**: platform allowlist is the compliance ceiling; downstream scopes can only add from inside that ceiling. |
 
 Publishing an org protection template propagates to all agents in the org via `mark_agents_for_recompose` — the same mechanism as alignment templates. See [Managing Card Composition](/guides/card-composition) for the full flow.
 
@@ -101,10 +107,9 @@ For high-stakes agents (financial, health, compliance):
 mode: enforce
 
 thresholds:
-  injection_score: 0.55            # stricter than the 0.70 platform default
-  exfiltration_score: 0.70
-  canary_match: 1.0
-  dlp_confidence: 0.60
+  warn: 0.50           # tighter than the 0.60 platform default
+  quarantine: 0.70
+  block: 0.85
 
 screen_surfaces:
   incoming: true
@@ -118,14 +123,15 @@ screen_surfaces:
 Before committing to enforcement, run in observe mode to gather a baseline:
 
 ```yaml
-mode: observe                       # all detectors run, nothing is blocked
+mode: observe          # all detectors run, nothing is blocked
 
 thresholds:
-  injection_score: 0.50             # lower = more sensitive (more events logged)
-  exfiltration_score: 0.70
+  warn: 0.50           # lower = more sensitive (more events logged)
+  quarantine: 0.70
+  block: 0.90
 ```
 
-Review the event stream for 7-14 days. Adjust thresholds based on false-positive rate. Promote to `nudge` or `enforce` when stable.
+Review the event stream for 7-14 days. Adjust thresholds based on false-positive rate. Promote to `nudge` or `enforce` when stable. `nudge` is a useful intermediate stage — the model receives an advisory annotation but the request still proceeds, so you can validate the security signal reaches the agent before committing to hard blocks.
 
 ### Performance-sensitive agent (tight tool-response window)
 
