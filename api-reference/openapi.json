@@ -3258,6 +3258,67 @@
         }
       }
     },
+    "/api-keys/{key_id}/rotate": {
+      "post": {
+        "operationId": "rotateApiKey",
+        "summary": "Rotate a personal API key",
+        "description": "Atomically mints a replacement key with the same `name` and `scopes` as the original, then immediately revokes the old key. The full new secret is returned in the response — this is your only chance to capture it. Old key is invalid as soon as the response is returned; if you need overlap with an in-flight deploy, **create a second key first** via `POST /api-keys`, ship your code, then `DELETE` the old key. Rotation is for the suspect/compromised-key case where overlap is the opposite of what you want.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New key minted, old key revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key_id":             { "type": "string" },
+                    "key":                { "type": "string", "description": "Full secret. Capture now — never returned again." },
+                    "key_prefix":         { "type": "string" },
+                    "name":               { "type": "string" },
+                    "scopes":             { "type": "array", "items": { "type": "string" } },
+                    "rotated_from":       { "type": "string", "description": "key_id of the now-revoked predecessor" },
+                    "old_key_revoked_at": { "type": "string", "format": "date-time" },
+                    "created_at":         { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "description": "If insert-new succeeded but soft-revoke of the old key failed, the response advises manually deleting the old key via `DELETE /api-keys/{old_key_id}`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/orgs": {
       "post": {
         "operationId": "createOrg",
@@ -4888,6 +4949,393 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/api-keys/{key_id}/rotate": {
+      "post": {
+        "operationId": "rotateOrgApiKey",
+        "summary": "Rotate an organization API key",
+        "description": "Atomic mint-new + immediately-revoke-old, with the same `name` and `scopes` as the original. The full new secret is returned only in this response. No grace period — old key is invalid immediately. If you need overlap with an in-flight deploy, create a second key first via `POST /orgs/{org_id}/api-keys`, ship, then `DELETE` the old key. Owners and admins may rotate any org key; members may rotate keys they created.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "key_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "201": {
+            "description": "New key minted, old key revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key_id":             { "type": "string" },
+                    "key":                { "type": "string", "description": "Full secret. Capture now — never returned again." },
+                    "key_prefix":         { "type": "string" },
+                    "name":               { "type": "string" },
+                    "org_id":             { "type": "string" },
+                    "scopes":             { "type": "array", "items": { "type": "string" } },
+                    "rotated_from":       { "type": "string" },
+                    "old_key_revoked_at": { "type": "string", "format": "date-time" },
+                    "created_at":         { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": {
+            "description": "If insert-new succeeded but soft-revoke of the old key failed, the response advises manually deleting the old key.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/audit-log": {
+      "get": {
+        "operationId": "getOrgAuditLog",
+        "summary": "Read the org audit log",
+        "description": "Returns request-level audit entries scoped to this org: events made with an org-level API key, plus any event on a `/v1/orgs/{org_id}/...` URL. Excludes Mnemom-staff actions on `/v1/admin/*` paths. Compliance-shaped — `owner`, `admin`, and `auditor` roles only.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0, "default": 0 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit entries, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id":             { "type": "string" },
+                          "created_at":     { "type": "string", "format": "date-time" },
+                          "http_method":    { "type": "string" },
+                          "path":           { "type": "string" },
+                          "auth_method":    { "type": "string", "enum": ["jwt", "api_key"] },
+                          "principal_type": { "type": "string", "enum": ["user", "org"] },
+                          "principal_id":   { "type": "string" },
+                          "key_id":         { "type": "string", "nullable": true },
+                          "status_code":    { "type": "integer" }
+                        }
+                      }
+                    },
+                    "limit":  { "type": "integer" },
+                    "offset": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/orgs/{org_id}/billing/portal-session": {
+      "post": {
+        "operationId": "createOrgBillingPortalSession",
+        "summary": "Open the Stripe Customer Portal for this org",
+        "description": "Mints a single-use URL into Stripe's hosted Customer Portal where the org admin can view invoices, download PDFs, update payment methods, change billing details, and manage their subscription. The portal is the primary surface for invoice access — there is no direct invoice API. `owner` and `admin` only (the portal is a mixed read+mutate surface; auditors have a separate read-only path via `GET /orgs/{org_id}/billing/summary`).",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "return_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Where Stripe redirects the customer after they finish in the portal. Must be `https://*.mnemom.ai`. Defaults to the dashboard billing page."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Portal session created. Redirect the customer to `url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": { "type": "string", "format": "uri" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No Stripe customer is associated with this billing account yet (e.g., free-tier org that has not run checkout).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": {
+            "description": "Org has no billing account configured.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/billing/summary": {
+      "get": {
+        "operationId": "getOrgBillingSummary",
+        "summary": "Read-only billing summary for the org",
+        "description": "Plan + customer-safe account state + 30-day usage rollup. Does **not** include invoice history (use `POST /orgs/{org_id}/billing/portal-session` for that) or recent billing events (the org audit log covers events generally). Internal Stripe identifiers and Mnemom-staff notes are scrubbed from the response. `owner`, `admin`, and `auditor` only.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account":      { "type": "object", "additionalProperties": true },
+                    "plan":         { "type": "object", "additionalProperties": true },
+                    "usage_rollup": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date":          { "type": "string", "format": "date" },
+                          "check_count":   { "type": "integer" },
+                          "tokens_in":     { "type": "integer" },
+                          "tokens_out":    { "type": "integer" },
+                          "cost_estimate": { "type": "number" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": {
+            "description": "Org has no billing account configured.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/costs": {
+      "get": {
+        "operationId": "getOrgCosts",
+        "summary": "Per-model cost rollup for the org",
+        "description": "Daily usage broken down by model with a USD cost estimate per row plus aggregate totals. Cost figures are estimates derived from Mnemom's published per-model pricing applied to your actual token volume; authoritative billing is in Stripe (see `POST /orgs/{org_id}/billing/portal-session`). Billing-shaped — `owner`, `admin`, and `auditor` only.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "days", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 365, "default": 30 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily cost rows + totals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "period": { "type": "string", "example": "daily" },
+                    "days":   { "type": "integer" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date":          { "type": "string", "format": "date" },
+                          "model":         { "type": "string" },
+                          "tokens_in":     { "type": "integer" },
+                          "tokens_out":    { "type": "integer" },
+                          "request_count": { "type": "integer" },
+                          "cost_usd":      { "type": "number" }
+                        }
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "total_cost_usd":  { "type": "number" },
+                        "total_tokens_in": { "type": "integer" },
+                        "total_tokens_out":{ "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": {
+            "description": "Org has no billing account configured.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/usage": {
+      "get": {
+        "operationId": "getOrgUsage",
+        "summary": "Daily request + token totals for the org",
+        "description": "Operational usage metrics — request count plus token volume per day. Dashboard-shaped: visible to all org roles except viewer (members and auditors retain access for self-monitoring and compliance respectively). For dollar-cost rollups see `GET /orgs/{org_id}/costs`.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" },
+          { "name": "days", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 365, "default": 30 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily usage rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "period": { "type": "string", "example": "daily" },
+                    "days":   { "type": "integer" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date":       { "type": "string", "format": "date" },
+                          "requests":   { "type": "integer" },
+                          "tokens_in":  { "type": "integer" },
+                          "tokens_out": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": {
+            "description": "Org has no billing account configured.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/health": {
+      "get": {
+        "operationId": "getOrgWebhookHealth",
+        "summary": "Webhook delivery health for this org",
+        "description": "Returns active + disabled endpoint counts, 24-hour delivery counts (success / failed / total), success rate, and the top event types delivered in the last 24 hours. Useful for Status-page-style dashboards or monitoring integrations. Read-only: `owner`, `admin`, and `auditor`.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgId" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Health metrics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "active_endpoints":   { "type": "integer" },
+                    "disabled_endpoints": { "type": "integer" },
+                    "deliveries_24h":     { "type": "integer" },
+                    "success_24h":        { "type": "integer" },
+                    "failed_24h":         { "type": "integer" },
+                    "success_rate_24h":   { "type": "number" },
+                    "top_event_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event_type": { "type": "string" },
+                          "count":      { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": {
+            "description": "Org has no billing account configured.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
       }

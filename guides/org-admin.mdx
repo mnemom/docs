@@ -1,0 +1,137 @@
+---
+title: "Org Admin"
+description: "What an organization owner or admin can do, the roles in your org, and how to escalate the things this surface deliberately doesn't cover."
+sidebarTitle: "Org Admin"
+icon: "user-shield"
+---
+
+This guide is for the **owner** or **admin** of a Mnemom organization. It explains the capabilities of those roles, the role matrix in full, and the deliberate boundaries — what this API surface does **not** do, and where to go when you need those things.
+
+If you're a regular member, viewer, or auditor, the [API reference](/api-reference/overview) marks the role each endpoint requires.
+
+## The roles
+
+A Mnemom organization has five roles. Every endpoint under `/v1/orgs/{org_id}/*` is gated against one or more of them.
+
+| Role | Dashboard | Agents | Billing | Settings | Compliance |
+|---|---|---|---|---|---|
+| **owner** | full | full | full | full | full |
+| **admin** | full | full | view | edit | full |
+| **member** | full | own | none | none | view |
+| **viewer** | view | view | none | none | view |
+| **auditor** | view | view | view | none | full + export |
+
+Two notes worth pinning:
+
+- **Only owners change roles.** The owner can promote a member to admin or set anyone's role; admins cannot. Ownership transfer is not an API operation — contact support if you need it.
+- **`auditor` is the read-only-with-billing-and-compliance role.** Auditors can read invoices, costs, the audit log, and webhook health, but cannot mutate anything. They're the SOC 2 / SOX / DORA review role.
+
+The `viewer` and `auditor` roles require the **RBAC** feature flag on your plan. They're not available on free or starter tiers.
+
+## Surfaces an org admin operates
+
+### Members + invitations
+
+Invite, change roles, remove members, manage pending invitations.
+
+- [`POST /v1/orgs/{org_id}/invitations`](/api-reference/endpoint/post-orgs-org-id-invitations)
+- [`GET /v1/orgs/{org_id}/members`](/api-reference/endpoint/get-orgs-org-id-members)
+- [`PATCH /v1/orgs/{org_id}/members/{user_id}`](/api-reference/endpoint/patch-orgs-org-id-members-user-id)
+- [`DELETE /v1/orgs/{org_id}/members/{user_id}`](/api-reference/endpoint/delete-orgs-org-id-members-user-id)
+
+### API keys
+
+Two surfaces:
+
+- **Personal keys** (`/v1/api-keys`) — billed to the user, owned by the user. Any member creates their own.
+- **Org keys** (`/v1/orgs/{org_id}/api-keys`) — billed to the org, created by owners + admins only.
+
+The [API Keys guide](/guides/api-keys) walks through the distinction in detail and covers rotation.
+
+### Webhooks
+
+Configure webhook endpoints for org events; check delivery health; redeliver failures.
+
+- [`POST /v1/orgs/{org_id}/webhooks`](/api-reference/endpoint/post-orgs-org-id-webhooks) — create endpoint
+- [`GET /v1/orgs/{org_id}/webhooks/health`](/api-reference/endpoint/get-orgs-org-id-webhooks-health) — 24-hour delivery metrics
+- [Webhooks guide](/guides/webhooks) — full event catalog + retry semantics
+
+### SSO (SAML)
+
+Configure SAML SSO with your IdP (Okta, Azure AD, Google Workspace, etc.). Owner-only because misconfiguration can lock everyone out of the org.
+
+- [`PUT /v1/orgs/{org_id}/sso`](/api-reference/endpoint/put-orgs-org-id-sso) — configure
+- [`POST /v1/orgs/{org_id}/sso/test`](/api-reference/endpoint/post-orgs-org-id-sso-test) — test before saving
+
+### Usage + costs
+
+Operational metrics + cost rollups. The dashboard cut (`/usage`) is broader; the billing cut (`/costs`, `/billing/summary`) is restricted.
+
+- [`GET /v1/orgs/{org_id}/usage`](/api-reference/endpoint/get-orgs-org-id-usage) — request + token totals per day
+- [`GET /v1/orgs/{org_id}/costs`](/api-reference/endpoint/get-orgs-org-id-costs) — per-model cost breakdown with USD estimates
+- [`GET /v1/orgs/{org_id}/billing/summary`](/api-reference/endpoint/get-orgs-org-id-billing-summary) — plan + period + usage rollup
+
+### Billing portal
+
+Invoice history, PDFs, payment methods, subscription management — all run through Stripe's hosted Customer Portal.
+
+- [`POST /v1/orgs/{org_id}/billing/portal-session`](/api-reference/endpoint/post-orgs-org-id-billing-portal-session) — mints a one-time Stripe URL
+
+### Audit log
+
+Compliance-shaped read of every authenticated write made against the org's API surface.
+
+- [`GET /v1/orgs/{org_id}/audit-log`](/api-reference/endpoint/get-orgs-org-id-audit-log) — owner / admin / auditor
+
+### Safe House + alignment
+
+Org-level posture for content-filter and alignment policy. Member configuration delegated to per-agent cards.
+
+- [`POST /v1/orgs/{org_id}/safe-house/enable`](/api-reference/endpoint/post-orgs-org-id-safe-house-enable)
+- [`PUT /v1/orgs/{org_id}/protection-template`](/api-reference/endpoint/put-orgs-org-id-protection-template)
+- [`PUT /v1/orgs/{org_id}/alignment-template`](/api-reference/endpoint/put-orgs-org-id-alignment-template)
+
+### Conscience values
+
+Org-level value declarations that propagate down to agent alignment cards.
+
+- [`GET /v1/orgs/{org_id}/conscience-values`](/api-reference/endpoint/get-orgs-org-id-conscience-values)
+- See the [Card Management guide](/guides/card-management) for how org → agent inheritance works.
+
+## What the API deliberately does not do
+
+These capabilities exist in Mnemom but are **not** exposed to org admins via the API. This is by design and matches the convention used by Stripe, GitHub, and Cloudflare for similar reasons.
+
+| You want to... | Where to do it instead |
+|---|---|
+| Change your billing plan | Stripe Customer Portal (`POST /billing/portal-session`) or contact support |
+| Apply a credit, extend a trial, issue a credit note | Email support@mnemom.ai |
+| Apply a coupon mid-cycle | Stripe Customer Portal or support |
+| Override a plan's quota for one member | Not self-service — contact support |
+| Impersonate another member to debug | Not supported — use the audit log to see what they did, or ask them directly |
+| Suspend a member's account globally | Not supported — `DELETE /v1/orgs/{org_id}/members/{user_id}` removes them from this org only |
+| See another org's data, even if you own both | Not supported — each org is fully isolated |
+
+The pattern: **revenue-affecting changes go through a human at Mnemom**, **audit-affecting changes go through the audit log surface**, **cross-tenant operations don't exist**.
+
+## Acquiring the role
+
+The user who creates an org becomes its owner. Owners can promote any member to admin via `PATCH /v1/orgs/{org_id}/members/{user_id}` with `{"role": "admin"}`. There is no self-service request-to-be-admin flow — escalation goes through the existing owner.
+
+## Common tasks
+
+**Onboard a new admin.** Invite via `POST /v1/orgs/{org_id}/invitations` with `role: "admin"`. They accept via the link in the invitation email. Once accepted, they have admin permissions immediately.
+
+**Rotate a compromised key.** Either personal (`POST /v1/api-keys/{key_id}/rotate`) or org-level (`POST /v1/orgs/{org_id}/api-keys/{key_id}/rotate`). The new key is returned in the response — capture it and update your deployment. The old key is revoked atomically; no grace period. See [API Keys guide](/guides/api-keys#rotation).
+
+**Investigate a suspicious event.** `GET /v1/orgs/{org_id}/audit-log?limit=200` for the request log; cross-reference with [webhook delivery log](/api-reference/endpoint/get-orgs-org-id-webhooks-deliveries) if external systems were notified.
+
+**Hand off ownership when an admin leaves.** Today: not self-service — contact support. Roadmap: ownership transfer endpoint, gated by 2FA reverify and email confirmation.
+
+**View invoices for accounting.** `POST /v1/orgs/{org_id}/billing/portal-session` returns a one-time Stripe URL; the customer admin clicks through, downloads PDFs, sees payment status, updates the card if needed.
+
+## Security posture
+
+- All endpoints under `/v1/orgs/{org_id}/*` enforce membership in `{org_id}` plus the role gate documented per-endpoint. A caller from `org-A` with a valid token cannot access any resource under `org-B`.
+- API keys carry the role of the user who created them, scoped to the org they were created in. Personal keys cannot reach `/v1/orgs/{org_id}/*` paths for orgs the user doesn't belong to.
+- All authenticated writes against your org's API surface are logged in `GET /v1/orgs/{org_id}/audit-log`. Mnemom-staff actions on your account (such as a support engineer's response to an open ticket) are not exposed in the customer audit log — if you need an account-level action attested for a compliance review, request a [support letter](mailto:support@mnemom.ai).

@@ -1,0 +1,130 @@
+---
+title: "API Keys"
+description: "Personal vs. organization keys, when to use which, and how to rotate."
+sidebarTitle: "API Keys"
+icon: "key"
+---
+
+Mnemom has **two API key surfaces** with different ownership, billing, and lifecycle. This guide covers when to use each and how to rotate them safely.
+
+If you came here from the [Org Admin guide](/guides/org-admin), this is the deep dive on key management.
+
+## The two surfaces, side by side
+
+| | Personal key | Organization key |
+|---|---|---|
+| **Endpoint** | `POST /v1/api-keys` | `POST /v1/orgs/{org_id}/api-keys` |
+| **Who can create** | Any authenticated user | Owner or admin of the org |
+| **Billed to** | The user's billing account | The org's billing account |
+| **Acts as** | The user's identity + permissions | The user's identity, scoped to the org |
+| **Visible in** | Settings → Personal → API keys | Settings → Organization → API keys |
+| **Survives departure?** | No — when the user leaves, key revokes | Yes — admin must explicitly revoke |
+| **Revoke** | The user (or admin via support) | Owner, admin, or original creator |
+
+Both surfaces produce keys with the `mnm_` prefix; they're identical at the wire level. The difference is **billing attribution** and **lifecycle ownership**.
+
+## When to use which
+
+**Personal key, every time** — *unless* one of the things below applies.
+
+- **Local development.** A developer on the team using Mnemom from their laptop. Personal key.
+- **Per-engineer CI accounts.** Each engineer has their own CI runner credentialed against their personal account. Personal key. (You probably want option 2 below for actual CI.)
+- **Single-purpose script you're running yourself.** Personal key.
+
+**Organization key when:**
+
+- **Shared CI/CD infrastructure** that runs as the *org*, not as a specific engineer. Survives engineer turnover.
+- **Service-account-style automation** — a cron job, a webhook receiver, a third-party integration that needs to outlive any individual member's tenure.
+- **Audit / compliance posture** that needs requests attributed to the org rather than to a person. The [audit log](/api-reference/endpoint/get-orgs-org-id-audit-log) tags org-level keys distinctly from user-level keys.
+
+If a member leaves the org, their **personal keys remain valid** (they're still the user's keys, billed to the user) but they obviously won't have access to the org's data anymore. **Org keys created by that member remain valid** until an admin explicitly revokes them — this is the lifecycle gap that motivates org-key rotation as part of a member-offboarding checklist.
+
+## Creating a key
+
+### Personal
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/api-keys \
+  -H "Authorization: Bearer $MNEMOM_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "local dev"}'
+```
+
+### Organization
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/orgs/$ORG_ID/api-keys \
+  -H "Authorization: Bearer $MNEMOM_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci-prod"}'
+```
+
+In both cases the response carries the **full secret** in the `key` field. You see it once. Mnemom stores only its SHA-256 hash; we cannot recover the secret if you lose it.
+
+```json
+{
+  "key_id": "mk-1a2b3c4d",
+  "key": "mnm_8f3e7c2b91a4d6f8...",
+  "key_prefix": "mnm_8f3e",
+  "name": "ci-prod",
+  "scopes": ["gateway", "api"],
+  "created_at": "2026-04-25T12:34:56Z"
+}
+```
+
+## Rotation
+
+Two endpoints, identical contract:
+
+- `POST /v1/api-keys/{key_id}/rotate`
+- `POST /v1/orgs/{org_id}/api-keys/{key_id}/rotate`
+
+Each **mints a replacement** with the same `name` and `scopes`, then **immediately revokes the old key**. The full new secret returns in the 201 response.
+
+### No grace period — by design
+
+The old key is invalid as soon as the response reaches you. Rotation is for the **suspect or compromised** case where you do not want overlap.
+
+If you need overlap with an in-flight deploy, **don't rotate**. Instead:
+
+1. `POST /v1/api-keys` to create a *second* key.
+2. Update your deployment to use the new key.
+3. Verify it's working in production.
+4. `DELETE /v1/api-keys/{old_key_id}` to retire the original.
+
+### Failure semantics
+
+- **Insert-new fails:** the response is 500; your old key is still valid. Try again.
+- **Insert-new succeeds, soft-revoke fails:** the response is 500 with a hint pointing you at `DELETE /v1/api-keys/{old_key_id}` to finish manually. The new key is fully active either way — capture it before retrying.
+
+### Audit trail
+
+Rotations log a distinct `api_key_rotated` event in your billing event history (and the org audit log for org-level rotations). The event records both the old and new `key_id`s so support can trace a rotation chain.
+
+## Org keys after P4f tightening
+
+Org-key creation requires `owner` or `admin` (not `member`). If you're a member who used to create org keys, the path forward is:
+
+1. Use a [personal key](#creating-a-key) instead. They're billed to you, but Mnemom doesn't double-bill — the personal-key checkmeter is a courtesy view, not a separate ledger.
+2. Or ask an admin to create the org key for you. Once it exists, you can rotate it (you become the creator post-rotation) but only the admin can have created it initially.
+
+This matches GitHub's PAT-vs-GitHub-App split, Stripe's restricted-keys-are-admin-only convention, and Cloudflare's user-token-vs-service-token model. The reasoning is simple: org-billed keys outlive their creator's tenure and are a real lifecycle hazard if any member can mint them.
+
+## Revocation
+
+```bash
+curl -X DELETE https://api.mnemom.ai/v1/api-keys/mk-1a2b3c4d \
+  -H "Authorization: Bearer $MNEMOM_JWT"
+```
+
+Keys soft-delete: `is_active` flips to `false`, `revoked_at` is timestamped, the row stays for audit. You cannot reactivate a revoked key — create a new one.
+
+For org keys, the same shape applies under `/v1/orgs/{org_id}/api-keys/{key_id}`. **Owner, admin, or original creator** can revoke; member can only revoke keys they created themselves.
+
+## Key hygiene checklist
+
+- **Rotate annually**, or whenever a member with access leaves the org. The audit log shows last_used_at per key — rotate dormant keys aggressively.
+- **Name your keys**. `"name": "ci-prod"` is much more useful than `"Default"` six months later when you're triaging an alert.
+- **Never commit secrets.** The `mnm_` prefix is a string git secret-scanners recognize; we recommend GitHub Secret Scanning + push protection to catch accidents.
+- **Use scopes.** Keys default to `["gateway", "api"]`; if you only need one, request just one. Smaller blast radius if leaked.
+- **Include a renewal reminder** in your deploy / IaC if the key has a TTL constraint from your security policy. Mnemom keys themselves don't expire by default.
