@@ -12,16 +12,23 @@ The AAP protocol-level card (the 1.0 handshake card, stable for external interop
 ## Top-level structure
 
 ```yaml
-card_version: unified/2026-04-15      # required; string; schema version identifier
-card_id: ac-<uuid>                    # required; string; stable ID for this card document
-agent_id: mnm-<uuid>                  # required; string; the agent this card belongs to
-issued_at: 2026-04-17T12:00:00Z       # required; ISO 8601 UTC
-expires_at: 2026-10-17T12:00:00Z      # optional; ISO 8601 UTC; null = no expiry
+card_version: unified/2026-04-26      # required; format: /^unified\/\d{4}-\d{2}-\d{2}$/
+card_id: ac-<uuid>                    # required; stable ID for this card document (preserved through compose)
+agent_id: mnm-<uuid>                  # required; the agent this card belongs to
+issued_at: 2026-04-26T12:00:00Z       # required; ISO 8601 UTC
+expires_at: 2026-10-26T12:00:00Z      # optional; ISO 8601 UTC; null = no expiry
+
+# Two independent top-level master switches (ADR-039 Decision 1):
+autonomy_mode: enforce                 # required; off | observe | nudge | enforce
+                                       # gates the action-policing pipeline (gateway CLPI tool-use policy
+                                       # + observer trace verification of bounded/forbidden actions)
+integrity_mode: enforce                # required; off | observe | nudge | enforce
+                                       # gates the values/conscience pipeline (gateway AIP Haiku analysis
+                                       # + observer drift detection + coherence scoring)
 
 principal: { ... }                     # optional; see §principal
 values: { ... }                        # required; see §values
 conscience: { ... }                    # optional; see §conscience
-integrity: { ... }                     # optional; see §integrity
 autonomy: { ... }                      # required; see §autonomy
 capabilities: { ... }                  # optional; see §capabilities
 enforcement: { ... }                   # optional; see §enforcement
@@ -31,6 +38,17 @@ extensions: { ... }                    # optional; §extensions
 # System-managed — present on canonical cards, absent on raw agent-scope cards.
 _composition: { ... }                  # see §composition-metadata
 ```
+
+### Master switches
+
+The four-mode enum `off | observe | nudge | enforce` is shared with the [Protection Card](/specifications/protection-card-schema). Same words; same semantics; same UI picker component renders all three master fields (Protection's `mode`, Alignment's `autonomy_mode`, Alignment's `integrity_mode`). Composition rule on each: **strictest wins** across Platform → Org → Agent (`enforce > nudge > observe > off`).
+
+| Field | Governs | Off | Observe | Nudge | Enforce |
+|---|---|---|---|---|---|
+| `autonomy_mode` | action-policing | skip CLPI + trace verification | log policy results, don't block | inject advisory annotation, don't block | block tool violations, escalate |
+| `integrity_mode` | values/conscience | skip AIP + drift detection | log checkpoint, no action | inject advisory on next request | auto-pause on boundary violation |
+
+Customers can control the two halves independently — e.g., "enforce conscience commitments at runtime, only observe action policy" or "off action-policing for cost, but enforce drift detection".
 
 ## §principal
 
@@ -86,6 +104,8 @@ values:
 
 **Validation:** every `definitions` key must be present in `declared`.
 
+**Composition note:** `bounded_actions` is composed as **union** across Platform → Org → Agent. (An earlier draft of this spec said "Agent-scoped" — that was incorrect; the unified-card program was always intended to let platform/org compose action sets, e.g. an org-wide `request_legal_review` action. ADR-039 Decision 8 reconciles docs to composer.)
+
 ## §conscience
 
 Inviolable or near-inviolable commitments that constrain the agent's behavior. Structured for [Safe House](/concepts/safe-house) + [drift detection](/concepts/drift-detection) integration.
@@ -114,19 +134,6 @@ conscience:
 
 **Validation:** `BOUNDARY` entries with `severity: advisory` are rejected.
 
-## §integrity
-
-How the [integrity checkpoint](/concepts/integrity-checkpoints) pipeline acts on this agent's reasoning traces.
-
-```yaml
-integrity:
-  enforcement_mode: enforce    # "observe" | "nudge" | "enforce"
-```
-
-| Field | Type | Required | Composition |
-|-------|------|----------|-------------|
-| `enforcement_mode` | enum | Yes (if section present) | **Strictest wins** (`enforce` > `nudge` > `observe`) |
-
 ## §autonomy
 
 What the agent may do independently. Maps directly onto the AAP 1.0 `autonomy_envelope` for protocol-level verification — the unified shape renames it but keeps the semantics.
@@ -142,7 +149,7 @@ autonomy:
     - modify_audit_logs
   escalation_triggers:
     - condition: "blast_radius > 50"
-      action: escalate         # "escalate" | "log" | "abort"
+      action: escalate         # "escalate" | "deny" | "log"
       reason: "Large blast radius requires human approval"
     - condition: "rollback_failed"
       action: escalate
@@ -154,7 +161,7 @@ autonomy:
 
 | Field | Type | Required | Composition |
 |-------|------|----------|-------------|
-| `bounded_actions` | string[] | Yes | **Agent-scoped** |
+| `bounded_actions` | string[] | Yes | **Union** across Platform → Org → Agent |
 | `forbidden_actions` | string[] | No | **Deny-overrides union** |
 | `escalation_triggers[].condition` | string | Yes (if trigger present) | — |
 | `escalation_triggers[].action` | enum | Yes | — |
@@ -172,36 +179,47 @@ Tool-use capabilities, keyed by capability name. Each entry maps to a glob patte
 ```yaml
 capabilities:
   query_database:
+    description: "Read from the operational database"
     tools: ["mcp:postgres/*", "mcp:readonly-query"]
     severity_on_unmapped: medium    # "low" | "medium" | "high" | "critical"
   external_http:
     tools: ["mcp:fetch"]
-    allowed_domains: [api.acme.example]
+    allowed_domains: ["api.acme.example"]
     severity_on_unmapped: high
 ```
 
 | Field | Type | Required | Composition |
 |-------|------|----------|-------------|
-| `<name>.tools` | string[] (glob patterns) | Yes | **Agent-scoped** |
-| `<name>.allowed_domains` | string[] | No | Agent-scoped |
-| `<name>.severity_on_unmapped` | enum | No | Default: `medium` |
+| `<name>.description` | string | No | Agent wins |
+| `<name>.tools` | string[] (glob patterns) | Yes | **Union** within capability |
+| `<name>.allowed_domains` | string[] | No | **Platform → agent intersection** (compliance ceiling, mirrors Protection Card `trusted_sources`) |
+| `<name>.severity_on_unmapped` | enum | No | Strictest wins per name; default `medium` |
 
 Capabilities are consumed by `@mnemom/policy-engine`'s `evaluatePolicy({ card, tools })` to produce per-request policy decisions.
 
 ## §enforcement
 
-Policy-level knobs that affect how `capabilities` are enforced at runtime.
+Policy-level knobs that affect how `capabilities` are enforced at runtime. The master switch lives at the top level (`autonomy_mode`); this section carries the fine-grained tool-use policy.
 
 ```yaml
 enforcement:
-  allow_unmapped_tools: false     # strictest wins across scopes
-  default_unmapped_severity: high # "low" | "medium" | "high" | "critical"
+  allow_unmapped_tools: false                  # strictest wins across scopes
+  default_unmapped_severity: high              # "low" | "medium" | "high" | "critical"
+  forbidden_tools:                             # XACML deny-overrides
+    - pattern: "mcp:filesystem/*"
+      reason: "No filesystem access for billing agents"
+      severity: critical
+  grace_period_hours: 24                       # min across scopes (shorter grace = stricter)
 ```
 
 | Field | Type | Required | Composition |
 |-------|------|----------|-------------|
 | `allow_unmapped_tools` | boolean | No (default `false`) | **Strictest wins** (`false` beats `true`) |
-| `default_unmapped_severity` | enum | No (default `high`) | Strictest wins |
+| `default_unmapped_severity` | enum | No (default `high`) | Strictest wins (`critical > high > medium > low`) |
+| `forbidden_tools[].pattern` | string | Yes (per entry) | **Deny-overrides union** (with exemption removal) |
+| `forbidden_tools[].reason` | string | Yes (per entry) | — |
+| `forbidden_tools[].severity` | enum | Yes (per entry) | — |
+| `grace_period_hours` | number | No (default `24`) | Min across scopes |
 
 ## §audit
 
@@ -213,10 +231,7 @@ audit:
   retention_days: 90
   queryable: true
   query_endpoint: https://api.mnemom.ai/v1/traces
-  tamper_evidence: append_only    # "append_only" | "merkle" | null
-  storage:
-    primary: supabase
-    replica: r2
+  tamper_evidence: append_only    # "append_only" | "signed" | "merkle" | null
 ```
 
 | Field | Type | Required | Composition |
@@ -226,7 +241,6 @@ audit:
 | `queryable` | boolean | Yes | **Platform-scoped** |
 | `query_endpoint` | string (URL) | Yes | **Platform-scoped** |
 | `tamper_evidence` | enum | No | **Platform-scoped** |
-| `storage` | object | No | Platform-scoped |
 
 **Validation:** `audit.query_endpoint` is a composer-enforced invariant (see ADR-023). The validator rejects cards without it; the composer ensures it's always present on canonical output.
 
