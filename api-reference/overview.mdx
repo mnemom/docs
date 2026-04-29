@@ -37,6 +37,8 @@ See the [API Versioning guide](/guides/api-versioning) for full details.
 
 The Mnemom API supports three authentication patterns. Pick the one that matches the caller, not the endpoint.
 
+For end-user sign-in (passkey, password + MFA, SSO), session lifecycle, and API-key rotation, see the [Authentication guide](/guides/authentication). Passkeys are the default dashboard sign-in method — see [Passkeys](/guides/passkeys) for browser support and enrollment.
+
 ### Session cookie (dashboard / SPA)
 
 Browser sessions at `www.mnemom.ai` and `app.mnemom.ai` authenticate via an HttpOnly, `Secure`, `SameSite=Lax` cookie named `mnemom_session`, issued on sign-in by the API itself. The cookie is opaque to JavaScript — it holds an AES-256-GCM-encrypted blob of the underlying session tokens, never a raw access token.
@@ -54,7 +56,7 @@ curl https://api.mnemom.ai/v1/agents \
   --cookie cookies.txt
 ```
 
-The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. MFA and SSO are carried through dedicated endpoints under `/v1/auth/mfa/*` and `/v1/auth/sso/*`. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
+The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. Passkey (WebAuthn / FIDO2) sign-in endpoints live at `/v1/auth/passkey/*` and return the same session cookie; MFA step-up and SSO are carried through `/v1/auth/mfa/*` and `/v1/auth/sso/*`. Sensitive operations require **AAL2 step-up** — a fresh user-verification gesture within the session's AAL2 window; see the [Authentication guide](/guides/authentication#aal2-step-up) for the list of protected actions. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
 
 ### Bearer token (CLI)
 
@@ -76,7 +78,7 @@ curl https://api.mnemom.ai/v1/agents \
   -H "X-Mnemom-Api-Key: <key>"
 ```
 
-**How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time.
+**How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time. Creating or rotating a key requires AAL2 step-up; see [Authentication — API keys](/guides/authentication#api-keys) for the rotation procedure.
 
 API keys are accepted on **all agent management endpoints** — agent CRUD, card and policy management, integrity operations, webhooks, enforcement, reviews, and deployments. This lets enterprise customers manage agent fleets programmatically without a user session.
 
