@@ -316,15 +316,27 @@ enforcement:
 **How it works:**
 
 1. The policy engine tracks when each tool is first seen via `tool_first_seen` records.
-2. When an unmapped tool is encountered, the engine checks how long ago it was first seen.
-3. If the tool was first seen within the grace period window, it is treated as `allow` regardless of `unmapped_tool_action`.
-4. After the grace period expires, the tool falls back to the configured `unmapped_tool_action`.
+2. When an unmapped or forbidden tool is encountered, the engine checks how long ago it was first seen.
+3. If the tool was first seen within the grace period window, the violation is **downgraded to a warning** (the verdict drops from `fail` to `warn`), and the request proceeds. Under enforce mode, this means the request is **not blocked**.
+4. After the grace period expires, the tool falls back to the configured `unmapped_tool_action` (or its forbidden severity, for forbidden-pattern matches).
+
+The window is per-(agent, tool): each agent's first observation of each tool starts its own clock. The clock cannot be back-dated.
 
 This gives operators time to amend the card's `capabilities` section after adding new tools or MCP servers, without immediately triggering violations in enforce mode.
 
-<Tip>
-The default grace period is 24 hours. Set it to 0 to disable grace periods entirely (strict mode). Set it higher (48–72 hours) for teams that deploy on weekly cycles and need more time to update cards.
-</Tip>
+<Warning>
+**Security implication.** With the default 24h grace, brand-new tools — including ones introduced by an attacker via prompt injection, MCP server compromise, or tool-name overlap — get a 24-hour pass on enforce mode. Mature agents with stable tool inventories aren't exposed; agents that add tools dynamically, run untrusted MCP servers, or accept tool definitions from user input absolutely are.
+
+If your threat model includes adversarial tool introduction, set `grace_period_hours: 0` on the alignment card to disable the grace path entirely. There is no API to back-date a `tool_first_seen` record, so `0` is the only way to make enforce strict from the moment a card is published. See [Enforcement § Grace period](/gateway/enforcement#grace-period-read-this-before-enabling-enforce).
+</Warning>
+
+| Use case | Recommended `grace_period_hours` |
+|---|---|
+| Adversarial threat model (untrusted user input, untrusted MCP servers, agents accepting tool defs from users) | **`0`** |
+| Test harness / CI matrix | `0` |
+| Production with stable tool inventory + mature card | `0` (no operational benefit when the tool list is stable) |
+| Production with frequent tool additions, trusted operators | `24` (default) |
+| Slow-cadence operational teams | `48`–`168` |
 
 ## Composition across scopes
 

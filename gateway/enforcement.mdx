@@ -133,6 +133,52 @@ Enforce mode will block non-streaming API calls when violations are detected. En
   </Tab>
 </Tabs>
 
+## Grace period (read this before enabling enforce)
+
+Enforce mode does **not** block every violation immediately. By default, the policy engine grants a **24-hour grace period** to any tool the agent has not been seen using before — during that window, what would otherwise be a `fail` verdict is silently downgraded to a `warn`, the gateway forwards the request, and the model gets to call the tool. This is intentional ergonomics for production rollouts (operators have a day to amend the alignment card after adding a new MCP server) but it has a real security trade-off you must understand.
+
+<Warning>
+**Brand-new tools — including ones an attacker introduces — get a 24h pass on enforce by default.**
+
+If an attacker injects an unmapped tool through prompt injection, an upstream MCP server compromise, or a tool-name overlap, the gateway will let the call through for the first 24 hours after it's first observed for that agent. Mature agents with stable tool inventories aren't exposed; agents that add tools dynamically, run untrusted MCP servers, or accept tool definitions from user input absolutely are.
+
+If your threat model includes adversarial tool introduction, set `grace_period_hours: 0` on the agent's [alignment card](/concepts/agent-cards) to disable the grace path entirely.
+</Warning>
+
+The setting lives in `enforcement.grace_period_hours` on the alignment card and accepts any non-negative number. `0` disables grace and makes enforce strict from the moment a card is published.
+
+```yaml
+# Strict enforce — every unmapped/forbidden tool blocks immediately,
+# from the first time it's seen.
+enforcement:
+  grace_period_hours: 0
+```
+
+```yaml
+# Default enforce — 24h grace per new tool. Operationally forgiving;
+# weakest under adversarial tool introduction.
+enforcement:
+  grace_period_hours: 24
+```
+
+```yaml
+# Long grace — deploy-on-weekly-cycles teams that need extra time
+# to update cards. Wider exposure window; only appropriate for
+# trusted environments.
+enforcement:
+  grace_period_hours: 168   # 7 days
+```
+
+| Use case | Recommended `grace_period_hours` |
+|---|---|
+| Adversarial threat model (untrusted user input, untrusted MCP servers, agents accepting tool defs from users) | **`0`** |
+| Test harness / CI matrix | `0` |
+| Production with stable tool inventory + mature card | `0` (no operational benefit when the tool list is stable) |
+| Production with frequent tool additions, trusted operators | `24` (default) |
+| Slow-cadence operational teams | `48`–`168` |
+
+The grace decision is per-(agent, tool) and is tracked in the platform's `tool_first_seen` table — first observation timestamps the row, subsequent calls within the window pass, calls after the window enforce. There is no API to back-date a `tool_first_seen` row, so disabling the grace period is the only way to make enforce strict from the moment a card is published. See [Policy Engine § Grace period](/concepts/policy-engine#grace-period) for the full mechanism.
+
 ## Setting enforcement mode
 
 Set enforcement mode via the API:
