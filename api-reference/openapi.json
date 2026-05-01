@@ -435,9 +435,9 @@
         }
       },
       "delete": {
-        "operationId": "deactivateAgent",
-        "summary": "Deactivate agent",
-        "description": "Soft-delete an agent by setting its status to deactivated and unlinking it from your account.",
+        "operationId": "deleteAgent",
+        "summary": "Delete agent (GDPR Art. 17 cascade)",
+        "description": "Tombstone an agent and asynchronously cascade deletion across all agent-owned records (traces, integrity checkpoints, drift alerts, reclassifications, etc.) per [ADR-021](https://github.com/mnemom/scale/blob/main/decisions/ADR-021-gdpr-cascade.md). The request returns `202 Accepted` immediately with a `deletion_request_id`; poll [GET /v1/agents/{agent_id}/deletion-status](/api-reference/endpoint/get-agents-agent-id-deletion-status) or subscribe to the deletion webhook for cascade progress.\n\nIdempotent: re-DELETE on a tombstoned agent returns the existing `deletion_request_id` with the current status.",
         "tags": [
           "Agents"
         ],
@@ -455,19 +455,42 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Agent deactivated",
+          "202": {
+            "description": "Deletion accepted; cascade will run asynchronously",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "deletion_request_id",
+                    "status",
+                    "requested_at"
+                  ],
                   "properties": {
-                    "deactivated": {
-                      "type": "boolean",
-                      "example": true
+                    "deletion_request_id": {
+                      "type": "string",
+                      "description": "Stable identifier for this deletion request; pass to deletion-status to poll progress.",
+                      "example": "del-7f3b9e2a-c41d-4b8e-9f0a-d5c2e8a17b3e"
                     },
-                    "agent_id": {
-                      "type": "string"
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "tombstoned",
+                        "in_progress",
+                        "completed",
+                        "failed"
+                      ],
+                      "description": "Initial state is `tombstoned` (synchronous part); cascade transitions to `in_progress` then `completed` (or `failed`)."
+                    },
+                    "requested_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "completed_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "Set once the async cascade finishes. `null` while in flight."
                     }
                   }
                 }
@@ -18355,7 +18378,9 @@
             "type": "string"
           },
           "agent_hash": {
-            "type": "string"
+            "type": "string",
+            "description": "First 16 hex chars of `SHA256(apiKey + '|' + agentName)` for named agents, or `SHA256(apiKey)` for unnamed singleton agents. The gateway computes the same value on each request and uses it as the lookup key. See [Agent Identity](https://docs.mnemom.ai/concepts/agent-identity#agent_hash--the-canonical-identity-hash).",
+            "example": "a1b2c3d4e5f6a7b8"
           },
           "user_id": {
             "type": [

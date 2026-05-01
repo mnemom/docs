@@ -72,3 +72,70 @@ curl https://api.mnemom.ai/v1/agents/mnm-550e8400-e29b-41d4-a716-446655440000/ca
 # Legacy format (still fully supported)
 curl https://api.mnemom.ai/v1/agents/smolt-a4c12709/card
 ```
+
+## Registration
+
+There are two paths to register an agent. Both produce a server-assigned `mnm-{uuid}` ID and the same `agent_hash` derived from your provider API key + agent name. They are interoperable — pick whichever fits your deployment.
+
+### `agent_hash` — the canonical identity hash
+
+Every agent is identified by `agent_hash` — the first 16 hex characters of:
+
+```
+agent_hash = SHA256(apiKey + '|' + agentName).slice(0, 16)
+```
+
+where `apiKey` is your **provider** API key (Anthropic, OpenAI, or Gemini — whichever you use to call the gateway) and `agentName` is the human-readable name you set via `x-mnemom-agent`. This is what the gateway computes on every request to look up the agent. It's also what you submit as `hash_proof` (full 64-char hex; the API truncates) when registering programmatically — proving you own the API key without transmitting it.
+
+For unnamed agents (singleton — one agent per API key, no `x-mnemom-agent` header), the formula drops the name:
+
+```
+agent_hash = SHA256(apiKey).slice(0, 16)
+```
+
+The same `apiKey` value you use at registration time **must** be the value sent as `x-api-key` (Anthropic), `Authorization: Bearer` (OpenAI), or `x-goog-api-key` (Gemini) on every gateway call against that agent. Any mismatch makes the agent unaddressable from the gateway.
+
+### Path 1: auto-register on first gateway call (recommended)
+
+The simplest path. Make a normal API call through the gateway with the `x-mnemom-agent` header — the gateway hashes your API key, sees no agent exists, and creates one with a server-assigned `mnm-{uuid}`.
+
+```bash
+curl https://gateway.mnemom.ai/anthropic/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "x-mnemom-agent: my-agent" \
+  -H "content-type: application/json" \
+  -d '{"model": "claude-sonnet-4-5-20250514", "max_tokens": 256, "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+The agent's `mnm-*` ID is returned in the `x-mnemom-agent` response header and persisted on the server. Subsequent calls with the same key + name resolve to the same agent.
+
+### Path 2: programmatic pre-registration via `POST /v1/agents`
+
+When you need to attach an alignment card or policy before the agent's first call — common for fleet provisioning, CI pipelines, or pre-flight role definition — use the CRUD endpoint.
+
+```bash
+# Compute hash_proof locally (full 64-char hex; API truncates to agent_hash)
+HASH_PROOF=$(printf '%s|%s' "$ANTHROPIC_API_KEY" "my-agent" | shasum -a 256 | awk '{print $1}')
+
+curl -X POST https://api.mnemom.ai/v1/agents \
+  -H "Authorization: Bearer $MNEMOM_JWT" \
+  -H "content-type: application/json" \
+  -d "{
+    \"name\": \"my-agent\",
+    \"hash_proof\": \"$HASH_PROOF\",
+    \"card_json\": { ... }
+  }"
+```
+
+The handler stores `agent_hash = hash_proof.slice(0, 16)` and binds the agent to your authenticated principal in the same call. No separate claim or link step is required — the legacy `POST /v1/agents/{id}/claim` and `POST /v1/agents/{id}/link` endpoints exist only for agents created before the unified `POST /v1/agents` endpoint shipped.
+
+The first gateway call against the same key + name will then find this row directly (matching `agent_hash`) and use the card you attached.
+
+### When the API key rotates
+
+`agent_hash` is keyed by `apiKey`, so rotating the upstream provider key rotates the identity of every agent registered under it. The supported migration path is:
+
+1. Use [`POST /v1/agents/{id}/rekey`](/api-reference/endpoint/post-agents-agent-id-rekey) to update the agent's `agent_hash` to the value derived from the new key, while preserving the agent's `mnm-*` ID + history.
+2. Or — for fleets where the old agents are disposable — tombstone them via [`DELETE /v1/agents/{id}`](/api-reference/endpoint/delete-agents-agent-id) and re-register with the new key.
+
+The harness fleet in `safe-house-hardening` uses the latter pattern: the provision script detects orphans (existing agents whose `agent_hash` doesn't match the canonical formula under the current key) and tombstones them before re-creating.

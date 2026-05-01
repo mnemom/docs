@@ -2,3 +2,48 @@
 title: "Register agent"
 openapi: "POST /agents"
 ---
+
+## Use this when
+
+You need to **pre-register an agent** before its first gateway call — most commonly to attach an alignment card or policy on creation. For interactive use, the [auto-create on first gateway call](/concepts/agent-identity#path-1-auto-register-on-first-gateway-call-recommended) path is simpler and produces an equivalent agent.
+
+## hash_proof
+
+The `hash_proof` field is the SHA-256 hex digest proving you own the provider API key the agent will be addressed by. Compute it locally:
+
+```
+hash_proof = SHA256(apiKey + '|' + agentName)        # named agent (recommended)
+hash_proof = SHA256(apiKey)                          # unnamed singleton (one agent per key)
+```
+
+Submit the full 64-char hex; the API truncates to 16 chars internally (`agents.agent_hash`). The provider key (`apiKey`) is your **Anthropic / OpenAI / Gemini** key, not your `mnm_*` Mnemom key — the gateway's per-request lookup uses the same formula on the provider key sent as `x-api-key` / `Authorization: Bearer` / `x-goog-api-key`.
+
+The same `apiKey` you used here **must** be the one you send on every gateway call against this agent. Any mismatch makes the agent unaddressable from the gateway. See [Agent Identity](/concepts/agent-identity#agent_hash--the-canonical-identity-hash).
+
+## Optional fields
+
+- `card_json` — a [unified alignment card](/concepts/agent-cards) to attach on creation. The composer validates and writes the canonical row in the same transaction.
+- `policy_yaml` — **deprecated.** Policy (`capabilities` + `enforcement` sections) is now embedded in the alignment card. Pass it inside `card_json` instead.
+
+## Auth + idempotency
+
+- Authenticated: send a Bearer JWT (`mnemom login` token, or staging-issued Supabase access token) or an `mnm_*` API key. The handler claims and links the new agent to your principal in the same call — no separate claim or link step.
+- Idempotent on `agent_hash`: re-POSTing the same `hash_proof` returns `409 Conflict` with the existing agent reachable via [`GET /v1/agents`](/api-reference/endpoint/get-agents).
+
+## Legacy claim + link
+
+The pre-CRUD flow registered an unauthenticated agent and required two follow-up calls to bind it to your account: [`POST /v1/agents/{id}/claim`](/api-reference/endpoint/post-agents-agent-id-claim) (with `hash_proof` proving key ownership) and [`POST /v1/agents/{id}/link`](/api-reference/endpoint/post-agents-agent-id-link) (with a Bearer JWT). Both endpoints remain for backward compatibility with agents that pre-date `POST /v1/agents`. New code should not use them.
+
+## Example
+
+```bash
+HASH_PROOF=$(printf '%s|%s' "$ANTHROPIC_API_KEY" "my-agent" | shasum -a 256 | awk '{print $1}')
+
+curl -X POST https://api.mnemom.ai/v1/agents \
+  -H "Authorization: Bearer $MNEMOM_JWT" \
+  -H "content-type: application/json" \
+  -d "{
+    \"name\": \"my-agent\",
+    \"hash_proof\": \"$HASH_PROOF\"
+  }"
+```
