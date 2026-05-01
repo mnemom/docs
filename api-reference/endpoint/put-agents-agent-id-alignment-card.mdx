@@ -1,0 +1,42 @@
+---
+title: "Publish agent alignment card"
+openapi: "PUT /agents/{agent_id}/alignment-card"
+---
+
+Publishes a new alignment card for an agent. The handler validates the card against the AAP schema, composes it with the Platform and Org scopes, and atomically writes the canonical row.
+
+This is the canonical UC-4 endpoint that replaced the legacy `PATCH /v1/agents/{id}/card`, `PUT /v1/agents/{id}/policy`, and `PUT /v1/agents/{id}/cfd/config` endpoints (all removed 2026-04-15 — see [Unified cards overview](/api-reference/unified-cards-overview)).
+
+## Required headers
+
+```
+Idempotency-Key: <opaque 24h-unique string>
+```
+
+The handler runs a two-phase reserve / finalize / release on the key. Replays of the same key with the **same** request body return the cached response. Replays with a **different** body return `422 Idempotency-Key conflict`.
+
+## Body shapes
+
+| `Content-Type` | Body |
+|---|---|
+| `text/yaml` | Raw YAML card document |
+| `application/yaml` | Raw YAML card document |
+| `application/json` | Raw card object, or `{ "card_yaml": "<yaml string>" }`, or `{ "card_json": {...} }` |
+
+The card body must include `values`, `autonomy`, and `commitments` blocks at minimum. See the [alignment card schema](/specifications/alignment-card-schema) for full requirements.
+
+## Side effects
+
+- Writes a `governance_audit_log` row before responding (synchronous; failure aborts).
+- Emits the `alignment_card.updated` webhook event (see [Webhooks guide](/guides/webhooks)).
+- Triggers recompose of any teams the agent belongs to.
+
+## Body size limit
+
+128 KB. Two-layer check (Content-Length, then body length).
+
+## See also
+
+- [Conscience values](/api-reference/endpoint/put-agents-agent-id-conscience-values) — published separately on the same agent.
+- [Unified cards overview](/api-reference/unified-cards-overview) — full card surface and composition semantics.
+- [Card management guide](/guides/card-management) — end-to-end walkthrough including CLI, dashboard, and API methods.
