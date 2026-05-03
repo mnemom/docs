@@ -1,0 +1,116 @@
+---
+title: "Team Template Schemas"
+description: "Normative JSON Schemas for team-scope alignment + protection templates."
+sidebarTitle: "Team Template Schemas"
+icon: "code"
+---
+
+This page documents the **normative** JSON Schemas for team-scope alignment + protection templates introduced in Piece 2 of T1-3.1 (per ADR-044 amended).
+
+Team templates share their on-the-wire shape with **agent cards** at the same kind: an alignment template is a partial alignment-card body; a protection template is a partial protection-card body. Server-side validation runs the same agent-card validators with a small allow-list of "may legitimately be omitted at template scope" fields (see [Allow-list](#template-scope-allow-list) below).
+
+## Endpoints
+
+| Endpoint | Method | Body shape |
+|---|---|---|
+| `/v1/teams/{team_id}/alignment-template` | GET | response: `{ team_id, org_id, name, template, enabled }` |
+| `/v1/teams/{team_id}/alignment-template` | PUT | request: alignment template body (see [Alignment template schema](#alignment-template-schema)) |
+| `/v1/teams/{team_id}/alignment-template` | DELETE | response: `{ team_id, org_id, template: null, enabled: false, deleted: true, agents_flagged_for_recompose }` |
+| `/v1/teams/{team_id}/alignment-template/preview-compose` | POST | request: alignment template body; response: `{ ok, composed, conflicts }` |
+| `/v1/teams/{team_id}/protection-template` | GET | response: same shape as alignment, but `template` is a partial Protection card |
+| `/v1/teams/{team_id}/protection-template` | PUT/DELETE/preview-compose | mirrors alignment |
+
+Body content types accepted on PUT and preview-compose: `application/json`, `text/yaml`, `application/yaml`. JSON envelope shape `{ template, enabled? }` or `{ template_yaml, enabled? }` is also accepted; bare-template JSON works too. Idempotency-Key header required on PUT/DELETE.
+
+Body size limits: **128 KiB** alignment / **64 KiB** protection (mirrors org-scope template limits).
+
+## Alignment template schema
+
+A team-scope alignment template is a **partial** [Alignment Card](./alignment-card-schema). The composer reads the same field paths the agent card reads, but a template legitimately omits fields that are author-specific (`agent_id`, `card_version`, etc. — see allow-list).
+
+Fields that are **typically authored** at team scope:
+
+| Field | Purpose | Composition rule |
+|---|---|---|
+| `autonomy_mode` | Override platform/org's autonomy mode for this team's agents (strictest wins) | Enum precedence (`enforce > nudge > observe > off`) |
+| `integrity_mode` | Override platform/org's integrity mode | Enum precedence |
+| `values.declared` | Add team-specific values to the agent's declared list | Union across layers |
+| `values.conflicts_with` | Add team-specific value conflicts | Union |
+| `conscience.mode` | Force conscience replace mode at team scope | Strictest (any layer setting `replace` wins) |
+| `conscience.values` | Add team commitments / boundaries | Union (or sole source in `replace` mode) |
+| `autonomy.bounded_actions` | Permit additional bounded actions for the team | Union |
+| `autonomy.forbidden_actions` | Forbid additional actions for the team | Union (deny-overrides) |
+| `autonomy.escalation_triggers` | Add team-specific escalation conditions | Union, deduplicated by `condition` (first occurrence wins) |
+| `autonomy.max_autonomous_value` | Tighten the team's autonomous-decision floor | Min across layers |
+| `capabilities.<name>` | Per-capability tools / allowed_domains / severity_on_unmapped | Per-name merge (union tools, union domains, strictest severity) |
+| `enforcement.forbidden_tools` | Add team-specific forbidden tool patterns | Union with dedup by pattern |
+| `enforcement.allow_unmapped_tools` | Tighten unmapped-tool policy | False beats true (strictest) |
+| `enforcement.default_unmapped_severity` | Tighten unmapped-tool severity | Strictest |
+| `enforcement.grace_period_hours` | Tighten the team's grace period | Min |
+| `audit.retention_days` | Strengthen audit retention for the team | **Max** (the only audit field a team may strengthen) |
+
+Other `audit.*` fields (`trace_format`, `queryable`, `query_endpoint`, `tamper_evidence`) are **platform-scoped**: a team may *propose* values, but the composer ignores them in favor of the platform values. Teams cannot widen the platform's audit-storage commitments.
+
+## Protection template schema
+
+A team-scope protection template is a **partial** [Protection Card](./protection-card-schema). Fields:
+
+| Field | Composition rule |
+|---|---|
+| `mode` | Strictest wins: `enforce > nudge > observe > off` |
+| `thresholds.{warn,quarantine,block}` | Min across layers (lower = stricter) |
+| `screen_surfaces.{incoming,outgoing,tool_calls,tool_responses}` | OR per field (true = scan more = stricter) |
+| `trusted_sources.{domains,agent_ids,ip_ranges}` | Org + every team + agent contribute additively (union); intersected with platform ceiling per ADR-037 |
+
+## Template-scope allow-list
+
+The server-side validator reuses the agent-card validator with one accommodation: certain fields that are **required on a full agent card** are legitimately absent on a template. The validator filters validation errors keyed to these field paths + the `required`-class rules:
+
+```
+card_version, agent_id,
+autonomy_mode, integrity_mode,
+principal, principal.type, principal.relationship, principal.identifier,
+values.declared,
+autonomy.bounded_actions,
+audit, audit.retention_days, audit.queryable, audit.trace_format,
+mode (protection)
+```
+
+Rules ignored on these field paths: `required`, `required_enum`, `required_when_typed`, `non_empty`. Other validation rules (enum membership, BOUNDARY rejection, disjoint-action checks, regex syntax for `forbidden_tools.pattern`, etc.) still apply.
+
+## Composition output
+
+When a team has a template enabled and is read via `?include=sources`, the response is the **four-scope envelope**:
+
+```json
+{
+  "platform": { "card_json": { ... }, "available": true },
+  "org":      { "card_json": { ... }, "available": true,  "org_id": "org-..." },
+  "team":     { "card_json": { ... }, "available": true,  "team_id": "...", "team_name": "platform" },
+  "composed": { "card_json": { ... }, "available": true }
+}
+```
+
+`available: false` for a layer that has no enabled contribution. The dashboard team-template editor renders the four rows. Solo agents (zero teams) never go through this endpoint; their cascade resolves through the agent-scope `?include=sources` envelope (which omits the team layer entirely — three rows).
+
+## Audit + recompose
+
+Successful PUT or DELETE emits a `governance_audit_log` row:
+
+| Action | Target type | `before_json` | `after_json` |
+|---|---|---|---|
+| `team_alignment_template.put` | `team` | prior template + enabled flag | new template + enabled flag |
+| `team_alignment_template.delete` | `team` | prior template + enabled flag | `null` |
+| `team_protection_template.put` | `team` | prior | new |
+| `team_protection_template.delete` | `team` | prior | `null` |
+
+`metadata` carries `org_id`, `team_name`, and `agents_flagged_for_recompose` (the count of canonical-card rows scoped to **this team's** active agents that were flipped to `needs_recompose=true`).
+
+The recompose fan-out is scoped to the team's agents only — never a blanket org flip. Background recompose then re-runs the composer for each flagged agent against the new template.
+
+## See also
+
+- [Team Scope (concept)](../concepts/team-scope) — model overview
+- [Alignment Card Schema](./alignment-card-schema) — full agent-card schema (template is a partial form)
+- [Protection Card Schema](./protection-card-schema)
+- [Card Composition](../concepts/card-composition) — the layered cascade

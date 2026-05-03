@@ -72,7 +72,15 @@ const exactMatchPattern = /if\s*\(\s*path\s*===\s*'([^']+)'\s*&&\s*method\s*===\
 const startsWithPattern = /if\s*\(\s*path\.startsWith\(\s*'([^']+)'\s*\)\s*&&\s*method\s*===\s*'([A-Z]+)'/g;
 
 // Pattern 3: regex-match declarations — `const fooMatch = path.match(/^\/v1\/foo\/([^/]+)$/);`.
-const regexDeclPattern = /const\s+(\w+)\s*=\s*path\.match\(\/\^(.+?)\$\/i?\)/g;
+// The `s` flag makes `.` match newlines so multi-line declarations like
+//   const fooMatch = path.match(
+//     /^\/v1\/foo\/([^/]+)\/bar$/,
+//   );
+// are picked up the same as the single-line form. Without `s` the extractor
+// silently skips the multi-line variant — the team-template routes (Piece 2
+// of T1-3.1) tripped this when they shipped wrapped across lines for
+// readability and showed up as false-positive "stale in spec" entries.
+const regexDeclPattern = /const\s+(\w+)\s*=\s*path\.match\(\s*\/\^(.+?)\$\/i?\s*,?\s*\)/gs;
 
 // Pattern 4: method checks against a regex var — `if (fooMatch && method === 'POST')`.
 const matchCheckPattern = /if\s*\(\s*(\w+)\s*&&\s*method\s*===\s*'([A-Z]+)'/g;
