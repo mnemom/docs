@@ -2283,6 +2283,265 @@
         }
       }
     },
+    "/auth/me/personal-org": {
+      "get": {
+        "operationId": "getMyPersonalOrg",
+        "summary": "Get the authenticated user's personal organization",
+        "description": "Returns the authenticated user's personal-org-of-one (per ADR-044 Piece 1). Idempotent. If the user does not yet have a personal org (legacy account pre-dating migration 161, or a transient backfill miss), one is provisioned on the fly and `just_provisioned` is set to `true`.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal org accessor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "org_id",
+                    "is_personal"
+                  ],
+                  "properties": {
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "is_personal": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "just_provisioned": {
+                      "type": "boolean",
+                      "description": "True only when this call provisioned the personal org (lazy backfill path)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "description": "Personal-org RPC briefly unavailable; safe to retry."
+          }
+        }
+      }
+    },
+    "/me/context": {
+      "get": {
+        "operationId": "getMyContext",
+        "summary": "Get the authenticated user's effective org-context envelope",
+        "description": "Returns the active org context, the full membership list, and any user preferences that affect the dashboard. Per ADR-044 Piece 1 / migration 164. The dashboard's authoritative endpoint for \"who am I, which org am I in, what are my memberships.\" `active` falls back to the most-recently-accepted multi-user org, then the personal org; `null` only if the user has zero memberships.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User context envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "active",
+                    "memberships",
+                    "preferences"
+                  ],
+                  "properties": {
+                    "active": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "org_id",
+                            "name",
+                            "slug",
+                            "is_personal",
+                            "is_owner",
+                            "role"
+                          ],
+                          "properties": {
+                            "org_id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            },
+                            "avatar_url": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "is_personal": {
+                              "type": "boolean"
+                            },
+                            "is_owner": {
+                              "type": "boolean"
+                            },
+                            "role": {
+                              "type": "string"
+                            },
+                            "company_name": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memberships": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "org_id",
+                          "name",
+                          "slug",
+                          "is_personal",
+                          "is_owner",
+                          "role"
+                        ],
+                        "properties": {
+                          "org_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "avatar_url": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "is_personal": {
+                            "type": "boolean"
+                          },
+                          "is_owner": {
+                            "type": "boolean"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "accepted_at": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "company_name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "preferences": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "User preferences blob (e.g., active_org_id, onboarding_completed_at)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateMyContext",
+        "summary": "Update the authenticated user's preferences",
+        "description": "Updates the `preferences` JSONB on `user_preferences`. Body is `{ preferences: object }`. Returns the same envelope shape as `GET /me/context`. Per ADR-044 Piece 1 / migration 164.",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "preferences"
+                ],
+                "properties": {
+                  "preferences": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Preferences blob to merge into user_preferences."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated user context envelope (same shape as GET /me/context)."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/auth/delete-account": {
       "delete": {
         "operationId": "deleteAccount",
@@ -8399,6 +8658,728 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/alignment-template": {
+      "get": {
+        "operationId": "getTeamAlignmentTemplate",
+        "summary": "Get the team alignment template",
+        "description": "Returns the team-level alignment template that is composed between the org template and each member agent's canonical card (per ADR-044 amended, Piece 2 of T1-3.1). Any org role (owner/admin/member/viewer/auditor) may read. Returns `template: null, enabled: false` if none is set. With `?include=sources`, returns the four-scope envelope `{ platform, org, team, composed }` consumed by the team-template editor.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sources"
+              ]
+            },
+            "description": "When `sources`, returns the four-scope envelope `{ platform, org, team, composed }`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Alignment template (YAML or JSON), or four-scope envelope when `include=sources`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "team_id",
+                    "org_id",
+                    "name",
+                    "template",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putTeamAlignmentTemplate",
+        "summary": "Publish or replace the team alignment template",
+        "description": "Requires org `owner` or `admin` (RBAC is purely org-level per ADR-044 amended). Accepts YAML or JSON. Body cap: 128 KiB. Every active member agent of the team is flagged for canonical recompose (scoped to the team, never a blanket flip). Requires `Idempotency-Key`.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template stored and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTeamAlignmentTemplate",
+        "summary": "Delete the team alignment template",
+        "description": "Clears the team alignment template (stored as `null`, `enabled: false`) and flags every active member agent of the team for recompose. Requires org `owner`/`admin` and `Idempotency-Key`. Idempotent.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template cleared and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "type": "null"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/alignment-template/preview-compose": {
+      "post": {
+        "operationId": "previewComposeTeamAlignmentTemplate",
+        "summary": "Dry-run compose for a team alignment template draft",
+        "description": "Composes Platform + Org + draft team template (no agent slot) and returns conflicts where the draft was tightened by the org/platform floor. Read-only; org member roles. No `Idempotency-Key` required. Body cap: 128 KiB.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "team_id",
+                    "org_id",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/protection-template": {
+      "get": {
+        "operationId": "getTeamProtectionTemplate",
+        "summary": "Get the team protection template",
+        "description": "Returns the team-level protection (Safe House) template composed between the org template and each member agent's canonical protection card (per ADR-044 amended, Piece 2 of T1-3.1). Any org role may read. With `?include=sources`, returns the four-scope envelope `{ platform, org, team, composed }`.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sources"
+              ]
+            },
+            "description": "When `sources`, returns the four-scope envelope `{ platform, org, team, composed }`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Protection template (YAML or JSON), or four-scope envelope when `include=sources`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "team_id",
+                    "org_id",
+                    "name",
+                    "template",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/UnifiedProtectionCard"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "text/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedProtectionCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putTeamProtectionTemplate",
+        "summary": "Publish or replace the team protection template",
+        "description": "Requires org `owner`/`admin`. Accepts YAML or JSON. Body cap: 64 KiB. Every active member agent of the team is flagged for canonical recompose. Requires `Idempotency-Key`.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template stored and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "$ref": "#/components/schemas/UnifiedProtectionCard"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTeamProtectionTemplate",
+        "summary": "Delete the team protection template",
+        "description": "Clears the team protection template and flags every active member agent of the team for recompose. Requires org `owner`/`admin` and `Idempotency-Key`. Idempotent.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template cleared and propagated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "template": {
+                      "type": "null"
+                    },
+                    "enabled": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "agents_flagged_for_recompose": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/protection-template/preview-compose": {
+      "post": {
+        "operationId": "previewComposeTeamProtectionTemplate",
+        "summary": "Dry-run compose for a team protection template draft",
+        "description": "Composes Platform + Org + draft team template (no agent slot) and returns conflicts where the draft was tightened by the org/platform floor. Read-only; org member roles. No `Idempotency-Key` required. Body cap: 64 KiB.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "team_id",
+                    "org_id",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedProtectionCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
           }
         }
       }
