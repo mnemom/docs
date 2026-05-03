@@ -2492,9 +2492,9 @@
         }
       },
       "patch": {
-        "operationId": "updateMyContext",
-        "summary": "Update the authenticated user's preferences",
-        "description": "Updates the `preferences` JSONB on `user_preferences`. Body is `{ preferences: object }`. Returns the same envelope shape as `GET /me/context`. Per ADR-044 Piece 1 / migration 164.",
+        "operationId": "setMyActiveOrg",
+        "summary": "Set the authenticated user's active org",
+        "description": "Switches the user's active org via `set_user_active_org` RPC; the `active_org_id` is persisted to `user_preferences.preferences`. Body is `{ org_id: string }`. Returns the same envelope shape as `GET /me/context`. Returns 403 with `code: 'not_a_member'` if the user is not a member of the target org. Per ADR-044 Piece 1 / migration 164.",
         "tags": [
           "Auth"
         ],
@@ -2516,13 +2516,12 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "preferences"
+                  "org_id"
                 ],
                 "properties": {
-                  "preferences": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "description": "Preferences blob to merge into user_preferences."
+                  "org_id": {
+                    "type": "string",
+                    "description": "Org ID to switch the active context to. The user must be a member."
                   }
                 }
               }
@@ -2531,13 +2530,16 @@
         },
         "responses": {
           "200": {
-            "description": "Updated user context envelope (same shape as GET /me/context)."
+            "description": "Active org switched. Response envelope matches GET /me/context."
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "User is not a member of the target org. Body includes `code: 'not_a_member'`."
           }
         }
       }
