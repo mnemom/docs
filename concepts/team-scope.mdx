@@ -1,0 +1,129 @@
+---
+title: "Team Scope"
+description: "Teams are an optional agent grouping primitive within an org. Agents in teams pick up an additional Team layer in the composition cascade."
+sidebarTitle: "Team Scope"
+icon: "users"
+---
+
+A **team** is an agent grouping primitive within an organization. Teams are **optional**: an agent may belong to zero, one, or many teams. Solo agents — agents in zero teams — compose under Platform → Org → Agent, the existing 3-layer shape. Teamed agents compose under Platform → Org → {Team, …} → Agent.
+
+This page documents the team-scope model: why it exists, how it interacts with the composition cascade, and how to manage team-scope alignment + protection templates.
+
+## Why team scope exists
+
+The Mnemom safe house composes governance state by layering **scopes**: platform-wide defaults at the top, organization-level templates below them, and agent-specific cards at the leaf. The platform is the most permissive ceiling; each layer down can only **tighten** — strictest-wins.
+
+For organizations with heterogeneous agent populations, the org-level template is too coarse. A bank's customer-service agents and its internal devops agents have different risk profiles, different bounded actions, different forbidden tools, different audit retention needs. Two compromises were possible: (1) write the org template strict enough for the strictest sub-population (over-restrictive for everyone else), or (2) carry per-agent overrides on every agent (high friction, no shared baseline).
+
+**Team scope is the missing middle.** Org admins set the org-wide floor. Team admins (Piece 5 — landing later) refine within the org's permissions for each team. Agents in a team inherit the team's contributions on top of the org floor. Solo agents that don't belong to a team simply don't pick up the team layer — their cascade is unchanged.
+
+## When team scope applies
+
+| Situation | Cascade |
+|---|---|
+| Solo developer, one agent, no teams | `Platform → Organization → Agent` (3 layers) |
+| Solo developer, three agents, no teams | `Platform → Organization → Agent` for each agent |
+| Org with one team, agents grouped into the team | `Platform → Organization → Team → Agent` |
+| Org with multiple teams, agent in 2+ teams | `Platform → Organization → {Team₁, Team₂} → Agent` (multi-team strictest-wins folds across all teams) |
+| Org with multiple teams, agent in zero teams | `Platform → Organization → Agent` — the team layer is **omitted** (no default team) |
+
+Per ADR-044 (amended 2026-05-03): there is **no auto-created default team**. Teams are an explicit org-admin construct. If a customer-shaped need for "agents auto-land in a specific team" arises, that lands as an opt-in `default_team_id` setting on the org — additive, not breaking.
+
+## The four-layer cascade (when applicable)
+
+For an agent that belongs to one or more teams, the composer reads four scope sets:
+
+1. **Platform defaults** — set by Mnemom (the safe-house operator). Compliance ceiling.
+2. **Org template** — set by org admin (`/v1/orgs/:org_id/{alignment,protection}-template`). Tightens platform.
+3. **Team template(s)** — set per team (`/v1/teams/:team_id/{alignment,protection}-template`). Tightens org for the team's agents.
+4. **Agent card** — the agent's own self-declaration. Tightens whatever the team(s) and org allow.
+
+For each field on the canonical card, the composition rule applies across **every** layer present:
+
+| Field shape | Composition rule |
+|---|---|
+| `mode` (enum) | Strictest wins: `enforce > nudge > observe > off` |
+| Numeric threshold (e.g., `block: 0.95`) | Min across layers (lower = stricter) |
+| Boolean toggle (e.g., `screen_surfaces.incoming`) | OR per field (true = scan more = stricter) |
+| String set (e.g., `forbidden_actions`) | Union across layers |
+| Typed bucket (`trusted_sources.domains`) | Org + every team + agent contribute additively (union); intersected with platform ceiling |
+
+The fold is variadic: the same rules apply with 0, 1, or N teams. Solo agents reduce naturally to the 3-layer cascade with no team contribution.
+
+## Multi-team agents
+
+An agent can be a member of multiple teams within its org. The composer aggregates contributions from **all** teams the agent belongs to via strictest-wins per field. If an agent is in `team:platform` and `team:sre`, and `platform` sets `autonomy_mode: nudge` while `sre` sets `autonomy_mode: enforce`, the strictest (`enforce`) wins.
+
+This is a v1 simplification consistent with Mnemom's existing strictest-wins idiom. Future v2 refinement (named-priority precedence — "team A wins over team B for this field") is cataloged in the post-T1-3.1 cleanup catalog if customer signal materializes.
+
+## Team templates vs. team identity cards
+
+Mnemom has **two separate concepts** that both reference a team:
+
+- **Team-scope templates** *(this page)* — written to `teams.card_template` and `teams.protection_template`. Applied **to** every member agent's composition cascade. Read by the composer; never visible on the wire as a "team's card."
+- **Team identity cards** *(see [Team Reputation](./team-reputation))* — a single representative card auto-derived from the team's member cards via `POST /v1/teams/:id/card/derive`. Stored in `alignment_cards.team_id`. Used for fleet-coherence analysis and team-reputation scoring; not applied to member agents' cascades.
+
+The two surfaces are orthogonal. Setting a team-scope template doesn't touch the team identity card; deriving a team identity card doesn't touch the templates. Most customers will only need team-scope templates (the cascade-applying surface); team identity cards are for the team-reputation feature on Team / Enterprise plans.
+
+## Authoring a team-scope template
+
+### Via the dashboard
+
+Settings → Organization → Teams → `<team>` → **Alignment template** or **Protection template** tab. The editor shows three rows:
+
+- **Org floor** *(read-only)* — the org admin's authored org template, which acts as the strict floor.
+- **Team** *(editable)* — your team's contribution, hybrid form + YAML editor.
+- **Composed preview** *(read-only)* — what the cascade resolves to for an agent in this team (combining org floor + your draft + platform ceiling).
+
+The save button is gated on **org owner / org admin** role today. (Team Admin role lands in a later milestone — see [Team Admin role](./team-admin-role) when published.)
+
+### Via the API
+
+```bash
+# Read the four-scope envelope (for the editor)
+GET /v1/teams/{team_id}/alignment-template?include=sources
+
+# Read the team's current template
+GET /v1/teams/{team_id}/alignment-template
+
+# Write the template (YAML or JSON, Idempotency-Key required)
+PUT /v1/teams/{team_id}/alignment-template
+
+# Clear the template (idempotent)
+DELETE /v1/teams/{team_id}/alignment-template
+
+# Preview-compose without writing
+POST /v1/teams/{team_id}/alignment-template/preview-compose
+```
+
+Same shape for `protection-template`. Body size limits: 128 KiB for alignment, 64 KiB for protection (mirrors org-scope template limits).
+
+Authorization: `requireOrgRole(team.org_id, ['owner', 'admin'])` for writes; full member roster (owner / admin / member / viewer / auditor) can read.
+
+### Via the CLI
+
+```bash
+mnemom team list
+mnemom team show <team_id>
+mnemom team alignment-template <team_id>                    # read
+mnemom team alignment-template <team_id> --set draft.yaml   # write
+mnemom team alignment-template <team_id> --clear            # delete
+mnemom team protection-template <team_id> [...]             # protection variant
+mnemom team preview-compose <team_id> [--protection] [--from draft.yaml]
+```
+
+The CLI walks every org you're a member of and lists teams across all of them; the `org_name` column disambiguates teams across orgs.
+
+## What team scope does NOT do
+
+- **Team scope is not user-scope.** Users do not "belong to" a team in the composition sense. The user-team association comes only via the Team Admin role grant (a permissions concept, not a membership concept) — landing in a later milestone. Until then, all team-scope authorization is purely org-level.
+- **Team scope does not affect solo agents.** Agents in zero teams compose exactly as they did before team-scope shipped. No regression; no migration; no surprise.
+- **Team scope is not a recipe.** [Recipes](./recipes-overview) are an orthogonal data plane (ADR-041) for detection rules. They will gain team scope on the same rationale as cards (cataloged as a follow-on); until then, recipes are platform/org/agent-scope only.
+
+## See also
+
+- [Card composition](./card-composition) — the layered cascade overview
+- [Personal Organization](./personal-organization) — why solo users still get an org context
+- [Alignment Card](./alignment-cards) — the artifact at the agent leaf
+- [Protection Card](./protection-card) — host-bound per-agent treatment policy
+- [Team Reputation](./team-reputation) — team identity cards (separate, orthogonal feature)

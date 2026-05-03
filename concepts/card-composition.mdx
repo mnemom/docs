@@ -1,11 +1,15 @@
 ---
 title: "Card Composition"
-description: "How alignment and protection cards compose across platform > org > agent scope, with field-level rules, exemptions, and canonical-card semantics."
+description: "How alignment and protection cards compose across platform > org > (team)? > agent scope, with field-level rules, exemptions, and canonical-card semantics."
 sidebarTitle: "Card Composition"
 icon: "layer-group"
 ---
 
-Every Mnemom agent has [two cards](/concepts/agent-cards) — alignment and protection. Both compose from **three scopes**: platform, org, agent. This page documents the composition rules, the canonical-card mechanism, and how exemptions change the computation.
+Every Mnemom agent has [two cards](/concepts/agent-cards) — alignment and protection. Both compose from up to **four scopes**: platform, org, team (optional), agent. This page documents the composition rules, the canonical-card mechanism, and how exemptions change the computation.
+
+<Note>
+**Team scope is optional.** Solo agents (in zero teams) compose under the 3-layer cascade `platform → org → agent` — the historical shape, unchanged. Teamed agents compose under `platform → org → {team₁, …, tₙ} → agent`. See [Team Scope](./team-scope) for the team layer's mechanics; the rest of this page covers the rules that apply at every layer present.
+</Note>
 
 ## Why composition exists
 
@@ -15,15 +19,18 @@ Composition moves the merge to **storage time**. When an agent's scope-level car
 
 Every gateway and observer read hits the canonical table, not the raw scope rows. The request path has zero merge cost.
 
-## The three scopes
+## The scopes
 
-| Scope | Purpose | Storage | Who edits |
-|-------|---------|---------|-----------|
-| **Platform** | Defaults for all agents on Mnemom — the absolute floor | `platform_policies` row (one per card type, singleton) | Mnemom platform team |
-| **Org** | Defaults for all agents in an organization | `orgs.card_template` (alignment) + `orgs.protection_template` (protection) | Org owner / admin |
-| **Agent** | Per-agent specialization | `alignment_cards.card_json` (active) + `sh_configs.config_json` (protection) | Agent owner |
+| Scope | Purpose | Storage | Who edits | Always present? |
+|-------|---------|---------|-----------|---|
+| **Platform** | Defaults for all agents on Mnemom — the absolute floor | `platform_policies` row (one per card type, singleton) | Mnemom platform team | Yes |
+| **Org** | Defaults for all agents in an organization | `orgs.card_template` (alignment) + `orgs.protection_template` (protection) | Org owner / admin | Yes (personal-org-of-one for solo users) |
+| **Team** *(optional)* | Sub-org grouping for heterogeneous fleets | `teams.card_template` + `teams.protection_template` (per team) | Org owner / admin (Team Admin role lands later) | No — only when the agent is a team member |
+| **Agent** | Per-agent specialization | `alignment_cards.card_json` (active) + `sh_configs.config_json` (protection) | Agent owner | Yes |
 
-Scope ordering is **platform → org → agent**. Later scopes apply over earlier scopes according to per-field rules below.
+Scope ordering is **platform → org → (team)? → agent**. The team layer is conditional: agents in zero teams compose under the 3-layer cascade; agents in one or more teams pick up a Team layer between Org and Agent. Multi-team agents fold strictest-wins across all their teams. See [Team Scope](./team-scope) for details.
+
+Later scopes apply over earlier scopes according to the per-field rules below. The **same** rules apply with 0, 1, or N team layers present — the composer's strictest-wins idiom is variadic.
 
 ## Field-level composition rules
 
