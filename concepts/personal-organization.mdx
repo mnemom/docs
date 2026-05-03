@@ -1,0 +1,106 @@
+---
+title: "Personal Organization"
+description: "Every Mnemom user has a personal organization, auto-provisioned at signup. Users can also be members of any number of multi-user organizations."
+sidebarTitle: "Personal Organization"
+icon: "user"
+---
+
+Every Mnemom user has a **personal organization** — a single-member org of their own, auto-provisioned at signup. Users can additionally be members of any number of **multi-user organizations** (an enterprise account, a team workspace, a customer-managed tenant).
+
+This page documents the personal-org model, when it applies, and how it interacts with multi-user organizations.
+
+## Why personal organizations exist
+
+The Mnemom safe house composes governance state across four scopes: **platform**, **org**, **team**, **agent**. Every agent in the system inherits from each layer; the cascade is uniform regardless of whether the user is a solo developer or a 10,000-person enterprise.
+
+Before the personal-org model, solo users sat in a degraded special case: their agents had no org context, the composer skipped the org layer silently, and several operations (granting exemptions, applying org-level templates, surfacing audit history) returned errors or empty results. Adding a sub-org **team** scope on top of that inconsistency would have propagated the special-casing across more code paths.
+
+The personal-org model removes the special case. Every agent has a personal org of its owner; every cascade is complete. The platform behaves identically for the solo developer and the enterprise team — the only difference is membership cardinality.
+
+## The model — at a glance
+
+| Aspect | Personal organization | Multi-user organization |
+|---|---|---|
+| Members | Exactly one (the owner) | One or more |
+| Auto-created | Yes, at signup | No, manually created via dashboard |
+| `is_personal` flag | `true` | `false` |
+| Org ID prefix | `pers-<8-hex>` | `org-<8-hex>` |
+| Owner role | Always the user themselves | First creator; transferable |
+| Visible in dashboard | Yes — appears in the org switcher | Yes — alongside personal |
+| Receives platform-default templates | Yes | Yes |
+| Can host teams | Yes (default team only, in v1) | Yes (multiple) |
+
+Per ADR-044 (Option A — GitHub model): users may belong to a personal organization AND any number of multi-user organizations simultaneously. Each agent is scoped to exactly one organization through its billing account; a personal-billing-account agent belongs to the user's personal org.
+
+## When the personal org applies
+
+Your **personal org** is the default context for any agent you create that is not explicitly scoped to a multi-user organization. If you sign up to Mnemom and create your first agent without joining or creating a multi-user org, that agent lives in your personal org. Its cards compose:
+
+```
+Platform defaults
+  → Personal org defaults (just-in-time mirror of platform; no org admin to change them)
+    → Default team (auto-created per personal org)
+      → Agent (your alignment + protection cards)
+```
+
+When you join a multi-user organization (e.g., an enterprise admin invites you), you do **not** lose your personal org. Your existing personal-org agents stay personal. New agents you create within the multi-user org live there. You can switch contexts in the dashboard's org switcher.
+
+## What the dashboard shows
+
+The dashboard's organization switcher lists every org you're a member of. Your personal org is sorted first and tagged `(personal)`. Switching contexts changes the scope of:
+
+- **Settings → Organization** — which org's templates and members you're managing
+- **Agents** — which org's agent list you see
+- **Audit log** — which org's mutations you're reviewing
+- **Trust Posture** (per ADR-045) — which org's posture library you can clone or edit
+
+A team admin or org owner of a multi-user org can never see another user's personal org. Personal orgs are private to their owner.
+
+## What the API exposes
+
+```
+GET /v1/auth/me/personal-org
+  → { "org_id": "pers-...", "is_personal": true, "just_provisioned": false }
+
+GET /v1/orgs
+  → {
+      "orgs": [
+        { "org_id": "pers-...", "is_personal": true, "is_owner": true, "role": "owner", ... },
+        { "org_id": "org-...",  "is_personal": false, "is_owner": false, "role": "member", ... }
+      ]
+    }
+```
+
+`GET /v1/auth/me/personal-org` is idempotent — if the user does not yet have a personal org (legacy account from before migration 161), one is provisioned on the fly and returned.
+
+`GET /v1/orgs` returns every membership, ordered personal-first.
+
+## Composition implications
+
+Per the composition rules ([Card Composition](/concepts/card-composition)), strictest-wins applies at every layer of the cascade. For personal-org agents:
+
+- **Platform** — Mnemom's compliance ceiling and sensible defaults.
+- **Org** (personal) — defaults seeded from platform; the user can edit their personal-org templates the same way an enterprise admin edits theirs.
+- **Team** (default team) — the auto-created default team for the personal org. The user can edit the default team's templates if finer per-agent control is desired.
+- **Agent** — the user's per-agent overrides.
+
+Because the user is both the owner and the only member of their personal org, they have administrator privileges across all four layers within their own scope. They cannot, however, weaken below the platform compliance ceiling.
+
+## Audit trail
+
+Personal-org provisioning is audit-logged the same way every org mutation is, via `governance_audit_log`:
+
+- `personal_org.provision` — when the personal org is auto-created (signup hook or migration 161 backfill).
+- `personal_org.default_team.provision` — when the default team is auto-created (Piece 2 of T1-3.1).
+
+Personal users can view their own audit log via the standard org audit endpoint scoped to their personal `org_id`.
+
+## Compliance and data residency
+
+A personal organization is treated identically to a multi-user organization for compliance and data-residency purposes. GDPR right-to-erasure (Article 17) cascades the personal org and its agents, billing account, and audit log on user account deletion.
+
+## See also
+
+- [Card Composition](/concepts/card-composition) — how the four-layer cascade resolves to canonical cards.
+- [Safe House](/concepts/safe-house) — the architectural picture; personal orgs participate identically to multi-user orgs.
+- ADR-044 (in the scale repo's decision register) — the architectural decision establishing the personal-org-of-one and Platform → Org → Team → Agent cascade.
