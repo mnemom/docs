@@ -13441,6 +13441,135 @@
         }
       }
     },
+    "/agents/{agent_id}/alignment-card/preview-compose": {
+      "post": {
+        "operationId": "previewComposeAgentAlignmentCard",
+        "summary": "Dry-run compose for an agent alignment card draft",
+        "description": "Composes Platform defaults + active org alignment template with the supplied draft agent alignment card and returns the composed canonical card plus per-field conflicts where the draft was tightened by an upstream scope. Read-only; no DB writes; no `Idempotency-Key` required. Body cap: 128 KiB. See ADR-039.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "field",
+                          "reason",
+                          "draft_value",
+                          "effective_value",
+                          "source_scope"
+                        ],
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "description": "Dotted path of the field whose draft value was overridden by a higher scope."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "platform_floor",
+                              "org_floor",
+                              "platform_ceiling",
+                              "org_addition"
+                            ]
+                          },
+                          "draft_value": {
+                            "description": "The value the caller submitted in the draft."
+                          },
+                          "effective_value": {
+                            "description": "The value after composition with higher scopes."
+                          },
+                          "source_scope": {
+                            "type": "string",
+                            "enum": [
+                              "platform",
+                              "org"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Draft failed schema validation. Body is `{ ok: false, errors: [...] }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      }
+    },
     "/agents/{agent_id}/protection-card": {
       "get": {
         "operationId": "getProtectionCard",
@@ -13565,6 +13694,135 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
+          }
+        }
+      }
+    },
+    "/agents/{agent_id}/protection-card/preview-compose": {
+      "post": {
+        "operationId": "previewComposeAgentProtectionCard",
+        "summary": "Dry-run compose for an agent protection card draft",
+        "description": "Composes Platform defaults + active org protection template with the supplied draft agent protection card and returns the composed canonical card plus per-field conflicts where the draft was tightened by an upstream scope. Read-only; no DB writes; no `Idempotency-Key` required. Body cap: 64 KiB. See ADR-039.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedProtectionCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "field",
+                          "reason",
+                          "draft_value",
+                          "effective_value",
+                          "source_scope"
+                        ],
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "description": "Dotted path of the field whose draft value was overridden by a higher scope (e.g. `mode`, `thresholds.warn`)."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "platform_floor",
+                              "org_floor",
+                              "platform_ceiling",
+                              "org_addition"
+                            ]
+                          },
+                          "draft_value": {
+                            "description": "The value the caller submitted in the draft."
+                          },
+                          "effective_value": {
+                            "description": "The value after composition with higher scopes."
+                          },
+                          "source_scope": {
+                            "type": "string",
+                            "enum": [
+                              "platform",
+                              "org"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Draft failed schema validation. Body is `{ ok: false, errors: [...] }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14063,6 +14321,135 @@
         }
       }
     },
+    "/orgs/{org_id}/alignment-template/preview-compose": {
+      "post": {
+        "operationId": "previewComposeOrgAlignmentTemplate",
+        "summary": "Dry-run compose for an org alignment template draft",
+        "description": "Composes Platform defaults with the supplied draft org alignment template (no team or agent slot) and returns the composed canonical card plus per-field conflicts where the draft was tightened by the platform ceiling. Read-only; any org role (owner/admin/member/viewer/auditor) may call. No `Idempotency-Key` required (no DB writes). Body cap: 128 KiB.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAlignmentCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedAlignmentCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "field",
+                          "reason",
+                          "draft_value",
+                          "effective_value",
+                          "source_scope"
+                        ],
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "description": "Dotted path of the field whose draft value was overridden by a higher scope."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "platform_floor",
+                              "org_floor",
+                              "platform_ceiling",
+                              "org_addition"
+                            ]
+                          },
+                          "draft_value": {
+                            "description": "The value the caller submitted in the draft."
+                          },
+                          "effective_value": {
+                            "description": "The value after composition with higher scopes."
+                          },
+                          "source_scope": {
+                            "type": "string",
+                            "enum": [
+                              "platform",
+                              "org"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Draft failed schema validation. Body is `{ ok: false, errors: [...] }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 128 KiB."
+          }
+        }
+      }
+    },
     "/orgs/{org_id}/protection-template": {
       "get": {
         "operationId": "getOrgProtectionTemplate",
@@ -14264,6 +14651,135 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/protection-template/preview-compose": {
+      "post": {
+        "operationId": "previewComposeOrgProtectionTemplate",
+        "summary": "Dry-run compose for an org protection template draft",
+        "description": "Composes Platform defaults with the supplied draft org protection template (no team or agent slot) and returns the composed canonical card plus per-field conflicts where the draft was tightened by the platform ceiling. Read-only; any org role (owner/admin/member/viewer/auditor) may call. No `Idempotency-Key` required (no DB writes). Body cap: 64 KiB.",
+        "tags": [
+          "Card Templates"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedProtectionCard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview compose result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "composed",
+                    "conflicts"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "composed": {
+                      "$ref": "#/components/schemas/UnifiedProtectionCard"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "field",
+                          "reason",
+                          "draft_value",
+                          "effective_value",
+                          "source_scope"
+                        ],
+                        "properties": {
+                          "field": {
+                            "type": "string",
+                            "description": "Dotted path of the field whose draft value was overridden by a higher scope (e.g. `mode`, `thresholds.warn`)."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "platform_floor",
+                              "org_floor",
+                              "platform_ceiling",
+                              "org_addition"
+                            ]
+                          },
+                          "draft_value": {
+                            "description": "The value the caller submitted in the draft."
+                          },
+                          "effective_value": {
+                            "description": "The value after composition with higher scopes."
+                          },
+                          "source_scope": {
+                            "type": "string",
+                            "enum": [
+                              "platform",
+                              "org"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Draft failed schema validation. Body is `{ ok: false, errors: [...] }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Request body exceeds 64 KiB."
           }
         }
       }
