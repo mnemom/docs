@@ -240,9 +240,23 @@ curl https://api.mnemom.ai/v1/agents/{id}/alignment-card?include_composition=tru
 
 Every gateway + observer card read emits a structured log entry with `card_source: canonical_hit` (or `canonical_miss_fallback` in the rare case the canonical row is missing and the composer is still catching up). The UC-14 gate review criterion is that the fallback rate is zero on production traffic.
 
+## Trust Posture is a parallel cascade, not nested
+
+Cards compose along `Platform → Org → Team → Agent`. **[Trust Posture](/concepts/trust-posture) — the team-scoped oversight policy artifact — composes along its own parallel cascade `Platform → Org → Team` and does NOT fold into the per-agent card.**
+
+Postures and cards are parallel artifact types: postures are team-scoped policy input (drives the observer's sideband sweep), cards are agent-scoped runtime treatment (read by the gateway at request time). They share infrastructure (this composer idiom, KV caching, audit log) but their data planes are independent.
+
+Practically:
+
+- An advisory written by a posture-driven detector lands in [`pending_advisories`](/concepts/integrity-checkpoints#pending-advisories) tagged with `source: sideband.{coherence,fault_line,fleet}`. The gateway picks it up on the next turn for an affected agent and lets card-driven enforcement decide the runtime treatment.
+- The posture cascade has no agent leaf because postures are inherently fleet-level (they observe a *group*, not an individual).
+- Composing a posture into the canonical card is intentionally not supported — see [Posture vs. Cards](/concepts/posture-vs-cards) for the design rationale.
+
 ## See also
 
 - [Agent Cards](/concepts/agent-cards) — the two-card model overview
 - [Alignment Card Schema](/specifications/alignment-card-schema) — normative schema for unified alignment cards
 - [Protection Card Schema](/specifications/protection-card-schema) — normative schema for protection cards
 - [Card Lifecycle](/concepts/card-lifecycle) — amendment, reclassification, expiry
+- [Trust Posture](/concepts/trust-posture) — team-scoped oversight policy
+- [Posture vs. Cards](/concepts/posture-vs-cards) — parallel cascades architecture

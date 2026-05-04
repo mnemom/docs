@@ -128,9 +128,23 @@ Outbound screening is configured separately and applies regardless of inbound mo
 
 When Safe House is active, its threat context enriches the AIP conscience analysis. If a message passes Safe House but scored close to a threshold, that score is included in the conscience prompt so AIP can apply extra scrutiny to the resulting reasoning. The signal flows in both directions: a high AIP boundary-violation rate for a session elevates Safe House's L3 session risk score.
 
+## The four artifact types
+
+Safe House's runtime treatment is configured by **two parallel cascades** of named-object artifacts:
+
+| Artifact | Scope | What it controls | When |
+|---|---|---|---|
+| [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates | Same-turn at the gateway: CLPI (tool calls) + AIP (reasoning) |
+| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources | Same-turn at the gateway: front-door + back-door |
+| [Trust Posture](/concepts/trust-posture) | Per-team | Sideband detector firing rules (coherence, fault-line, fleet) | Async sideband sweep → carryover via `pending_advisories` |
+| Card-cascade composition | Platform → Org → Team → Agent | Strictest-wins fold per-agent | Read by gateway at request time |
+
+[Trust Posture vs. Cards](/concepts/posture-vs-cards) covers in detail why these are *parallel* artifact types (postures don't fold into cards; cards don't fold into postures) and the two well-defined join points where they cooperate (detector input + carryover bridge).
+
 ## See also
 
 - [Safe House Gateway Integration](/gateway/safe-house-overview) — How Safe House fits into the Mnemom gateway request pipeline
 - [Safe House Quickstart](/quickstart/safe-house-protection) — Enable and test Safe House in 5 minutes
 - [Enforcement Modes](/gateway/enforcement) — How the gateway handles violations after they reach the agent
+- [Trust Posture](/concepts/trust-posture) — Team-scoped oversight policy artifact
 - [Observatory](/guides/observability) — Reviewing Safe House verdicts and session risk in the dashboard

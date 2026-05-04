@@ -1,0 +1,180 @@
+---
+title: "Posture versioning"
+description: "Postures are versioned with forward-only revision history. Every mutation creates a new revision; rollback creates a forward revision; old revisions stay immutable and queryable."
+sidebarTitle: "Posture versioning"
+icon: "git-branch"
+---
+
+[Trust Postures](/concepts/trust-posture) are versioned. Every PUT creates a new revision; the parent posture's `current_revision_id` pointer advances; older revisions stay immutable and queryable.
+
+This page documents the versioning semantics, the immutability guarantees, the diff and rollback workflows, and what compliance reporting can rely on.
+
+## The model
+
+Three tables underpin posture versioning:
+
+| Table | What it holds |
+|---|---|
+| `trust_postures` | Library row — id, slug, name, scope, owner, **`current_revision_id` pointer** |
+| `trust_posture_revisions` | Versioned bodies — revision_id (PK), posture_id (FK), revision_no (monotonic per posture, starts at 1), body (JSONB), authored_by, authored_at, change_summary |
+| `team_posture_assignments` | Team↔posture link — team_id (PK), posture_id, optional `assigned_revision_id` to pin a specific revision (default: float against current) |
+
+Two design choices shape the rest of this page:
+
+1. **Forward-only.** Revisions are immutable once written. Editing a posture writes a *new* row to `trust_posture_revisions` and advances `current_revision_id`. The old revision stays.
+2. **Float vs. pin.** A team's assignment may either *float* against the posture's `current_revision_id` (default — every PUT changes the team's effective body too) or *pin* to a specific `revision_no` (the team's effective body never changes until the assignment is updated). Pinning is for change-controlled environments.
+
+## Revision lifecycle
+
+### First publish
+
+```bash
+mnemom posture create --org org-acme --slug acme-standard --name "Acme Standard" \
+                      --from initial-body.json --summary "Initial revision."
+```
+
+Server inserts:
+
+1. `trust_postures` row with `current_revision_id = NULL`
+2. `trust_posture_revisions` row with `revision_no = 1`
+3. UPDATE `trust_postures` SET `current_revision_id = <new>`
+
+A `posture.create` audit-log row lands with `target_type='posture'`.
+
+### Subsequent edits
+
+```bash
+mnemom posture update tp-acme123 --from v2-body.json --summary "tighten coherence to 0.6"
+```
+
+Server reads max `revision_no`, inserts a new revision with `revision_no = max + 1`, and PATCHes the parent's `current_revision_id`. A `posture.put` audit-log row lands with `metadata.revision_no` populated.
+
+The previous revision (1) stays. It's still queryable. If you assigned a team to revision 1 (pinned), nothing changes for that team. If you assigned a team to *current* (floating), the team picks up revision 2 the next time the observer reads.
+
+### Rollback
+
+There's no destructive rollback. Rolling back to revision N means:
+
+```bash
+# 1) Read revision N's body
+mnemom posture revisions tp-acme123 --json | jq '.[] | select(.revision_no == 3) | .body' > rollback-body.json
+
+# 2) PUT it as a new revision (forward-only)
+mnemom posture update tp-acme123 --from rollback-body.json --summary "rollback to revision 3"
+```
+
+Now `current_revision_id` points at revision 4, whose body equals revision 3's. Audit linearity preserved — the log shows "rolled back to revision 3" rather than "revision 4 appears to have been deleted."
+
+### Diff
+
+Compare any two revisions:
+
+```bash
+mnemom posture diff tp-acme123 --from 1 --to 3
+```
+
+The server walks both bodies recursively and emits a flat list of `{path, op, before, after}` entries. Op is `added`, `removed`, or `changed`. Useful for change-review and for compliance reports ("what changed between Q1 and Q2?").
+
+## Immutability guarantees
+
+### Mnemom-shipped platform defaults
+
+The three Mnemom-shipped postures (`tp-platform-standard`, `tp-platform-high-compliance`, `tp-platform-low-latency`) are **immutable from REST**. PUT and DELETE return 403. Future tuning ships as a new revision migration (a versioned platform-side change), not as an edit through the API. This keeps the seed-via-migration discipline auditable.
+
+To customize a platform default, [clone it](/cli/posture#clone) into your org and edit the clone.
+
+### Org-scope postures
+
+Org admins (owner, admin) can:
+
+- Create new postures in the org
+- PUT new revisions
+- Soft-delete (refuses if the posture is currently assigned to any team — unassign first)
+- Clone other postures (including platform defaults) into the org
+- Assign / unassign to teams
+
+Org members (member, viewer, auditor) can:
+
+- List postures
+- Read postures and revisions
+- Diff revisions
+- Preview-compose
+
+## Compliance applications
+
+Versioned postures + audit log together give compliance reporting a queryable foundation.
+
+**Point-in-time policy state:**
+
+```sql
+-- "What was our coherence threshold for the trading-desk team on 2026-03-31?"
+SELECT tpr.body #> '{sideband,coherence,fire_on,pairwise_governance_floor_below}'
+FROM team_posture_assignments tpa
+JOIN trust_postures tp ON tp.posture_id = tpa.posture_id
+JOIN trust_posture_revisions tpr
+  ON tpr.posture_id = tp.posture_id
+  AND tpr.authored_at <= '2026-03-31'
+WHERE tpa.team_id = '<trading-desk-uuid>'
+ORDER BY tpr.authored_at DESC
+LIMIT 1;
+```
+
+**Change attribution:**
+
+```sql
+-- "Who tightened coherence between revision 5 and revision 6?"
+SELECT authored_by, authored_at, change_summary
+FROM trust_posture_revisions
+WHERE posture_id = 'tp-acme123' AND revision_no = 6;
+```
+
+**Detection coverage:**
+
+```sql
+-- "How many of our teams have a posture with coherence enabled?"
+SELECT count(*)
+FROM team_posture_assignments tpa
+JOIN trust_postures tp ON tp.posture_id = tpa.posture_id
+JOIN trust_posture_revisions tpr ON tpr.revision_id = tp.current_revision_id
+WHERE (tpr.body #> '{sideband,coherence,enabled}')::boolean = true;
+```
+
+The full compliance attestation surface (snapshots, control mapping, certified exports) is on the roadmap (post-T1-3.1); the foundation is the versioning model documented here.
+
+## Audit-log actions
+
+Every posture mutation emits a `governance_audit_log` row with `target_type='posture'`:
+
+| Action | Surface |
+|---|---|
+| `posture.create` | New posture + initial revision |
+| `posture.put` | New revision on existing posture |
+| `posture.clone` | Source posture cloned to target org |
+| `posture.delete` | Soft-delete (refused if assigned) |
+| `team_posture.assign` | Assignment created or replaced (one-active-per-team) |
+| `team_posture.unassign` | Assignment removed |
+
+Each row carries `before_json` + `after_json` (where applicable) and `metadata` (org_id, team_id, revision_no, source_posture_id for clones, etc.).
+
+## API surface
+
+Read endpoints — accessible to any org member:
+
+- `GET /v1/postures/{id}/revisions` — list revisions, newest first
+- `GET /v1/postures/{id}/revisions/{n}` — read specific revision
+- `GET /v1/postures/{id}/diff?from=N&to=M` — structural diff between revisions
+
+Mutation endpoints — owner/admin only on org-scope:
+
+- `PUT /v1/postures/{id}` — write a new revision (forward-only)
+
+Platform-scope postures: PUT / DELETE return 403.
+
+CLI mirror in [`mnemom posture`](/cli/posture) subcommands (`update`, `revisions`, `diff`, `clone`).
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — overview
+- [Trust Posture vs. Cards](/concepts/posture-vs-cards) — parallel cascades
+- [Mnemom-shipped default postures](/concepts/mnemom-default-postures) — the three immutable defaults
+- [Trust Posture schema](/specifications/trust-posture-schema) — normative JSONB body
