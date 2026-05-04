@@ -1,0 +1,233 @@
+---
+title: "Pending advisories schema"
+description: "Wire format for pending_advisories rows + the closed source taxonomy and expansion contract (ADR-047)."
+sidebarTitle: "Pending advisories"
+icon: "envelope"
+---
+
+# Pending advisories — wire format and source taxonomy
+
+`pending_advisories` is the unified cross-turn carryover surface. One table, one read point at the start of each runtime turn (`gateway/src/index.ts::injectPendingNudges`), multiple sources via a closed `source` enum spanning runtime + sideband + manual contexts.
+
+This page documents the row shape every consumer can rely on (gateway, observer, dashboard, CLI, webhook subscribers) and the [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) expansion contract for adding new sources.
+
+## Row shape
+
+```typescript
+interface PendingAdvisory {
+  id: string;                    // pa-<12 hex chars>
+  agent_id: string;              // mnm-<uuid>
+  session_id: string | null;     // null for sideband.* (cross-session); set for runtime.*
+  text: string;                  // injected nudge_content; bracket-wrapped
+  source: SourceValue;           // closed enum (see §"Source taxonomy")
+  source_ref: SourceRef;         // JSONB; shape per source (see §"source_ref shapes")
+  status: "pending" | "consumed" | "expired";
+  created_at: string;            // ISO-8601 UTC
+  consumed_at: string | null;    // ISO-8601 UTC; set when gateway injects
+  expires_at: string;            // ISO-8601 UTC; default created_at + 24h
+}
+```
+
+**TTL.** Default 24 hours. Configurable platform-wide by Mnemom platform admins; not configurable per-org or per-agent (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md)).
+
+**Status transitions.** Always forward: `pending → consumed` (gateway injected on a turn) or `pending → expired` (TTL elapsed without injection). No revivals.
+
+## Source taxonomy
+
+Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047 expansion recipe](#expansion-contract) (ADR amendment + migration + producer + consumer-tolerance + posture body extension for `sideband.*`).
+
+| Context | Producer | Examples |
+|---|---|---|
+| `runtime.*` | `gateway/src/index.ts` (same-turn intervention bookkeeping) | `runtime.front_door.nudge`, `runtime.back_door.modification` |
+| `sideband.*` | `observer/src/sideband.ts` (cron-driven detector firing) | `sideband.drift`, `sideband.coherence`, `sideband.fault_line`, `sideband.fleet` |
+| `manual.*` | mnemom-api admin handlers (human-attached) | `manual.admin` |
+
+### Current ratified values (post-Piece-6, ADR-047 §6)
+
+| Source | Producer | Posture-gated | Webhook event |
+|---|---|---|---|
+| `runtime.front_door.nudge` | gateway (front-door handler) | No | (none) |
+| `runtime.front_door.enforce` | gateway (front-door handler) | No | (none) |
+| `runtime.inside.autonomy.nudge` | gateway (CLPI handler) | No | (none) |
+| `runtime.inside.integrity.nudge` | gateway (AIP handler) | No | (none) |
+| `runtime.back_door.modification` | gateway (back-door handler) | No | (none) |
+| `sideband.drift` | observer (`writeDriftSidebandAdvisory`) | Partial† | `drift.detected` (legacy carve-out) |
+| `sideband.coherence` | observer (`writeCoherenceSidebandAdvisory`) | Yes | `sideband.coherence.fired` |
+| `sideband.fault_line` | observer (`writeFaultLineSidebandAdvisory`) | Yes | `sideband.fault_line.fired` |
+| `sideband.fleet` | observer (`writeFleetSidebandAdvisory`) | Yes | `sideband.fleet.fired` |
+| `manual.admin` | mnemom-api admin attach handler | No | future `manual.advisory_attached` |
+
+† Drift's current thresholds are hardcoded in the AAP SDK; future posture-body extensions will move them under per-team Posture control. Drift's `drift.detected` webhook keeps its legacy name for backwards compatibility — the single documented carve-out from the `<source>.fired` convention.
+
+## `source_ref` shapes
+
+JSONB envelope keyed off `source`. Conventions:
+
+- Every `sideband.*` row carries `{team_id: string, pattern_type: string, ...detector_outputs}`
+- Every `runtime.*` row carries `{checkpoint_id: string, mode_at_fire: "off"|"observe"|"nudge"|"enforce"}`
+- Every `manual.*` row carries `{actor_user_id: string, attached_at: string, note?: string}`
+
+### `sideband.coherence` — `source_ref`
+
+```json
+{
+  "team_id": "tm-acme-banking",
+  "pattern_type": "pairwise_governance_floor=0.42 < 0.5|outliers=2 > 1",
+  "pairwise_governance_floor": 0.42,
+  "conflict_edge_count": 3,
+  "outlier_agent_ids": ["agt-monitor-3", "agt-watch-7"]
+}
+```
+
+`pattern_type` is a `|`-separated list of fired conditions (one or more of `pairwise_governance_floor`, `conflict_edge_count`, `outliers`). Detector outputs are propagated as-is so the dashboard can render the specific finding.
+
+### `sideband.fault_line` — `source_ref`
+
+```json
+{
+  "team_id": "tm-acme-banking",
+  "fault_line_id": "fl-de4f7ae",
+  "value": "transparency",
+  "severity": "high",
+  "impact_score": 0.62,
+  "classification": "priority_mismatch"
+}
+```
+
+One row per affected agent (per `fan_out.rule = "per_named_affected_agent"`) — `fault_line_id` is shared across the rows. Webhooks dedupe per-(account, fault_line); the carryover rows do not (the agent needs to know they specifically were named).
+
+### `sideband.fleet` — `source_ref`
+
+Three independent firing patterns; one row per (pattern, affected agent) — see the [Per-pattern emission](/concepts/sideband-detection#per-pattern-emission-for-the-fleet-axis) explainer.
+
+```json
+// patterns: outliers
+{ "team_id": "tm-acme-banking", "pattern_type": "outliers", "outlier_agent_ids": ["agt-monitor-3"] }
+
+// patterns: min_pair_score
+{ "team_id": "tm-acme-banking", "pattern_type": "min_pair_score", "min_pair_score": 0.31, "threshold": 0.4 }
+
+// patterns: cluster_partition
+{ "team_id": "tm-acme-banking", "pattern_type": "cluster_partition", "cluster_count": 2, "cluster_ids": ["c-0", "c-1"] }
+```
+
+### `sideband.drift` — `source_ref`
+
+```json
+{ "drift_alert_id": "drift-a7f2c6e8" }
+```
+
+Compact — drift's full diagnostic data lives in the `drift_alerts` row referenced by `drift_alert_id`. Consumers needing detail join.
+
+### `runtime.*` — `source_ref`
+
+```json
+{
+  "checkpoint_id": "ckpt-92e1d8b3",
+  "mode_at_fire": "nudge"
+}
+```
+
+`checkpoint_id` references the `integrity_checkpoints` row created on the same turn. `mode_at_fire` is the agent's effective mode at intervention time (post-cascade, pre-fire).
+
+### `manual.admin` — `source_ref`
+
+```json
+{
+  "actor_user_id": "user-a3f29c1e",
+  "attached_at": "2026-05-04T15:32:00Z",
+  "note": "Customer support attached after escalation #47291"
+}
+```
+
+## `nudge_content` format
+
+Every advisory's `text` follows a stable wrapper:
+
+```
+[Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]
+```
+
+The bracket wrapper enables the gateway's [I10 invariant](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) (user-visible-explanation 100%) to detect that an injection happened. Producers MUST keep the wrapper; if the wrapper is missing on a delivered turn, the gateway suffix-injects its own marker `[Mnemom: <intervention summary>]`.
+
+## `concerns_summary` format
+
+Short structured headline (≤80 chars) used for telemetry, dashboard display, and CLI list output. Convention: `<axis>: <short outcome>`.
+
+| Source | Example |
+|---|---|
+| `sideband.coherence` | `Coherence: pairwise_governance_floor=0.42 (1 outlier)` |
+| `sideband.fault_line` | `Fault line: transparency (severity high, impact 0.62)` |
+| `sideband.fleet` | `Fleet: cluster_partition (4 affected)` |
+| `sideband.drift` | `Sideband drift: misalignment_drift (similarity 0.28)` |
+| `runtime.*` | `<checkpoint>: <mode>-fired` |
+
+## Read endpoints
+
+| Endpoint | Auth | Returns |
+|---|---|---|
+| `GET /v1/agents/:id/sideband-advisories` | user (org member) | All `sideband.*` advisories for one agent (default last 50, max 200). |
+| `GET /v1/teams/:id/sideband-advisories` | user (org member) | All `sideband.*` advisories for member agents (default last 100, max 500). |
+| `GET /v1/teams/:id/sideband-coverage` | user (org member) | 30-day per-axis sweep summary + raw rows. |
+
+Filters (all optional, on the agent + team listing endpoints):
+
+- `?since=<ISO-8601>` — only advisories created after this timestamp
+- `?limit=<n>` — page size (default 50/100, max 200/500)
+
+Service-key paths used by observer (not customer-facing):
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /v1/internal/active-teams-for-sweep` | `X-Service-Key` | Observer cron: enumerate teams to sweep |
+| `POST /v1/internal/sideband-sweep-log` | `X-Service-Key` | Observer heartbeat: UPSERT per-sweep log row |
+| `GET /v1/teams/:id/effective-posture` | `X-Service-Key` (or user) | Observer posture read |
+
+## Expansion contract
+
+### Adding a new source
+
+To add a new value to `source`, a single PR train MUST land all of:
+
+1. **ADR amendment** to [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) §6 adding the value with its producer, consumer responsibilities, and `source_ref` shape.
+2. **Migration** (`ALTER TABLE pending_advisories DROP CONSTRAINT … ADD CONSTRAINT … CHECK (source IN (…))`) appending the new value. Migration MUST use the post-DDL `pg_proc.prosrc` ASSERT pattern from `mnemom-api/database/migrations/158_*.sql`.
+3. **Producer code** that writes rows with the new source — fire-and-forget, never throws on insert failure.
+4. **Consumer-tolerance discipline** — `gateway/src/index.ts::injectPendingNudges` MUST already render any unknown source as a generic advisory (the current code does this; it doesn't filter on source). Future consumers (dashboard filter chips, CLI `--source`, webhook event types) MUST tolerate the value via either pre-registration or graceful unknown-source fallback.
+5. **`source_ref` JSONB shape** documented per source on this page.
+6. **For `sideband.*` only** — extend `PostureBody.sideband` with the corresponding axis configuration (`enabled`, `cadence_seconds`, `severity_floor` or `fire_on.*`, `severity_on_fire`). The Posture is the policy surface; new sideband sources without posture-body fields are forbidden.
+
+### Removing a source
+
+**Forbidden.** Removing a source breaks compliance attestation (historical advisories with that source value become un-renderable) and breaks deserialization for any consumer holding archived rows. Deprecation is the only valid path: stop producing the source, document the deprecation in ADR-047, but leave the CHECK constraint accepting the value forever.
+
+## Webhook events
+
+Each source's webhook event name follows `<source>.fired` per ADR-047 §5 — with one documented carve-out: `sideband.drift` keeps its legacy `drift.detected` name. Subscribers receive the standard webhook envelope:
+
+```json
+{
+  "id": "wh-evt-1f2a8e9c",
+  "type": "sideband.coherence.fired",
+  "created_at": "2026-05-04T15:32:00Z",
+  "account_id": "acct-acme-banking",
+  "data": {
+    "team_id": "tm-acme-banking",
+    "reasons": ["pairwise_governance_floor=0.42 < 0.5"],
+    "pairwise_governance_floor": 0.42,
+    "conflict_edge_count": 3,
+    "outlier_agent_ids": ["agt-monitor-3"],
+    "severity": "medium",
+    "detected_at": "2026-05-04T15:32:00Z"
+  }
+}
+```
+
+See [Subscribing to Safe House webhooks](/guides/safe-house-webhooks) for the full subscription + signature-verification flow.
+
+## See also
+
+- [Sideband detection](/concepts/sideband-detection) — concept overview and the four-source taxonomy
+- [Trust Posture](/concepts/trust-posture) — the policy surface that drives `sideband.*` thresholds
+- [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) — same-turn enforcement + cross-turn carryover model
+- [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) — source taxonomy expansion contract (this page is its customer-facing render)
+- [Compliance attestation foundation](/guides/compliance-attestation-foundation) — how `sideband_sweep_log` + posture-versioned snapshots feed control mappings
