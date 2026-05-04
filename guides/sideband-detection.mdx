@@ -1,0 +1,134 @@
+---
+title: "Tuning sideband detection via Trust Posture"
+description: "Tune coherence, fault-line, and fleet detectors via Trust Posture. Enable an axis, set a cadence, pick a severity, and the observer applies the strictest-wins fold of Platform → Org → Team."
+sidebarTitle: "Sideband detection"
+icon: "radar"
+---
+
+Sideband detection is Mnemom's fleet-level oversight. Three detectors — **coherence**, **fault-line**, and **fleet** — run on a configurable cadence and emit advisories when their thresholds fire. The thresholds are not hardcoded: they live in a [Trust Posture](/concepts/trust-posture). This guide shows you how to tune each detector for your fleet.
+
+If you're new to Trust Posture, start with the [overview](/concepts/trust-posture) and the [Mnemom-shipped defaults](/concepts/mnemom-default-postures). The [normative schema](/specifications/trust-posture-schema) is the field-by-field reference.
+
+## The three detectors
+
+| Axis | Fires when… | Reads from |
+|---|---|---|
+| **Coherence** | Pairwise governance falls below floor, conflict edges climb past threshold, or outlier agents emerge | `sideband.coherence` |
+| **Fault-line** | Severity meets or exceeds the configured floor | `sideband.fault_line` |
+| **Fleet** | Outlier agents detected, min pair-score drops below threshold, or fleet partitions into incompatible clusters | `sideband.fleet` |
+
+Each axis has an `enabled` flag, a `cadence_seconds` sweep interval, axis-specific thresholds, and a `severity_on_fire` value stamped onto the resulting advisory.
+
+## The strictest-wins cascade
+
+Every team's effective posture is composed `Platform → Org → Team`. Per-axis composition is **strictest-wins**:
+
+- `enabled` (bool): OR-true wins (any layer enabling fires the detector)
+- `cadence_seconds` (number): min wins (shorter = more frequent = stricter)
+- `fire_on.*` thresholds: min-among-defined wins (lower = fires earlier = stricter)
+- `severity_floor`: min wins (lower floor = more advisories = stricter)
+- `severity_on_fire`: max wins (higher = louder advisory = stricter)
+
+You **cannot** loosen a detector below the org's or platform's floor by tightening at a lower scope. If your org sets `coherence.cadence_seconds: 300`, every team in that org will run coherence at least every 5 minutes regardless of the team's own setting.
+
+## Workflow: clone Standard, tighten for a banking team
+
+The expected workflow is **clone the Mnemom default that's closest to what you want, then tighten**. The Mnemom defaults are immutable; you don't edit them directly.
+
+### Step 1 — Clone the Mnemom default
+
+Use the dashboard library at `/settings/organization/postures` (the "Clone Standard" CTA on the empty state) or the CLI:
+
+```bash
+mnemom posture clone tp-platform-standard \
+  --org org-acme \
+  --slug acme-banking-high-compliance \
+  --name "Acme Banking — High-Compliance"
+```
+
+The clone starts as a byte-for-byte copy of Standard's body. From here, every change you make creates a [forward-only revision](/concepts/posture-versioning).
+
+### Step 2 — Tighten coherence cadence
+
+A banking team needs faster anomaly surfacing than the 10-minute Standard cadence. Open the new clone in the editor (`/settings/organization/postures/{id}`) and drop the cadence slider on the Coherence axis from `every 10 min` to `every 5 min`. The "Effective composed" column on the right updates immediately — strictest-wins folds the cadence to 300s.
+
+In YAML, the change is:
+
+```yaml
+sideband:
+  coherence:
+    cadence_seconds: 300   # was 600
+```
+
+### Step 3 — Tighten the conflict-edge threshold
+
+For a fleet where any disagreement matters, drop the conflict-edge threshold from `3` to `1`:
+
+```yaml
+sideband:
+  coherence:
+    fire_on:
+      conflict_edge_count_exceeds: 1  # was 3
+```
+
+The "Pinned by org floor" badge in the editor will appear on this field if your org default is already tighter than `1` — strictest-wins keeps the org's value.
+
+### Step 4 — Raise severity-on-fire
+
+When this detector fires, you want it loud:
+
+```yaml
+sideband:
+  coherence:
+    severity_on_fire: high  # was medium
+```
+
+`severity_on_fire` is unusual — it's the one field where **max wins** instead of min. The reasoning: a louder advisory at a downstream layer should not be quieted by an upstream layer's lower setting. When two layers disagree on loudness, the louder one wins.
+
+### Step 5 — Save as a new revision
+
+Click "Save as new revision" in the editor. The dialog reminds you that posture revisions are forward-only — the current revision becomes a queryable historical entry; the new revision becomes live. Add a `change_summary` so the revision history reads as a narrative:
+
+> _"Tightened coherence cadence + conflict-edge threshold for SOC 2 review. Severity raised to `high`."_
+
+### Step 6 — Assign to the banking team
+
+On the Banking team's detail page (`/dashboard/teams/{teamId}` → Trust Posture tab), the Posture Assignment Control surfaces the org library + Mnemom defaults. Pick the new clone and click Apply. The cascade tree updates immediately to show:
+
+```
+Platform [tp-platform-standard rev 1]
+  └─ Org [Acme default — rev 4 — Inheriting Mnemom default]
+       └─ Team [acme-banking-high-compliance rev 2 — assigned]
+```
+
+The "Per-field winner" toggle expands to show which layer set each tunable field's effective value.
+
+## Tuning fault-line detection
+
+The same workflow applies to fault-line. The two knobs that matter:
+
+- **`severity_floor`** — findings below this severity are dropped. `low` lets every fault line surface; `critical` is "only show me the worst." Most banking fleets settle on `medium` for the org default and `high` for noise-sensitive teams.
+
+- **`use_reputation_scores`** — when `true`, the detector weights `impact_score` by each agent's [reputation](/concepts/reputation-scores). This is on by default in Standard and should stay on for compliance-grade fleets — it gives more weight to fault lines involving low-reputation agents.
+
+## Tuning fleet detection
+
+Fleet patterns are independent — each can be enabled or disabled separately:
+
+- **`outliers`** — fires when any agent is more than 1σ below the fleet mean on any value dimension. Always-on for healthy fleets.
+
+- **`min_pair_score_below`** — fires when the worst pair-score drops below this. A higher value fires more often (stricter). Banking-grade clones typically tighten this to `0.7`; `null` disables the pattern entirely.
+
+- **`cluster_partition`** — fires when the fleet partitions into incompatible clusters (compatibility ≥ 0.7 in the SDK). Important for fleets where coordination across the whole population matters.
+
+## Disabling a detector
+
+Set `enabled: false` to disable an axis entirely at any layer. **Strictest-wins still folds upward** — if your org enables coherence and a team disables it locally, coherence still fires for that team (OR-true wins on enabled). The only way to fully disable a detector is to set `enabled: false` at every layer (including the platform default, which Mnemom owns and won't change for you).
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — concept overview
+- [Mnemom-shipped default postures](/concepts/mnemom-default-postures) — Standard / High-Compliance / Low-Latency rationales
+- [Trust Posture schema](/specifications/trust-posture-schema) — normative field reference
+- [Posture cloning workflow](/guides/posture-cloning) — the clone-and-customize pattern in depth
+- [Compliance attestation foundation](/guides/compliance-attestation-foundation) — versioned postures as audit evidence
