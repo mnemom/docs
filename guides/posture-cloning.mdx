@@ -1,0 +1,127 @@
+---
+title: "Posture cloning workflow"
+description: "Clone a Mnemom-shipped default and tighten it for your fleet. The clone-and-customize pattern preserves the upstream baseline, gives you your own forward-only revision history, and produces a clean compliance audit trail."
+sidebarTitle: "Posture cloning"
+icon: "copy"
+---
+
+The Mnemom-shipped default postures (`tp-platform-standard`, `tp-platform-high-compliance`, `tp-platform-low-latency`) are immutable. You can't edit them; you clone them. This guide walks the clone-and-customize workflow end-to-end.
+
+If you're new to the concept, the [overview](/concepts/trust-posture) and [defaults rationale](/concepts/mnemom-default-postures) come first.
+
+## Why clone instead of edit-in-place?
+
+Cloning is the canonical customization workflow for three reasons:
+
+1. **The upstream baseline stays stable.** Every org's clone of Standard starts byte-for-byte equal to Standard's seed. When Mnemom ships a tightening to Standard's defaults in a future release, your clone is unaffected — you opt-in to baseline updates by re-cloning, not by surprise.
+
+2. **You get your own forward-only revision history.** Once cloned, every edit creates a new revision. The history is queryable for "what was our coherence threshold for the trading desk on 2026-03-31" — the load-bearing answer for SOC 2 / EU AI Act control evidence.
+
+3. **It's the same pattern enterprise tools use.** CrowdStrike Falcon Prevention Policies, CloudFlare Rulesets, Okta Policies — all ship vendor baselines and require clone-to-customize. Mnemom matches that shape so the workflow is familiar to security teams.
+
+## The workflow
+
+### 1. Pick the closest baseline
+
+Each Mnemom default has a different opinion baked in:
+
+| Posture | When to clone | Cadence | Severity floor |
+|---|---|---|---|
+| **Standard** | General-purpose fleets, mid-stakes | 10 min | high |
+| **High-Compliance** | Regulated industries (banking, healthcare, EU AI Act) | 5 min | medium |
+| **Low-Latency** | Real-time agent UX where observability cost matters | 30 min | critical |
+
+Pick the one closest to your target. Cloning High-Compliance gives you a tighter starting point than cloning Standard if you're going to tighten further anyway.
+
+### 2. Clone via dashboard or CLI
+
+**Dashboard** — go to `/settings/organization/postures`. The empty state's "Clone Standard" CTA covers the most common path. To clone any other default, navigate to the default's editor page and click "Clone to customize" in the header. The CTA opens the editor on a fresh org-scope draft seeded with the default's body.
+
+**CLI** —
+
+```bash
+mnemom posture clone tp-platform-high-compliance \
+  --org org-acme \
+  --slug acme-high-compliance \
+  --name "Acme High-Compliance"
+```
+
+The clone surfaces in your org library immediately (`mnemom posture list --org org-acme`).
+
+### 3. Tighten in the editor
+
+The dashboard editor has three columns:
+
+```
+┌─────────────────┬──────────────────┬──────────────────┐
+│ Your draft      │ Org floor        │ Effective        │
+│ (editable)      │ (read-only)      │ composed         │
+└─────────────────┴──────────────────┴──────────────────┘
+```
+
+- **Your draft** is what you're editing.
+- **Org floor** shows the current org default (or Mnemom Standard if no org default is set). It's the floor your draft will be subject to.
+- **Effective composed** shows the strictest-wins fold: `Platform ⊕ Org ⊕ your-draft`. Any field where the floor is tighter than your draft will pin in this column with a "Pinned by org floor" badge.
+
+Tighten what matters; leave the rest alone. A clone that diverges from the baseline by 3 fields (cadence + severity-on-fire + conflict-edge threshold) is much easier to maintain than one that diverges by 17.
+
+### 4. Save as a new revision
+
+Click "Save as new revision". The confirmation modal reminds you that revisions are forward-only:
+
+> _"Posture revisions are forward-only. The current revision becomes a queryable historical entry; the new revision becomes live for every team that floats against this posture (and stays unchanged for teams pinned to a specific revision)."_
+
+Add a `change_summary` describing what you tightened and why. This becomes the audit-log entry and shows up in the revision history.
+
+### 5. Assign to teams
+
+On a team's detail page (`/dashboard/teams/{teamId}` → Trust Posture tab), the Posture Assignment Control lets you pick from the org library + Mnemom defaults. Two assignment modes:
+
+- **Float** (default) — the team always uses the posture's current revision. New revisions take effect immediately.
+- **Pin to revision N** — the team uses revision N and stays pinned. Useful for change-controlled environments where you batch updates.
+
+Use float for most teams; pin only when an audit cycle is in flight or a regulator requires change-controlled rollout.
+
+## Multi-stage cloning
+
+For larger orgs, two-stage cloning is common:
+
+1. **Org default**: clone a Mnemom default into the org and tighten to the org's baseline. Set this as `orgs.default_posture_id` (the dashboard onboarding picker handles this; CLI users use `mnemom org update --default-posture <posture_id>`).
+2. **Team-specific clones**: for teams with stricter needs, clone the org default and tighten further. Assign the per-team clone to the team.
+
+This keeps the cascade legible — most teams float against the org default; specialized teams have a clearly-named clone (`acme-banking`, `acme-trading-floor`) with a focused divergence.
+
+## Cloning between orgs
+
+Cloning a posture from a different org is **not** supported by default. The clone API requires the caller to be an org admin of the target org **and** at least a member of the source org. Cross-org sharing patterns (template marketplaces, multi-tenant baselines) are debt #5 — track in `safe-house-hardening/debt/post-t1-3-1-cleanup.md`.
+
+If you need to copy a posture across orgs you administer, the workaround is:
+
+```bash
+# Export from the source org
+mnemom posture show tp-org-source-12345 --json > /tmp/posture.json
+jq '.body' /tmp/posture.json > /tmp/body.json
+
+# Create in the target org
+mnemom posture create \
+  --org org-target \
+  --slug acme-cloned \
+  --name "Acme Cloned" \
+  --from /tmp/body.json
+```
+
+## Common pitfalls
+
+- **Cloning then editing the original.** The Mnemom defaults are immutable and the API enforces it (PUT/DELETE return 403). If you find yourself trying to edit `tp-platform-standard` directly, clone it first.
+
+- **Drift accumulating without a `change_summary`.** Every revision should carry a one-line summary. The dashboard's revision history reads as a narrative when summaries are written; it reads as `null, null, null, null` when they're not.
+
+- **Pinning every team to a specific revision.** Float-by-default is correct for most fleets. Pinning every team turns posture rollout into a manual reassignment chore. Pin only when an audit or change-control window requires it.
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — concept overview
+- [Mnemom-shipped default postures](/concepts/mnemom-default-postures) — when to choose Standard vs. High-Compliance vs. Low-Latency
+- [Posture versioning](/concepts/posture-versioning) — revision history + rollback semantics
+- [Sideband detection how-to](/guides/sideband-detection) — tuning the three detectors
+- [Compliance attestation foundation](/guides/compliance-attestation-foundation) — versioned postures as audit evidence

@@ -1,0 +1,145 @@
+---
+title: "Compliance attestation foundation"
+description: "Use versioned Trust Postures as audit evidence for SOC 2, EU AI Act, HIPAA, and ISO 27001. Point-in-time queries answer 'what was our detection policy on date X' with a single SQL join."
+sidebarTitle: "Compliance attestation"
+icon: "scale-balanced"
+---
+
+Versioned Trust Postures are the foundation for compliance attestation. They give auditors a single, queryable answer to the question "what was your detection policy at time T" — across SOC 2, EU AI Act, HIPAA, ISO 27001, and any other framework that mandates documented control state at point-in-time.
+
+This guide is the **foundation** layer. The full control-mapping (which posture field maps to which control) is debt #4 — tracked in `safe-house-hardening/debt/post-t1-3-1-cleanup.md` and landing once SOC 2 work formalizes. The foundation is enough to start collecting audit evidence today.
+
+## The three properties that make postures auditable
+
+1. **Named, library-cataloged.** Every posture has a stable `posture_id`, a human-readable `name`, and a kebab-case `slug`. Auditors can reference "the policy assigned to the Banking team at the time of incident" by id, not by reconstructing config.
+
+2. **Versioned, forward-only.** Every edit creates a new revision. Old revisions never disappear — they become queryable historical entries. Rollback creates a *new* revision whose body equals the target's, so audit linearity is preserved with no destructive history rewrites.
+
+3. **Audit-logged on every mutation.** Every `posture.create`, `posture.put`, `posture.clone`, `team_posture.assign`, and `team_posture.unassign` writes a row to `governance_audit_log` with the actor, the before/after JSON, and the idempotency key. The audit log is the source of truth for "who changed what, when."
+
+## Point-in-time queries
+
+The queryable answer to "what was the team's effective posture on 2026-03-31" is a single SQL pattern. The detail depends on whether the team was floating or pinned at that time:
+
+### Floating team — query the posture's history
+
+```sql
+WITH active_revision AS (
+  SELECT
+    tpr.body,
+    tpr.revision_no,
+    tpr.authored_at,
+    tpr.authored_by,
+    tpr.change_summary
+  FROM trust_posture_revisions tpr
+  WHERE tpr.posture_id = (
+    SELECT posture_id
+    FROM team_posture_assignments
+    WHERE team_id = $team_id
+  )
+    AND tpr.authored_at <= $point_in_time
+  ORDER BY tpr.revision_no DESC
+  LIMIT 1
+)
+SELECT * FROM active_revision;
+```
+
+This returns the revision that was current on the day in question, plus its `change_summary` — the load-bearing answer for an auditor's question.
+
+### Pinned team — query the pinned revision directly
+
+```sql
+SELECT
+  tpr.body,
+  tpr.revision_no,
+  tpr.authored_at,
+  tpr.authored_by,
+  tpr.change_summary
+FROM trust_posture_revisions tpr
+JOIN team_posture_assignments tpa ON tpa.assigned_revision_id = tpr.revision_id
+WHERE tpa.team_id = $team_id;
+```
+
+Pinned teams don't move — the answer doesn't depend on `point_in_time` (as long as the assignment was active then; check the audit log for the assignment's lifespan).
+
+## Audit log shape
+
+`governance_audit_log` rows for posture mutations look like:
+
+```jsonc
+{
+  "id": "audit-2026-04-15-...",
+  "actor_user_id": "user-...",
+  "actor_role": "org_admin",
+  "action": "posture.put",
+  "target_type": "posture",
+  "target_id": "tp-org-acme-banking",
+  "before_json": { /* prior revision's body */ },
+  "after_json":  { /* new revision's body */ },
+  "metadata": { "revision_no": 4, "revision_id": "tpr-..." },
+  "request_id": "cf-ray-...",
+  "idempotency_key": "...",
+  "at": "2026-04-15T13:42:11Z"
+}
+```
+
+Key properties for auditors:
+
+- **Attribution.** `actor_user_id` + `actor_role` answer "who did this." Roles include `platform_admin`, `org_owner`, `org_admin`, `team_admin`, `member`, `system`.
+- **Diffability.** `before_json` + `after_json` are the full bodies. The dashboard's [revision diff view](/concepts/posture-versioning#diff) consumes the same data; auditors can run their own diffs offline.
+- **Idempotency.** The `idempotency_key` proves a mutation wasn't applied twice. Replay attacks are visible as duplicate rows with identical keys.
+- **Request correlation.** `request_id` ties the audit row to the upstream HTTP request log for end-to-end traceability.
+
+## Three-step audit-prep workflow
+
+For each control your auditor wants evidence on:
+
+### 1. Identify the posture body field that maps to the control
+
+Until debt #4 lands the formal map, this is manual. Examples:
+
+| Control concept | Posture field |
+|---|---|
+| _"Anomaly detection runs at least every 15 minutes"_ | `sideband.coherence.cadence_seconds ≤ 900` |
+| _"Reputation-weighted scoring is enabled for fault-line analysis"_ | `sideband.fault_line.use_reputation_scores = true` |
+| _"Critical findings always trigger advisories"_ | `sideband.fault_line.severity_floor ∈ {low, medium, high, critical}` |
+| _"Cluster partitions across the fleet are flagged"_ | `sideband.fleet.patterns.cluster_partition = true` |
+
+The [normative schema](/specifications/trust-posture-schema) is the field reference; pair each control with the field(s) it constrains.
+
+### 2. Pull the point-in-time evidence
+
+Run the SQL pattern above for every team in scope, for every relevant date in the audit window. The output for an auditor is a CSV per team with columns `(team_id, date, posture_id, revision_no, body)` — enough to prove the control held continuously.
+
+### 3. Pull the change log
+
+For the same audit window, dump `governance_audit_log` filtered to `target_type = 'posture'`:
+
+```sql
+SELECT actor_user_id, actor_role, action, target_id, metadata, before_json, after_json, at
+FROM governance_audit_log
+WHERE target_type = 'posture'
+  AND at BETWEEN $audit_start AND $audit_end
+ORDER BY at ASC;
+```
+
+This is the "who tightened what, when" timeline. Pair it with the point-in-time evidence and the auditor has the full picture.
+
+## What's deferred
+
+The foundation is in place; the layers above it are tracked debt:
+
+- **Compliance attestation snapshots** — a one-click "export this posture for SOC 2 evidence" button. Today, the SQL above is the manual equivalent. Debt #3.
+- **Compliance framework mapping** — formal SOC 2 / ISO 27001 / HIPAA / EU AI Act control → posture field map. Debt #4.
+- **Detection coverage scoring** — "% of fleet with each axis enabled" rolled up to a dashboard tile. Debt #5.
+- **Policy-as-code export** — Terraform provider + YAML round-trip. Debt #6.
+
+These are the natural next steps once SOC 2 prep work formalizes. The architecture is intentionally compatible — none of them require changes to posture data model, just additional read paths over the existing rows.
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — concept overview
+- [Posture versioning](/concepts/posture-versioning) — revisions, rollback, immutability
+- [Trust Posture schema](/specifications/trust-posture-schema) — normative field reference
+- [Sideband detection](/guides/sideband-detection) — tuning the detectors
+- [Posture cloning workflow](/guides/posture-cloning) — clone-and-customize
