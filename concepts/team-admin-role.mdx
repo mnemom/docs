@@ -1,0 +1,91 @@
+---
+title: "Team Admin Role"
+description: "A scoped admin role for managing a single team's templates, posture, and roster — without granting org-wide admin rights."
+sidebarTitle: "Team Admin Role"
+icon: "user-shield"
+---
+
+The **Team Admin** role lets an organization delegate management of a single team's governance — its alignment + protection templates, its [Trust Posture](/concepts/trust-posture) assignment, and its agent roster — to a non-org-admin user. It is the first user-team association in Mnemom; everywhere else, [team membership](/concepts/team-scope) is keyed to *agents*, not users.
+
+This page documents the role: what it can and cannot do, how grants work, and how it interacts with the org-wide RBAC roles.
+
+## Why the role exists
+
+For larger organizations, two real problems surfaced once team scope shipped:
+
+1. **Org admins do not scale.** A bank with 30 teams cannot make every team lead an org admin without giving each one read/write access across the whole org's billing, settings, and every other team. The blast radius of a single mis-grant is unbounded.
+2. **Team leads need autonomy.** A team's compliance posture, its roster, and its template overrides are exactly the kind of changes that benefit from being in the hands of the team's lead — quick to evolve, low coordination overhead.
+
+Team Admin closes this gap: an org admin grants `team_admin` on a specific team to a specific user. That user can now manage *their team*. They cannot affect any other team in the org, the org's settings, billing, or anything else.
+
+## What a Team Admin can do
+
+Granted on team `T`, a `team_admin` can:
+
+| Action | Scope |
+|---|---|
+| Read + write the team's alignment template | `T` only |
+| Read + write the team's protection template | `T` only |
+| Assign / unassign a [Trust Posture](/concepts/trust-posture) to the team | `T` only |
+| Add / remove agents from the team's roster | `T` only |
+| List active team admins on `T` | `T` only |
+| Self-revoke their own grant | self only |
+
+Team Admin **cannot**:
+
+- Grant or revoke `team_admin` on any team (including their own — only org admins grant).
+- Mutate any other team's templates, posture, or roster.
+- Read or write org-level templates, billing, members, or settings.
+- Mutate platform-scope defaults (those are reserved for Mnemom-internal admins).
+
+## Implicit team admin
+
+**Org owners and org admins implicitly act as team admins for every team in their org** — no grant row required. This means a team can show "0 team admins" on the dashboard and still have admins (the org's own admins). The dashboard surfaces this with a footer note when the count is non-zero, and an explanatory empty-state when the count is zero.
+
+The audit trail records the highest applicable role at the time of the mutation. If an org admin edits a team's template, `governance_audit_log.actor_role` records `org_admin`, **not** `team_admin`. This preserves forensic clarity about which capability was being exercised.
+
+## Grant lifecycle
+
+| Step | Who | API |
+|---|---|---|
+| Grant | org_owner / org_admin | `POST /v1/teams/:team_id/admins` |
+| Revoke (other) | org_owner / org_admin | `DELETE /v1/teams/:team_id/admins/:user_id` |
+| Revoke (self) | the team_admin themselves | same `DELETE` endpoint, with their own `user_id` |
+| List | any org member | `GET /v1/teams/:team_id/admins` |
+
+Grants are tuples: each `(team_id, user_id)` pair is independent. A grant on Team A confers nothing for Team B. Re-granting an already-active grant is idempotent — the API returns 200 with `idempotent_noop: true` and no audit row.
+
+A team can have zero, one, or many active team admins. There is **no last-admin protection**: the team can drop to zero grants, because org admins still implicitly cover the team. The dashboard shows a non-blocking warning when revoking the last grant.
+
+When a user is removed from the org (their `org_members` row is deleted), every active `team_admin` grant they hold across that org's teams is automatically revoked at the database level. The forensic chain stays intact.
+
+## CLI
+
+The `@mnemom/mnemom` CLI exposes the lifecycle as three subcommands:
+
+```bash
+mnemom team admin grant   <team_id> --user <user_id>
+mnemom team admin revoke  <team_id> --user <user_id>
+mnemom team admin list    <team_id> [--json]
+```
+
+Output mirrors the existing `mnemom team` shape — tabular by default, JSON via `--json` for scripting.
+
+## Dashboard
+
+The team detail page's **Roster** tab (at `/dashboard/teams/<team_id>`) hosts a "Team admins" sub-section above the agent roster. Org admins see Grant + Revoke controls; lower roles see a read-only list. The grant flow opens a search-by-email modal scoped to the team's org members — cross-org grants are blocked at the UI level (and the API also 403s).
+
+## Audit attribution
+
+Every mutation listed above writes a row to `governance_audit_log` with `actor_role` populated:
+
+- `team_admin.grant` / `team_admin.revoke` rows always have `target_type: 'team'`, `target_id: team_id`, and `actor_role` reflecting the actor's highest role at the moment.
+- All `team_*_template.put` / `team_*_template.delete` / `team_posture.assign` / `team_posture.unassign` rows include `actor_role: 'team_admin'` when fired by a non-org-admin grant holder, or `'org_admin'` / `'org_owner'` when fired by an implicit team admin.
+
+The actor is always a **human** (or a backend `system` process). Agents are subjects of governance mutations, never actors.
+
+## Related
+
+- [Team Scope](/concepts/team-scope) — the optional team grouping primitive that this role administers.
+- [Trust Posture](/concepts/trust-posture) — what a team admin assigns to their team.
+- [Card Composition](/concepts/card-composition) — how team templates fold into the cascade.
