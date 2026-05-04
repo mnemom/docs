@@ -1,0 +1,137 @@
+---
+title: "Sideband Detection"
+description: "How Mnemom's observer detects coherence drops, fault lines, fleet partitions, and behavioral drift across teams of agents — and how those findings cross to runtime."
+sidebarTitle: "Sideband detection"
+icon: "radar"
+---
+
+# Sideband detection
+
+**Sideband detection** is the asynchronous half of Mnemom's Safe House. While the gateway intervenes [same-turn at four checkpoints](/concepts/safe-house) on each agent request, the observer runs a parallel cron sweep across teams of agents and emits *advisories* the agent receives at the start of its next turn.
+
+Four detector axes share this surface:
+
+| Source value | Detector | What it catches |
+|---|---|---|
+| `sideband.drift` | [Drift detection](/concepts/drift-detection) | An agent's behavior diverging from declared alignment over time (per-agent, trace-driven). |
+| `sideband.coherence` | [Team coherence](/concepts/fleet-coherence) | A team's pairwise governance scores dropping below threshold; conflict edges accumulating; outlier agents emerging. |
+| `sideband.fault_line` | Fault-line analysis | A specific value dimension splits the team — some agents declare it, others miss it, others list it as a conflict. |
+| `sideband.fleet` | Fleet patterns | The team partitions into incompatible clusters, the worst pair drops below threshold, or outliers emerge under cluster topology. |
+
+All four write to the same carryover table (`pending_advisories`, per [ADR-040](/specifications/pending-advisories-schema)) and the gateway reads from a single inject point (`injectPendingNudges`) when the agent's next request arrives.
+
+## Why sideband
+
+Some signals only emerge across time, across sessions, or across the team — not on any single request. A single trace might pass every gate. The pattern of dozens of traces, across half the fleet, can still be telling you the agents are drifting apart on `transparency` or that one agent has quietly stopped escalating high-stakes decisions.
+
+The runtime gateway can't see those patterns — it sees one request, one agent, one moment. The observer has the wider lens: it reads the team's alignment cards on a configurable cadence, runs the detectors, and writes findings to the carryover surface.
+
+<Note>
+**Sideband never intervenes retroactively.** When a sideband detector fires on Tuesday, the agent's Tuesday turns have already happened. The advisory lands on the agent's *next* request — Wednesday's first turn — as a system message at the start of context. From the agent's perspective: "before you respond, here's what we noticed about you and your team since we last spoke." The gateway never goes back and modifies a delivered response.
+</Note>
+
+## The two-turn dance
+
+Per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md): runtime checkpoints intervene same-turn under `enforce`; sideband checkpoints intervene cross-turn via the advisory carryover.
+
+```
+turn N: agent works as usual; observer's cron sweep detects something
+        → row written to pending_advisories with source = sideband.<axis>
+
+turn N+1: gateway reads pending_advisories at the start of the request
+          → injects the advisory text as a system message
+          → agent sees it, references it, responds
+          → row marked status = consumed
+```
+
+The advisory text follows a stable wrapper: `[Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]`. The bracket wrapper is what enables Safe House's [I10 invariant](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) (user-visible-explanation 100%) to recognize an injection happened — the gateway suffix-injects its own marker if the wrapper is missing.
+
+## How the detectors are wired
+
+The observer's cron tick (every minute in production, every five minutes in staging) follows a five-step loop per active team:
+
+1. **Enumerate active teams** via the internal RPC `GET /v1/internal/active-teams-for-sweep` (mnemom-api). Filters: not archived, ≥2 non-deleted member agents.
+2. **Fetch the team's effective Trust Posture** via `GET /v1/teams/:id/effective-posture`. The composer folds Platform → Org → Team with [strictest-wins semantics](/concepts/trust-posture) per axis.
+3. **Fetch member agents and their alignment cards** via the canonical card store.
+4. **Run the three pure-synchronous detectors** (`computeTeamCoherence`, `analyzeFaultLines`, `checkFleetCoherence`) against the posture body's per-axis thresholds. Each axis runs only if it's `enabled` *and* the team's per-axis cadence has elapsed.
+5. **Fan out advisories** per the posture's `fan_out.rule`. The default — and only v1 value — is `per_named_affected_agent`: one row per agent named in the finding.
+
+Each sweep also writes a row to `sideband_sweep_log` (UPSERT keyed by `team_id × axis × day`) — proof-of-coverage evidence for SOC 2 / EU AI Act control mappings, even when no findings are produced. Read it via `GET /v1/teams/:id/sideband-coverage`.
+
+## The Posture is the policy surface
+
+Detectors don't carry their own thresholds. Every per-source firing rule lives in the team's effective [Trust Posture](/concepts/trust-posture) and composes with strictest-wins per layer:
+
+| Posture field | Drives | Composition |
+|---|---|---|
+| `sideband.<axis>.enabled` | Whether the detector runs at all for this team | OR-true wins (any layer enabling fires) |
+| `sideband.<axis>.cadence_seconds` | Sweep interval | min wins (shorter = stricter) |
+| `sideband.coherence.fire_on.*` | Threshold per fire condition (pairwise governance floor, conflict edges, outlier count) | min-among-defined wins (lower = stricter) |
+| `sideband.fault_line.severity_floor` | Minimum AAP severity that produces an advisory | min wins (lower floor = more advisories) |
+| `sideband.fleet.patterns.*` | Which fleet patterns fire (outliers / min pair / partition) | OR-true wins per pattern |
+| `sideband.<axis>.severity_on_fire` | Severity stamped on the advisory when the detector fires | max wins (louder advisory) |
+| `fan_out.rule` | How many rows to produce when N agents are affected | fixed precedence list |
+
+If you want a detector tuned tighter for a banking team, you tighten the posture — never the detector code. See the how-to: [Tuning sideband detection via Trust Posture](/guides/sideband-detection).
+
+## Per-pattern emission for the fleet axis
+
+The fleet axis can fire on three independent patterns: `outliers`, `min_pair_score`, and `cluster_partition`. When more than one fires on the same sweep, the observer emits **one row per pattern** with a distinct `source_ref.pattern_type`. This mirrors the convention used by leading detection platforms (CrowdStrike Detections, Datadog Security Monitoring signals): one detection event per (rule, target, time-window) — *not* aggregated.
+
+```json
+// outliers fire on team tm-acme-banking
+{
+  "source": "sideband.fleet",
+  "source_ref": {
+    "team_id": "tm-acme-banking",
+    "pattern_type": "outliers",
+    "outlier_agent_ids": ["agt-monitor-3"]
+  }
+}
+// cluster partition fires on the same team in the same sweep
+{
+  "source": "sideband.fleet",
+  "source_ref": {
+    "team_id": "tm-acme-banking",
+    "pattern_type": "cluster_partition",
+    "cluster_count": 2,
+    "cluster_ids": ["c-0", "c-1"]
+  }
+}
+```
+
+Downstream consumers (dashboard, runtime injection, webhook subscribers) treat each row independently. Dedupe at presentation time if needed; the storage layer keeps detection events distinct.
+
+## Multi-team agents
+
+An agent that is a member of N teams may receive up to N advisories on a single turn — each team's effective posture sweeps independently, and strictest-wins does *not* fold across teams (each team's posture is its own composition). The gateway's `injectPendingNudges` caps each turn at five advisories; if a multi-team agent has more than five queued, the older ones land on subsequent turns until the queue drains.
+
+## Webhook events
+
+Each sideband firing emits a `<source>.fired` webhook event so external subscribers (SIEM, ticketing, alerting) can react. Per [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md):
+
+- `sideband.coherence.fired`
+- `sideband.fault_line.fired`
+- `sideband.fleet.fired`
+
+Drift's webhook keeps its legacy name (`drift.detected`) for backwards compatibility — the single documented carve-out from the `<source>.fired` convention. Subscribe via [Webhooks](/guides/safe-house-webhooks).
+
+## Compliance evidence — proof-of-coverage
+
+Operations security buyers comparing Mnemom against CrowdStrike Falcon Audit, Splunk audit.log, or Datadog Security Monitoring expect *two* artifacts:
+
+1. **Findings** — what fired, when, on which agent. Mnemom: `pending_advisories` rows with sources `sideband.*`.
+2. **Coverage proof** — even when nothing fired, evidence that the detector ran during the reporting window. Mnemom: `sideband_sweep_log` rows.
+
+The `sideband_sweep_log` table UPSERTs `(team_id, axis, day)` keys per sweep, incrementing `swept_count` and `fired_count` and refreshing `last_swept_at`. SOC 2 / EU AI Act / HIPAA control mappings can answer "show evidence that team X had its coherence detector swept N times during the audit window" in a single SQL query — or via the public `GET /v1/teams/:id/sideband-coverage` endpoint, which returns a per-axis 30-day summary.
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — the policy artifact that drives every per-team sideband threshold
+- [Mnemom default postures](/concepts/mnemom-default-postures) — Standard / High-Compliance / Low-Latency rationales
+- [Posture vs. Cards](/concepts/posture-vs-cards) — why these are parallel artifact types
+- [Drift Detection](/concepts/drift-detection) — the per-agent timescale, complementary to per-team sideband
+- [Fleet Coherence](/concepts/fleet-coherence) — dimensional team coherence scoring (ADR-025)
+- [Tuning sideband detection via Trust Posture](/guides/sideband-detection) — the customer-facing how-to
+- [Pending advisories schema](/specifications/pending-advisories-schema) — wire format and source taxonomy
+- [Compliance attestation foundation](/guides/compliance-attestation-foundation) — how Posture versioning + sweep logs feed control mappings
