@@ -1,0 +1,97 @@
+---
+title: "Trust Posture"
+description: "A named, versioned, cloneable, assignable oversight policy. Mnemom ships three opinionated defaults; orgs use them as-is or clone-and-customize."
+sidebarTitle: "Trust Posture"
+icon: "shield-check"
+---
+
+A **Trust Posture** is Mnemom's fleet-level oversight policy artifact. It's the named object that decides which sideband detectors fire, at what thresholds, on what cadence, with what severity, with what fan-out. Postures are assigned to teams; the observer reads each team's effective posture at sweep time and runs the corresponding detectors against the team's members.
+
+If you've used CrowdStrike Falcon's Prevention Policies, CloudFlare's Rulesets, Okta's Policies, Microsoft Defender's Configuration Profiles, ServiceNow's Domains+Policies, or Zscaler's Policy Sets — Trust Posture follows the same shape. A posture is a first-class, library-cataloged, versioned object; you assign it to teams; you clone it to customize; you roll back when needed.
+
+## The named-object pattern
+
+Three properties matter:
+
+1. **Posture is the entity, not a property on the team.** The posture lives in a library. Teams are *assigned* a posture. The posture outlives the team↔posture relationship — clone it, edit it, A/B-test it, export it, archive it, all without touching any team.
+
+2. **Every mutation creates a new revision.** Postures are versioned. The current revision is what observer reads; older revisions stay queryable. Rollback is forward-only — rolling back to revision `N` creates a new revision whose body equals revision `N`'s. Audit linearity preserved.
+
+3. **Mnemom ships opinionated defaults.** Three platform-scope postures arrive seeded:
+   - **Standard** — sensible enterprise defaults (the right starting point).
+   - **High-Compliance** — banking-core / regulated industry shape; tighter, faster, louder.
+   - **Low-Latency** — real-time agent UX; permissive thresholds, slower cadence.
+
+   Customers either use these as-is or clone-and-customize. There's no "empty config" starting state.
+
+## Why postures are separate from cards
+
+[Trust Posture vs. Cards](/concepts/posture-vs-cards) covers this in depth. The short version:
+
+- **Cards** (Alignment Card, Protection Card) are **agent-scoped runtime treatment**. They answer "what is this agent allowed to do?" and "how do we screen this agent's content for threats?" Read by the gateway at request time.
+- **Postures** are **team-scoped policy input**. They answer "across this group of agents, what fleet-level patterns warrant alarm?" Read by the observer at sweep time.
+
+The two artifact types are parallel — they share infrastructure (composer, KV cache, audit log) but their data planes are independent. A posture never folds into a card; a card never folds into a posture.
+
+## The cascade
+
+Effective posture is composed `Platform → Org → Team`:
+
+| Layer | Source | Notes |
+|---|---|---|
+| Platform | One of `tp-platform-{standard,high-compliance,low-latency}` | Cascade-closure floor. Every team has at least the platform layer. |
+| Org | The org's chosen default (set on `orgs.default_posture_id`) | Optional. NULL ⇒ org doesn't override the platform layer. |
+| Team | The team's directly-assigned posture | Optional. NULL ⇒ team inherits org/platform. |
+
+[Strictest-wins per axis](/specifications/trust-posture-schema#composition-rules):
+
+- `enabled` (bool): OR-true wins (any layer enabling fires the detector)
+- `cadence_seconds` (number): min wins (shorter = more frequent = stricter)
+- `fire_on.*` (number or null): min-among-defined wins; null contributes nothing
+- `severity_floor` (enum): min wins (lower floor = more advisories)
+- `severity_on_fire` (enum): max wins (higher = louder advisory)
+- Pattern booleans (`patterns.outliers`, `cluster_partition`): OR-true wins
+
+Charter §I13 (cascade closure for posture) guarantees every team has an effective posture; the platform default is the floor.
+
+## Library, editor, and assignment
+
+Three first-class management surfaces:
+
+- **Library** (`/settings/organization/postures` — landing in Piece 4): browse the three Mnemom defaults plus your org's customized postures. Cards display assigned-team count, current revision, last-edited-by, divergence-from-default indicator.
+- **Editor** (`/settings/organization/postures/{id}`): three-column composition preview. Your draft, the org floor, the effective composed result. Per-field tightening callouts.
+- **Assignment** (on the team detail page): a tree view of `Platform → Org → Team` showing which posture is at each layer and which axis comes from where.
+
+CLI mirror via the `mnemom posture` subcommands (`list`, `show`, `create`, `update`, `clone`, `revisions`, `diff`, `assign`, `unassign`, `preview-compose`, `delete`).
+
+## What postures don't do
+
+Postures are deliberately *not* a place to set per-agent runtime treatment. If you want to:
+
+- Forbid `rm -rf` on a specific agent → that's [Alignment Card](/concepts/alignment-cards) `enforcement.forbidden_tools`.
+- Block PII from leaving via an agent's responses → that's [Protection Card](/concepts/protection-card) DLP thresholds.
+- Cap autonomous spend → that's Alignment Card `autonomy.max_autonomous_value`.
+
+If you want to:
+
+- Detect when a team's value coherence degrades → posture `sideband.coherence`.
+- Detect fault lines forming between agents → posture `sideband.fault_line`.
+- Detect fleet outliers — agents drifting from the group's center of mass → posture `sideband.fleet`.
+
+## Audit + compliance
+
+Every posture mutation emits a `governance_audit_log` row with `target_type='posture'` and one of:
+
+- `posture.create`, `posture.put`, `posture.clone`, `posture.delete`
+- `team_posture.assign`, `team_posture.unassign`
+
+Versioning + audit + assignment metadata together give compliance reporting a queryable foundation: "What was our coherence detection threshold for the trading-desk team on 2026-03-31?" is one SQL join.
+
+## Further reading
+
+- [Trust Posture vs. Cards](/concepts/posture-vs-cards) — how postures and cards cooperate
+- [Mnemom-shipped default postures](/concepts/mnemom-default-postures) — when to choose Standard vs. High-Compliance vs. Low-Latency
+- [Posture versioning](/concepts/posture-versioning) — revisions, rollback, diff
+- [Trust Posture schema](/specifications/trust-posture-schema) — normative JSONB body
+- Sideband detection how-to (tuning coherence/fault_line/fleet via posture) — *landing in Piece 4 alongside the dashboard editor.*
+- [ADR-045](https://github.com/mnemom/scale/blob/main/decisions/ADR-045-trust-posture-named-object.md) — the architectural decision record

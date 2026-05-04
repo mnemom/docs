@@ -1,0 +1,112 @@
+---
+title: "Trust Posture vs. Cards"
+description: "Postures and cards are parallel artifact types: postures are team-scoped policy input; cards are agent-scoped runtime treatment. They cooperate through two well-defined join points."
+sidebarTitle: "Posture vs. Cards"
+icon: "git-compare"
+---
+
+The single most common point of confusion when first encountering Trust Posture: "is it a kind of card?" or "does it compose into the agent's card?"
+
+**No.** Postures and cards are *parallel* artifact types. They share infrastructure (the composer idiom, KV caching, the audit log, strictest-wins rules) but their data planes are independent. A posture never folds into a card; a card never folds into a posture.
+
+This page makes the distinction explicit, and shows where the two surfaces *do* cooperate — at well-defined join points downstream of either artifact's cascade.
+
+## The two cascades
+
+| Cascade | Layers | Output | Consumed by |
+|---|---|---|---|
+| **Posture** (oversight policy) | Platform → Org → Team | effective posture per **team** | Observer's per-team sweep |
+| **Cards** (runtime treatment) | Platform → Org → Team → Agent | canonical Alignment + Protection cards per **agent** | Gateway at request time |
+
+Cards have an agent leaf because cards encode per-agent runtime treatment ("what is this agent allowed to do?"). Postures have no agent leaf because postures are inherently fleet-level — they observe a *group* of agents and decide whether the group's collective behavior warrants alarm.
+
+## The axes are orthogonal
+
+| Axis | Cards | Posture |
+|---|---|---|
+| **Time** | Synchronous, per-request, same-turn | Asynchronous, periodic sweep, cross-turn carryover |
+| **Subject** | Single agent's behavior (this turn's tool call, this turn's reasoning, this turn's content) | Fleet-level patterns (coherence between agents, fault lines, outliers within a team) |
+| **Cardinality** | One trace, one decision | Per-finding fan-out to N affected agents via `pending_advisories` |
+| **Scope leaf** | Agent | Team |
+| **Mutation by** | Agent owner (within org+platform constraints) | Org admin (within platform constraints) |
+
+## Concrete examples
+
+| Concern | Owner |
+|---|---|
+| "Don't let this agent run `rm -rf`" | Alignment Card (`enforcement.forbidden_tools`) |
+| "Cap autonomous spend at $100" | Alignment Card (`autonomy.max_autonomous_value`) |
+| "Redact secrets from this agent's reasoning before delivery" | Alignment Card (`integrity_mode`) |
+| "Block prompt-injection on inbound content" | Protection Card (`mode` + `thresholds`) |
+| "Surgically replace PII in outbound responses" | Protection Card (back-door) |
+| "Trust only `*.mnemom.ai` as a content origin" | Protection Card (`trusted_sources`) |
+| "Alert when 3+ agents in this team start disagreeing about declared values" | Trust Posture (`sideband.coherence.fire_on.conflict_edge_count_exceeds`) |
+| "Alert when one agent's coherence drops more than 1σ below the team mean" | Trust Posture (`sideband.fleet.patterns.outliers`) |
+| "Treat fault lines at severity ≥ high as actionable" | Trust Posture (`sideband.fault_line.severity_floor`) |
+| "Sweep this banking-team fleet every 5 minutes, not 10" | Trust Posture (`sideband.*.cadence_seconds`) |
+
+## Where they cooperate (two join points)
+
+Postures and cards intersect at exactly two well-defined join points downstream of either cascade.
+
+### 1. Detector input
+
+The sideband detectors read **two** sources at sweep time:
+
+- The team's effective Posture (policy) — tells the detector *when to fire*.
+- The team members' canonical Alignment Cards (data) — provides *what to look at*.
+
+The posture's body specifies thresholds (e.g., `pairwise_governance_floor_below: 0.5`); the card's content (declared values, conscience, integrity sections) is the substrate the detector analyzes.
+
+### 2. Carryover bridge
+
+Posture-driven findings write rows to [`pending_advisories`](/concepts/integrity-checkpoints#pending-advisories) tagged with `source: sideband.{coherence,fault_line,fleet}`. The gateway, on the next turn for any affected agent, reads those rows alongside the agent's canonical cards and lets card-driven enforcement decide the runtime treatment.
+
+The slogan: **posture detects; cards treat.**
+
+```
+Observer sweeps a team
+  ├─ reads team's effective Posture (from Platform → Org → Team cascade)
+  └─ reads team members' Alignment Cards
+       │
+       ▼
+  Detector fires per posture's fire_on rules
+       │
+       ▼
+  Writes pending_advisories rows (source: sideband.*)
+       │
+       ▼ (next turn for affected agent)
+  Gateway picks up advisory
+  ├─ reads agent's canonical Alignment + Protection Cards (Platform → Org → Team → Agent)
+  └─ Cards decide runtime treatment (observe / nudge / enforce per autonomy_mode + integrity_mode)
+       │
+       ▼
+  User sees the chat complete (CAC: chat always completes), with appropriate treatment applied.
+```
+
+## Why no overlap is intentional
+
+If a posture could set per-agent forbidden_tools, you'd have two answers to "is `rm -rf` blocked?" — the card's and the posture's — and the composer would need to merge them. That's a design smell.
+
+The line we hold:
+
+- *Per-agent identity, per-agent treatment* lives on cards.
+- *Fleet hygiene* lives on postures.
+- Mode vocabulary (`off | observe | nudge | enforce`) and strictest-wins composition are shared idioms, applied within each cascade independently.
+
+The result: extending the posture body to add Trust-Rating gating, attestation flags, control-tags, or new sideband sources doesn't touch the card schemas. Extending cards (new principal types, new exemption granularity) doesn't touch postures. Each artifact stays small enough to reason about.
+
+## Architectural references
+
+- [ADR-008](https://github.com/mnemom/scale/blob/main/decisions/ADR-008-unified-cards.md) — Unified cards (the agent-scope artifact)
+- [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) — Four-checkpoint same-turn model + the carryover bridge
+- [ADR-044](https://github.com/mnemom/scale/blob/main/decisions/ADR-044-scope-cascade-team-layer.md) — Scope cascade with team layer
+- [ADR-045](https://github.com/mnemom/scale/blob/main/decisions/ADR-045-trust-posture-named-object.md) — Trust Posture as a named-object oversight artifact
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — what a posture is, end-to-end
+- [Alignment Cards](/concepts/alignment-cards) — agent-scoped runtime self-declaration
+- [Protection Card](/concepts/protection-card) — agent-scoped threat-screening
+- [Card composition](/concepts/card-composition) — how the per-agent card cascade folds
+- [Fleet coherence](/concepts/fleet-coherence) — the underlying detection capability

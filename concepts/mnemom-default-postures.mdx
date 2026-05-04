@@ -1,0 +1,154 @@
+---
+title: "Mnemom-shipped default postures"
+description: "Three opinionated defaults — Standard, High-Compliance, Low-Latency — Mnemom seeds at migration time. Use as-is or clone-and-customize."
+sidebarTitle: "Default postures"
+icon: "gauge"
+---
+
+Mnemom seeds three [Trust Postures](/concepts/trust-posture) at migration time. They are platform-scope, immutable, and appear in every customer's library. You either:
+
+- **Adopt one as-is** — set it as your org's default (or assign it to a specific team) and you're shipping with sensible policy from day one.
+- **Clone and customize** — start from a Mnemom default, create your own org-scope copy, edit thresholds to your fleet's needs.
+
+The three are:
+
+| Posture | When to choose | Cadence | Stricter than Standard? | Looser than Standard? |
+|---|---|---|---|---|
+| [**Standard**](#standard) | Default starting point. Sensible for most fleets. | 10 min | — | — |
+| [**High-Compliance**](#high-compliance) | Banking, healthcare, regulated industries. | 5 min | Tighter thresholds, faster cadence, louder severity, reputation-weighted fault-line analysis | — |
+| [**Low-Latency**](#low-latency) | Real-time agent UX where observability cost matters. | 30 min | — | Permissive thresholds, slower cadence, lower severity, cluster-partition pattern off |
+
+This page explains the rationale behind each default and provides the decision criteria for choosing between them.
+
+## Standard
+
+**Posture ID:** `tp-platform-standard` · **When to pick:** "I don't know which one to choose."
+
+Standard is the **cascade-closure floor** for every team in every org. Even when no posture is explicitly assigned anywhere, every team's effective posture will at least be Standard. It's the [Charter §I13](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) guarantee.
+
+### Detection coverage
+
+| Axis | Setting |
+|---|---|
+| `coherence.enabled` | true |
+| `coherence.cadence_seconds` | 600 (every 10 minutes) |
+| `coherence.fire_on.pairwise_governance_floor_below` | 0.5 |
+| `coherence.fire_on.conflict_edge_count_exceeds` | 3 |
+| `coherence.fire_on.outlier_agents_count_exceeds` | 0 (any outlier fires) |
+| `coherence.severity_on_fire` | medium |
+| `fault_line.enabled` | true |
+| `fault_line.cadence_seconds` | 600 |
+| `fault_line.severity_floor` | high |
+| `fault_line.use_reputation_scores` | true |
+| `fault_line.severity_on_fire` | high |
+| `fleet.enabled` | true |
+| `fleet.cadence_seconds` | 600 |
+| `fleet.patterns.outliers` | true |
+| `fleet.patterns.min_pair_score_below` | 0.5 |
+| `fleet.patterns.cluster_partition` | true |
+| `fleet.severity_on_fire` | medium |
+
+### Rationale
+
+Standard is calibrated for "fleets that should know when something's amiss but aren't operating at compliance-critical strictness." Coherence below half-strength fires; conflict-edge count above 3 fires; any outlier fires; fault-lines at severity high+ surface; cluster partitions surface. Cadence is mid-paced (10 minutes is enough to catch shifts without burning observability budget on tight loops).
+
+If you don't know which posture to pick, **Standard is the right answer.**
+
+## High-Compliance
+
+**Posture ID:** `tp-platform-high-compliance` · **When to pick:** Banking-core, healthcare, regulated industries, or any fleet where missed signals are more costly than signal noise.
+
+### Detection coverage
+
+| Axis | Setting | Δ vs. Standard |
+|---|---|---|
+| `coherence.cadence_seconds` | 300 | 2× faster |
+| `coherence.fire_on.pairwise_governance_floor_below` | 0.7 | Tighter — fires earlier |
+| `coherence.fire_on.conflict_edge_count_exceeds` | 1 | Any conflict edge fires |
+| `coherence.severity_on_fire` | high | Louder advisory |
+| `fault_line.cadence_seconds` | 300 | 2× faster |
+| `fault_line.severity_floor` | medium | More findings actionable |
+| `fault_line.use_reputation_scores` | true | (same — already on in Standard) |
+| `fault_line.severity_on_fire` | critical | Loudest |
+| `fleet.cadence_seconds` | 300 | 2× faster |
+| `fleet.patterns.min_pair_score_below` | 0.7 | Tighter |
+| `fleet.severity_on_fire` | high | Louder |
+
+Other settings unchanged.
+
+### Rationale
+
+High-Compliance assumes that *false negatives are unacceptable*. Tighter thresholds mean more advisories — that's the trade. Cadence is faster (5 minutes) so anomalies surface within minutes, not tens of minutes. Severity floors are lower (more findings cross the bar). Severity-on-fire is one notch up across all axes — when something fires, it's loud.
+
+If your fleet is subject to SOC 2, HIPAA, EU AI Act, banking regulations, or any framework that mandates documented detection coverage, **start with High-Compliance** (then clone and tune to your specific requirements).
+
+## Low-Latency
+
+**Posture ID:** `tp-platform-low-latency` · **When to pick:** Real-time agent UX surfaces where observability overhead competes with response latency.
+
+### Detection coverage
+
+| Axis | Setting | Δ vs. Standard |
+|---|---|---|
+| `coherence.cadence_seconds` | 1800 | 3× slower |
+| `coherence.fire_on.pairwise_governance_floor_below` | 0.4 | Looser — fires later |
+| `coherence.fire_on.conflict_edge_count_exceeds` | 5 | More edges before firing |
+| `coherence.fire_on.outlier_agents_count_exceeds` | 1 | Two-or-more outliers before firing |
+| `coherence.severity_on_fire` | low | Quieter |
+| `fault_line.cadence_seconds` | 1800 | 3× slower |
+| `fault_line.severity_floor` | critical | Only critical findings surface |
+| `fault_line.use_reputation_scores` | false | Reputation modulation off |
+| `fault_line.severity_on_fire` | medium | Quieter |
+| `fleet.cadence_seconds` | 1800 | 3× slower |
+| `fleet.patterns.min_pair_score_below` | 0.3 | Looser |
+| `fleet.patterns.cluster_partition` | false | Pattern off |
+| `fleet.severity_on_fire` | low | Quieter |
+
+### Rationale
+
+Low-Latency assumes that *false positives compound a UX cost more than false negatives compound a risk cost*. Slower cadence (30 minutes), permissive thresholds, lower severity-on-fire, and cluster-partition detection turned off — together, this minimizes advisory pressure on agents that are operating in latency-sensitive modes.
+
+This posture is **not** suitable for compliance-driven fleets. It's suitable for: real-time chat agents where every advisory injection adds latency to the user, gaming or live-event agents where missed signals are recoverable, low-stakes internal tools.
+
+## Choosing — a decision matrix
+
+| If your fleet… | Pick |
+|---|---|
+| Is general-purpose, mid-stakes, or you're unsure | **Standard** |
+| Is regulated (SOC 2, HIPAA, banking, EU AI Act, etc.) | **High-Compliance** (then customize) |
+| Operates in latency-sensitive surfaces (real-time chat, live events) | **Low-Latency** (with caveats — review before adopting) |
+| Has multiple sub-populations with different needs | Mix: assign different postures to different teams |
+
+## Customization workflow
+
+The Mnemom defaults are **immutable post-seed**. You can't edit them; you clone them.
+
+```bash
+# Clone Standard into your org as the customization starting point
+mnemom posture clone tp-platform-standard --org org-acme --slug acme-standard --name "Acme Standard"
+
+# Edit the clone (forward-only revision)
+mnemom posture update tp-acme... --from acme-standard-v2.json --summary "tighten coherence to 0.6"
+
+# Assign the clone to a team
+mnemom posture assign tp-acme... --team <team-uuid>
+```
+
+Cloning preserves the source's body byte-for-byte; you start with the default's thresholds and incrementally tighten or loosen as you learn what your fleet needs.
+
+## Tuning over time
+
+Posture revisions are **forward-only**. Every edit creates a new revision; old revisions stay queryable. Rollback creates a forward revision pointing at an older body. This means:
+
+- You can A/B-test posture changes on individual teams without affecting the org default.
+- You can answer "what was our coherence threshold for the trading-desk team on 2026-03-31?" with one query.
+- You can revert a misconfigured tightening without losing audit linearity.
+
+See [Posture versioning](/concepts/posture-versioning) for the full revision/rollback semantics.
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — overview
+- [Trust Posture vs. Cards](/concepts/posture-vs-cards) — how postures and cards cooperate
+- [Posture versioning](/concepts/posture-versioning) — revision history + rollback
+- [Trust Posture schema](/specifications/trust-posture-schema) — normative body shape

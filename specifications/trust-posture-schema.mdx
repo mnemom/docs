@@ -1,0 +1,200 @@
+---
+title: "Trust Posture schema"
+description: "Normative JSONB body schema for Trust Posture revisions, plus the per-axis composition rules the composer uses to fold Platform → Org → Team."
+sidebarTitle: "Trust Posture schema"
+icon: "code"
+---
+
+This page is the **normative reference** for the JSONB body stored in `trust_posture_revisions.body`. It covers the v1.0 schema, every field's type and semantics, validation rules, and the per-axis composition rules the composer applies when folding `Platform → Org → Team`.
+
+The conceptual overview is at [Trust Posture](/concepts/trust-posture); this page is the spec.
+
+## Top-level shape
+
+```jsonc
+{
+  "posture_schema_version": "v1.0",
+  "sideband": {
+    "coherence": { /* see below */ },
+    "fault_line": { /* see below */ },
+    "fleet": { /* see below */ }
+  },
+  "fleet_identification": { "by": "team_membership" },
+  "fan_out": { "rule": "per_named_affected_agent" }
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|:---:|---|
+| `posture_schema_version` | string (literal `"v1.0"`) | ✓ | Strict — future schema versions bump this and the validator rejects unknown values. |
+| `sideband` | object | ✓ | Container for the three sideband axes. |
+| `fleet_identification` | object | ✓ | How the observer enumerates the fleet for sweep. |
+| `fan_out` | object | ✓ | How findings produce per-agent advisories. |
+
+**Strict-unknown-field rejection.** Top-level and nested objects reject unknown keys. Adding a field requires a schema-version bump.
+
+## `sideband` axes
+
+### `sideband.coherence`
+
+Drives [`computeTeamCoherence`](https://github.com/mnemom/coherence) (`@mnemom/team-coherence`). Detector takes no internal config; the posture body is the firing policy.
+
+```jsonc
+{
+  "enabled": true,
+  "cadence_seconds": 600,
+  "fire_on": {
+    "pairwise_governance_floor_below": 0.5,
+    "conflict_edge_count_exceeds": 3,
+    "outlier_agents_count_exceeds": 0
+  },
+  "severity_on_fire": "medium"
+}
+```
+
+| Field | Type | Required | Range | Notes |
+|---|---|:---:|---|---|
+| `enabled` | boolean | ✓ | — | Master switch. |
+| `cadence_seconds` | positive integer | ✓ | ≥ 1 | Sweep interval floor. |
+| `fire_on.pairwise_governance_floor_below` | number or null | ✓ | [0, 1] or null | Pairwise governance below this fires. null disables this condition. |
+| `fire_on.conflict_edge_count_exceeds` | integer or null | ✓ | ≥ 0 or null | Conflict-edge count strictly above this fires. null disables. |
+| `fire_on.outlier_agents_count_exceeds` | integer or null | ✓ | ≥ 0 or null | Outlier-agent count strictly above this fires. null disables. |
+| `severity_on_fire` | enum | ✓ | `low \| medium \| high \| critical` | Stamped onto the advisory. |
+
+Detector fires when **any** of the `fire_on` conditions is satisfied. To disable a condition entirely, set it to `null`. To disable the entire axis, set `enabled: false`.
+
+### `sideband.fault_line`
+
+Drives [`analyzeFaultLines`](https://github.com/mnemom/aap) (`@mnemom/agent-alignment-protocol`).
+
+```jsonc
+{
+  "enabled": true,
+  "cadence_seconds": 600,
+  "severity_floor": "high",
+  "use_reputation_scores": true,
+  "severity_on_fire": "high"
+}
+```
+
+| Field | Type | Required | Range | Notes |
+|---|---|:---:|---|---|
+| `enabled` | boolean | ✓ | — | Master switch. |
+| `cadence_seconds` | positive integer | ✓ | ≥ 1 | Sweep interval floor. |
+| `severity_floor` | enum | ✓ | `low \| medium \| high \| critical` | Findings below this severity are dropped. |
+| `use_reputation_scores` | boolean | ✓ | — | Whether to weight `impact_score` by reputation. |
+| `severity_on_fire` | enum | ✓ | `low \| medium \| high \| critical` | Stamped onto the advisory. |
+
+The fault-line detector emits findings at four severity tiers (low / medium / high / critical, derived from `impact_score` thresholds in the SDK). `severity_floor` is the cutoff — findings below that severity don't fire. `severity_on_fire` is what the resulting `pending_advisories` row carries.
+
+### `sideband.fleet`
+
+Drives [`checkFleetCoherence`](https://github.com/mnemom/aap) / `checkFleetFaultLines` (`@mnemom/agent-alignment-protocol`).
+
+```jsonc
+{
+  "enabled": true,
+  "cadence_seconds": 600,
+  "patterns": {
+    "outliers": true,
+    "min_pair_score_below": 0.5,
+    "cluster_partition": true
+  },
+  "severity_on_fire": "medium"
+}
+```
+
+| Field | Type | Required | Range | Notes |
+|---|---|:---:|---|---|
+| `enabled` | boolean | ✓ | — | Master switch. |
+| `cadence_seconds` | positive integer | ✓ | ≥ 1 | Sweep interval floor. |
+| `patterns.outliers` | boolean | ✓ | — | Fire when at least one outlier (>1σ below fleet mean) is detected. |
+| `patterns.min_pair_score_below` | number or null | ✓ | [0, 1] or null | Fire when min_pair_score is strictly below this. null disables. |
+| `patterns.cluster_partition` | boolean | ✓ | — | Fire when the fleet partitions into incompatible clusters (compatibility ≥ 0.7 in the SDK). |
+| `severity_on_fire` | enum | ✓ | `low \| medium \| high \| critical` | Stamped onto the advisory. |
+
+A finding is emitted when **any** enabled pattern fires.
+
+## `fleet_identification`
+
+```jsonc
+{ "by": "team_membership" }
+```
+
+| Field | Type | Required | Allowed values |
+|---|---|:---:|---|
+| `by` | string | ✓ | `team_membership` |
+
+In v1.0, `team_membership` is the only valid value. The field is present so future identification modes (by capability, by tag, by metadata predicate) can be added additively without breaking existing rows. Validators reject unknown values.
+
+## `fan_out`
+
+```jsonc
+{ "rule": "per_named_affected_agent" }
+```
+
+| Field | Type | Required | Allowed values |
+|---|---|:---:|---|
+| `rule` | string | ✓ | `per_named_affected_agent` |
+
+In v1.0, `per_named_affected_agent` is the only valid value — every named affected agent in a finding receives one `pending_advisories` row. Future modes (deduplicated, aggregated, throttled) extend this enum additively.
+
+## Composition rules
+
+The composer (`composeTrustPosture` in mnemom-api) folds `Platform → Org → Team` with strictest-wins per axis. Mirrors the cards composition idiom.
+
+| Field shape | Rule | Stricter direction |
+|---|---|---|
+| `*.enabled` (bool) | OR-true | Any layer enabling fires the detector |
+| `cadence_seconds` (number) | min | Shorter = more frequent = stricter |
+| `fire_on.pairwise_governance_floor_below` etc. (number or null) | min-among-defined; null contributes nothing | Lower threshold = fires earlier = stricter |
+| `fire_on.conflict_edge_count_exceeds` etc. (number or null) | min-among-defined | Lower count threshold = fires earlier |
+| `severity_floor` (enum) | min | Lower floor = more advisories = stricter |
+| `severity_on_fire` (enum) | max | Higher = louder advisory = stricter |
+| `patterns.outliers`, `patterns.cluster_partition` (bool) | OR-true | Any layer enabling that pattern fires it |
+| `patterns.min_pair_score_below` (number or null) | min-among-defined | Lower = fires later vs. higher = fires earlier — see note |
+| `use_reputation_scores` (bool) | OR-true | Any layer wanting reputation modulation gets it |
+| `fleet_identification.by` (enum) | precedence: highest layer wins | Single value in v1; deterministic for forward-compat |
+| `fan_out.rule` (enum) | precedence: highest layer wins | Single value in v1; deterministic for forward-compat |
+
+**On `min_pair_score_below` direction:** the field expresses "fire when the worst pair is *below* this." A higher threshold fires more often (stricter); a lower threshold fires less often (looser). The composer uses `min` here — meaning the *lower* (looser) value wins. If you want stricter behavior, set the value higher at your layer.
+
+This is a deliberate exception to "lower = stricter" because the field's semantic is the *upper bound at which firing starts*. The composer documents it explicitly.
+
+### Cascade closure
+
+Charter §I13 (landing in Piece 8) guarantees: **every team has an effective posture**. The platform default (`tp-platform-standard`) is the floor — every team's effective body composes at least the platform layer.
+
+If the gather RPC returns a degraded envelope (e.g., the platform seed somehow missing), the in-process composer synthesizes a fallback floor matching `tp-platform-standard`'s body. Production should never see this path; it's defensive belt-and-suspenders, with a sentinel `posture_id: tp-synthetic-fallback` in the output's `scopes_applied` for telemetry.
+
+## Validation rules summary
+
+| Rule | Behavior |
+|---|---|
+| Unknown top-level keys | 400 |
+| Unknown nested keys (in any object) | 400 |
+| `posture_schema_version != "v1.0"` | 400 |
+| Non-boolean `enabled` | 400 |
+| Non-positive-integer `cadence_seconds` | 400 |
+| `severity_on_fire` / `severity_floor` not in {low, medium, high, critical} | 400 |
+| Numeric out of range (e.g., `pairwise_governance_floor_below > 1.0`) | 400 |
+| Non-integer `conflict_edge_count_exceeds` / `outlier_agents_count_exceeds` | 400 |
+| Missing required field | 400 |
+| `fleet_identification.by` not in allowed values | 400 |
+| `fan_out.rule` not in allowed values | 400 |
+
+Validation failures return a structured `{ ok: false, errors: [{ field, rule, message }, …] }` body so client tooling can surface specific field errors.
+
+## Body size
+
+Server-side limit: **256 KiB** per posture body. Cards' equivalents are 128 KiB (alignment) and 64 KiB (protection); postures are larger by design because of the multi-axis schema and future-axis headroom (Trust-Rating gating, attestation flags, control-tag mappings).
+
+A 413 response means your body is over the limit. Postures rarely approach 256 KiB in practice — the canonical Mnemom defaults are &lt;2 KiB each.
+
+## See also
+
+- [Trust Posture](/concepts/trust-posture) — overview
+- [Trust Posture vs. Cards](/concepts/posture-vs-cards) — parallel cascades
+- [Mnemom-shipped default postures](/concepts/mnemom-default-postures) — Standard / High-Compliance / Low-Latency rationales
+- [Posture versioning](/concepts/posture-versioning) — revision history + rollback
+- `mnemom posture` — CLI mirror of the REST surface (see the `mnemom posture --help` output)
