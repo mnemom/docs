@@ -1,0 +1,184 @@
+---
+title: "Governance Signals Schema"
+description: "Table layout, RPC surface, and webhook event taxonomy for governance_signals (ADR-048)."
+sidebarTitle: "Governance signals schema"
+icon: "database"
+---
+
+# Governance signals schema
+
+This page documents the platform schema for [governance signals](/concepts/governance-signals), the operator-actionable observation surface introduced in [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md).
+
+## Tables
+
+### `governance_signals`
+
+The single row per open observation. The platform writes via the `governance_signal_emit` RPC; consumers (REST handlers, dispatcher, UI, CLI) read directly.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `text` PK | `gs-{12-hex}` (mirrors `pa-` convention from `pending_advisories`). |
+| `scope` | `text` CHECK | `platform | org | team | agent`. |
+| `scope_id` | `text` | platform_id / org_id / team_id (uuid::text) / agent_id. |
+| `source` | `text` CHECK | `sideband.drift | sideband.coherence | sideband.fault_line | sideband.fleet`. Future `protection.*` / `posture.*` via [ADR-048 amendment](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md#section-8). |
+| `pattern_type` | `text` | Free-form per source (e.g., `cluster_partition`, `pairwise_governance_floor`). |
+| `severity` | `text` CHECK | `info | warn | high | critical`. |
+| `detected_at` | `timestamptz` | Default `now()`; refreshed on coalescing upsert. |
+| `detected_by` | `text` | Detector name (e.g., `observer.sweepFleet`). |
+| `org_id` | `text` FK → `orgs.org_id` | Denormalized for RLS perf. |
+| `team_id` | `uuid` | Nullable for platform/org/agent scope. |
+| `agent_ids` | `text[]` | Affected agents — informational fan-out. |
+| `detail` | `jsonb` | Pattern-specific payload. |
+| `source_ref` | `jsonb` | Detector run / sweep_id / cadence info. |
+| `status` | `text` CHECK | `open | acknowledged | resolved | dismissed | expired`. |
+| `acknowledged_by` | `uuid` FK → `auth.users.id` | |
+| `acknowledged_at` | `timestamptz` | |
+| `acknowledged_actor_role` | `text` CHECK | `platform_admin | org_owner | org_admin | team_admin | member | system` (mirrors [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md) actor_role). |
+| `resolution_status` | `text` CHECK | `action_taken | wont_fix | duplicate | false_positive | self_resolved`. |
+| `action_taken` | `text` | Operator-authored note. |
+| `resolved_by` | `uuid`, `resolved_at` `timestamptz` | |
+| `expires_at` | `timestamptz` | TTL from posture (default 30d). |
+| `webhook_delivery_id` | `uuid` | Last dispatch attempt FK (informational). |
+| `notification_state` | `jsonb` | `{<channel>: {state, attempts, destination_id, delivered_at, last_error}}`. |
+| `created_at`, `updated_at` | `timestamptz` | `updated_at` maintained by trigger. |
+
+#### Indexes
+
+```sql
+-- Write-time idempotency: repeated cron emissions of the same open
+-- signal coalesce. The architectural fix to the duplicate-paragraph
+-- symptom that motivated ADR-048.
+CREATE UNIQUE INDEX governance_signals_open_dedup
+  ON governance_signals (scope, scope_id, source, pattern_type)
+  WHERE status = 'open';
+
+CREATE INDEX governance_signals_org_status_idx
+  ON governance_signals (org_id, status, detected_at DESC);
+CREATE INDEX governance_signals_team_status_idx
+  ON governance_signals (team_id, status, detected_at DESC)
+  WHERE team_id IS NOT NULL;
+CREATE INDEX governance_signals_severity_open_idx
+  ON governance_signals (severity, detected_at DESC)
+  WHERE status = 'open';
+CREATE INDEX governance_signals_agent_ids_gin
+  ON governance_signals USING GIN (agent_ids);
+```
+
+### `governance_notification_destinations`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `org_id` | `text` FK | |
+| `channel` | `text` CHECK | `webhook | slack | email | pagerduty`. |
+| `config` | `jsonb` | Channel-specific. |
+| `filter` | `jsonb` | `{sources?, severities?, scopes?, pattern_types?}` AND-folded narrowing. |
+| `enabled` | `boolean` | Disable without delete to preserve audit. |
+| `display_name` | `text` | UI label. |
+| `last_tested_at` | `timestamptz` | Set by `… /test` endpoint. |
+| `last_test_status`, `last_test_error` | `text` | |
+
+### `governance_escalation_rules`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `org_id` | `text` FK | |
+| `name` | `text` | Operator-authored. |
+| `predicate` | `jsonb` | `{source?, pattern_type?, severity_min?, severity_max?, scope?, team_id?, threshold_count?, window_minutes?}` AND-folded. |
+| `destination_ids` | `uuid[]` | Non-empty CHECK. |
+| `enabled` | `boolean` | |
+| `last_fired_at`, `fire_count` | | Telemetry for tuning. |
+
+## RLS
+
+Service-role bypass model: the API boundary applies authz in TypeScript per [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md), and PostgREST goes through the service role. RLS is enabled on all three tables with **no user-facing policies** — this is fail-closed against accidental exposure (a future PostgREST exposure can't leak governance signals across orgs).
+
+Future tightening to user-driven RLS UPDATE policies is a follow-up once a shared cross-type `org_members.user_id` (TEXT) ↔ `auth.uid()` (UUID) policy helper is in place.
+
+## RPCs
+
+### `governance_signal_emit`
+
+```sql
+governance_signal_emit(
+  p_scope TEXT,
+  p_scope_id TEXT,
+  p_source TEXT,
+  p_pattern_type TEXT,
+  p_severity TEXT,
+  p_org_id TEXT,
+  p_team_id UUID,
+  p_agent_ids TEXT[],
+  p_detail JSONB,
+  p_source_ref JSONB,
+  p_detected_by TEXT,
+  p_expires_at TIMESTAMPTZ DEFAULT NULL
+) RETURNS governance_signals
+```
+
+`SECURITY DEFINER` + service-role only. `INSERT ... ON CONFLICT DO UPDATE` on the open-dedup index — repeated cron emissions of the same condition refresh `detected_at`, `severity`, `agent_ids`, `detail`, `source_ref` on the existing open row instead of creating a new one.
+
+### `governance_signal_acknowledge` / `_resolve` / `_dismiss`
+
+Operator state transitions. Each captures `acknowledged_actor_role` per ADR-046 and is `SECURITY DEFINER` so the API can invoke after applying RBAC in TypeScript.
+
+```sql
+governance_signal_acknowledge(p_id, p_actor, p_actor_role, p_action_taken DEFAULT NULL)
+governance_signal_resolve(p_id, p_actor, p_actor_role, p_resolution_status, p_action_taken DEFAULT NULL)
+governance_signal_dismiss(p_id, p_actor, p_actor_role, p_reason DEFAULT NULL)
+```
+
+## REST endpoints
+
+See [api-reference/governance](/api-reference/governance) for full schemas. Quick map:
+
+| Method | Path | RBAC |
+|---|---|---|
+| GET | `/v1/orgs/:org_id/governance/signals` | any org member |
+| GET | `/v1/teams/:team_id/governance/signals` | any org member |
+| GET | `/v1/agents/:agent_id/governance/signals` | any org member |
+| GET | `/v1/governance/signals/:id` | any org member of row's org |
+| POST | `/v1/governance/signals/:id/{acknowledge,resolve,dismiss}` | org_admin / org_owner |
+| GET | `/v1/orgs/:org_id/governance/coverage` | any org member |
+| `*` | `/v1/orgs/:org_id/governance/notification-destinations[/:id][/test]` | org_admin / org_owner |
+| `*` | `/v1/orgs/:org_id/governance/escalation-rules[/:id]` | org_admin / org_owner |
+| GET | `/v1/internal/governance-signals?agent_id=…` | service-key (gateway / Polis sovereign composer) |
+
+## Webhook event taxonomy
+
+| Event | Fired when |
+|---|---|
+| `governance.signal.fired` | New row inserted (or open row coalesced). |
+| `governance.signal.acknowledged` | `_acknowledge` RPC. |
+| `governance.signal.resolved` | `_resolve` RPC. |
+| `governance.signal.dismissed` | `_dismiss` RPC. |
+| `governance.escalation.triggered` | A rule's predicate matched and dispatch fired. |
+
+Legacy aliases (kept 30 days post-cutover, removed at D+30):
+
+- `sideband.coherence.fired` → use `governance.signal.fired` filtered on `payload.source == "sideband.coherence"`.
+- `sideband.fault_line.fired` → same.
+- `sideband.fleet.fired` → same.
+- `drift.detected` → use `governance.signal.fired` filtered on `payload.source == "sideband.drift"`.
+
+All HMAC-SHA256 signed (`X-Mnemom-Signature: sha256=…`) following the AAP webhook contract; subscribers should verify the signature before trusting the payload.
+
+## Naming convention discipline
+
+`source` is closed, hierarchical, append-only — mirrors [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) for `pending_advisories.source`. Adding a new value requires:
+
+1. ADR-048 amendment.
+2. Migration extending the CHECK constraint with ASSERT-after-DDL guard.
+3. Producer code (typically observer).
+4. Consumer-tolerance discipline (gateway / UI / CLI / SDKs).
+5. Posture-gating extension if the source is detector-driven.
+
+Removing a source is forbidden. Deprecation is the only valid path.
+
+## Related
+
+- [Governance signals concept](/concepts/governance-signals).
+- [Pending Advisories Schema](/specifications/pending-advisories-schema) — narrowed to `runtime.*` + `manual.*` per ADR-048 §1.
+- [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md).
+- [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) — narrowed at amendment time by ADR-048 §8.

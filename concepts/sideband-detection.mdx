@@ -18,7 +18,11 @@ Four detector axes share this surface:
 | `sideband.fault_line` | Fault-line analysis | A specific value dimension splits the team — some agents declare it, others miss it, others list it as a conflict. |
 | `sideband.fleet` | Fleet patterns | The team partitions into incompatible clusters, the worst pair drops below threshold, or outliers emerge under cluster topology. |
 
-All four write to the same carryover table (`pending_advisories`, per [ADR-040](/specifications/pending-advisories-schema)) and the gateway reads from a single inject point (`injectPendingNudges`) when the agent's next request arrives.
+All four write to [`governance_signals`](/concepts/governance-signals) (per [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md)) — the operator-actionable observation surface. Surfaced via UI dashboard, webhook (`governance.signal.fired`), REST, and CLI. **Not** auto-injected into agent prompts; that architectural mis-layering is what ADR-048 corrected. See [governance signals](/concepts/governance-signals) for the full layering and operator workflow.
+
+<Note>
+**Cutover note (2026-05-07):** Detection logic on this page (cadence, fire conditions, fan-out fields) is unchanged. Only the *delivery surface* moved: from `pending_advisories` (which the gateway injected into agent prompts) to `governance_signals` (operator-facing). Pre-cutover `pending_advisories` rows with `source LIKE 'sideband.%'` will TTL out within 24 hours of the gateway-reader narrowing in mnemom-platform#247.
+</Note>
 
 ## Why sideband
 
