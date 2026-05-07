@@ -11,6 +11,33 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
+## Governance signals — operator-actionable observation surface (ADR-048)
+<sub>May 2026</sub>
+
+Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Application-side composers (e.g., Polis for sovereign-CTO agents like Wintermute) own the edge case of folding a fleet signal into a sovereign agent's prompt — the platform never auto-injects.
+
+The triggering symptom: a sovereign agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. ADR-048 fixed the layering at the schema, producer, and consumer layers simultaneously.
+
+**What's new:**
+
+- New `governance_signals` table with partial-unique open-dedup index (kills the duplicate-emission symptom at the WRITE layer).
+- New REST surface at `/v1/{orgs,teams,agents}/.../governance/signals` plus state-transition endpoints.
+- New webhook event family `governance.signal.{fired,acknowledged,resolved,dismissed}` + `governance.escalation.triggered`. Legacy aliases (`sideband.*.fired`, `drift.detected`) kept for 30 days post-cutover.
+- New notification destinations: Slack incoming-webhook, email (Resend), PagerDuty Events API v2, generic HMAC-signed webhook. Per-org configurable + filterable + rule-driven.
+- New escalation rule engine with rate-based gating (`threshold_count` + `window_minutes`).
+- New UI at team + agent scope (`/dashboard/teams/:teamId/governance` + `/dashboard/agents/:uuid/governance`).
+- `mnemom governance` CLI subcommand group: `signals`, `destinations`, `rules`.
+- `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript types + sovereign-composer example.
+- `@mnemom/agent-integrity-protocol@1.1.0` adds optional `triggering_governance_signal_id` to `IntegritySignal`.
+
+**Cutover:** observer writers redirected (mnemom-platform#246), gateway reader narrowed (mnemom-platform#247). Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
+
+**Charter invariant** (`safe-house-hardening/validation-charter.md` §I15): operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted by the harness.
+
+See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals), [sovereign-agent composition](/guides/sovereign-agent-composition).
+
+---
+
 ## Agent ID format update — `mnm-{uuid_v4}`
 <sub>April 2026</sub>
 

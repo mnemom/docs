@@ -1,0 +1,93 @@
+---
+title: "Governance signals"
+description: "Operator-actionable observations from Mnemom's platform detectors — fleet drift, value fault lines, coherence drops, behavior drift. Surfaced to operators (UI, webhook, REST) and to application composers, never auto-injected into agent prompts."
+sidebarTitle: "Governance signals"
+icon: "siren"
+---
+
+# Governance signals
+
+**Governance signals** are operator-actionable observations produced by Mnemom platform detectors. They surface fleet-shaped concerns — coherence drift across a team, value fault lines between agents, fleet topology changes, per-agent behavior drift — that an *operator* (CISO, org admin, team admin, on-call SRE) needs to see and act on.
+
+They are deliberately distinct from the [per-turn advisories](/concepts/safe-house) that the gateway injects into an agent's next prompt. The architectural commitment, ratified in [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md), is:
+
+> **Operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail.**
+
+If a non-sovereign agent is told "Recalibrate fleet alignment before the next response," it has no team-management authority, no acknowledgment surface, and no remediation it can perform from inside its own LLM call. The signal is real and important — but the recipient is wrong. Governance signals fix that mis-layering.
+
+## What gets surfaced
+
+| Source | Detector | What it catches | Acts at |
+|---|---|---|---|
+| `sideband.drift` | Per-agent drift | An agent's behavior diverging from declared alignment | Per agent |
+| `sideband.coherence` | Team coherence | Pairwise governance scores below threshold; conflict edges; outlier agents | Per team |
+| `sideband.fault_line` | Value fault lines | A value dimension splits the team into agents-declaring vs agents-missing vs agents-conflicting | Per team |
+| `sideband.fleet` | Fleet topology | Cluster partitions, weak-pair score floors, fleet outliers | Per team |
+
+Future `protection.*` and `posture.*` sources will land additively via [ADR-048 amendment](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md#section-8).
+
+## Surfaces, not injections
+
+A governance signal lives in **three operator surfaces** simultaneously:
+
+1. **Web UI** at `app.mnemom.ai/dashboard/teams/{teamId}/governance` (and per-agent at `…/dashboard/agents/{uuid}/governance`). Filterable list, severity badges, ack/resolve/dismiss workflow.
+2. **Webhook** events: `governance.signal.fired`, `governance.signal.acknowledged`, `governance.signal.resolved`, `governance.signal.dismissed`, `governance.escalation.triggered`. HMAC-SHA256 signed POSTs (`X-Mnemom-Signature: sha256=…`) following the AAP webhook contract.
+3. **REST API**: `GET /v1/orgs/:org/governance/signals`, `GET /v1/teams/:team/governance/signals`, `GET /v1/agents/:agent/governance/signals`, plus state-transition endpoints. See [Governance Signals Schema](/specifications/governance-signals-schema).
+
+The platform **never** injects governance signals into an agent's LLM request. That decision lives entirely in your application, if you have a sovereign-CTO-shaped agent who legitimately can act on fleet-level signals (e.g., a fleet orchestrator agent with reorg tools). See [Sovereign-agent composition](/guides/sovereign-agent-composition) for the worked pattern.
+
+## Operator workflow
+
+A signal moves through this lifecycle:
+
+```
+   open → acknowledged → resolved
+       ↘                ↗
+        dismissed
+       ↘
+        expired (TTL)
+```
+
+- **`open`** — fresh detection. Notification rail (Slack, email, PagerDuty, generic webhook) routes per your [escalation rules](/guides/operating-governance-signals#escalation-rules).
+- **`acknowledged`** — an org admin / org owner / team admin has confirmed receipt. Captures `acknowledged_actor_role` per [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md) audit-actor model.
+- **`resolved`** — closed with a `resolution_status` (`action_taken` / `wont_fix` / `duplicate` / `false_positive` / `self_resolved`) and optional `action_taken` note.
+- **`dismissed`** — operator marked as not actionable (noise, redundant).
+- **`expired`** — TTL elapsed without operator action; configurable per posture, default 30 days.
+
+The schema's partial unique index on `(scope, scope_id, source, pattern_type) WHERE status='open'` makes detection idempotent: repeated cron emissions of the same condition refresh the open row in place rather than stacking. This is the architectural fix to the symptom that triggered this work — a sovereign agent receiving the same `cluster_partition` paragraph 2× per turn for weeks.
+
+## Notification destinations
+
+Each org configures destinations independently:
+
+- **`webhook`** — generic HMAC-signed POST to a URL of your choice. Mirrors AAP webhook contract.
+- **`slack`** — incoming-webhook POST with [Block Kit](https://api.slack.com/block-kit) payload. Severity-color border, action button to "Acknowledge in dashboard."
+- **`email`** — Resend-backed HTML + plaintext.
+- **`pagerduty`** — Events API v2 with stable `dedup_key` so coalesced detections don't duplicate incidents.
+
+A destination's `filter` narrows what it receives (sources, severities, scopes, pattern_types). [Escalation rules](/guides/operating-governance-signals#escalation-rules) bind a predicate to a list of destination IDs and support rate-based gating (`threshold_count` + `window_minutes`) for "fire only if N matching signals occurred in M minutes."
+
+Test a destination from the CLI:
+
+```bash
+mnemom governance destinations test <destination_id> --org <org_id>
+```
+
+This sends a synthetic signal through the channel only (bypasses rules) and records `last_tested_at` / `last_test_status` on the destination.
+
+## Charter invariant
+
+The [Safe House Hardening](https://github.com/mnemom/safe-house-hardening) validation charter ratifies §I15 — surface separation invariant — asserted by the harness:
+
+1. End-to-end fixtures that provoke each `governance_signals` source and assert the agent's prompt is byte-clean.
+2. Telemetry that production gateway requests over a 30-day rolling window write zero `pending_advisories` rows whose `source LIKE 'sideband.%'`.
+
+The harness gate is binding for `T1-4` (CI gate) closure post-cutover.
+
+## Related
+
+- [Sideband detection](/concepts/sideband-detection) — the detector layer (unchanged; only the delivery surface moved).
+- [Governance Signals Schema](/specifications/governance-signals-schema) — table layout, RPCs, RLS.
+- [Operating governance signals](/guides/operating-governance-signals) — operator runbook for ack/resolve/dismiss + destinations + rules.
+- [Sovereign-agent composition](/guides/sovereign-agent-composition) — application-side pattern for opting sovereign agents into governance-signal context.
+- [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md) — the architectural decision.

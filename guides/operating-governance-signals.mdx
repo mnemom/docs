@@ -1,0 +1,183 @@
+---
+title: "Operating governance signals"
+description: "Operator runbook for ack/resolve/dismiss workflow, notification destinations (Slack/email/PagerDuty/webhook), and escalation rules."
+sidebarTitle: "Operating governance signals"
+icon: "list-check"
+---
+
+# Operating governance signals
+
+[Governance signals](/concepts/governance-signals) are observations operators see and act on. This guide walks through the runbook.
+
+## Daily flow
+
+1. **Triage** the open queue at `app.mnemom.ai/dashboard/teams/{teamId}/governance` (or via `mnemom governance signals list --team <id> --status open`).
+2. **Acknowledge** signals you're investigating. Records `acknowledged_actor_role` per [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md) — captures whether you acted as `org_admin`, `team_admin`, etc.
+3. **Resolve** with a `resolution_status`:
+   - `action_taken` — you (or a sovereign agent) made changes (rebalanced team, refreshed cards, …).
+   - `wont_fix` — known noise or out of scope.
+   - `duplicate` — same root cause as another signal.
+   - `false_positive` — detector misfire (file a debt item).
+   - `self_resolved` — the underlying condition cleared itself before you acted.
+4. **Dismiss** for noise: the signal is acknowledged but no action is needed and no resolution category applies cleanly.
+
+CLI:
+
+```bash
+mnemom governance signals list --team team-uuid-here --status open
+mnemom governance signals show gs-abc123def456
+mnemom governance signals ack gs-abc123def456 --action "investigating cluster shape"
+mnemom governance signals resolve gs-abc123def456 \
+  --status action_taken \
+  --action "rebalanced team — moved agent-X to fleet-B"
+```
+
+## Notification destinations
+
+Configure where signals route off-platform. Each destination is one channel binding for an org.
+
+### Slack
+
+```bash
+mnemom governance destinations add \
+  --org org-id \
+  --channel slack \
+  --name "#sec-alerts" \
+  --config '{"url":"https://hooks.slack.com/services/T.../B.../..."}'
+```
+
+Block Kit payload with severity-color border, action button "Acknowledge in dashboard."
+
+### Email
+
+```bash
+mnemom governance destinations add \
+  --org org-id \
+  --channel email \
+  --name "Security on-call" \
+  --config '{"to":["security-oncall@yourco.com"],"from":"governance@yourco.com"}'
+```
+
+Resend-backed HTML + plaintext.
+
+### PagerDuty
+
+```bash
+mnemom governance destinations add \
+  --org org-id \
+  --channel pagerduty \
+  --name "Critical on-call" \
+  --config '{"routing_key":"R1234567890ABCDEF"}'
+```
+
+Events API v2 with stable `dedup_key` (`governance-signal-{id}`) — coalesced detections don't create duplicate incidents.
+
+### Generic webhook
+
+```bash
+mnemom governance destinations add \
+  --org org-id \
+  --channel webhook \
+  --name "Internal SOC pipeline" \
+  --config '{"url":"https://soc.internal/governance","signing_secret":"<32+ bytes>"}'
+```
+
+HMAC-SHA256 signed POST. Verify the signature server-side before trusting the payload.
+
+### Test before you trust
+
+Every destination supports a synthetic test signal:
+
+```bash
+mnemom governance destinations test <destination_id> --org <org_id>
+```
+
+This sends a test signal through the channel only (bypasses rules) and records `last_tested_at` / `last_test_status` on the destination row. The dashboard surfaces the result inline.
+
+## Filter narrowing
+
+Each destination has an optional `filter` that AND-folds with the matching escalation rule's predicate. Useful for "only critical to PagerDuty, everything else to Slack":
+
+```bash
+# PagerDuty: critical only
+mnemom governance destinations add --org org-id --channel pagerduty \
+  --config '...' --filter '{"severities":["critical"]}'
+
+# Slack: warn + high (PagerDuty handles critical separately)
+mnemom governance destinations add --org org-id --channel slack \
+  --config '...' --filter '{"severities":["warn","high"]}'
+```
+
+Filter keys: `sources`, `severities`, `scopes`, `pattern_types`. Absent key = match-all on that dimension.
+
+## Escalation rules
+
+Rules bind a predicate to a list of destinations. When an inserted signal matches the predicate, the dispatcher routes to the rule's destinations (intersected with each destination's filter).
+
+```bash
+mnemom governance rules add \
+  --org org-id \
+  --name "fleet-critical-pageout" \
+  --predicate '{"source":"sideband.fleet","severity_min":"high"}' \
+  --destinations dest-pagerduty-id,dest-slack-id
+```
+
+Predicate keys (AND-folded):
+
+- `source` — exact source match.
+- `pattern_type` — exact pattern_type match.
+- `severity_min` / `severity_max` — bound on severity.
+- `scope` — exact scope match.
+- `team_id` — narrow to one team.
+- `threshold_count` + `window_minutes` — **rate-based gating**: fire only if ≥ N matching signals occurred in M minutes.
+
+### Rate-gating example
+
+"Page on-call only if 3+ critical signals fire in 5 minutes":
+
+```bash
+mnemom governance rules add \
+  --org org-id \
+  --name "critical-burst-pageout" \
+  --predicate '{"severity_min":"critical","threshold_count":3,"window_minutes":5}' \
+  --destinations dest-pagerduty-id
+```
+
+### Dedup across rules
+
+If two rules both route to the same destination, the dispatcher dedups — one Slack message per signal, not two. Each contributing rule's `fire_count` and `last_fired_at` still get bumped.
+
+## Coverage rollup
+
+`GET /v1/orgs/:org_id/governance/coverage?days=30` returns a per-(source, severity) aggregate over the window:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.mnemom.ai/v1/orgs/org-id/governance/coverage?days=30" | jq
+```
+
+```json
+{
+  "org_id": "org-id",
+  "since": "2026-04-07T00:00:00Z",
+  "days": 30,
+  "total_signals": 47,
+  "by_source_severity": [
+    { "source": "sideband.fleet", "severity": "high", "total": 12, "open": 0 },
+    { "source": "sideband.coherence", "severity": "warn", "total": 8, "open": 2 },
+    { "source": "sideband.drift", "severity": "warn", "total": 27, "open": 4 }
+  ]
+}
+```
+
+Use this for compliance evidence (signals were detected and operators responded), and as input for tuning your escalation rules — sources with high `open` ratios may need ack-process tightening; sources with high volume may want filter narrowing on noisy destinations.
+
+## Auditing
+
+Every state transition records `acknowledged_actor_role` (who acted, in what capacity) per [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md). `resolution_status` + `action_taken` provide the prose audit trail. The platform's `governance_audit_log` table captures every governance mutation for full SOC2-shaped reconstruction.
+
+## Related
+
+- [Governance signals concept](/concepts/governance-signals).
+- [Governance Signals Schema](/specifications/governance-signals-schema).
+- [Sovereign-agent composition](/guides/sovereign-agent-composition) — application-side pattern when you have a sovereign-CTO-shaped agent.
