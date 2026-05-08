@@ -1,11 +1,11 @@
 ---
 title: "API Keys"
-description: "Personal vs. organization keys, when to use which, and how to rotate."
+description: "Personal vs. organization keys, capability scopes, and how to rotate them safely."
 sidebarTitle: "API Keys"
 icon: "key"
 ---
 
-Mnemom has **two API key surfaces** with different ownership, billing, and lifecycle. This guide covers when to use each and how to rotate them safely.
+Mnemom has **two API key surfaces** — personal keys and organization keys — sharing one capability-based scope vocabulary. This guide covers when to use each surface, how scopes work, and how to rotate them safely.
 
 If you came here from the [Org Admin guide](/guides/org-admin), this is the deep dive on key management.
 
@@ -16,19 +16,53 @@ If you came here from the [Org Admin guide](/guides/org-admin), this is the deep
 | **Endpoint** | `POST /v1/api-keys` | `POST /v1/orgs/{org_id}/api-keys` |
 | **Who can create** | Any authenticated user | Owner or admin of the org |
 | **Billed to** | The user's billing account | The org's billing account |
-| **Acts as** | The user's identity + permissions | The user's identity, scoped to the org |
+| **Acts as** | The user's identity | The user's identity, scoped to the org |
 | **Visible in** | Settings → Personal → API keys | Settings → Organization → API keys |
 | **Survives departure?** | No — when the user leaves, key revokes | Yes — admin must explicitly revoke |
 | **Revoke** | The user (or admin via support) | Owner, admin, or original creator |
 
 Both surfaces produce keys with the `mnm_` prefix; they're identical at the wire level. The difference is **billing attribution** and **lifecycle ownership**.
 
-## When to use which
+## Scope vocabulary
+
+Mnemom keys use a **capability-based** scope vocabulary. Each scope names what the key is *allowed to do*. The default is least-privilege; admin scopes are opt-in and gated by your role at mint time and re-checked on every request.
+
+| Scope | Grants | Mintable by |
+|---|---|---|
+| `gateway` | Send traffic through the Mnemom gateway worker (proxy LLM requests, capture traces). | Any authenticated user |
+| `api:read` | `GET` endpoints scoped to the bearer's identity (your agents, traces, cards, policies). | Any authenticated user |
+| `api:write` | `POST` / `PUT` / `PATCH` / `DELETE` endpoints scoped to the bearer's identity (mutate your agents, cards, policies). | Any authenticated user |
+| `admin:org` | `/v1/orgs/{org_id}/...` admin operations on orgs you own or admin (members, settings, billing, org-level keys). Re-checked per request against your current org membership. | Owner or admin of at least one org |
+| `admin:platform` | `/v1/admin/*` Mnemom-staff platform operations across tenants. Re-checked per request against your current staff role. | Mnemom-staff users only |
+
+**Default for new keys:** `["gateway", "api:read", "api:write"]`. Admin scopes are not added unless you explicitly request them.
+
+### Scope semantics — what to know
+
+- **Capabilities are independent.** `admin:platform` does NOT imply `api:read`. A key with only `admin:platform` cannot call `/v1/agents`. If your automation needs to call non-admin endpoints alongside admin ones, request both.
+- **Mint-time ceiling is enforced server-side.** Requesting a scope you're not eligible for returns HTTP 403 at creation time. Examples:
+  ```
+  POST /v1/api-keys
+  { "name": "doomed", "scopes": ["admin:platform"] }
+  ← 403 admin:platform scope requires Mnemom-staff role on your account
+  ```
+- **Request-time role is re-checked** for admin scopes. If a staff member is demoted after minting an `admin:platform` key, that key's admin power stops working immediately on the next request — without rotation. The key still authenticates for non-admin endpoints if those scopes are also present.
+- **Demotion is silent.** Mnemom does not auto-revoke admin-scoped keys when a user's role changes. Use `DELETE /v1/api-keys/{key_id}` (or rotate) when offboarding admin-role users.
+
+### Picking scopes for common patterns
+
+- **Local development on your laptop:** `gateway`, `api:read`, `api:write` (the default).
+- **CI runner that publishes traces but doesn't mutate state:** `gateway`, `api:read`.
+- **Read-only analytics ingest into Snowflake/BQ:** `api:read`.
+- **Service account that manages org members from a script:** `admin:org` (plus `api:read` if it needs to read non-admin endpoints).
+- **Mnemom-internal automation (deploy gates, on-call tooling):** `admin:platform` (plus `api:read`/`api:write` if it touches non-admin endpoints too).
+
+## When to use which surface
 
 **Personal key, every time** — *unless* one of the things below applies.
 
 - **Local development.** A developer on the team using Mnemom from their laptop. Personal key.
-- **Per-engineer CI accounts.** Each engineer has their own CI runner credentialed against their personal account. Personal key. (You probably want option 2 below for actual CI.)
+- **Per-engineer CI accounts.** Each engineer has their own CI runner credentialed against their personal account. Personal key.
 - **Single-purpose script you're running yourself.** Personal key.
 
 **Organization key when:**
@@ -47,7 +81,10 @@ If a member leaves the org, their **personal keys remain valid** (they're still 
 curl -X POST https://api.mnemom.ai/v1/api-keys \
   -H "Authorization: Bearer $MNEMOM_JWT" \
   -H "Content-Type: application/json" \
-  -d '{"name": "local dev"}'
+  -d '{
+    "name": "local dev",
+    "scopes": ["gateway", "api:read", "api:write"]
+  }'
 ```
 
 ### Organization
@@ -56,7 +93,10 @@ curl -X POST https://api.mnemom.ai/v1/api-keys \
 curl -X POST https://api.mnemom.ai/v1/orgs/$ORG_ID/api-keys \
   -H "Authorization: Bearer $MNEMOM_JWT" \
   -H "Content-Type: application/json" \
-  -d '{"name": "ci-prod"}'
+  -d '{
+    "name": "ci-prod",
+    "scopes": ["gateway", "api:read", "api:write"]
+  }'
 ```
 
 In both cases the response carries the **full secret** in the `key` field. You see it once. Mnemom stores only its SHA-256 hash; we cannot recover the secret if you lose it.
@@ -67,10 +107,32 @@ In both cases the response carries the **full secret** in the `key` field. You s
   "key": "mnm_8f3e7c2b91a4d6f8...",
   "key_prefix": "mnm_8f3e",
   "name": "ci-prod",
-  "scopes": ["gateway", "api"],
+  "scopes": ["gateway", "api:read", "api:write"],
   "created_at": "2026-04-25T12:34:56Z"
 }
 ```
+
+If you omit `scopes` from the request body, the API substitutes the default set (`["gateway", "api:read", "api:write"]`).
+
+## Using a key
+
+```bash
+curl https://api.mnemom.ai/v1/agents \
+  -H "X-Mnemom-Api-Key: mnm_8f3e7c2b91a4d6f8..."
+```
+
+The `X-Mnemom-Api-Key` header is the canonical auth path for `mnm_*` keys. (Some legacy SDKs send the key as `Authorization: Bearer mnm_...` — that path is deprecated; migrate to `X-Mnemom-Api-Key`.)
+
+## Legacy keys (`["gateway", "api"]`)
+
+Keys minted before May 2026 carry the legacy two-scope set `["gateway", "api"]`. They continue to work — the auth gate aliases them to `["gateway", "api:read", "api:write"]` at request time, so existing integrations need no changes.
+
+The dashboard renders these keys with a "legacy" badge. To upgrade a legacy key to the canonical vocabulary:
+
+1. Rotate the key (`POST /v1/api-keys/{key_id}/rotate`) — the rotation preserves the legacy scope set on the new key.
+2. Revoke the rotated key and create a fresh one (`POST /v1/api-keys`) without specifying `scopes`. The new key inherits the post-ADR-049 default `["gateway", "api:read", "api:write"]`.
+
+(You don't have to upgrade — legacy keys remain valid indefinitely. But if you want the dashboard to stop annotating them, this is the migration path.)
 
 ## Rotation
 
@@ -123,8 +185,10 @@ For org keys, the same shape applies under `/v1/orgs/{org_id}/api-keys/{key_id}`
 
 ## Key hygiene checklist
 
-- **Rotate annually**, or whenever a member with access leaves the org. The audit log shows last_used_at per key — rotate dormant keys aggressively.
-- **Name your keys**. `"name": "ci-prod"` is much more useful than `"Default"` six months later when you're triaging an alert.
+- **Rotate annually**, or whenever a member with access leaves the org. The audit log shows `last_used_at` per key — rotate dormant keys aggressively.
+- **Name your keys.** `"name": "ci-prod"` is much more useful than `"Default"` six months later when you're triaging an alert.
+- **Use the smallest scope set that works.** Default to `gateway` + `api:read`/`api:write` and only add admin scopes when the integration genuinely needs them. Smaller blast radius if leaked.
+- **Prefer `api:read` for analytics integrations.** Read-only keys are safer and the audit trail is cleaner.
 - **Never commit secrets.** The `mnm_` prefix is a string git secret-scanners recognize; we recommend GitHub Secret Scanning + push protection to catch accidents.
-- **Use scopes.** Keys default to `["gateway", "api"]`; if you only need one, request just one. Smaller blast radius if leaked.
 - **Include a renewal reminder** in your deploy / IaC if the key has a TTL constraint from your security policy. Mnemom keys themselves don't expire by default.
+- **Treat admin-scope keys with extra care.** Use them only for the specific automation that needs them; rotate them on any suspected leak; audit which keys carry `admin:org` or `admin:platform` quarterly.
