@@ -1,6 +1,6 @@
 ---
 title: "Governance signals"
-description: "Operator-actionable observations from Mnemom's platform detectors — fleet drift, value fault lines, coherence drops, behavior drift. Surfaced to operators (UI, webhook, REST) and to application composers, never auto-injected into agent prompts."
+description: "Operator-actionable observations from Mnemom's platform detectors — fleet drift, value fault lines, coherence drops, behavior drift. Surfaced to operators (UI, webhook, REST). The platform never injects governance signals into an agent's prompt."
 sidebarTitle: "Governance signals"
 icon: "siren"
 ---
@@ -13,7 +13,7 @@ They are deliberately distinct from the [per-turn advisories](/concepts/safe-hou
 
 > **Operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail.**
 
-If a non-sovereign agent is told "Recalibrate fleet alignment before the next response," it has no team-management authority, no acknowledgment surface, and no remediation it can perform from inside its own LLM call. The signal is real and important — but the recipient is wrong. Governance signals fix that mis-layering.
+If an agent is told "Recalibrate fleet alignment before the next response," it has no team-management authority, no acknowledgment surface, and no remediation it can perform from inside its own LLM call. The signal is real and important — but the recipient is wrong. Governance signals fix that mis-layering by routing fleet-shaped observations exclusively to operator surfaces.
 
 ## What gets surfaced
 
@@ -34,7 +34,7 @@ A governance signal lives in **three operator surfaces** simultaneously:
 2. **Webhook** events: `governance.signal.fired`, `governance.signal.acknowledged`, `governance.signal.resolved`, `governance.signal.dismissed`, `governance.escalation.triggered`. HMAC-SHA256 signed POSTs (`X-Mnemom-Signature: sha256=…`) following the AAP webhook contract.
 3. **REST API**: `GET /v1/orgs/:org/governance/signals`, `GET /v1/teams/:team/governance/signals`, `GET /v1/agents/:agent/governance/signals`, plus state-transition endpoints. See [Governance Signals Schema](/specifications/governance-signals-schema).
 
-The platform **never** injects governance signals into an agent's LLM request. That decision lives entirely in your application, if you have a sovereign-CTO-shaped agent who legitimately can act on fleet-level signals (e.g., a fleet orchestrator agent with reorg tools). See [Sovereign-agent composition](/guides/sovereign-agent-composition) for the worked pattern.
+The platform **never** injects governance signals into an agent's LLM request — there is no exception, no per-agent fast-path, no platform-supplied composer pattern. Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform offers no surface for that. (See [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md)'s 2026-05-07 amendment for the full rationale.)
 
 ## Operator workflow
 
@@ -54,7 +54,7 @@ A signal moves through this lifecycle:
 - **`dismissed`** — operator marked as not actionable (noise, redundant).
 - **`expired`** — TTL elapsed without operator action; configurable per posture, default 30 days.
 
-The schema's partial unique index on `(scope, scope_id, source, pattern_type) WHERE status='open'` makes detection idempotent: repeated cron emissions of the same condition refresh the open row in place rather than stacking. This is the architectural fix to the symptom that triggered this work — a sovereign agent receiving the same `cluster_partition` paragraph 2× per turn for weeks.
+The schema's partial unique index on `(scope, scope_id, source, pattern_type) WHERE status='open'` makes detection idempotent: repeated cron emissions of the same condition refresh the open row in place rather than stacking. This is the architectural fix to the symptom that triggered this work — an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks.
 
 ## Notification destinations
 
@@ -89,5 +89,4 @@ The harness gate is binding for `T1-4` (CI gate) closure post-cutover.
 - [Sideband detection](/concepts/sideband-detection) — the detector layer (unchanged; only the delivery surface moved).
 - [Governance Signals Schema](/specifications/governance-signals-schema) — table layout, RPCs, RLS.
 - [Operating governance signals](/guides/operating-governance-signals) — operator runbook for ack/resolve/dismiss + destinations + rules.
-- [Sovereign-agent composition](/guides/sovereign-agent-composition) — application-side pattern for opting sovereign agents into governance-signal context.
 - [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md) — the architectural decision.
