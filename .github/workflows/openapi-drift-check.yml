@@ -5,16 +5,15 @@ name: OpenAPI Drift Check
 #      (openapi.json path, or /v1/admin/ reference in any MDX/docs.json).
 #      /v1/admin/* is permanently Mnemom-staff-only; customer org-admin
 #      routes live under /v1/orgs/{org_id}/*.
-#   2. OpenAPI drift — fails if routes in mnemom-api (+ reputation, risk)
-#      diverge from api-reference/openapi.json. Step 8 of the docs drift
-#      audit (docs-audit/code-bugs.md + 04-generator-options.md).
+#   2. Manifest sync — fails if api-reference/openapi.json drifts from
+#      mnemom-api/openapi.json (the manifest-generated source of truth,
+#      mnemom-api PR #360, 2026-05-08).
 #
 # Triggers:
-#   - pull_request to main (any docs change that could leak /v1/admin/
-#     into the customer surface, or any change that might add/remove a
-#     customer route in openapi.json)
-#   - schedule daily (catches drift introduced by mnemom-api changes
-#     that didn't trigger a docs PR)
+#   - pull_request to main (any docs change touching openapi.json or MDX)
+#   - schedule daily (catches drift introduced when mnemom-api ships a
+#     new manifest-generated openapi.json without a corresponding docs
+#     sync PR)
 #   - workflow_dispatch (manual trigger)
 
 on:
@@ -65,33 +64,12 @@ jobs:
           ref: main
           path: mnemom-api
           token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
-
-      - name: Checkout mnemom-reputation (private) via read-only PAT
-        if: steps.preflight.outputs.skip == 'false'
-        uses: actions/checkout@v6
-        with:
-          repository: mnemom/mnemom-reputation
-          ref: main
-          path: mnemom-reputation
-          token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
-        continue-on-error: true
-
-      - name: Checkout mnemom-risk (private) via read-only PAT
-        if: steps.preflight.outputs.skip == 'false'
-        uses: actions/checkout@v6
-        with:
-          repository: mnemom/mnemom-risk
-          ref: main
-          path: mnemom-risk
-          token: ${{ secrets.MNEMOM_API_READ_TOKEN }}
-        continue-on-error: true
+          # Sparse: only need openapi.json (the manifest-generated source
+          # of truth) — neither the source code nor the manifest tag files.
+          sparse-checkout: |
+            openapi.json
+          sparse-checkout-cone-mode: false
 
       - name: Check for drift
         if: steps.preflight.outputs.skip == 'false'
-        run: |
-          # Include reputation + risk worker sources if they were checked out;
-          # fall back to mnemom-api only if the optional checkouts failed.
-          sources="mnemom-api/src/index.ts"
-          [ -f mnemom-reputation/server/src/index.ts ] && sources="$sources mnemom-reputation/server/src/index.ts"
-          [ -f mnemom-risk/server/src/index.ts ] && sources="$sources mnemom-risk/server/src/index.ts"
-          node scripts/check-openapi-drift.mjs $sources
+        run: node scripts/check-openapi-drift.mjs mnemom-api/openapi.json
