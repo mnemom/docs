@@ -3419,6 +3419,7 @@
       "post": {
         "operationId": "createApiKey",
         "summary": "Create a personal API key",
+        "description": "Mints a new personal API key. The full secret is returned in the `key` field — capture it now, it is not retrievable again. Scopes use the capability-based vocabulary (ADR-049); the default scope set is `[\"gateway\", \"api:read\", \"api:write\"]`. Admin scopes (`admin:org`, `admin:platform`) are opt-in and rejected at mint time if the requester does not hold the corresponding role.",
         "tags": [
           "Billing"
         ],
@@ -3436,7 +3437,20 @@
                   "name": {
                     "type": "string",
                     "maxLength": 100,
-                    "default": "Default"
+                    "default": "Default",
+                    "description": "Friendly name for the key (e.g., \"ci-prod\", \"local-dev\"). Capped at 100 characters; longer names are truncated server-side."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ApiKeyScope"
+                    },
+                    "default": [
+                      "gateway",
+                      "api:read",
+                      "api:write"
+                    ],
+                    "description": "Capability set for this key. If omitted, the API substitutes the default. Admin scopes (`admin:org`, `admin:platform`) are gated by the requester's current role and return HTTP 403 at mint time if the requester is not eligible."
                   }
                 }
               }
@@ -3454,8 +3468,14 @@
               }
             }
           },
+          "400": {
+            "description": "Validation error — typically an unknown scope name. The error message lists the valid scopes."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Mint-time ceiling violation — `admin:platform` requested by a non-staff user, or `admin:org` requested by a user who is not owner/admin of any organization. The error body identifies which scope was rejected."
           }
         }
       },
@@ -4893,7 +4913,20 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "maxLength": 100
+                    "maxLength": 100,
+                    "description": "Friendly name for the key (e.g., \"ci-prod\")."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ApiKeyScope"
+                    },
+                    "default": [
+                      "gateway",
+                      "api:read",
+                      "api:write"
+                    ],
+                    "description": "Capability set for this org key (ADR-049). If omitted, the API substitutes the default. The caller is already verified as owner/admin of this org by the route's RBAC gate, so `admin:org` is implicit-eligible here; `admin:platform` still requires Mnemom-staff role."
                   }
                 }
               }
@@ -4916,6 +4949,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Mint-time ceiling violation — typically `admin:platform` requested by a non-staff user."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -20570,6 +20606,18 @@
           }
         }
       },
+      "ApiKeyScope": {
+        "type": "string",
+        "enum": [
+          "gateway",
+          "api:read",
+          "api:write",
+          "admin:org",
+          "admin:platform",
+          "api"
+        ],
+        "description": "Capability-based scope (ADR-049). `gateway` permits gateway-worker traffic; `api:read` and `api:write` permit identity-scoped GET and write endpoints respectively; `admin:org` permits org-admin operations on orgs the bearer owns/admins (per-request membership re-check); `admin:platform` permits `/v1/admin/*` Mnemom-staff operations (per-request staff-role re-check). The legacy `api` scope is accepted for backward compatibility and aliased to `api:read` + `api:write` at the auth gate; new keys should use the canonical vocabulary."
+      },
       "ApiKey": {
         "type": "object",
         "properties": {
@@ -20595,8 +20643,9 @@
           "scopes": {
             "type": "array",
             "items": {
-              "type": "string"
-            }
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "description": "Capabilities granted to this key. Default for new keys is `[\"gateway\", \"api:read\", \"api:write\"]`. Admin scopes (`admin:org`, `admin:platform`) are opt-in and gated by the requester's role at mint time. See [API Keys → Scope vocabulary](https://docs.mnemom.ai/guides/api-keys#scope-vocabulary)."
           },
           "created_at": {
             "type": "string",

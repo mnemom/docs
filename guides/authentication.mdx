@@ -86,7 +86,21 @@ Server-side, sessions are revalidated on every protected request against the `au
 
 ## API keys
 
-API keys authenticate server-to-server calls against `api.mnemom.ai`. They are scoped to an organization and inherit the role of the creator.
+API keys authenticate server-to-server calls against `api.mnemom.ai` and `gateway.mnemom.ai`. They use a **capability-based scope vocabulary** (ADR-049): each scope names what the key is allowed to do, defaults are least-privilege, and admin scopes are opt-in and gated by your role.
+
+The full deep dive on key management — including the side-by-side comparison of personal vs. organization keys, the per-scope reference table, and rotation/revocation flows — lives at [API Keys](/guides/api-keys). This section is the auth-flow summary.
+
+### Scope vocabulary at a glance
+
+| Scope | Grants | Mintable by |
+|---|---|---|
+| `gateway` | Send LLM traffic through Mnemom's gateway worker. | Anyone |
+| `api:read` | `GET` endpoints scoped to your identity. | Anyone |
+| `api:write` | `POST`/`PUT`/`PATCH`/`DELETE` endpoints scoped to your identity. | Anyone |
+| `admin:org` | Org-admin operations on orgs you own/admin. | Org owner / org admin |
+| `admin:platform` | Mnemom-staff platform operations. | Mnemom staff only |
+
+**Default for new keys:** `["gateway", "api:read", "api:write"]`. Admin scopes are explicit opt-in; the API enforces a mint-time ceiling against your current role and re-checks on every request.
 
 ### Creating an API key
 
@@ -94,11 +108,11 @@ API keys authenticate server-to-server calls against `api.mnemom.ai`. They are s
 
 ### Sign in and open API keys
 
-**Settings → API Keys** (user-scoped) or **Org Settings → API Keys** (org-scoped).
+**Settings → API Keys** (personal) or **Org Settings → API Keys** (organization).
 
-### Create the key
+### Pick capabilities
 
-Click **Create API key**, name it, and pick a scope (Owner, Admin, Member — must not exceed the creator's role). AAL2 step-up is required.
+The dialog has a Capabilities section (default scopes) and an Admin permissions section (opt-in, role-gated). Quick-pick presets ("Default", "Read-only", "Gateway-only") cover most cases. AAL2 step-up is required.
 
 ### Copy the secret
 
@@ -115,6 +129,10 @@ curl https://api.mnemom.ai/v1/agents \
 
 API keys are rate-limited per plan tier (see [API reference overview](/api-reference/overview)).
 
+### Legacy keys
+
+Keys minted before May 2026 carry the legacy two-scope set `["gateway", "api"]`. The auth gate aliases them to `["gateway", "api:read", "api:write"]` at request time, so existing integrations continue to work unchanged. The dashboard renders them with a "legacy" annotation; rotation upgrades them to the canonical vocabulary. See [API Keys → Legacy keys](/guides/api-keys#legacy-keys-gateway-api) for the migration path.
+
 ### Rotating an API key
 
 Rotation is **create-new-then-revoke-old**, not an in-place swap. This gives you a window to roll callers over before the old key dies.
@@ -125,8 +143,6 @@ Rotation is **create-new-then-revoke-old**, not an in-place swap. This gives you
 4. Revoke the old key.
 
 Revocation is immediate. Any in-flight request using the revoked key receives HTTP 401 on its next call.
-
-{/* TODO: Alex — confirm whether we surface a "last used at" timestamp in the dashboard today, and whether there's an automated rotation reminder (e.g., suggest rotation after 90 days). */}
 
 ### Rotating a provider API key bound to an agent
 
