@@ -12,11 +12,11 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 ---
 
 ## Governance signals — operator-actionable observation surface (ADR-048)
-<sub>May 2026</sub>
+<sub>May 2026 (amended 2026-05-07)</sub>
 
-Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Application-side composers (e.g., Polis for sovereign-CTO agents like Wintermute) own the edge case of folding a fleet signal into a sovereign agent's prompt — the platform never auto-injects.
+Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Fleet-shaped governance signals are operator content. The platform serves them to operators only — humans, dashboards, webhooks, paging — and offers no path by which an operator-side signal becomes prompt content for any agent.
 
-The triggering symptom: a sovereign agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. ADR-048 fixed the layering at the schema, producer, and consumer layers simultaneously.
+The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. ADR-048 fixed the layering at the schema, producer, and consumer layers simultaneously.
 
 **What's new:**
 
@@ -27,14 +27,16 @@ The triggering symptom: a sovereign agent receiving the same `cluster_partition`
 - New escalation rule engine with rate-based gating (`threshold_count` + `window_minutes`).
 - New UI at team + agent scope (`/dashboard/teams/:teamId/governance` + `/dashboard/agents/:uuid/governance`).
 - `mnemom governance` CLI subcommand group: `signals`, `destinations`, `rules`.
-- `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript types + sovereign-composer example.
+- `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript governance signal types (consumed by operator dashboards, webhook subscribers, alerting tools).
 - `@mnemom/agent-integrity-protocol@1.1.0` adds optional `triggering_governance_signal_id` to `IntegritySignal`.
 
 **Cutover:** observer writers redirected (mnemom-platform#246), gateway reader narrowed (mnemom-platform#247). Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
 
 **Charter invariant** (`safe-house-hardening/validation-charter.md` §I15): operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted by the harness.
 
-See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals), [sovereign-agent composition](/guides/sovereign-agent-composition).
+**Amendment 2026-05-07:** ADR-048's original §7 ("Application-owned sovereign-agent composition") was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface, SDK examples, and ratifying ADR couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the Polis-shaped `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
+
+See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals).
 
 ---
 
