@@ -74,6 +74,13 @@ const SCAN_EXCLUDE_DIRS = new Set([
   "fonts",
   "images",
   "logo",
+  // External repos checked out by the CI workflow for the manifest sync
+  // guard (Guard 2). Their openapi.json files document the FULL surface
+  // including /admin/ paths and must not be walked as if they were
+  // customer docs.
+  "mnemom-api",
+  "mnemom-reputation",
+  "mnemom-risk",
 ]);
 
 function walkContent(dir, acc = []) {
