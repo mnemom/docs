@@ -34,15 +34,18 @@ interface PendingAdvisory {
 
 ## Source taxonomy
 
-Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047 expansion recipe](#expansion-contract) (ADR amendment + migration + producer + consumer-tolerance + posture body extension for `sideband.*`).
+Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047 expansion recipe](#expansion-contract) (ADR amendment + migration + producer + consumer-tolerance).
 
 | Context | Producer | Examples |
 |---|---|---|
 | `runtime.*` | `gateway/src/index.ts` (same-turn intervention bookkeeping) | `runtime.front_door.nudge`, `runtime.back_door.modification` |
-| `sideband.*` | `observer/src/sideband.ts` (cron-driven detector firing) | `sideband.drift`, `sideband.coherence`, `sideband.fault_line`, `sideband.fleet` |
 | `manual.*` | mnemom-api admin handlers (human-attached) | `manual.admin` |
 
-### Current ratified values (post-Piece-6, ADR-047 §6)
+<Warning>
+**ADR-048 §I15 invariant.** As of 2026-05-07, `sideband.*` sources are no longer accepted into `pending_advisories`. Cron-driven, fleet-shaped observations (the four legacy `sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` rows) now write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table, never to `pending_advisories`. A `NOT VALID` CHECK constraint on `pending_advisories.source` rejects new sideband.* writes; pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'` by migration 193.
+</Warning>
+
+### Current ratified values (post-ADR-048 cutover)
 
 | Source | Producer | Posture-gated | Webhook event |
 |---|---|---|---|
@@ -51,73 +54,18 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047
 | `runtime.inside.autonomy.nudge` | gateway (CLPI handler) | No | (none) |
 | `runtime.inside.integrity.nudge` | gateway (AIP handler) | No | (none) |
 | `runtime.back_door.modification` | gateway (back-door handler) | No | (none) |
-| `sideband.drift` | observer (`writeDriftSidebandAdvisory`) | Partial† | `drift.detected` (legacy carve-out) |
-| `sideband.coherence` | observer (`writeCoherenceSidebandAdvisory`) | Yes | `sideband.coherence.fired` |
-| `sideband.fault_line` | observer (`writeFaultLineSidebandAdvisory`) | Yes | `sideband.fault_line.fired` |
-| `sideband.fleet` | observer (`writeFleetSidebandAdvisory`) | Yes | `sideband.fleet.fired` |
 | `manual.admin` | mnemom-api admin attach handler | No | future `manual.advisory_attached` |
 
-† Drift's current thresholds are hardcoded in the AAP SDK; future posture-body extensions will move them under per-team Posture control. Drift's `drift.detected` webhook keeps its legacy name for backwards compatibility — the single documented carve-out from the `<source>.fired` convention.
+`sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here. They moved to [`governance_signals`](/specifications/governance-signals-schema) with the ADR-048 cutover; the four legacy `sideband.*.fired` and `drift.detected` webhook event names continue to fire for D+30 backwards-compat through 2026-06-07.
 
 ## `source_ref` shapes
 
 JSONB envelope keyed off `source`. Conventions:
 
-- Every `sideband.*` row carries `{team_id: string, pattern_type: string, ...detector_outputs}`
 - Every `runtime.*` row carries `{checkpoint_id: string, mode_at_fire: "off"|"observe"|"nudge"|"enforce"}`
 - Every `manual.*` row carries `{actor_user_id: string, attached_at: string, note?: string}`
 
-### `sideband.coherence` — `source_ref`
-
-```json
-{
-  "team_id": "tm-acme-banking",
-  "pattern_type": "pairwise_governance_floor=0.42 < 0.5|outliers=2 > 1",
-  "pairwise_governance_floor": 0.42,
-  "conflict_edge_count": 3,
-  "outlier_agent_ids": ["agt-monitor-3", "agt-watch-7"]
-}
-```
-
-`pattern_type` is a `|`-separated list of fired conditions (one or more of `pairwise_governance_floor`, `conflict_edge_count`, `outliers`). Detector outputs are propagated as-is so the dashboard can render the specific finding.
-
-### `sideband.fault_line` — `source_ref`
-
-```json
-{
-  "team_id": "tm-acme-banking",
-  "fault_line_id": "fl-de4f7ae",
-  "value": "transparency",
-  "severity": "high",
-  "impact_score": 0.62,
-  "classification": "priority_mismatch"
-}
-```
-
-One row per affected agent (per `fan_out.rule = "per_named_affected_agent"`) — `fault_line_id` is shared across the rows. Webhooks dedupe per-(account, fault_line); the carryover rows do not (the agent needs to know they specifically were named).
-
-### `sideband.fleet` — `source_ref`
-
-Three independent firing patterns; one row per (pattern, affected agent) — see the [Per-pattern emission](/concepts/sideband-detection#per-pattern-emission-for-the-fleet-axis) explainer.
-
-```json
-// patterns: outliers
-{ "team_id": "tm-acme-banking", "pattern_type": "outliers", "outlier_agent_ids": ["agt-monitor-3"] }
-
-// patterns: min_pair_score
-{ "team_id": "tm-acme-banking", "pattern_type": "min_pair_score", "min_pair_score": 0.31, "threshold": 0.4 }
-
-// patterns: cluster_partition
-{ "team_id": "tm-acme-banking", "pattern_type": "cluster_partition", "cluster_count": 2, "cluster_ids": ["c-0", "c-1"] }
-```
-
-### `sideband.drift` — `source_ref`
-
-```json
-{ "drift_alert_id": "drift-a7f2c6e8" }
-```
-
-Compact — drift's full diagnostic data lives in the `drift_alerts` row referenced by `drift_alert_id`. Consumers needing detail join.
+For `sideband.*` `source_ref` shapes, see [`governance_signals` source_ref](/specifications/governance-signals-schema#source-ref-shapes); those observations write to the operator-actionable surface, not to this table.
 
 ### `runtime.*` — `source_ref`
 
@@ -156,11 +104,8 @@ Short structured headline (≤80 chars) used for telemetry, dashboard display, a
 
 | Source | Example |
 |---|---|
-| `sideband.coherence` | `Coherence: pairwise_governance_floor=0.42 (1 outlier)` |
-| `sideband.fault_line` | `Fault line: transparency (severity high, impact 0.62)` |
-| `sideband.fleet` | `Fleet: cluster_partition (4 affected)` |
-| `sideband.drift` | `Sideband drift: misalignment_drift (similarity 0.28)` |
 | `runtime.*` | `<checkpoint>: <mode>-fired` |
+| `manual.admin` | `Manual: <one-line note>` |
 
 ## Read endpoints
 
