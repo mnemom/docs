@@ -13703,6 +13703,118 @@
         }
       }
     },
+    "/governance/signals": {
+      "get": {
+        "operationId": "listPlatformGovernanceSignals",
+        "summary": "List governance signals across the entire platform",
+        "description": "Cross-org listing for Mnemom platform admins. Optional `org_id` query narrows to one tenant. Other filters mirror the org-scope endpoint. Mnemom staff only (`app_metadata.is_admin = true`).",
+        "tags": [
+          "Governance"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional: narrow to a single org."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/GovernanceSignalSource"
+            },
+            "description": "Filter by source detector."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/GovernanceSignalSeverity"
+            },
+            "description": "Filter by severity."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/GovernanceSignalStatus"
+            },
+            "description": "Filter by workflow status."
+          },
+          {
+            "name": "pattern_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by pattern_type within the source's taxonomy."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Platform-scope governance signals listing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "scope",
+                    "signals"
+                  ],
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "platform"
+                      ]
+                    },
+                    "signals": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GovernanceSignal"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/governance/signals/{signal_id}": {
       "get": {
         "operationId": "getGovernanceSignal",
@@ -18041,7 +18153,7 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "minItems": 1
+                    "description": "Allowed empty when enabled is false (Tier 4 §4.4 default rules)"
                   },
                   "enabled": {
                     "type": "boolean",
@@ -18125,7 +18237,7 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "minItems": 1
+                    "description": "Allowed empty when enabled is false (Tier 4 §4.4 default rules)"
                   },
                   "enabled": {
                     "type": "boolean"
@@ -21478,6 +21590,88 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/realtime/governance": {
+      "get": {
+        "operationId": "subscribeGovernanceRealtime",
+        "summary": "Subscribe to live governance signal updates (SSE)",
+        "description": "Server-Sent Events stream that emits one `event: signal` per `governance_signals` insert/update matching the caller's filter. RBAC mirrors the REST list endpoints: `scope=platform` requires Mnemom staff; `scope=org|team|agent` requires org membership. The stream emits an initial `event: ready` marker, then signal events as they arrive, plus periodic `:heartbeat` comments. Connection lifetime is capped at 5 minutes — clients should reconnect.",
+        "tags": [
+          "Governance"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "platform",
+                "org",
+                "team",
+                "agent"
+              ],
+              "default": "org"
+            },
+            "description": "Subscription scope. `platform` requires staff; the rest require the matching scope id."
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of governance signal events.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Newline-delimited SSE frames: `event: ready` then `event: signal\\ndata: <GovernanceSignal JSON>` per update, plus `:heartbeat` comments."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
