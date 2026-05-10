@@ -47,18 +47,18 @@ The published `smoltbot` npm binary remains as a graceful-failure shim (`mnemom`
 
 ### `X-AIP-*` extras → `X-Mnemom-Verdict.integrity` + checkpoint REST
 
-The AAP allow-list is now tight: **only `X-AIP-Verdict` + `X-AIP-Checkpoint-Id` survive** (per [ADR-042 amend Q1](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md)). The full attestation detail moves to the [integrity checkpoints REST surface](/api-reference/endpoint/get-integrity-checkpoints-id), fetched by `X-AIP-Checkpoint-Id`.
+The AAP allow-list is now tight: **only `X-AIP-Verdict` + `X-AIP-Checkpoint-Id` survive** (per [ADR-042 amend Q1](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md)). The full attestation detail moves to the [integrity checkpoints REST surface](/api-reference/endpoint/get-agents-agent-id-checkpoints-checkpoint-id), fetched by `X-AIP-Checkpoint-Id`.
 
 | Old | New equivalent |
 |---|---|
-| `X-AIP-Action: <action>` | Folds into `X-Mnemom-Verdict.integrity`. Full action detail at `GET /v1/integrity-checkpoints/{checkpoint_id}.action`. |
+| `X-AIP-Action: <action>` | Folds into `X-Mnemom-Verdict.integrity`. Full action detail at `GET /v1/agents/{agent_id}/checkpoints/{checkpoint_id}.action`. |
 | `X-AIP-Proceed: true\|false` | Folds into `X-Mnemom-Verdict.integrity ∈ {pass, observed} → true; nudged → true; enforced → false`. |
 | `X-AIP-Synthetic: true` | The `clear` verdict path now passes through verbatim with `X-Mnemom-Verdict.integrity = pass`. The `synthetic` flag was redundant. |
-| `X-AIP-Source: hybrid\|local` | Folds into checkpoint metadata. Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.source`. |
+| `X-AIP-Source: hybrid\|local` | Folds into checkpoint metadata. Available at `GET /v1/agents/{agent_id}/checkpoints/{checkpoint_id}.source`. |
 | `X-AIP-Analysis-Scope: thinking_only\|thinking_and_output` | Folds into checkpoint metadata. |
-| `X-AIP-Certificate-Id: <id>` | Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.attestation.certificate_id`. |
-| `X-AIP-Chain-Hash: <hash>` | Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.attestation.chain_hash`. |
-| `X-AIP-Reason: <text>` | Folds into `X-Mnemom-Advisory` for boundary-violation cases. Full text at `GET /v1/integrity-checkpoints/{checkpoint_id}.reasoning_summary`. |
+| `X-AIP-Certificate-Id: <id>` | Available at `GET /v1/agents/{agent_id}/checkpoints/{checkpoint_id}.attestation.certificate_id`. |
+| `X-AIP-Chain-Hash: <hash>` | Available at `GET /v1/agents/{agent_id}/checkpoints/{checkpoint_id}.attestation.chain_hash`. |
+| `X-AIP-Reason: <text>` | Folds into `X-Mnemom-Advisory` for boundary-violation cases. Full text at `GET /v1/agents/{agent_id}/checkpoints/{checkpoint_id}.reasoning_summary`. |
 | `X-AIP-Nudge-Count: <n>` | When nudges fired, `X-Mnemom-Verdict.integrity = nudged`. Per-nudge detail in `X-Mnemom-Advisory` entries. |
 | `X-AIP-Enforcement: nudge\|enforce` | Folds into `X-Mnemom-Verdict.integrity ∈ {nudged, enforced}`. |
 
@@ -100,7 +100,9 @@ For the rare case where you genuinely needed an attestation field (`certificate_
 ```ts
 const checkpointId = response.headers.get('X-AIP-Checkpoint-Id');
 if (checkpointId) {
-  const checkpoint = await fetch(`https://api.mnemom.ai/v1/integrity-checkpoints/${checkpointId}`)
+  // Replace `<agent_id>` with the value of the `x-mnemom-agent` response header on
+  // the original gateway response.
+  const checkpoint = await fetch(`https://api.mnemom.ai/v1/agents/<agent_id>/checkpoints/${checkpointId}`)
     .then(r => r.json());
   const certificateId = checkpoint.attestation?.certificate_id;
   const chainHash = checkpoint.attestation?.chain_hash;
