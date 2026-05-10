@@ -1,0 +1,215 @@
+---
+title: "Response Headers"
+description: "The canonical Mnemom-namespaced response header set, presence conditions, and parser snippets for X-Mnemom-Verdict."
+sidebarTitle: "Headers"
+icon: "list-tree"
+---
+
+## The canonical set
+
+Every Mnemom response carries a tightly-scoped header surface. The Mnemom-namespaced set is **six headers**, plus an optional API-version header and an AAP allow-list pair. Anything else under `X-Mnemom-*` or `X-AIP-*` was retired in the [ADR-042 amendment 2026-05-08](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — see the [migration guide](/migration/smoltbot-to-mnemom-headers).
+
+| Header | Always emitted? | Emitted by | Purpose |
+|---|---|---|---|
+| `X-Mnemom-Request-Id` | Always | Gateway | UUIDv4 per request — paste into a support ticket and we can pull every log line for that request. Stable across the whole pipeline. |
+| `X-Mnemom-Verdict` | Always (gateway) | Gateway | Structured per-checkpoint verdict: `front=…; autonomy=…; integrity=…; back=…`, each in `{pass \| observed \| nudged \| enforced}`. Parse once; grep four checkpoints. |
+| `X-Mnemom-Advisory` | When non-empty | Gateway | Compact JSON array of advisory entries `[{source, text, severity?, id?}, …]`. Capped at 5 entries. Omitted entirely when no advisories fired. |
+| `X-Mnemom-Schema` | On API responses with versioned shapes | mnemom-api | Response-shape identifier (e.g. `alignment_card/v1`, `safe-house-harness-state/v1`). Mirrors the shape your client should validate against. |
+| `X-Mnemom-Version` | Always (mnemom-api) | mnemom-api | Echoes the date-based API version the response was rendered against (`YYYY-MM-DD`). Stripe-Version analog. |
+| `X-Mnemom-Agent` | When the request is bound to a named agent | Gateway | The agent identifier the gateway resolved your request to. |
+| `X-Mnemom-Session` | When the request is part of a multi-turn session | Gateway | Stable session correlation token across a multi-turn conversation. |
+
+**AAP allow-list (two headers, ADR-042 amend Q1):**
+
+| Header | Always emitted? | Purpose |
+|---|---|---|
+| `X-AIP-Verdict` | When AIP analysis ran | Raw AAP verdict for SDK clients (`pass \| boundary_violation \| ambiguous \| clear \| skipped \| pending \| disabled \| error`). The structured `X-Mnemom-Verdict.integrity` is the canonical rollup; `X-AIP-Verdict` is the raw value SDK clients use to fetch the full attestation via `Checkpoint-Id`. |
+| `X-AIP-Checkpoint-Id` | When AIP analysis stored a checkpoint | Pointer to the integrity checkpoint row. Use this to fetch the full attestation chain via the [integrity checkpoints REST surface](/api-reference/endpoint/get-integrity-checkpoints-id). |
+
+Plus standards: `Content-Type`, `Cache-Control`, CORS headers, and `Idempotent-Replay: true` on cached idempotency replays.
+
+## `X-Mnemom-Verdict` — structured per-checkpoint state
+
+**Format.** Single-line, semicolon-separated `key=value` pairs. Familiar HTTP convention (Cookie, Cache-Control, Server-Timing). Always exactly four checkpoints, always in canonical order:
+
+```
+X-Mnemom-Verdict: front=pass; autonomy=pass; integrity=pass; back=pass
+```
+
+Each value is one of `pass | observed | nudged | enforced`. The semantics of each verdict per checkpoint:
+
+| Checkpoint | `pass` | `observed` | `nudged` | `enforced` |
+|---|---|---|---|---|
+| **`front`** (Protection inbound) | No threat detected. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`). |
+| **`autonomy`** (CLPI on tool calls) | Tool call within bounds. | Out-of-bounds tool call observed but allowed. | Tool call surfaced a warning. | Tool call replaced with a synthetic error response. |
+| **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Reasoning surfaced a nudge into the response. | Response was replaced same-turn with a same-voice intervention. |
+| **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged with a warning suffix. | Output redacted, replaced, or blocked same-turn. |
+
+The four-checkpoint model is documented in [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) and [Safe House concept](/concepts/safe-house). All four checkpoints **always run** on every gateway-routed request — `pass` means the checkpoint ran and the request was clean.
+
+### Parser snippets
+
+**TypeScript:**
+
+```ts
+type CheckpointVerdicts = {
+  front: 'pass' | 'observed' | 'nudged' | 'enforced';
+  autonomy: 'pass' | 'observed' | 'nudged' | 'enforced';
+  integrity: 'pass' | 'observed' | 'nudged' | 'enforced';
+  back: 'pass' | 'observed' | 'nudged' | 'enforced';
+};
+
+function parseMnemomVerdict(headerValue: string): CheckpointVerdicts {
+  return Object.fromEntries(
+    headerValue.split(';').map(s => s.trim().split('=')),
+  ) as CheckpointVerdicts;
+}
+
+const v = parseMnemomVerdict(response.headers.get('X-Mnemom-Verdict')!);
+if (v.integrity === 'enforced') {
+  // Same-turn AIP replacement happened — surface that in your UI.
+}
+```
+
+**Python:**
+
+```python
+from typing import TypedDict, Literal
+
+VerdictValue = Literal['pass', 'observed', 'nudged', 'enforced']
+
+class CheckpointVerdicts(TypedDict):
+    front: VerdictValue
+    autonomy: VerdictValue
+    integrity: VerdictValue
+    back: VerdictValue
+
+def parse_mnemom_verdict(header_value: str) -> CheckpointVerdicts:
+    return dict(
+        s.strip().split('=', 1)
+        for s in header_value.split(';')
+    )  # type: ignore[return-value]
+
+v = parse_mnemom_verdict(response.headers['X-Mnemom-Verdict'])
+if v['integrity'] == 'enforced':
+    pass  # surface to UI / log / metric
+```
+
+**Go:**
+
+```go
+package mnemom
+
+import "strings"
+
+type CheckpointVerdicts struct {
+    Front     string
+    Autonomy  string
+    Integrity string
+    Back      string
+}
+
+func ParseMnemomVerdict(headerValue string) CheckpointVerdicts {
+    out := CheckpointVerdicts{}
+    for _, pair := range strings.Split(headerValue, ";") {
+        kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+        if len(kv) != 2 {
+            continue
+        }
+        switch kv[0] {
+        case "front":
+            out.Front = kv[1]
+        case "autonomy":
+            out.Autonomy = kv[1]
+        case "integrity":
+            out.Integrity = kv[1]
+        case "back":
+            out.Back = kv[1]
+        }
+    }
+    return out
+}
+```
+
+## `X-Mnemom-Advisory` — operator-actionable advisory entries
+
+**Format.** Compact JSON array. Each entry is `{source, text, severity?, id?}`. Capped at 5 entries (HTTP header size safety). Omitted entirely when there are no advisories.
+
+```http
+X-Mnemom-Advisory: [{"source":"safe_house.dlp","text":"DLP-protected content detected in agent output","severity":"warn"}]
+```
+
+Field semantics:
+
+| Field | Required | Description |
+|---|---|---|
+| `source` | Yes | Stable provenance string (`safe_house.dlp`, `safe_house.canary`, `safe_house.quarantine`, `sideband.coherence`, etc.). Maps to the producer surface. |
+| `text` | Yes | Human-readable one-line summary. Surface this in dashboards / alerts. |
+| `severity` | Optional | `info \| warn \| critical`. Drives color / prominence in operator UIs. |
+| `id` | Optional | Stable identifier for the underlying advisory row (e.g. quarantine_id). Lets you fetch full detail via the API. |
+
+### Parsing
+
+```ts
+type MnemomAdvisory = {
+  source: string;
+  text: string;
+  severity?: 'info' | 'warn' | 'critical';
+  id?: string;
+};
+
+const advisoryHeader = response.headers.get('X-Mnemom-Advisory');
+const advisories: MnemomAdvisory[] = advisoryHeader ? JSON.parse(advisoryHeader) : [];
+```
+
+When the receiving application needs more than 5 advisories per request, fetch the full set via the per-agent advisory listing endpoint — the header cap is a transport budget, not a semantic limit.
+
+## `X-Mnemom-Request-Id` — support correlation
+
+UUIDv4 per request. Stable across the entire request lifecycle (gateway → mnemom-api → Supabase → response). When you open a support ticket, paste this header value — we can pull every log line, OTel span, and audit row for the request.
+
+```http
+X-Mnemom-Request-Id: 8f446ed6-ca87-4c1d-aa90-e2bc6e9ef580
+```
+
+The header is **always emitted on gateway-routed responses**, including 4xx and 5xx error responses. Even on auth-failure 401s, the `X-Mnemom-Request-Id` is set — paste-into-support works on the failure case too.
+
+## Inbound stripping
+
+The gateway strips customer-supplied `X-Mnemom-*` and `X-AIP-*` from inbound requests at the boundary. This closes a header-smuggling attack vector — without the strip, an upstream proxy or compromised middleware could inject `X-Mnemom-Verdict: front=pass; ...` into a request and confuse downstream consumers parsing headers naively.
+
+The four customer-meaningful headers that survive the strip:
+
+- `X-Mnemom-Api-Key` — programmatic auth.
+- `X-Mnemom-Version` — date-based API version negotiator.
+- `X-Mnemom-Agent` — named-agent identifier (lets the gateway route per-agent).
+- `X-Mnemom-Session` — multi-turn session correlation (typically server-emitted, but customers can pass through to maintain session continuity across a managed proxy).
+
+Anything else under `X-Mnemom-*` or `X-AIP-*` on inbound is deleted. If you're testing with `curl` and accidentally include a verdict-shaped header, the response will reflect the gateway's own canonical state — your inbound value never reaches downstream code.
+
+## What was retired
+
+20 deprecated response headers were retired clean-break per ADR-042 amendment 2026-05-08:
+
+**Autonomy verdict (1):**
+- `X-Mnemom-Autonomy-Verdict` → folds into `X-Mnemom-Verdict.autonomy`.
+
+**Safe House extras (9):**
+- `X-Safe-House-Verdict` / `X-Safe-House-Advisory` / `X-Safe-House-Event` → fold into `X-Mnemom-Verdict.front` + `X-Mnemom-Advisory`.
+- `X-Safe-House-Quarantine-Id` / `X-Safe-House-Canary-Triggered` / `X-Safe-House-DLP` → fold into `X-Mnemom-Advisory` entries.
+- `X-Safe-House-Session-Risk` / `X-Safe-House-Mode` / `X-Safe-House-Simulated-Verdict` → were operator-dashboard signals only; data lives in `sh_evaluations` / `audit_log`.
+
+**AAP extras (10):**
+- `X-AIP-Action` / `X-AIP-Proceed` / `X-AIP-Synthetic` / `X-AIP-Source` / `X-AIP-Analysis-Scope` / `X-AIP-Reason` / `X-AIP-Nudge-Count` / `X-AIP-Enforcement` → fold into `X-Mnemom-Verdict.integrity`.
+- `X-AIP-Certificate-Id` / `X-AIP-Chain-Hash` → fetch via the integrity-checkpoints REST surface using `X-AIP-Checkpoint-Id`.
+
+The `x-smoltbot-*` namespace was also retired in the same amendment (Q7) — see the [migration guide](/migration/smoltbot-to-mnemom-headers).
+
+There is **no dual-emit window** and **no `Sunset` header** on the legacy names. The retirement is clean-break per the amendment's Q7+Q8 ratification.
+
+## See also
+
+- [Migration: smoltbot → Mnemom headers](/migration/smoltbot-to-mnemom-headers) — the customer-facing migration cheat sheet.
+- [Webhook contract](/concepts/webhook-contract) — the seven invariants every webhook event carries.
+- [ADR-042: Header rationalization](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — the architectural decision and Q1+Q7+Q8 amendment.
+- [Charter §"Headers — the simplified set"](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) — the authoritative spec.

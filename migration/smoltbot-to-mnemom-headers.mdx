@@ -1,0 +1,120 @@
+---
+title: "Migration — smoltbot → Mnemom headers"
+description: "What's in the canonical Mnemom-namespaced response set and how to migrate from the pre-2026-05-10 surface."
+sidebarTitle: "smoltbot → Mnemom headers"
+icon: "arrow-right-arrow-left"
+---
+
+## What changed
+
+On 2026-05-10, Mnemom retired three legacy response-header namespaces clean-break per the [ADR-042 amendment 2026-05-08](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md):
+
+- `x-smoltbot-*` (the historical agent-routing namespace, retired in W2.3)
+- `X-Safe-House-*` extras (W2.1 + W2.1b)
+- `X-AIP-*` extras outside the AAP allow-list (W2.1 + W2.1b)
+
+**Their content folds into two new structured headers:** `X-Mnemom-Verdict` (per-checkpoint verdict state) and `X-Mnemom-Advisory` (operator-actionable advisory entries). See the [Response Headers reference](/api-reference/headers) for the full canonical set.
+
+This is **not a deprecation window** — there is no dual-emit period and no `Sunset` header. The legacy names stop being emitted on the cutover. Plan accordingly.
+
+## Migration cheat sheet
+
+If you parsed any of these legacy headers, here's where the equivalent data lives now:
+
+### `x-smoltbot-*` namespace
+
+| Old | New |
+|---|---|
+| `x-smoltbot-agent` | `x-mnemom-agent` (response) / `X-Mnemom-Agent` (request, when binding by name) |
+| `x-smoltbot-session` | `x-mnemom-session` (response) / `X-Mnemom-Session` (request, when continuing a session) |
+| Other `x-smoltbot-*` | Retired with no equivalent — they were internal routing signals never meant to be customer-facing. |
+
+The published `smoltbot` npm binary remains as a graceful-failure shim (`mnemom` is the canonical CLI binary). If you have legacy installations referencing the smoltbot binary, the shim prints a deprecation message and exits non-zero — that's the cleanest signal to migrate to `mnemom`.
+
+### `X-Safe-House-*` extras → `X-Mnemom-Verdict.front` + `X-Mnemom-Advisory`
+
+| Old | New equivalent |
+|---|---|
+| `X-Safe-House-Verdict: pass\|warn\|quarantine\|block` | `X-Mnemom-Verdict.front` ∈ `{pass, observed, nudged, enforced}` (mapped: `warn → observed`, `quarantine \| block → enforced`). |
+| `X-Safe-House-Quarantine-Id: <id>` | `X-Mnemom-Advisory` entry: `{source: "safe_house.quarantine", id: "<id>", severity: "critical", text: "Request quarantined: <id>"}` |
+| `X-Safe-House-Canary-Triggered: true` | `X-Mnemom-Advisory` entry: `{source: "safe_house.canary", severity: "critical", text: "Canary credential detected in agent output"}` |
+| `X-Safe-House-DLP: detected` | `X-Mnemom-Advisory` entry: `{source: "safe_house.dlp", severity: "warn"\|"critical", text: "DLP-protected content detected in agent output"}` |
+| `X-Safe-House-Advisory: <text>` | `X-Mnemom-Advisory` entry: `{source: "safe_house", severity: "warn", text: "<text>"}` |
+| `X-Safe-House-Session-Risk` | Retired — operator-dashboard signal only; data lives in `sh_evaluations` / `audit_log`. Fetch via the per-org safe-house API surface. |
+| `X-Safe-House-Mode` | Retired — internal mode hint, not customer-facing. The mode is implicit in whether the front-door verdict is `nudged`/`enforced`. |
+| `X-Safe-House-Simulated-Verdict` | Retired — test-mode-only header that should never have shipped to customers. |
+| `X-Safe-House-Event` | Retired with no equivalent — was an outbound webhook delivery header from a parallel rail. |
+
+### `X-AIP-*` extras → `X-Mnemom-Verdict.integrity` + checkpoint REST
+
+The AAP allow-list is now tight: **only `X-AIP-Verdict` + `X-AIP-Checkpoint-Id` survive** (per [ADR-042 amend Q1](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md)). The full attestation detail moves to the [integrity checkpoints REST surface](/api-reference/endpoint/get-integrity-checkpoints-id), fetched by `X-AIP-Checkpoint-Id`.
+
+| Old | New equivalent |
+|---|---|
+| `X-AIP-Action: <action>` | Folds into `X-Mnemom-Verdict.integrity`. Full action detail at `GET /v1/integrity-checkpoints/{checkpoint_id}.action`. |
+| `X-AIP-Proceed: true\|false` | Folds into `X-Mnemom-Verdict.integrity ∈ {pass, observed} → true; nudged → true; enforced → false`. |
+| `X-AIP-Synthetic: true` | The `clear` verdict path now passes through verbatim with `X-Mnemom-Verdict.integrity = pass`. The `synthetic` flag was redundant. |
+| `X-AIP-Source: hybrid\|local` | Folds into checkpoint metadata. Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.source`. |
+| `X-AIP-Analysis-Scope: thinking_only\|thinking_and_output` | Folds into checkpoint metadata. |
+| `X-AIP-Certificate-Id: <id>` | Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.attestation.certificate_id`. |
+| `X-AIP-Chain-Hash: <hash>` | Available at `GET /v1/integrity-checkpoints/{checkpoint_id}.attestation.chain_hash`. |
+| `X-AIP-Reason: <text>` | Folds into `X-Mnemom-Advisory` for boundary-violation cases. Full text at `GET /v1/integrity-checkpoints/{checkpoint_id}.reasoning_summary`. |
+| `X-AIP-Nudge-Count: <n>` | When nudges fired, `X-Mnemom-Verdict.integrity = nudged`. Per-nudge detail in `X-Mnemom-Advisory` entries. |
+| `X-AIP-Enforcement: nudge\|enforce` | Folds into `X-Mnemom-Verdict.integrity ∈ {nudged, enforced}`. |
+
+### `X-AIP-Verdict` itself — kept
+
+`X-AIP-Verdict` (raw AAP value: `pass | boundary_violation | ambiguous | clear | skipped | pending | disabled | error`) survives the cutover unchanged. AAP SDK clients use this for protocol-shape parsing; the structured `X-Mnemom-Verdict.integrity` is the canonical platform rollup.
+
+## Code-side migration
+
+If you had:
+
+```ts
+// PRE-2026-05-10 — DON'T DO THIS ANYMORE
+const aipAction = response.headers.get('X-AIP-Action');
+const aipReason = response.headers.get('X-AIP-Reason');
+const shVerdict = response.headers.get('X-Safe-House-Verdict');
+const quarantineId = response.headers.get('X-Safe-House-Quarantine-Id');
+```
+
+Replace with:
+
+```ts
+// POST-2026-05-10 — canonical headers + advisory entries
+import { parseMnemomVerdict } from './mnemom-headers'; // or your equivalent
+
+const verdict = parseMnemomVerdict(response.headers.get('X-Mnemom-Verdict')!);
+const advisoryHeader = response.headers.get('X-Mnemom-Advisory');
+const advisories = advisoryHeader ? JSON.parse(advisoryHeader) : [];
+
+const integrityState = verdict.integrity;       // 'pass' | 'observed' | 'nudged' | 'enforced'
+const frontDoorState = verdict.front;            // same
+const quarantine = advisories.find(a => a.source === 'safe_house.quarantine');
+const quarantineId = quarantine?.id;             // same identifier as before
+const canaryHit = advisories.some(a => a.source === 'safe_house.canary');
+```
+
+For the rare case where you genuinely needed an attestation field (`certificate_id`, `chain_hash`), fetch the full checkpoint:
+
+```ts
+const checkpointId = response.headers.get('X-AIP-Checkpoint-Id');
+if (checkpointId) {
+  const checkpoint = await fetch(`https://api.mnemom.ai/v1/integrity-checkpoints/${checkpointId}`)
+    .then(r => r.json());
+  const certificateId = checkpoint.attestation?.certificate_id;
+  const chainHash = checkpoint.attestation?.chain_hash;
+}
+```
+
+## Inbound-request stripping
+
+The gateway now strips customer-supplied `X-Mnemom-*` and `X-AIP-*` from inbound requests at the boundary, except for four customer-meaningful headers (`X-Mnemom-Api-Key`, `X-Mnemom-Version`, `X-Mnemom-Agent`, `X-Mnemom-Session`). If your code was setting any other header in those namespaces on outbound requests to Mnemom, the gateway now silently drops them.
+
+This closes a header-smuggling attack vector. If you accidentally relied on `X-Mnemom-Verdict: front=pass; ...` flowing through unchanged, your code would break — but if your code was injecting a verdict header, that was already wrong and dangerous.
+
+## See also
+
+- [Response Headers reference](/api-reference/headers) — the canonical post-cutover surface.
+- [Webhook contract](/concepts/webhook-contract) — webhook event invariants (orthogonal but related).
+- [ADR-042 amendment](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — the architectural rationale.
