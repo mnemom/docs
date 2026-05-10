@@ -1,0 +1,116 @@
+---
+title: "Webhook Contract"
+description: "Seven invariants every Mnemom webhook event carries — stable name, JSON Schema, HMAC signature, idempotency key, retry policy, replay path, surface separation."
+sidebarTitle: "Webhook Contract"
+icon: "webhook"
+---
+
+Mnemom webhook events are **operator-actionable signals**. Every event the platform emits — whether a billing event (`subscription.status_changed`), a Safe House signal (`integrity.violation`), or a sideband detection firing (`sideband.coherence.fired`) — carries the same seven contractual guarantees.
+
+This page is the rationale for those guarantees and how to verify them. The full event catalog (47 events as of 2026-05-09) is at [Webhook Event Catalog](/api-reference/webhook-events).
+
+## The seven invariants
+
+### 1. Stable name
+
+Every event is identified by a hierarchical, dotted name (`<context>.<axis>[.<event>]`) per [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md). The name is **stable across versions** — if the underlying mechanism changes, the existing name continues to work; the new mechanism gets a new name.
+
+The name space is defined as a closed enum in `mnemom-api/src/webhooks/types.ts` (`WEBHOOK_EVENT_TYPES`). New events go through ADR review and are added to the enum atomically with their schema and emission site.
+
+### 2. Versioned JSON Schema
+
+Every event has a JSON Schema published at `mnemom-api/schemas/webhooks/<event>.schema.json`, rendered live on [docs.mnemom.ai/api-reference/webhook-events](/api-reference/webhook-events), and exported as OpenAPI for client generation.
+
+Payload evolution is **additive** — new fields can be added without bumping the event name. Breaking changes bump the catalog version (date-based, mirroring `X-Mnemom-Version`). See [ADR-050](https://github.com/mnemom/scale/blob/main/decisions/ADR-050-webhook-event-catalog-discipline.md) for the discipline.
+
+CI enforces three-way coherence on every PR: `WEBHOOK_EVENT_TYPES` ↔ schemas ↔ emission sites. A schema without an emitter or an emitter without a schema fails the lint.
+
+### 3. Example payload
+
+Every event in the catalog ships with an example payload at `mnemom-api/schemas/webhooks/<event>.example.json`. The example is the canonical reference for client implementations and the seed for the `mnemom webhooks trigger <event>` CLI subcommand.
+
+### 4. Idempotency key
+
+Every event carries a stable `id` field in the form `evt-<random>`. **Receivers can safely dedupe on this id** — Mnemom guarantees the same `id` will not be issued for two different events.
+
+When Mnemom retries delivery (per the retry policy below), the same `id` flows through every attempt. Your receiver can store seen ids and short-circuit re-emissions without losing semantic correctness.
+
+### 5. HMAC signature
+
+Every delivery is signed with HMAC-SHA256 over `${X-Webhook-Timestamp}.${rawBody}` using the per-endpoint signing secret. The signature is sent as `X-Webhook-Signature: v1=<hex>` (Stripe convention).
+
+**Verifying a signature:**
+
+```ts
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function verifyWebhookSignature(
+  rawBody: string,
+  timestamp: string,
+  signatureHeader: string,
+  signingSecret: string,
+): boolean {
+  const sigMatch = signatureHeader.match(/^v1=(.+)$/);
+  if (!sigMatch) return false;
+
+  const expected = createHmac('sha256', signingSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest('hex');
+
+  const a = Buffer.from(sigMatch[1], 'hex');
+  const b = Buffer.from(expected, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+Always reject signatures whose `X-Webhook-Timestamp` is more than 5 minutes from server time — replay attacks are otherwise indistinguishable from legitimate retries.
+
+### 6. Retry policy
+
+Mnemom retries failed deliveries on this schedule (in seconds): `[10, 30, 120, 600, 3600]` (5 retries, 6 attempts total). Receivers that return any 2xx within 30 seconds are considered successful. 5xx and connection failures are retried; 4xx (other than 408/429) are NOT retried — they indicate a permanent receiver-side error.
+
+After 100 consecutive failures across all events to an endpoint, Mnemom auto-disables the endpoint and notifies the org owner via email + Slack + HubSpot. The endpoint stays disabled until manually re-enabled.
+
+The first-attempt timeout is **30 seconds** (per ADR-050 amend Q17 + Stripe / Cloudflare receiver-budget mode). Receivers with database writes or downstream fan-out should write the event to a queue first and ack immediately.
+
+### 7. Replay path
+
+Every emitted event is durably stored in `webhook_events` and can be replayed via `POST /v1/orgs/:org_id/webhooks/events/:event_id/replay`. Replay re-fans-out the event to all currently-subscribed active endpoints (or to a caller-specified subset via `endpoint_ids[]` in the request body).
+
+Replay differs from `redeliver`:
+
+- **`replay`** rebuilds the fan-out from the canonical event row — picks up endpoints that have been added or re-subscribed since the original emission.
+- **`redeliver`** retries one specific delivery row.
+
+Both shapes ship — Stripe-equivalent ergonomics. See the [webhook event catalog](/api-reference/webhook-events) for the full API surface.
+
+The replay endpoint requires an `Idempotency-Key` header; reuse with the same key returns the cached delivery list (does NOT mint a second fan-out). Cached replays carry an `Idempotent-Replay: true` response header.
+
+## §I15 — surface separation invariant
+
+Mnemom webhook events live exclusively on the **operator surface** per [charter §I15](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md#i15) and [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md).
+
+Operators are **humans, dashboards, paging systems, automated systems acting outside an agent's request loop**. Agent-actionable signals (per-turn, conversation-bound, where the agent has a same-turn lever) belong to `pending_advisories` only and have no webhook fan-out.
+
+This is enforced at three layers:
+
+1. **Schema metadata.** Every catalog entry declares `x-mnemom-surface: operator-actionable`. Anything else fails the CI lint at `mnemom-api/scripts/validate-webhook-schemas.ts`.
+2. **Producer-layer separation.** `pending_advisories` accepts only `runtime.*` + `manual.*` source values per [ADR-047 §6](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) narrowed by ADR-048 §1; `governance_signals` accepts `sideband.*` + future `protection.*` / `posture.*`. The two surfaces are mutually exclusive.
+3. **Harness assertion.** Every emitted event has a §I15 negative-assertion cell in the Safe House harness — `assertI15_VerifyTurnByteClean` — confirming that when the event fires, the agent's verify-turn prompt remains byte-clean (no leak from operator surface to agent prompt).
+
+The full conformance audit is at [`safe-house-hardening/audit/i15-conformance-2026-05-09.md`](https://github.com/mnemom/safe-house-hardening/blob/main/audit/i15-conformance-2026-05-09.md).
+
+## What the contract is not
+
+- **Not at-most-once delivery.** Mnemom delivers at-least-once, with idempotency keys for receiver-side dedup. Build your receiver to handle a small number of duplicates.
+- **Not strict ordering.** Events are emitted in the order they occur, but delivery to a slow receiver may arrive out of order if a retry races a fresh delivery. Use the event payload's `created_at` for canonical ordering.
+- **Not exactly-once semantics.** Combined with idempotency keys, you can build exactly-once semantics on the receiver — but the wire contract is at-least-once.
+- **Not customer-tunable retry.** The retry schedule is platform-wide (per ADR-050). If you need different retry behavior, dead-letter to a queue at your receiver and process there.
+
+## See also
+
+- [Webhook Event Catalog](/api-reference/webhook-events) — all 47 events with schemas + examples.
+- [Headers reference](/api-reference/headers) — the canonical Mnemom-namespaced response set.
+- [ADR-050: Webhook event catalog discipline](https://github.com/mnemom/scale/blob/main/decisions/ADR-050-webhook-event-catalog-discipline.md) — the architectural decision.
+- [ADR-048: Governance signals layering](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md) — surface separation.
+- [Charter §"Webhooks — the contract"](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) — the authoritative spec.
