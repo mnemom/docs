@@ -122,17 +122,13 @@ Mnemom's gateway adapter — the code that parses each provider's response forma
 | **Static-shape** | Every PR to the gateway | "Did our parser break?" Asserts the adapter handles captured response fixtures correctly. |
 | **Live** | Nightly | "Did the upstream provider ship a breaking change?" Real upstream call → real response → real parse. |
 
-For Anthropic and Gemini, **both layers run**. For OpenAI, only the static layer runs today — see the disclosure below.
+All three providers (Anthropic, OpenAI, Gemini) run **both layers** as of 2026-05-12. Live tests fire nightly against real upstream APIs and detect breaking changes within 24 hours.
 
-<Warning>
-**OpenAI live tests are currently paused.** Mnemom's OpenAI safety-research test account was deactivated by OpenAI's automated abuse-detection systems (the safety-evaluation traffic patterns Mnemom legitimately uses to test guardrails look identical to attacker traffic from the outside). We are working with OpenAI to restore the account. While the account is suspended:
+<Note>
+**Streaming OpenAI thinking visibility:** OpenAI's STREAMING Chat Completions API does not emit reasoning summaries via `delta.reasoning_content` for o-series models. Reasoning happens server-side and is reported in `usage.completion_tokens_details.reasoning_tokens`, but the reasoning text itself does not reach the streamed response. Customers using OpenAI's non-streaming Responses API see reasoning summaries; streaming customers do not.
 
-- **OpenAI adapter correctness is still verified** on every PR via captured response fixtures.
-- **Live verification of OpenAI changes** does not run nightly. If OpenAI ships a breaking change to their streaming format, Mnemom would detect it on the next captured-fixture refresh (quarterly cadence by default; can be triggered manually within 24 hours).
-- **OpenAI inference itself is unaffected.** Customer traffic to OpenAI through the gateway works as documented.
-
-This is disclosed publicly because Mnemom's commitment is honest per-provider differentiation. Anthropic and Gemini get nightly upstream-breakage detection; OpenAI does not until the account is restored.
-</Warning>
+This is upstream behavior, not a Mnemom limitation. The AIP coverage commitment of **≥50% on OpenAI o-series** applies to non-streaming consumers; streaming OpenAI o-series degrades to surface-only treatment. Mnemom's gateway parser correctly reports empty thinking content for streaming OpenAI responses regardless of model.
+</Note>
 
 ## Deprecation policy
 
