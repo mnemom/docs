@@ -113,6 +113,27 @@ In aggregate:
 
 Mid-stream interruption for integrity violations is not supported on any provider (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md)). AIP runs after the upstream response completes, but before the gateway delivers it to the customer.
 
+## How we test against each provider
+
+Mnemom's gateway adapter — the code that parses each provider's response format, extracts thinking blocks, and routes tool calls — is tested in **two layers**:
+
+| Layer | Cadence | Catches |
+|---|---|---|
+| **Static-shape** | Every PR to the gateway | "Did our parser break?" Asserts the adapter handles captured response fixtures correctly. |
+| **Live** | Nightly | "Did the upstream provider ship a breaking change?" Real upstream call → real response → real parse. |
+
+For Anthropic and Gemini, **both layers run**. For OpenAI, only the static layer runs today — see the disclosure below.
+
+<Warning>
+**OpenAI live tests are currently paused.** Mnemom's OpenAI safety-research test account was deactivated by OpenAI's automated abuse-detection systems (the safety-evaluation traffic patterns Mnemom legitimately uses to test guardrails look identical to attacker traffic from the outside). We are working with OpenAI to restore the account. While the account is suspended:
+
+- **OpenAI adapter correctness is still verified** on every PR via captured response fixtures.
+- **Live verification of OpenAI changes** does not run nightly. If OpenAI ships a breaking change to their streaming format, Mnemom would detect it on the next captured-fixture refresh (quarterly cadence by default; can be triggered manually within 24 hours).
+- **OpenAI inference itself is unaffected.** Customer traffic to OpenAI through the gateway works as documented.
+
+This is disclosed publicly because Mnemom's commitment is honest per-provider differentiation. Anthropic and Gemini get nightly upstream-breakage detection; OpenAI does not until the account is restored.
+</Warning>
+
 ## Deprecation policy
 
 Models the gateway routes are classified into two tiers:
