@@ -1,0 +1,152 @@
+---
+title: "Provider support"
+description: "Honest per-provider coverage of every Mnemom feature — what works, what's partial, and what's not supported across Anthropic, OpenAI, and Gemini"
+sidebarTitle: "Provider support"
+icon: "circuit-board"
+---
+
+# Provider support
+
+Mnemom sits in front of three upstream model providers: **Anthropic**, **OpenAI**, and **Gemini**. Safe House, AIP integrity checkpoints, CLPI policy enforcement, and DLP all route through a single gateway, but the **quality of each feature varies by provider** — because the underlying APIs differ in what they expose.
+
+This page is the honest accounting: what Mnemom guarantees on each provider, what it partially guarantees, and what it cannot guarantee.
+
+<Note>
+  Where coverage is partial — particularly **OpenAI's integrity-checkpoint coverage** — Mnemom does not claim parity. The v1 commitment is honest per-provider differentiation, not uniform coverage. Marketing materials, the status page, and the trust center all reflect this.
+</Note>
+
+## Supported models
+
+Models the v1 promise applies to. Listed in the gateway's `/models.json` registry; routed end-to-end through Safe House, AIP, CLPI, and DLP per the matrix below.
+
+<CardGroup cols={3}>
+  <Card title="Anthropic" icon="brain">
+    Claude Opus 4.7
+    Claude Sonnet 4.6
+    Claude Haiku 4.5
+  </Card>
+  <Card title="OpenAI" icon="microchip">
+    GPT-5
+    GPT-5 Codex
+    o3
+    o3-mini
+  </Card>
+  <Card title="Gemini" icon="gem">
+    Gemini 2.5 Pro
+    Gemini 2.5 Flash
+  </Card>
+</CardGroup>
+
+Additional models may route through the gateway in **passthrough mode** — they work for inference but do not carry the v1 feature-correctness promise. See [Deprecation policy](#deprecation-policy) below.
+
+## Feature coverage matrix
+
+Each cell describes the v1 commitment level. Symbols:
+
+- **✓** Fully supported. Tested in CI; Safe House features work identically to the Anthropic baseline.
+- **⚠ Partial** — Provider exposes the feature, but with a documented limitation. See the supporting note.
+- **N/A** — Provider does not expose this capability. Not a Mnemom limitation.
+
+| Capability | Anthropic | OpenAI | Gemini |
+|---|---|---|---|
+| Streaming (SSE) | ✓ | ✓ | ✓ |
+| Tool use / function calling | ✓ | ✓ | ✓ |
+| **Thinking-trace inspection** (AIP) | ✓ <sup>[1]</sup> | ⚠ Partial <sup>[2]</sup> | ✓ <sup>[3]</sup> |
+| Multimodal (image inputs) | ✓ | ✓ | ✓ |
+| Prompt caching | ✓ <sup>[4]</sup> | ⚠ Partial <sup>[5]</sup> | ⚠ Partial <sup>[6]</sup> |
+| Batch API | ✓ | ✓ | ✓ |
+
+### [1] Anthropic — full extended thinking
+
+Anthropic models expose full **extended thinking blocks** through the response API. AIP reads completed thinking blocks post-response, pre-delivery, and the verifier (Claude Haiku 4.5) has full chain-of-thought visibility. This is the most complete AIP coverage Mnemom offers — and the baseline against which other providers are compared.
+
+### [2] OpenAI — reasoning summaries only
+
+OpenAI's reasoning APIs (`o3`, `o3-mini`) expose **reasoning summaries**, not raw chain-of-thought. AIP can inspect these summaries, but the depth of analysis is bounded by what OpenAI chose to summarize. Non-reasoning models (`gpt-5`, `gpt-5-codex`, `gpt-4o`) expose no internal reasoning at all — AIP degrades to surface-only analysis on these.
+
+**What this means in practice:**
+- Boundary violations that surface in the model's final response are caught equally well across all providers.
+- Boundary violations that would have surfaced in the model's hidden reasoning, but never reach the final response, are caught with **lower confidence** on OpenAI than on Anthropic or Gemini.
+- The AIP integrity-checkpoint **verdict** is still emitted on OpenAI; the **certainty** of that verdict is provider-conditional.
+
+This is the load-bearing honesty disclosure. Mnemom does not claim uniform AIP coverage across providers. See [SLI-P1 in the Safe House SLOs](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p1-aip-coverage-by-provider) for the public commitment.
+
+### [3] Gemini — full `thoughts` exposure
+
+Gemini 2.5 models expose a `thoughts` field on response candidates. Coverage is uniform across 2.5 Pro and 2.5 Flash; AIP reads `thoughts` through the gateway's response normalizer and treats it as equivalent to Anthropic extended thinking.
+
+### [4] Anthropic — explicit `cache_control`
+
+Anthropic supports explicit `cache_control` block markers — customers control which prompt segments are cached. Mnemom passes `cache_control` through transparently. **Safe House still evaluates the full request** (it does not assume cached prefixes are safe just because they were previously seen). Cache hits do not bypass any checkpoint.
+
+### [5] OpenAI — automatic caching, no customer control
+
+OpenAI's prompt caching is **automatic** — the API decides what to cache based on request shape. Customers cannot reason about cache hit rates the way they can on Anthropic. Mnemom passes requests through unchanged; cache decisions are OpenAI's. **Safe House dispatch remains idempotent across cache hits and misses** — the same prompt routed through Mnemom twice produces the same verdict regardless of whether OpenAI cached it.
+
+### [6] Gemini — separate `CachedContent` API
+
+Gemini exposes prompt caching as a separate `CachedContent` resource (explicit cache lifecycle, named caches with TTL). The gateway today does not surface or use this API; requests are sent without referencing cached content. Customers using Gemini's cache outside Mnemom will see lower latency than they see through Mnemom — this is a known gap, tracked in the [Track 3 hardening plan](https://github.com/mnemom/safe-house-hardening/blob/main/implementation-plan.md#t3-2--aip-coverage-gaps-documented-honestly).
+
+## AIP coverage by provider — the headline commitment
+
+Of all per-provider gaps, **integrity-checkpoint coverage** is the load-bearing one. Mnemom's public SLO commitment is:
+
+| Provider | Target AIP coverage <sup>[*]</sup> |
+|---|---|
+| Anthropic (Opus 4.7, Sonnet 4.6, Haiku 4.5) | **≥ 99%** |
+| Gemini (2.5 Pro, 2.5 Flash) | **≥ 95%** |
+| OpenAI o-series (`o3`, `o3-mini`) | **≥ 50%** |
+| OpenAI non-thinking (`gpt-5`, `gpt-5-codex`, `gpt-4o`) | Excluded — AIP runs in degraded "surface-only" mode |
+
+<sup>[*]</sup> "AIP coverage" is defined as the percentage of customer-facing AIP analysis cycles where the verifier had full thinking-trace inspection. Anthropic and Gemini expose full traces; OpenAI o-series exposes reasoning summaries only; non-reasoning OpenAI models expose no internal reasoning. See [SLI-P1](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p1-aip-coverage-by-provider) for the rolling 30-day measurement methodology.
+
+**If your application relies on AIP catching boundary violations in the model's reasoning** — particularly violations that would not surface in the final response — choose Anthropic or Gemini. OpenAI o-series is supported, with the documented coverage limitation. OpenAI non-thinking models are supported for inference but are not the right choice when AIP is the load-bearing safety layer.
+
+## Latency expectations
+
+Per-provider P50/P95 latency for the Safe House dispatch path and AIP analysis is published on the [status page](https://status.mnemom.ai) and committed via [SLI-P2](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p2-per-provider-dispatch-overhead) and [SLI-P3](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p3-per-provider-aip-analysis-latency).
+
+In aggregate:
+
+- **Safe House dispatch** adds ~15 ms P50 / ~60 ms P95 across all providers (the dispatch path is provider-agnostic).
+- **AIP analysis** runs post-response, pre-delivery. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash and OpenAI non-thinking models emit thin traces and complete AIP analysis in P50 ≤ 800 ms.
+
+Mid-stream interruption for integrity violations is not supported on any provider (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md)). AIP runs after the upstream response completes, but before the gateway delivers it to the customer.
+
+## Deprecation policy
+
+Models the gateway routes are classified into two tiers:
+
+<CardGroup cols={2}>
+  <Card title="Supported" icon="check">
+    Listed in the [supported models](#supported-models) section above. v1 promise applies. Safe House, AIP, CLPI, DLP all work to their per-provider commitment. Tested in CI. Deprecation requires **90 days' notice** via this page and the changelog.
+  </Card>
+  <Card title="Passthrough" icon="forward">
+    Routed by the gateway but not in the supported tier. Inference works; Safe House features are best-effort. Not tested in CI. No deprecation notice — model availability tracks the provider's lifecycle.
+  </Card>
+</CardGroup>
+
+**Today's deprecation schedule:**
+
+| Model | Status | Sunset date | Migration target |
+|---|---|---|---|
+| `claude-3-opus-20240229` | Passthrough | Tracks Anthropic's deprecation | `claude-opus-4-7` |
+| `claude-3-5-sonnet-20241022` | Passthrough | Tracks Anthropic's deprecation | `claude-sonnet-4-6` |
+| `claude-sonnet-4-20250514` | Passthrough | 2026-Q3 (recommend migrating now) | `claude-sonnet-4-6` |
+| `gpt-4o` | Passthrough | Tracks OpenAI's deprecation | `gpt-5` |
+| `gemini-3-pro`, `gemini-3-flash` | Preview | When Google releases stable | Stay on `gemini-3-*` once supported |
+
+Passthrough-tier models that are removed from the upstream provider also disappear from the gateway's `/models.json` registry; we do not maintain shims.
+
+## Out of scope
+
+Provider expansion beyond Anthropic + OpenAI + Gemini is **not in scope for v1**. Cohere, Mistral, Together, Groq, and other providers are not supported. Adding a provider is a multi-quarter effort (Safe House dispatch, AIP adapter, CLPI policy schema mapping, harness coverage, docs) — tracked separately.
+
+[BYOK (bring-your-own-key)](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-headers-rationalization.md) for upstream providers is also out of v1. v1 ships with Mnemom-only key custody.
+
+## Related
+
+- [Integrity Checkpoints](/concepts/integrity-checkpoints) — the AIP analysis machinery
+- [Safe House](/concepts/safe-house) — pre-screening layer for inbound messages
+- [CLPI](/concepts/clpi) — Continuous Local Policy Interpretation for tool use
+- [Webhook contract](/concepts/webhook-contract) — event delivery for operator surfaces (provider-agnostic)
