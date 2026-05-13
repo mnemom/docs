@@ -1,0 +1,174 @@
+---
+title: "agent-preview/v1 Specification"
+description: "Normative spec for the agent-preview/v1 URL preview manifest: a structured JSON sibling for every URL, discoverable via <link rel=alternate>. MIME application/vnd.agent-preview+json. Mnemom is the reference implementation; the spec is vendor-neutral."
+sidebarTitle: "agent-preview/v1"
+icon: "file-json"
+---
+
+A structured JSON manifest sibling for every URL. One fetch gives an agent the title, summary, type, representations (HTML, markdown, image, JSON-LD), and per-type context — without rendering HTML or parsing markdown.
+
+Mnemom is the reference implementation of this spec. The schema is **vendor-neutral**: other sites can adopt the same shape, point at this hosted spec, and let their own URLs become one-fetch addressable for agents. As adoption grows the MIME can be IANA-registered to drop the `vnd.` prefix.
+
+The canonical hosted copy of this spec is at [https://www.mnemom.ai/spec/agent-preview/v1](https://www.mnemom.ai/spec/agent-preview/v1) (this docs page mirrors it).
+
+## Why
+
+Pasting a URL in chat already produces a rich human preview (the OG image). For agents, the equivalent today is "fetch HTML, parse it, hope the meta tags are present and consistent." That's expensive and brittle. `agent-preview/v1` is the structured sibling — a one-fetch typed summary so agents previewing a link can decide whether to dig deeper before reading the full page or the markdown mirror.
+
+## How discovery works
+
+Every prerendered URL on a compliant site exposes a sibling preview manifest at `<url>.preview.json` (root: `/index.preview.json`). The HTML page advertises it via `<link rel="alternate">` in `<head>`. Crawlers and humans ignore the unknown MIME; aware agents follow it.
+
+```html
+<link rel="alternate"
+      type="application/vnd.agent-preview+json"
+      href="https://example.com/article.preview.json">
+```
+
+### MIME type
+
+```
+application/vnd.agent-preview+json
+```
+
+## Schema (v1.0)
+
+The manifest is a single JSON object. Required keys are below; consumers MUST tolerate additional keys and unknown `type` values (treat unknowns as `reference`).
+
+```json
+{
+  "spec_version": "1.0",
+  "spec_url": "https://www.mnemom.ai/spec/agent-preview/v1",
+  "url": "https://www.mnemom.ai/methodology",
+  "canonical_url": "https://www.mnemom.ai/methodology",
+  "type": "methodology",
+  "title": "Mnemom Trust Rating™ Methodology",
+  "summary": "Fully transparent formula, component weights, grade scale.",
+  "language": "en-US",
+  "representations": {
+    "html": "https://www.mnemom.ai/methodology",
+    "markdown": "https://www.mnemom.ai/methodology.md",
+    "image": "https://www.mnemom.ai/api/og-image?type=methodology",
+    "json_ld": "https://www.mnemom.ai/methodology"
+  },
+  "context": {},
+  "last_modified": "2026-05-13T00:00:00Z",
+  "publisher": {
+    "name": "Mnemom",
+    "url": "https://www.mnemom.ai",
+    "agents_txt": "https://www.mnemom.ai/agents.txt",
+    "readiness_manifest": "https://www.mnemom.ai/for-agents"
+  }
+}
+```
+
+### Required fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `spec_version` | `"1.0"` | Spec version string. v1 == "1.0". |
+| `spec_url` | string | Canonical URL of the published spec. Consumers can fetch this to validate they understand the version. |
+| `url` | string | The URL this preview is *about*. Absolute http(s). |
+| `canonical_url` | string | Preferred form for citing. Equals `url` for unambiguous routes; may differ for locale-prefixed paths that share an x-default canonical. |
+| `type` | enum | See type taxonomy below. |
+| `title` | string | Short human-readable name for the resource. |
+| `summary` | string | One-line description. ≤ 220 chars recommended for previews. |
+| `language` | string | BCP-47 language tag (en-US, fr-FR, …). |
+| `representations` | object | Other URLs the agent can fetch for richer data. |
+| `context` | object | Type-specific context. Empty object is valid. |
+| `last_modified` | string | ISO 8601 timestamp; same source as sitemap.xml's lastmod. |
+| `publisher` | object | Pointer to the issuing site's agent-readiness manifest. |
+
+### type taxonomy
+
+| Value | Meaning |
+|---|---|
+| `home` | Site root. |
+| `marketing` | Generic marketing page (catch-all for top-level pages). |
+| `blog_post` | An article in a chronological blog feed. |
+| `research_paper` | A long-form research artifact (paper, whitepaper). |
+| `case_study` | Customer/deployment narrative. |
+| `agent_profile` | Public profile page for an AI agent. |
+| `team_profile` | Public profile page for a team of agents. |
+| `methodology` | Documented methodology or formula. |
+| `explainer` | Conceptual explainer or how-it-works page. |
+| `policy` | Legal/policy page (privacy, terms, etc.). |
+| `discovery` | Agent-readability discovery surface (agents.txt host page, spec pages). |
+| `coherence_report` | Mnemom-specific: a coherence report awaiting attestation. |
+| `reference` | Catch-all. Consumers MUST treat unknown `type` values as this. |
+
+### representations
+
+```json
+{
+  "html": "https://...",          // required
+  "markdown": "https://....md",   // optional (omit if route has no <main>)
+  "image": "https://.../og.png",  // required
+  "json_ld": "https://..."        // optional (consumer extracts JSON-LD from this URL's HTML)
+}
+```
+
+### context
+
+Type-specific fields. All optional. Examples:
+
+| Type | Fields |
+|---|---|
+| `blog_post` · `research_paper` | `author`, `published_at`, `reading_time_min`, `tags[]`, `eyebrow` |
+| `case_study` | `company`, `outcome`, `eyebrow` |
+| `agent_profile` · `team_profile` | `agent_id` / `team_id`, `grade`, `score`, `last_attested_at` |
+| `coherence_report` | `status`, `primitives[]` |
+
+Consumers MUST ignore unknown context fields and MUST NOT fail if `context` is `{}`.
+
+### publisher
+
+```json
+{
+  "name": "Mnemom",                                            // required
+  "url": "https://www.mnemom.ai",                              // required
+  "agents_txt": "https://www.mnemom.ai/agents.txt",            // required
+  "readiness_manifest": "https://www.mnemom.ai/for-agents"     // required
+}
+```
+
+The `readiness_manifest` URL SHOULD return a public document describing the site's agent-readability commitments. For Mnemom this is the page rendered from [agent-readiness.yaml](https://www.mnemom.ai/for-agents).
+
+## Versioning
+
+Future schema changes go to v2 with a new MIME (`application/vnd.agent-preview+json; version=2`) and a new spec URL (`/spec/agent-preview/v2`). v1 stays frozen at its URL forever. Consumers can pin to `spec_url` + `spec_version` for stable behavior. Within v1, the schema is **append-only**: new optional fields can be added; existing field names and semantics MUST NOT change.
+
+## Adopting on your site
+
+If you publish marketing or content URLs that agents might encounter:
+
+1. **Generate a `<url>.preview.json` sibling at build time** for every public URL. Walk your prerendered HTML, extract title / description / canonical / og:image, classify the type, write the manifest. (For a reference implementation in TypeScript/Node, see Mnemom's [`scripts/build-preview-cards.mjs`](https://github.com/mnemom/mnemom-website/blob/main/scripts/build-preview-cards.mjs).)
+
+2. **Emit the `<link rel="alternate">`** in every page's `<head>`:
+   ```html
+   <link rel="alternate"
+         type="application/vnd.agent-preview+json"
+         href="https://yoursite.com/page.preview.json">
+   ```
+
+3. **Serve the file with the right Content-Type** (`application/vnd.agent-preview+json` is preferred; `application/json` is acceptable for CDNs that strip vendor MIMEs).
+
+4. **Write a verifier** that validates your manifests against the v1 schema and runs in CI. Mnemom's [verifier](https://github.com/mnemom/mnemom-website/blob/main/scripts/verify/preview-surface.ts) is Apache 2.0.
+
+5. **Cross-reference from your `/agents.txt`**:
+   ```
+   agent-preview-spec: https://www.mnemom.ai/spec/agent-preview/v1
+   agent-preview-mime: application/vnd.agent-preview+json
+   agent-preview-discovery: <link rel="alternate" type="application/vnd.agent-preview+json" href="<url>.preview.json">
+   agent-preview-example: https://yoursite.com/methodology.preview.json
+   ```
+
+## Compliance + reference implementation
+
+Mnemom verifies the surface nightly. The live status is at [https://www.mnemom.ai/agent-readiness-status.json](https://www.mnemom.ai/agent-readiness-status.json) (`preview-surface` commitment). The public commitment renders on [/for-agents](https://www.mnemom.ai/for-agents).
+
+The reference implementation is open source under Apache 2.0:
+- Build-time generator: [scripts/build-preview-cards.mjs](https://github.com/mnemom/mnemom-website/blob/main/scripts/build-preview-cards.mjs)
+- Verifier: [scripts/verify/preview-surface.ts](https://github.com/mnemom/mnemom-website/blob/main/scripts/verify/preview-surface.ts)
+- TypeScript types: [client/lib/preview-types.ts](https://github.com/mnemom/mnemom-website/blob/main/client/lib/preview-types.ts)
+- Discovery emitter: [client/lib/route-meta.ts](https://github.com/mnemom/mnemom-website/blob/main/client/lib/route-meta.ts)
