@@ -1,0 +1,62 @@
+name: Doc Examples Live (staging)
+
+# T5-1.3 (Safe House Hardening) — live executor for the doc-as-spec
+# walker. Runs every safe-to-execute curl example from customer-facing
+# MDX against the staging environment and asserts the response status
+# is documented in the spec (or a 2xx). Catches runtime drift the
+# static walker can't see (endpoints the spec documents but staging
+# hasn't deployed yet; subtle parameter validation differences).
+#
+# Triggers:
+#   - schedule nightly (1 hour after the static walker; staging should
+#     be quiet by then)
+#   - workflow_dispatch (manual; useful for one-off verification after
+#     adding fixtures or expanding the WRITE_ALLOWLIST)
+#
+# This workflow is NOT PR-blocking. It can only run with
+# MNEMOM_STAGING_TOKEN configured (a staging-scoped service-account
+# token); without the secret it skips with a notice. Failures here
+# surface as Actions tab warnings, not failed-PR red checks.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 1h after doc-examples.yml (06:45)
+  workflow_dispatch:
+
+jobs:
+  execute-examples:
+    name: Run safe doc curl examples against staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Preflight — staging token configured?
+        id: preflight
+        run: |
+          if [ -z "${{ secrets.MNEMOM_STAGING_TOKEN }}" ]; then
+            echo "::notice::MNEMOM_STAGING_TOKEN secret is not set. Live execution skipped."
+            echo "Set a staging-scoped service-account token in repo secrets to enable T5-1.3 live runs."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Execute safe doc examples
+        if: steps.preflight.outputs.skip == 'false'
+        env:
+          MNEMOM_STAGING_TOKEN: ${{ secrets.MNEMOM_STAGING_TOKEN }}
+          MNEMOM_STAGING_BASE_URL: ${{ vars.MNEMOM_STAGING_BASE_URL || 'https://api.staging.mnemom.ai/v1' }}
+        run: node scripts/run-doc-examples.mjs --verbose
