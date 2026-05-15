@@ -326,9 +326,21 @@ for (const file of files) {
       const pathOnly = final.pathname.replace(/^\/v1\//, "/");
       const stagingURL = stagingBase.replace(/\/$/, "") + pathOnly + final.search;
 
-      // Inject Authorization header.
+      // Inject auth header. The header choice depends on the token shape:
+      // `mnm_*` / `mnemom_*` are Mnemom API keys and MUST go via
+      // `X-Mnemom-Api-Key` (per guides/api-keys.mdx — Authorization: Bearer
+      // for these keys is deprecated and rejected by `getAuthUser`-gated
+      // routes like /v1/safe-house/*). Supabase user JWTs (header starts
+      // with `eyJ`) go via Authorization: Bearer. Anything else falls back
+      // to Authorization: Bearer so a misshapen token still hits the
+      // server (where it 401s honestly rather than skipping silently here).
       const filteredHeaders = headers.filter((h) => !/^authorization\s*:/i.test(h) && !/^x-mnemom-api-key\s*:/i.test(h));
-      filteredHeaders.push(`Authorization: Bearer ${stagingToken ?? "DRY_RUN_TOKEN"}`);
+      const tokenValue = stagingToken ?? "DRY_RUN_TOKEN";
+      if (/^mnm_|^mnemom_/.test(tokenValue)) {
+        filteredHeaders.push(`X-Mnemom-Api-Key: ${tokenValue}`);
+      } else {
+        filteredHeaders.push(`Authorization: Bearer ${tokenValue}`);
+      }
 
       plan.push({
         file,
@@ -378,14 +390,21 @@ for (const p of plan) {
 
   let res;
   let resBody;
+  let resBodyText;
+  let resRequestId;
   try {
     res = await fetch(p.url, { method: p.method, headers, body: p.body ?? undefined });
-    if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+    resRequestId = res.headers.get("x-request-id") ?? res.headers.get("cf-ray") ?? null;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      resBodyText = await res.text();
       try {
-        resBody = await res.json();
+        resBody = JSON.parse(resBodyText);
       } catch {
         resBody = undefined;
       }
+    } else {
+      resBodyText = await res.text().catch(() => "");
     }
   } catch (err) {
     results.push({ ...p, error: err.message });
@@ -408,7 +427,7 @@ for (const p of plan) {
       }
     }
   }
-  results.push({ ...p, status: res.status, verdict, respVerdict });
+  results.push({ ...p, status: res.status, verdict, respVerdict, resBodyText, resRequestId });
 }
 
 // ── Final report ─────────────────────────────────────────────────────────
@@ -430,6 +449,8 @@ for (const r of failed) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ERROR: ${r.error}   (${r.file}:${r.line})`);
   } else if (r.verdict?.ok === false) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (${r.verdict.why})   (${r.file}:${r.line})`);
+    if (r.resRequestId) console.log(`      x-request-id: ${r.resRequestId}`);
+    if (r.resBodyText) console.log(`      body: ${r.resBodyText.slice(0, 800)}`);
   } else if (r.respVerdict?.ok === false) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (status ${r.verdict.why}; resp schema FAIL)   (${r.file}:${r.line})`);
     for (const e of r.respVerdict.errors.slice(0, 5)) {
