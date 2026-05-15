@@ -108,15 +108,9 @@ const KNOWN_DRIFT = [
   { file: "quickstart/safe-house-protection.mdx", method: "GET", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}", owner: "T5-4" },
   { file: "quickstart/safe-house-protection.mdx", method: "POST", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}/release", owner: "T5-4" },
   { file: "quickstart/safe-house-protection.mdx", method: "POST", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}/discard", owner: "T5-4" },
-  // guides/api-versioning.mdx — references the pre-ADR-039 unified
-  // /agents/{agent_id}/card endpoint. Post-ADR-039 the surface is split
-  // into /alignment-card and /protection-card. Owner: T5-2 concept-page
-  // audit (the same page rewrite should drop the legacy field
-  // mentions per the T5-2 acceptance criteria).
-  { file: "guides/api-versioning.mdx", method: "GET", path: "/agents/{agent_id}/card", owner: "T5-2" },
-  // concepts/agent-identity.mdx — same legacy /card reference, two
-  // distinct example IDs in the same fenced block.
-  { file: "concepts/agent-identity.mdx", method: "GET", path: "/agents/{agent_id}/card", owner: "T5-2" },
+  // (closed 2026-05-15 by T5-2: guides/api-versioning.mdx + concepts/
+  // agent-identity.mdx /card references rewritten onto /alignment-card
+  // per ADR-039.)
   // gateway/org-card-templates.mdx — references /agents/{agent_id}/
   // org-card-exempt which doesn't exist in the spec. Two examples
   // (PUT to set, GET to check) — both resolve to the same tuple after
