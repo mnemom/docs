@@ -9,36 +9,45 @@
  *      (after normalizing shell-var, all-caps, and example-ID placeholders
  *      to the spec's `{param}` slots).
  *   2. The HTTP method on that path is declared in the spec.
+ *   3. (T5-1.2) The `-d '{...}'` JSON body, when present, validates against
+ *      the spec's `requestBody.content['application/json'].schema` via Ajv
+ *      after internal $ref dereferencing.
  *
- * This is the first layer of Track 5's doc-as-spec CI (T5-1, v1). It is
- * the docs-side complement of the four-layer leading-teams contract-drift
- * defense built out by Track 4 (spec inheritance + static walker + runtime
- * enforce + OTel-derived auto-patcher in mnemom-api). The runtime guarantees
- * api-reference/openapi.json is exhaustive and enforced; this walker
- * guarantees every documented endpoint corresponds to a real one.
+ * This is the docs-side of Track 5's doc-as-spec CI, complement to the
+ * four-layer leading-teams contract-drift defense built out by Track 4
+ * (spec inheritance + static walker + runtime enforce + OTel-derived
+ * auto-patcher in mnemom-api). The runtime guarantees openapi.json is
+ * exhaustive and enforced; this walker guarantees every documented
+ * endpoint and example body matches.
  *
- * Out of scope for v1 (deliberate follow-ons):
- *  - JSON body validation against requestBody schemas (needs Ajv + a $ref
- *    resolver; deferred to T5-1 layer 2).
+ * Out of scope (deliberate follow-ons):
  *  - Live execution against staging (needs credential handling, idempotency
- *    discipline, cleanup; deferred to T5-1 layer 3).
+ *    discipline, cleanup; deferred to T5-1.3).
  *  - gateway.mnemom.ai/* URLs (passthrough, no first-party spec).
- *  - JSON / YAML / Python / TypeScript fenced blocks (out of grammar for v1;
- *    spec-page YAML examples are T5-3's territory).
+ *  - Non-curl examples — JSON-only / YAML / Python / TypeScript fenced
+ *    blocks. Spec-page YAML/JSON parsing through the production validator
+ *    is T5-3's territory; SDK examples are deferred until SDK contract
+ *    tests stabilize.
  *
- * Exits 0 when every extracted call matches the spec.
+ * Exits 0 when every extracted call + body matches the spec.
  * Exits 1 with a per-file report on any drift.
  *
  * Flags:
- *   --scope <dirs>   Comma-separated list of top-level dirs to walk.
- *                    Default: quickstart,guides,concepts,specifications,
+ *   --scope <dirs>   Comma-separated list of dirs/files to walk.
+ *                    Default: introduction.mdx + changelog.mdx +
+ *                    quickstart,guides,concepts,specifications,
  *                    protocols,gateway,for-agents,migration,pricing.
  *   --verbose        Also list the calls that passed (audit aid).
+ *   --no-bodies      Skip body validation (path+method only — equivalent
+ *                    to the T5-1 layer-1 behavior pre-2026-05-14).
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { argv, exit } from "node:process";
+
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 
 // ── CLI parsing ──────────────────────────────────────────────────────────
 const args = argv.slice(2);
@@ -48,11 +57,13 @@ const args = argv.slice(2);
 // and would trivially round-trip.
 let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifications,protocols,gateway,for-agents,migration,pricing";
 let verbose = false;
+let checkBodies = true;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--scope") scope = args[++i];
   else if (args[i] === "--verbose") verbose = true;
+  else if (args[i] === "--no-bodies") checkBodies = false;
   else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose]");
+    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${args[i]}`);
@@ -127,9 +138,172 @@ function knownDriftEntry(file, method, segments) {
   );
 }
 
+// ── Known body-drift allowlist ───────────────────────────────────────────
+//
+// Same shape as KNOWN_DRIFT but for body-schema findings. Entry matches a
+// (file, method, templated-path, body-error-keyword) tuple. The keyword
+// is Ajv's error keyword (`required`, `additionalProperties`, `enum`,
+// `type`, etc.) plus an optional schemaPath suffix to disambiguate
+// multiple errors on the same body. As T5-2 / T5-4 close, entries get
+// removed.
+const KNOWN_BODY_DRIFT = [
+  // ── Webhook `event_types` enum drift ───────────────────────────────
+  // Docs reference event names like `safe_house.evaluation.block` that
+  // the spec's enum doesn't include. May be spec drift rather than doc
+  // drift — mnemom-api openapi.json's webhook event enum should be
+  // verified against the runtime event taxonomy (likely a follow-up
+  // against mnemom-api, tagged separately). Until verified, treat as
+  // doc-side and allowlist.
+  { file: "guides/improving-reputation.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+  { file: "guides/safe-house-webhooks.mdx", method: "PATCH", path: "/orgs/{org_id}/webhooks/{endpoint_id}", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+  { file: "guides/safe-house-webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+  { file: "guides/trust-recovery.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+  { file: "guides/webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+
+  // ── /policies/evaluate missing `policy` ────────────────────────────
+  // The eval endpoints require a `policy` field per the spec; doc
+  // examples lack it. Likely real drift (rename or example omitted the
+  // field).
+  { file: "guides/policy-management.mdx", method: "POST", path: "/policies/evaluate", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+  { file: "guides/policy-management.mdx", method: "POST", path: "/policies/evaluate/historical", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+  { file: "guides/trust-recovery.mdx", method: "POST", path: "/policies/evaluate", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+
+  // ── alignment-card examples missing required nested fields ─────────
+  // `autonomy.escalation_triggers` and `audit.queryable` are spec-
+  // required nested fields the examples omit. Either the spec is too
+  // strict (legitimate optionality) or the doc examples are incomplete.
+  // T5-2 / T5-4 should reconcile.
+  { file: "guides/card-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
+  { file: "guides/policy-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
+  { file: "guides/policy-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/audit/required", owner: "T5-4" },
+  { file: "guides/upgrading-to-0-5.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
+
+  // ── hash_proof too short / missing ─────────────────────────────────
+  { file: "guides/multi-agent-setup.mdx", method: "POST", path: "/agents", keyword: "minLength", schemaPath: "#/properties/hash_proof/minLength", owner: "T5-4" },
+  { file: "for-agents/index.mdx", method: "POST", path: "/agents", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+
+  // ── team/card.values.declared shape mismatch ───────────────────────
+  // Example uses simplified shape; spec requires object items.
+  { file: "guides/team-management.mdx", method: "PUT", path: "/teams/{team_id}/card", keyword: "type", schemaPath: "#/properties/values/properties/declared/items/type", owner: "T5-4" },
+
+  // ── trust-edges missing to_agent ───────────────────────────────────
+  { file: "guides/upgrading-to-0-5.mdx", method: "POST", path: "/agents/{agent_id}/trust-edges", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+];
+
+function knownBodyDriftEntry(file, method, segments, keyword, schemaPath) {
+  return KNOWN_BODY_DRIFT.find(
+    (e) =>
+      e.file === file &&
+      e.method === method &&
+      templatePathMatchesSegments(e.path, segments) &&
+      e.keyword === keyword &&
+      (!e.schemaPath || e.schemaPath === schemaPath),
+  );
+}
+
 // ── Load spec ────────────────────────────────────────────────────────────
 const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
 const specPaths = Object.keys(spec.paths ?? {});
+
+// ── Ajv + dereferencer ───────────────────────────────────────────────────
+//
+// OpenAPI 3.1.0 uses JSON Schema 2020-12; we use Ajv2020 with strict=false
+// (OpenAPI tolerates a handful of extension keywords that strict mode
+// rejects: discriminator, xml, example, externalDocs, etc.).
+const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
+addFormats(ajv);
+
+// Manual deref. api-reference/openapi.json has 107 component schemas with
+// zero cycles (verified at T5-1.2 design time), so full inline expansion
+// terminates. We deref each requestBody schema lazily — once per unique
+// (path, method) — and cache the compiled validator.
+function derefRef(refStr, root) {
+  if (!refStr.startsWith("#/")) return null;
+  const segs = refStr.slice(2).split("/").map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
+  let cur = root;
+  for (const s of segs) {
+    if (cur == null) return null;
+    cur = cur[s];
+  }
+  return cur ?? null;
+}
+
+function deref(node, root) {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map((n) => deref(n, root));
+  if (typeof node.$ref === "string") {
+    const target = derefRef(node.$ref, root);
+    return target == null ? node : deref(target, root);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(node)) out[k] = deref(v, root);
+  return out;
+}
+
+// Validator cache keyed by `${method}|${specPath}`.
+const validatorCache = new Map();
+function getBodyValidator(specPath, method) {
+  const key = `${method}|${specPath}`;
+  if (validatorCache.has(key)) return validatorCache.get(key);
+  const op = spec.paths[specPath]?.[method];
+  const schema = op?.requestBody?.content?.["application/json"]?.schema;
+  if (!schema) {
+    validatorCache.set(key, null);
+    return null;
+  }
+  let validator;
+  try {
+    const dereffed = deref(schema, spec);
+    validator = ajv.compile(dereffed);
+  } catch (err) {
+    validator = { __compileError: err.message };
+  }
+  validatorCache.set(key, validator);
+  return validator;
+}
+
+// Sentinel string that replaces placeholder values during validation.
+// Any Ajv error whose data == this sentinel is suppressed (the doc author
+// is using a shell-substituted runtime value the static walker can't see;
+// fail-by-static-checker on a placeholder shape would be a false positive).
+const PLACEHOLDER_SENTINEL = "__MNEMOM_DOC_PLACEHOLDER__";
+
+function shellVarSubstitute(jsonish) {
+  // The doc grammar embeds shell substitutions inside JSON string positions:
+  //   "new_key_hash": "$NEW_HASH"    "url": "${WEBHOOK_URL}"
+  //   "token": "<your-token>"        "id": "YOUR_AGENT_ID"
+  // At runtime shell expands `$VAR` / `${VAR}`; the actual body satisfies
+  // the schema. The static walker can't see those substitutions, so it
+  // substitutes the sentinel here, and the post-validate filter drops
+  // errors whose `data` equals the sentinel. This preserves real-drift
+  // detection on fields the doc author *did* put a literal value for.
+  return jsonish
+    .replace(/\$\{[A-Z_][A-Z0-9_]*\}/g, PLACEHOLDER_SENTINEL)
+    .replace(/\$[A-Z_][A-Z0-9_]+/g, PLACEHOLDER_SENTINEL)
+    .replace(/<[a-z][a-z0-9-]*(?:-[a-z0-9]+)*>/gi, PLACEHOLDER_SENTINEL);
+}
+
+function parseBody(raw) {
+  // `curl -d @filename.yaml` is curl's "read body from file" syntax —
+  // semantically the doc is saying "edit this file, then curl with -d @-".
+  // The actual body content lives in a separate YAML/JSON fenced block
+  // earlier in the page. The walker can't validate the in-doc grammar
+  // for these without cross-block correlation; flag as "external body"
+  // and skip validation. T5-1.2 follow-on can stitch these blocks
+  // together if it turns out to be high-yield.
+  if (raw.startsWith("@")) {
+    return { external: true, ref: raw.slice(1) };
+  }
+  // The body grammar in our docs is single-quoted JSON: `-d '{...}'`. The
+  // shell tokenizer already strips the surrounding quotes. Whitespace
+  // including newlines is valid inside JSON. Try parse; report the
+  // failure precisely if it doesn't round-trip.
+  try {
+    return { ok: true, value: JSON.parse(shellVarSubstitute(raw)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
 
 // Pre-tokenize the spec's paths once. Each entry: { raw, segments[], methods[] }.
 const specIndex = specPaths.map((raw) => {
@@ -209,56 +383,61 @@ function extractBashBlocks(source) {
 // rejoin continuations into single logical lines, then scan for tokens
 // starting with `curl`.
 function extractCurls(blockBody) {
-  // Rejoin trailing-backslash continuations into one logical line per curl.
-  const logical = blockBody
-    .replace(/\\\n\s*/g, " ")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("#"));
+  // Rejoin backslash-line-continuations into single logical units. Inside
+  // single-quoted bodies (`-d '{...multi-line JSON...}'`) the JSON spans
+  // multiple physical lines WITHOUT `\` markers — those newlines must
+  // survive the tokenizer. After rejoin, walk the block as one stream,
+  // splitting only on top-level (unquoted) `;` / `&&` / `||`.
+  const text = blockBody.replace(/\\\n\s*/g, " ");
 
   const curls = [];
-  for (const line of logical) {
-    // Heredoc'd request bodies (`-d @-` patterns etc.) aren't used in
-    // our docs grammar; simple inline -d '...' / -d "..." covers what
-    // exists. A curl line may have semicolons or `&&` joiners; split
-    // on those before parsing.
-    for (const piece of splitShellTokens(line)) {
-      const trimmed = piece.trim();
-      if (trimmed.startsWith("curl ") || trimmed === "curl") {
-        curls.push(trimmed);
-      }
-    }
-  }
-  return curls;
-}
-
-function splitShellTokens(line) {
-  // Split a logical line on `;`, `&&`, `||` while respecting single/double
-  // quoted segments. Returns the resulting pieces.
-  const out = [];
-  let depth = { sq: false, dq: false };
-  let buf = "";
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === "'" && !depth.dq) depth.sq = !depth.sq;
-    else if (c === '"' && !depth.sq) depth.dq = !depth.dq;
-    if (!depth.sq && !depth.dq) {
-      if (c === ";") {
-        out.push(buf);
-        buf = "";
-        continue;
-      }
-      if ((c === "&" && line[i + 1] === "&") || (c === "|" && line[i + 1] === "|")) {
-        out.push(buf);
-        buf = "";
+  let i = 0;
+  while (i < text.length) {
+    // Skip leading whitespace, newlines, and `#` comments.
+    while (i < text.length) {
+      const c = text[i];
+      if (/\s/.test(c)) {
         i++;
         continue;
       }
+      if (c === "#") {
+        while (i < text.length && text[i] !== "\n") i++;
+        continue;
+      }
+      break;
     }
-    buf += c;
+    if (i >= text.length) break;
+
+    // Consume one shell command, respecting single/double quote state.
+    // Quoted newlines are preserved into the captured slice.
+    const start = i;
+    let sq = false;
+    let dq = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "\\" && !sq && i + 1 < text.length) {
+        i += 2;
+        continue;
+      }
+      if (c === "'" && !dq) sq = !sq;
+      else if (c === '"' && !sq) dq = !dq;
+      else if (!sq && !dq) {
+        if (c === ";") break;
+        if (c === "&" && text[i + 1] === "&") break;
+        if (c === "|" && text[i + 1] === "|") break;
+        if (c === "\n") {
+          // A top-level newline that isn't continued ends the command.
+          break;
+        }
+      }
+      i++;
+    }
+    const cmd = text.slice(start, i).trim();
+    if (cmd.startsWith("curl ") || cmd === "curl") curls.push(cmd);
+    if (text[i] === ";" || text[i] === "\n") i++;
+    else if (text[i] === "&" || text[i] === "|") i += 2;
   }
-  if (buf.trim()) out.push(buf);
-  return out;
+  return curls;
 }
 
 // ── Parse a single curl invocation ───────────────────────────────────────
@@ -274,20 +453,28 @@ function parseCurl(invocation) {
 
   let method = "GET";
   let url = null;
+  let body = null;
+  let explicitMethod = false;
 
   for (let i = 1; i < tokens.length; i++) {
     const t = tokens[i];
     if (t === "-X" || t === "--request") {
       const m = (tokens[++i] ?? "").toUpperCase();
-      if (HTTP_METHODS.has(m)) method = m;
+      if (HTTP_METHODS.has(m)) {
+        method = m;
+        explicitMethod = true;
+      }
     } else if (t.startsWith("-X")) {
       const m = t.slice(2).toUpperCase();
-      if (HTTP_METHODS.has(m)) method = m;
+      if (HTTP_METHODS.has(m)) {
+        method = m;
+        explicitMethod = true;
+      }
     } else if (t === "-H" || t === "--header") {
       i++; // skip header arg
     } else if (t === "-d" || t === "--data" || t === "--data-raw" || t === "--data-binary") {
-      i++; // skip body; if no explicit method was set, default-to-POST
-      if (method === "GET") method = "POST";
+      body = tokens[++i] ?? null;
+      if (!explicitMethod) method = "POST";
     } else if (t === "-u" || t === "--user" || t === "-A" || t === "--user-agent") {
       i++;
     } else if (t === "-o" || t === "--output" || t === "--cookie" || t === "-b") {
@@ -306,7 +493,7 @@ function parseCurl(invocation) {
       url = t;
     }
   }
-  return url ? { method, url } : null;
+  return url ? { method, url, body } : null;
 }
 
 function shellTokenize(line) {
@@ -413,8 +600,13 @@ function matchSpecPath(segments) {
 // ── Walk + validate ──────────────────────────────────────────────────────
 const failures = [];
 const knownDrift = [];
+const bodyFailures = [];
+const knownBodyDrift = [];
+const bodyParseWarns = [];
 const passes = [];
 let totalCurls = 0;
+let totalBodies = 0;
+let bodiesValidated = 0;
 
 for (const file of files) {
   const source = readFileSync(file, "utf8");
@@ -449,6 +641,81 @@ for (const file of files) {
         continue;
       }
       passes.push({ file, line: block.line, method, path: matched.raw });
+
+      // Body validation — T5-1.2.
+      if (!checkBodies || parsed.body == null) continue;
+      totalBodies++;
+      const parsedBody = parseBody(parsed.body);
+      if (parsedBody.external) {
+        // `-d @file` — body lives in a separate fenced block; v1 doesn't
+        // cross-correlate. Silent skip.
+        continue;
+      }
+      if (!parsedBody.ok) {
+        // Unparseable body: warn (likely an illustrative example with
+        // intentionally non-JSON content like a comment or trailing
+        // ellipsis). Doesn't fail the build. T5-2 / T5-4 should normalize
+        // these as they audit pages.
+        bodyParseWarns.push({ file, line: block.line, method, path: matched.raw, error: parsedBody.error, body: clip(parsed.body) });
+        continue;
+      }
+      const validator = getBodyValidator(matched.raw, m);
+      if (!validator) {
+        // Spec has no requestBody schema for this op — no contract to
+        // assert against. Silent; this is "spec gap" territory, handled
+        // by Track 4, not T5.
+        continue;
+      }
+      if (validator.__compileError) {
+        bodyParseWarns.push({ file, line: block.line, method, path: matched.raw, error: `Ajv compile error: ${validator.__compileError}`, body: clip(parsed.body) });
+        continue;
+      }
+      bodiesValidated++;
+      const ok = validator(parsedBody.value);
+      if (!ok) {
+        const errs = (validator.errors ?? []).filter((e) => {
+          // Suppress findings on placeholder values — the doc relies on
+          // shell substitution; the static walker can't see the actual
+          // value, so pattern/format/length checks are noise here. Real
+          // drift on a placeholder field (e.g., a removed required field)
+          // still surfaces because `required` errors don't carry `e.data`.
+          if (e.keyword === "required") return true;
+          // Pull the actual value at the error's instancePath. Ajv's
+          // `e.data` isn't always populated for pattern/format errors, so
+          // resolve from the parsed body directly.
+          let cur = parsedBody.value;
+          for (const seg of (e.instancePath || "").split("/").filter(Boolean)) {
+            const key = seg.replace(/~1/g, "/").replace(/~0/g, "~");
+            if (cur == null) break;
+            cur = cur[key];
+          }
+          if (typeof cur === "string" && cur === PLACEHOLDER_SENTINEL) return false;
+          return true;
+        });
+        if (errs.length === 0) continue;
+        for (const e of errs) {
+          const keyword = e.keyword;
+          const schemaPath = e.schemaPath;
+          const instancePath = e.instancePath || "(root)";
+          const detail = formatAjvError(e);
+          const allow = knownBodyDriftEntry(file, method, norm.segments, keyword, schemaPath);
+          const entry = {
+            file,
+            line: block.line,
+            method,
+            path: matched.raw,
+            keyword,
+            instancePath,
+            schemaPath,
+            reason: detail,
+            curl: clip(curl),
+            allowKey: allow ? `${allow.file}|${allow.method}|${allow.path}|${allow.keyword}|${allow.schemaPath ?? ""}` : null,
+            owner: allow?.owner,
+          };
+          if (allow) knownBodyDrift.push(entry);
+          else bodyFailures.push(entry);
+        }
+      }
     }
   }
 }
@@ -457,10 +724,42 @@ function clip(s) {
   return s.length > 140 ? s.slice(0, 137) + "..." : s;
 }
 
+function formatAjvError(e) {
+  const where = e.instancePath || "(root)";
+  switch (e.keyword) {
+    case "required":
+      return `${where}: missing required property '${e.params.missingProperty}'`;
+    case "additionalProperties":
+      return `${where}: unknown property '${e.params.additionalProperty}'`;
+    case "enum":
+      return `${where}: value not in enum ${JSON.stringify(e.params.allowedValues).slice(0, 80)}`;
+    case "type":
+      return `${where}: expected ${e.params.type}, got ${typeof e.data ?? "?"}`;
+    case "const":
+      return `${where}: expected const ${JSON.stringify(e.params.allowedValue)}`;
+    case "format":
+      return `${where}: ${e.message ?? "format violation"} (expected ${e.params.format})`;
+    case "pattern":
+      return `${where}: pattern mismatch (${e.params.pattern})`;
+    case "minLength":
+    case "maxLength":
+    case "minimum":
+    case "maximum":
+    case "minItems":
+    case "maxItems":
+      return `${where}: ${e.message}`;
+    default:
+      return `${where}: ${e.keyword}${e.message ? ` — ${e.message}` : ""}`;
+  }
+}
+
 // ── Report ───────────────────────────────────────────────────────────────
 const fileCount = files.length;
 console.log(`Scanned ${fileCount} MDX file(s) across [${scopeDirs.join(", ")}].`);
 console.log(`Extracted ${totalCurls} curl invocation(s) targeting api.mnemom.ai/v1/*.`);
+if (checkBodies) {
+  console.log(`Body validation: ${bodiesValidated} body(ies) validated against requestBody schemas (${totalBodies - bodiesValidated} skipped: no schema, parse-error, or compile-error).`);
+}
 
 if (verbose) {
   for (const p of passes) {
@@ -484,16 +783,44 @@ if (knownDrift.length > 0) {
   }
 }
 
+if (knownBodyDrift.length > 0) {
+  console.log();
+  console.log(`Known body drift (allowlisted; tracked under T5-2 / T5-4): ${knownBodyDrift.length}`);
+  const byFile = new Map();
+  for (const f of knownBodyDrift) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path}  body.${f.keyword}: ${f.reason}  [${f.owner ?? "?"}]`);
+    }
+  }
+}
+
+if (bodyParseWarns.length > 0) {
+  console.log();
+  console.log(`⚠ ${bodyParseWarns.length} body(ies) could not be JSON-parsed (non-blocking; T5-2 / T5-4 should normalize these):`);
+  for (const w of bodyParseWarns) {
+    console.log(`  ${w.file}:${w.line}  ${w.method} ${w.path} — ${w.error}`);
+  }
+}
+
 // Detect stale KNOWN_DRIFT entries — present in the allowlist but no
 // longer matched by any extracted example. These should be removed.
 const seenTuples = new Set(knownDrift.map((d) => d.allowKey).filter(Boolean));
 const stale = KNOWN_DRIFT.filter(
   (e) => !seenTuples.has(`${e.file}|${e.method}|${e.path}`),
 );
+const seenBodyTuples = new Set(knownBodyDrift.map((d) => d.allowKey).filter(Boolean));
+const staleBody = KNOWN_BODY_DRIFT.filter(
+  (e) => !seenBodyTuples.has(`${e.file}|${e.method}|${e.path}|${e.keyword}|${e.schemaPath ?? ""}`),
+);
 
-if (failures.length === 0 && stale.length === 0) {
+if (failures.length === 0 && bodyFailures.length === 0 && stale.length === 0 && staleBody.length === 0) {
   console.log();
-  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known-drift allowlisted.`);
+  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known path-drift + ${knownBodyDrift.length} known body-drift allowlisted; ${bodiesValidated} body(ies) validated.`);
   exit(0);
 }
 
@@ -526,6 +853,32 @@ if (failures.length > 0) {
   console.log("file/method/path against the extracted form shown above.");
 }
 
+if (bodyFailures.length > 0) {
+  console.log();
+  console.log(`❌ ${bodyFailures.length} NEW body-schema drift finding(s):\n`);
+  const byFile = new Map();
+  for (const f of bodyFailures) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path}`);
+      console.log(`      ${f.keyword}: ${f.reason}`);
+      console.log(`      schemaPath=${f.schemaPath}`);
+    }
+    console.log();
+  }
+  console.log("Body failures mean a doc example's JSON payload doesn't satisfy");
+  console.log("the spec's requestBody schema. Most likely:");
+  console.log("  - the doc uses a field that was renamed / removed,");
+  console.log("  - the doc omits a now-required field,");
+  console.log("  - the doc uses an enum value the spec no longer allows.");
+  console.log("Fix the doc to match the spec, or — if the spec is wrong —");
+  console.log("fix mnemom-api/openapi.json first.");
+}
+
 if (stale.length > 0) {
   console.log();
   console.log(`⚠ ${stale.length} stale KNOWN_DRIFT entr${stale.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
@@ -535,6 +888,14 @@ if (stale.length > 0) {
   console.log();
   console.log("A stale entry means the underlying doc drift is resolved.");
   console.log("Removing the entry tightens the gate.");
+}
+
+if (staleBody.length > 0) {
+  console.log();
+  console.log(`⚠ ${staleBody.length} stale KNOWN_BODY_DRIFT entr${staleBody.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
+  for (const e of staleBody) {
+    console.log(`  - ${e.file}: ${e.method} ${e.path}  body.${e.keyword}  [${e.owner ?? "?"}]`);
+  }
 }
 
 exit(1);
