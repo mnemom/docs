@@ -50,7 +50,8 @@ import addFormats from "ajv-formats";
 
 import {
   resolveScope,
-  extractBashBlocks,
+  extractFencedBlocks,
+  pairBashWithResponseJson,
   extractCurls,
   parseCurl,
   pathSegmentsFromUrl,
@@ -68,12 +69,14 @@ const args = argv.slice(2);
 let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifications,protocols,gateway,for-agents,migration,pricing";
 let verbose = false;
 let checkBodies = true;
+let checkResponses = true;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--scope") scope = args[++i];
   else if (args[i] === "--verbose") verbose = true;
   else if (args[i] === "--no-bodies") checkBodies = false;
+  else if (args[i] === "--no-responses") checkResponses = false;
   else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies]");
+    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${args[i]}`);
@@ -199,6 +202,40 @@ function knownBodyDriftEntry(file, method, segments, keyword, schemaPath) {
   );
 }
 
+// ── Known response-drift allowlist (T5-1.4) ──────────────────────────────
+//
+// Parallel to KNOWN_DRIFT / KNOWN_BODY_DRIFT but for response-example
+// findings. Same tuple shape: (file, method, templated-path, keyword,
+// schemaPath?). Populated by the first full-repo run after T5-1.4 lands.
+const KNOWN_RESPONSE_DRIFT = [
+  // DELETE /agents/{agent_id} response shows `status: "pending"` (or
+  // similar) that the spec's enum doesn't include. Either the spec is
+  // missing a value or the doc shows a stale status name. T5-4 reconcile.
+  { file: "guides/gdpr-data-subject-rights.mdx", method: "DELETE", path: "/agents/{agent_id}", keyword: "enum", schemaPath: "#/properties/status/enum", owner: "T5-4" },
+
+  // GET /orgs/{org_id}/governance/coverage response example is a partial
+  // snippet missing 4 required top-level fields. Either the example is
+  // truncated for illustration (T5-4 normalize) or the spec is overly
+  // strict.
+  { file: "guides/operating-governance-signals.mdx", method: "GET", path: "/orgs/{org_id}/governance/coverage", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+
+  // GET /agents/{agent_id}/trust-edges response missing 4 required
+  // top-level fields. Same shape as above; either the example is a
+  // partial snippet or the spec needs to relax required.
+  { file: "guides/upgrading-to-0-5.mdx", method: "GET", path: "/agents/{agent_id}/trust-edges", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+];
+
+function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
+  return KNOWN_RESPONSE_DRIFT.find(
+    (e) =>
+      e.file === file &&
+      e.method === method &&
+      templatePathMatchesSegments(e.path, segments) &&
+      e.keyword === keyword &&
+      (!e.schemaPath || e.schemaPath === schemaPath),
+  );
+}
+
 // ── Load spec ────────────────────────────────────────────────────────────
 const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
 
@@ -259,6 +296,48 @@ function getBodyValidator(specPath, method) {
   return validator;
 }
 
+// Response-validator cache keyed by `${method}|${specPath}|${status}`.
+const responseValidatorCache = new Map();
+function getResponseValidator(specPath, method, status) {
+  const key = `${method}|${specPath}|${status}`;
+  if (responseValidatorCache.has(key)) return responseValidatorCache.get(key);
+  const op = spec.paths[specPath]?.[method];
+  const schema =
+    op?.responses?.[String(status)]?.content?.["application/json"]?.schema;
+  if (!schema) {
+    responseValidatorCache.set(key, null);
+    return null;
+  }
+  let validator;
+  try {
+    const dereffed = deref(schema, spec);
+    validator = ajv.compile(dereffed);
+  } catch (err) {
+    validator = { __compileError: err.message };
+  }
+  responseValidatorCache.set(key, validator);
+  return validator;
+}
+
+// Pick the response status to validate the doc's example against. The
+// doc rarely shows the status explicitly; we infer:
+//   GET / PUT / PATCH / DELETE → 200 (fall through to first 2xx in spec)
+//   POST                       → 201 if documented, else 200, else first 2xx
+function inferResponseStatus(specPath, method) {
+  const op = spec.paths[specPath]?.[method];
+  const responses = op?.responses ?? {};
+  if (method === "post") {
+    if (responses["201"]) return "201";
+    if (responses["200"]) return "200";
+  } else {
+    if (responses["200"]) return "200";
+    if (responses["201"]) return "201";
+  }
+  // Fall through to the first 2xx documented.
+  const twoxx = Object.keys(responses).find((k) => /^2\d\d$/.test(k));
+  return twoxx ?? null;
+}
+
 // Sentinel string that replaces placeholder values during validation.
 // Any Ajv error whose data == this sentinel is suppressed (the doc author
 // is using a shell-substituted runtime value the static walker can't see;
@@ -316,14 +395,25 @@ const knownDrift = [];
 const bodyFailures = [];
 const knownBodyDrift = [];
 const bodyParseWarns = [];
+const responseFailures = [];
+const knownResponseDrift = [];
+const responseParseWarns = [];
 const passes = [];
 let totalCurls = 0;
 let totalBodies = 0;
 let bodiesValidated = 0;
+let totalResponses = 0;
+let responsesValidated = 0;
 
 for (const file of files) {
   const source = readFileSync(file, "utf8");
-  for (const block of extractBashBlocks(source)) {
+  const fencedBlocks = extractFencedBlocks(source);
+  const bashBlocks = fencedBlocks.filter((b) => b.type === "bash");
+  const responsePairing = pairBashWithResponseJson(fencedBlocks, source);
+  const responsesValidatedInThisFile = new Set();
+  for (let bIdx = 0; bIdx < bashBlocks.length; bIdx++) {
+    const block = bashBlocks[bIdx];
+    const responseBlock = responsePairing.get(bIdx);
     for (const curl of extractCurls(block.body)) {
       const parsed = parseCurl(curl);
       if (!parsed) continue;
@@ -354,6 +444,59 @@ for (const file of files) {
         continue;
       }
       passes.push({ file, line: block.line, method, path: matched.raw });
+
+      // Response-example validation — T5-1.4.
+      //
+      // The "next JSON fenced block in the same bash→json pair" is the
+      // doc's response example for this curl. Validate against
+      // `responses[status].content['application/json'].schema` where
+      // status is inferred (201 for POST when documented, else 200).
+      // Skip if we've already validated THIS response block for any
+      // earlier curl in the same bash block — the schema doesn't depend
+      // on the request-side specifics here, only on (specPath, method).
+      if (checkResponses && responseBlock) {
+        const respKey = `${responseBlock.line}|${matched.raw}|${m}`;
+        if (!responsesValidatedInThisFile.has(respKey)) {
+          responsesValidatedInThisFile.add(respKey);
+          totalResponses++;
+          const status = inferResponseStatus(matched.raw, m);
+          if (status) {
+            const respValidator = getResponseValidator(matched.raw, m, status);
+            if (respValidator && !respValidator.__compileError) {
+              let parsedResp;
+              try {
+                parsedResp = JSON.parse(responseBlock.body);
+              } catch (err) {
+                responseParseWarns.push({ file, line: responseBlock.line, method, path: matched.raw, status, error: err.message, body: clip(responseBlock.body) });
+              }
+              if (parsedResp !== undefined) {
+                responsesValidated++;
+                const ok = respValidator(parsedResp);
+                if (!ok) {
+                  for (const e of respValidator.errors ?? []) {
+                    const allow = knownResponseDriftEntry(file, method, norm.segments, e.keyword, e.schemaPath);
+                    const entry = {
+                      file,
+                      line: responseBlock.line,
+                      method,
+                      path: matched.raw,
+                      status,
+                      keyword: e.keyword,
+                      instancePath: e.instancePath || "(root)",
+                      schemaPath: e.schemaPath,
+                      reason: formatAjvError(e),
+                      allowKey: allow ? `${allow.file}|${allow.method}|${allow.path}|${allow.keyword}|${allow.schemaPath ?? ""}` : null,
+                      owner: allow?.owner,
+                    };
+                    if (allow) knownResponseDrift.push(entry);
+                    else responseFailures.push(entry);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
 
       // Body validation — T5-1.2.
       if (!checkBodies || parsed.body == null) continue;
@@ -473,6 +616,9 @@ console.log(`Extracted ${totalCurls} curl invocation(s) targeting api.mnemom.ai/
 if (checkBodies) {
   console.log(`Body validation: ${bodiesValidated} body(ies) validated against requestBody schemas (${totalBodies - bodiesValidated} skipped: no schema, parse-error, or compile-error).`);
 }
+if (checkResponses) {
+  console.log(`Response validation: ${responsesValidated} response example(s) validated against responses[code] schemas (${totalResponses - responsesValidated} skipped: no schema, parse-error, or compile-error).`);
+}
 
 if (verbose) {
   for (const p of passes) {
@@ -520,6 +666,30 @@ if (bodyParseWarns.length > 0) {
   }
 }
 
+if (knownResponseDrift.length > 0) {
+  console.log();
+  console.log(`Known response drift (allowlisted; tracked under T5-2 / T5-4): ${knownResponseDrift.length}`);
+  const byFile = new Map();
+  for (const f of knownResponseDrift) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path} [${f.status}]  resp.${f.keyword}: ${f.reason}  [${f.owner ?? "?"}]`);
+    }
+  }
+}
+
+if (responseParseWarns.length > 0) {
+  console.log();
+  console.log(`⚠ ${responseParseWarns.length} response example(s) could not be JSON-parsed (non-blocking):`);
+  for (const w of responseParseWarns) {
+    console.log(`  ${w.file}:${w.line}  ${w.method} ${w.path} — ${w.error}`);
+  }
+}
+
 // Detect stale KNOWN_DRIFT entries — present in the allowlist but no
 // longer matched by any extracted example. These should be removed.
 const seenTuples = new Set(knownDrift.map((d) => d.allowKey).filter(Boolean));
@@ -530,10 +700,21 @@ const seenBodyTuples = new Set(knownBodyDrift.map((d) => d.allowKey).filter(Bool
 const staleBody = KNOWN_BODY_DRIFT.filter(
   (e) => !seenBodyTuples.has(`${e.file}|${e.method}|${e.path}|${e.keyword}|${e.schemaPath ?? ""}`),
 );
+const seenRespTuples = new Set(knownResponseDrift.map((d) => d.allowKey).filter(Boolean));
+const staleResp = KNOWN_RESPONSE_DRIFT.filter(
+  (e) => !seenRespTuples.has(`${e.file}|${e.method}|${e.path}|${e.keyword}|${e.schemaPath ?? ""}`),
+);
 
-if (failures.length === 0 && bodyFailures.length === 0 && stale.length === 0 && staleBody.length === 0) {
+if (
+  failures.length === 0 &&
+  bodyFailures.length === 0 &&
+  responseFailures.length === 0 &&
+  stale.length === 0 &&
+  staleBody.length === 0 &&
+  staleResp.length === 0
+) {
   console.log();
-  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known path-drift + ${knownBodyDrift.length} known body-drift allowlisted; ${bodiesValidated} body(ies) validated.`);
+  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known path-drift + ${knownBodyDrift.length} known body-drift + ${knownResponseDrift.length} known response-drift allowlisted; ${bodiesValidated} body(ies) + ${responsesValidated} response(s) validated.`);
   exit(0);
 }
 
@@ -608,6 +789,40 @@ if (staleBody.length > 0) {
   console.log(`⚠ ${staleBody.length} stale KNOWN_BODY_DRIFT entr${staleBody.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
   for (const e of staleBody) {
     console.log(`  - ${e.file}: ${e.method} ${e.path}  body.${e.keyword}  [${e.owner ?? "?"}]`);
+  }
+}
+
+if (responseFailures.length > 0) {
+  console.log();
+  console.log(`❌ ${responseFailures.length} NEW response-schema drift finding(s):\n`);
+  const byFile = new Map();
+  for (const f of responseFailures) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path} [${f.status}]`);
+      console.log(`      ${f.keyword}: ${f.reason}`);
+      console.log(`      schemaPath=${f.schemaPath}`);
+    }
+    console.log();
+  }
+  console.log("Response failures mean a doc example's response JSON doesn't");
+  console.log("satisfy the spec's `responses[code]` schema. Most likely:");
+  console.log("  - the doc shows fields the spec no longer documents,");
+  console.log("  - the doc omits fields the spec now requires,");
+  console.log("  - the doc uses an enum value the spec no longer allows.");
+  console.log("Fix the doc to match the spec, or — if the spec is wrong —");
+  console.log("fix mnemom-api/openapi.json first.");
+}
+
+if (staleResp.length > 0) {
+  console.log();
+  console.log(`⚠ ${staleResp.length} stale KNOWN_RESPONSE_DRIFT entr${staleResp.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
+  for (const e of staleResp) {
+    console.log(`  - ${e.file}: ${e.method} ${e.path}  resp.${e.keyword}  [${e.owner ?? "?"}]`);
   }
 }
 

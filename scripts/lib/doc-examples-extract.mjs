@@ -41,33 +41,96 @@ export function resolveScope(scopeStr) {
   });
 }
 
-// ── Fenced bash-block extraction ──────────────────────────────────────
-export function extractBashBlocks(source) {
+// ── Fenced-block extraction ───────────────────────────────────────────
+//
+// Returns every fenced code block with its language tag, start line,
+// end line, and body. Callers can filter to bash/json/yaml as needed.
+// Bash blocks are detected via the set {bash, sh, shell, curl, console}
+// per the walker's grammar.
+const BASH_TAGS = new Set(["bash", "sh", "shell", "curl", "console"]);
+const JSON_TAGS = new Set(["json", "jsonc"]);
+
+export function extractFencedBlocks(source) {
   const blocks = [];
   const lines = source.split("\n");
   let inFence = false;
-  let isBash = false;
   let buf = [];
   let openLine = 0;
+  let tag = "";
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith("```")) {
       if (!inFence) {
-        const tag = line.slice(3).trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        tag = line.slice(3).trim().split(/\s+/)[0]?.toLowerCase() ?? "";
         inFence = true;
-        isBash = ["bash", "sh", "shell", "curl", "console"].includes(tag);
         buf = [];
         openLine = i + 1;
       } else {
-        if (isBash) blocks.push({ line: openLine, body: buf.join("\n") });
+        const type = BASH_TAGS.has(tag) ? "bash" : JSON_TAGS.has(tag) ? "json" : tag;
+        blocks.push({ type, tag, line: openLine, closeLine: i + 1, body: buf.join("\n") });
         inFence = false;
-        isBash = false;
       }
-    } else if (inFence && isBash) {
+    } else if (inFence) {
       buf.push(line);
     }
   }
   return blocks;
+}
+
+// Backwards-compat: bash blocks only, matching the legacy walker signature.
+export function extractBashBlocks(source) {
+  return extractFencedBlocks(source).filter((b) => b.type === "bash");
+}
+
+// Pair each bash block with the next json block that appears before the
+// next bash block AND before any intervening markdown heading. The json
+// block is the "response example" for every curl in the preceding bash
+// block. Returns a Map<bashIndex, jsonBlock> where bashIndex is the
+// position of the bash block in the type=bash filtered list.
+//
+// `source` is the raw MDX text — used to check for intervening headings
+// (lines starting with `#`) between the bash close and the json open. A
+// heading break invalidates the pairing: the json belongs to the next
+// section, not the previous bash block.
+export function pairBashWithResponseJson(blocks, source) {
+  const bashes = blocks.filter((b) => b.type === "bash");
+  const lines = source ? source.split("\n") : null;
+  const result = new Map();
+  for (let i = 0; i < bashes.length; i++) {
+    const bash = bashes[i];
+    const nextBash = bashes[i + 1];
+    const limit = nextBash ? nextBash.line : Infinity;
+    const candidates = blocks.filter(
+      (b) =>
+        b.type === "json" &&
+        b.line > bash.closeLine &&
+        b.line < limit,
+    );
+    let chosen = null;
+    for (const cand of candidates) {
+      if (!lines) {
+        chosen = cand;
+        break;
+      }
+      // Disallow heading-break between bash.closeLine and cand.line. We
+      // index the lines array zero-based; cand.line / bash.closeLine are
+      // 1-based block start/close lines.
+      let hasHeadingBreak = false;
+      for (let li = bash.closeLine; li < cand.line - 1; li++) {
+        const t = lines[li];
+        if (t && /^#{1,6}\s/.test(t)) {
+          hasHeadingBreak = true;
+          break;
+        }
+      }
+      if (!hasHeadingBreak) {
+        chosen = cand;
+        break;
+      }
+    }
+    if (chosen) result.set(i, chosen);
+  }
+  return result;
 }
 
 // ── Curl extraction (multi-line bodies survive) ───────────────────────
