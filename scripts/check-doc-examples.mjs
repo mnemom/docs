@@ -98,25 +98,18 @@ for (let i = 0; i < args.length; i++) {
 // Normalized path = the path the walker computes (no /v1 prefix, trailing
 // slash trimmed, percent-decoded segments). See pathSegmentsFromUrl.
 const KNOWN_DRIFT = [
-  // quickstart/safe-house-protection.mdx — six examples reference a
-  // per-agent /safe-house/* shape that doesn't exist; the spec has
-  // /safe-house/quarantine/{quarantine_id}/release|report (org-scoped),
-  // /safe-house/stats, etc. Owner: T5-4 guide audit; the whole quickstart
-  // needs to be rewritten against the real safe-house surface.
-  { file: "quickstart/safe-house-protection.mdx", method: "PUT", path: "/agents/{agent_id}/safe-house/config", owner: "T5-4" },
-  { file: "quickstart/safe-house-protection.mdx", method: "GET", path: "/agents/{agent_id}/safe-house/stats", owner: "T5-4" },
-  { file: "quickstart/safe-house-protection.mdx", method: "GET", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}", owner: "T5-4" },
-  { file: "quickstart/safe-house-protection.mdx", method: "POST", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}/release", owner: "T5-4" },
-  { file: "quickstart/safe-house-protection.mdx", method: "POST", path: "/agents/{agent_id}/safe-house/quarantine/{quarantine_id}/discard", owner: "T5-4" },
+  // (closed 2026-05-15 by T5-4 PR 5: quickstart/safe-house-protection
+  // .mdx rewritten onto the real protection-card endpoint + org-scoped
+  // safe-house endpoints. The legacy per-agent /safe-house/* shape
+  // never existed; the rewrite teaches PUT /agents/{id}/protection-card
+  // + GET /safe-house/stats + GET /safe-house/quarantine/{id} + POST
+  // /safe-house/quarantine/{id}/release + DELETE /safe-house/quarantine/{id}.)
   // (closed 2026-05-15 by T5-2: guides/api-versioning.mdx + concepts/
   // agent-identity.mdx /card references rewritten onto /alignment-card
   // per ADR-039.)
-  // gateway/org-card-templates.mdx — references /agents/{agent_id}/
-  // org-card-exempt which doesn't exist in the spec. Two examples
-  // (PUT to set, GET to check) — both resolve to the same tuple after
-  // method+path normalization on the GET side because the doc actually
-  // uses PUT twice. Owner: T5-4 guide audit.
-  { file: "gateway/org-card-templates.mdx", method: "PUT", path: "/agents/{agent_id}/org-card-exempt", owner: "T5-4" },
+  // (closed 2026-05-15 by T5-4 PR 5: gateway/org-card-templates.mdx
+  // rewritten onto the section-specific /exemptions surface — the
+  // whole-card org_card_exempt flag was retired in UC-4 2026-04-15.)
 
   // (closed 2026-05-15 by T5-4 PR 2: quickstart/gateway.mdx,
   // gateway/enforcement.mdx, guides/multi-agent-setup.mdx all rewritten

@@ -130,23 +130,32 @@ To restore org template inheritance, navigate to the agent's page and click **Re
 
 ### API
 
-You can also manage exemptions via the API:
+The pre-UC whole-card `org_card_exempt` flag was replaced in UC-4 (2026-04-15) by **section-specific exemptions** that target one field of the org card at a time, with audit metadata. Manage them via:
 
 ```bash
-# Set exemption
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/org-card-exempt \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"exempt": true, "reason": "Adversarial alignment testing agent"}'
+# List active exemptions on an agent
+curl https://api.mnemom.ai/v1/agents/{agent_id}/exemptions \
+  -H "Authorization: Bearer YOUR_TOKEN"
 
-# Remove exemption
-curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/org-card-exempt \
+# Grant a new exemption (required: exempt_section, reason)
+# exempt_section is closed-enum:
+#   "autonomy.forbidden_actions" | "enforcement.forbidden_tools" | "autonomy.max_autonomous_value"
+curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/exemptions \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"exempt": false}'
+  -d '{
+    "exempt_section": "autonomy.forbidden_actions",
+    "exempt_patterns": ["no_external_api_calls"],
+    "reason": "Adversarial alignment testing agent — external probes required",
+    "expires_at": "2026-08-15T00:00:00Z"
+  }'
+
+# Revoke (use the exemption_id returned from the list/POST)
+curl -X DELETE https://api.mnemom.ai/v1/agents/{agent_id}/exemptions/{exemption_id} \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-See the [Unified Cards overview](/api-reference/unified-cards-overview) for the current per-agent exemption model, which supersedes the whole-card exempt toggle (UC-4, 2026-04-15).
+Exemptions are time-bounded (default 90-day expiry), audit-logged, and section-specific. See the [Unified Cards overview](/api-reference/unified-cards-overview) for the canonical exemption model and the [Card Composition](/concepts/card-composition) page for how exemptions interact with the platform → org → agent cascade.
 
 ## Relationship to conscience values
 
