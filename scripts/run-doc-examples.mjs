@@ -37,6 +37,9 @@
 import { readFileSync } from "node:fs";
 import { argv, env, exit } from "node:process";
 
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+
 import {
   resolveScope,
   extractBashBlocks,
@@ -46,6 +49,52 @@ import {
   buildSpecIndex,
   matchSpecPath,
 } from "./lib/doc-examples-extract.mjs";
+
+// ── Ajv (mirrors the walker; needed for actual-response validation) ──────
+const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
+addFormats(ajv);
+
+function derefRef(refStr, root) {
+  if (!refStr.startsWith("#/")) return null;
+  const segs = refStr.slice(2).split("/").map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
+  let cur = root;
+  for (const s of segs) {
+    if (cur == null) return null;
+    cur = cur[s];
+  }
+  return cur ?? null;
+}
+function deref(node, root) {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map((n) => deref(n, root));
+  if (typeof node.$ref === "string") {
+    const target = derefRef(node.$ref, root);
+    return target == null ? node : deref(target, root);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(node)) out[k] = deref(v, root);
+  return out;
+}
+const responseValidatorCache = new Map();
+function getResponseValidator(spec, specPath, method, status) {
+  const key = `${method}|${specPath}|${status}`;
+  if (responseValidatorCache.has(key)) return responseValidatorCache.get(key);
+  const op = spec.paths[specPath]?.[method];
+  const schema = op?.responses?.[String(status)]?.content?.["application/json"]?.schema;
+  if (!schema) {
+    responseValidatorCache.set(key, null);
+    return null;
+  }
+  try {
+    const dereffed = deref(schema, spec);
+    const v = ajv.compile(dereffed);
+    responseValidatorCache.set(key, v);
+    return v;
+  } catch (err) {
+    responseValidatorCache.set(key, { __compileError: err.message });
+    return null;
+  }
+}
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 const args = argv.slice(2);
@@ -300,30 +349,64 @@ for (const p of plan) {
   if (p.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
   let res;
+  let resBody;
   try {
     res = await fetch(p.url, { method: p.method, headers, body: p.body ?? undefined });
+    if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+      try {
+        resBody = await res.json();
+      } catch {
+        resBody = undefined;
+      }
+    }
   } catch (err) {
     results.push({ ...p, error: err.message });
     continue;
   }
   const verdict = assertExpectedStatus(p.specPath, p.method.toLowerCase(), res.status);
-  results.push({ ...p, status: res.status, verdict });
+
+  // T5-1.4 — validate the actual response body against the spec's
+  // responses[status] schema. Skip on auth-related statuses (the body
+  // is an error envelope, not the documented success shape).
+  let respVerdict = null;
+  if (verdict.ok && resBody !== undefined && res.status >= 200 && res.status < 300) {
+    const respValidator = getResponseValidator(spec, p.specPath, p.method.toLowerCase(), res.status);
+    if (respValidator && !respValidator.__compileError) {
+      const ok = respValidator(resBody);
+      if (!ok) {
+        respVerdict = { ok: false, errors: respValidator.errors ?? [] };
+      } else {
+        respVerdict = { ok: true };
+      }
+    }
+  }
+  results.push({ ...p, status: res.status, verdict, respVerdict });
 }
 
 // ── Final report ─────────────────────────────────────────────────────────
-const failed = results.filter((r) => r.error || r.verdict?.ok === false);
-const passed = results.filter((r) => r.verdict?.ok);
+const failed = results.filter(
+  (r) => r.error || r.verdict?.ok === false || r.respVerdict?.ok === false,
+);
+const passed = results.filter(
+  (r) => !r.error && r.verdict?.ok && r.respVerdict?.ok !== false,
+);
 
 console.log();
 console.log(`Executed ${results.length} example(s): ${passed.length} ✓ / ${failed.length} ✗`);
 for (const r of passed) {
-  console.log(`  ✓ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (${r.verdict.why})   (${r.file}:${r.line})`);
+  const respNote = r.respVerdict?.ok ? "; resp schema ✓" : "";
+  console.log(`  ✓ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (${r.verdict.why}${respNote})   (${r.file}:${r.line})`);
 }
 for (const r of failed) {
   if (r.error) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ERROR: ${r.error}   (${r.file}:${r.line})`);
-  } else {
+  } else if (r.verdict?.ok === false) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (${r.verdict.why})   (${r.file}:${r.line})`);
+  } else if (r.respVerdict?.ok === false) {
+    console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (status ${r.verdict.why}; resp schema FAIL)   (${r.file}:${r.line})`);
+    for (const e of r.respVerdict.errors.slice(0, 5)) {
+      console.log(`      resp.${e.keyword}: ${e.instancePath || "(root)"} — ${e.message ?? ""}`);
+    }
   }
 }
 
