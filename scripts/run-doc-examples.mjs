@@ -378,14 +378,21 @@ for (const p of plan) {
 
   let res;
   let resBody;
+  let resBodyText;
+  let resRequestId;
   try {
     res = await fetch(p.url, { method: p.method, headers, body: p.body ?? undefined });
-    if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+    resRequestId = res.headers.get("x-request-id") ?? res.headers.get("cf-ray") ?? null;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      resBodyText = await res.text();
       try {
-        resBody = await res.json();
+        resBody = JSON.parse(resBodyText);
       } catch {
         resBody = undefined;
       }
+    } else {
+      resBodyText = await res.text().catch(() => "");
     }
   } catch (err) {
     results.push({ ...p, error: err.message });
@@ -408,7 +415,7 @@ for (const p of plan) {
       }
     }
   }
-  results.push({ ...p, status: res.status, verdict, respVerdict });
+  results.push({ ...p, status: res.status, verdict, respVerdict, resBodyText, resRequestId });
 }
 
 // ── Final report ─────────────────────────────────────────────────────────
@@ -430,6 +437,8 @@ for (const r of failed) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ERROR: ${r.error}   (${r.file}:${r.line})`);
   } else if (r.verdict?.ok === false) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (${r.verdict.why})   (${r.file}:${r.line})`);
+    if (r.resRequestId) console.log(`      x-request-id: ${r.resRequestId}`);
+    if (r.resBodyText) console.log(`      body: ${r.resBodyText.slice(0, 800)}`);
   } else if (r.respVerdict?.ok === false) {
     console.log(`  ✗ ${r.method.padEnd(6)} ${r.specPath}  ${r.status} (status ${r.verdict.why}; resp schema FAIL)   (${r.file}:${r.line})`);
     for (const e of r.respVerdict.errors.slice(0, 5)) {
