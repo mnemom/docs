@@ -57,11 +57,18 @@ if (!token) {
   exit(2);
 }
 
+// `mnm_*` / `mnemom_*` are Mnemom API keys and MUST authenticate via
+// `X-Mnemom-Api-Key` (per docs/guides/api-keys.mdx). Supabase JWTs and
+// anything else go via `Authorization: Bearer`. Mirrors run-doc-examples.mjs.
+const authHeaders = /^mnm_|^mnemom_/.test(token)
+  ? { "X-Mnemom-Api-Key": token }
+  : { Authorization: `Bearer ${token}` };
+
 async function api(method, path, body) {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...authHeaders,
       "Content-Type": "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -79,11 +86,24 @@ async function api(method, path, body) {
   return json;
 }
 
-// ── 1. Identify the staging user + their default org ─────────────────────
-const me = await api("GET", "/auth/me");
-const orgId = me.default_org_id ?? me.org_id ?? me.user?.default_org_id;
+// ── 1. Identify the target org ────────────────────────────────────────
+// Explicit env var (MNEMOM_STAGING_ORG_ID) takes precedence — pins the
+// seeder to a known fixture org regardless of which orgs the principal
+// happens to be a member of. Falls back to `/api-keys/whoami` for
+// principals whose key is org-bound (whoami uses resolveAuthPrincipal,
+// which accepts both JWTs and `X-Mnemom-Api-Key`). `/auth/me` was the
+// previous discovery endpoint but is JWT-only (getAuthUser), so
+// API-key-bound seeders 401'd there.
+let orgId = env.MNEMOM_STAGING_ORG_ID ?? null;
 if (!orgId) {
-  throw new Error("Could not resolve org_id from /auth/me; check response shape against the spec.");
+  const me = await api("GET", "/api-keys/whoami");
+  orgId = me.org_id ?? me.default_org_id ?? me.user?.default_org_id ?? null;
+}
+if (!orgId) {
+  throw new Error(
+    "Could not resolve org_id. Either set MNEMOM_STAGING_ORG_ID explicitly, " +
+      "or bind the staging key to an org so /api-keys/whoami returns it.",
+  );
 }
 
 // ── 2. Find-or-create the doc-fixtures webhook endpoint ──────────────────
