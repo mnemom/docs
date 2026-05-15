@@ -42,12 +42,22 @@
  *                    to the T5-1 layer-1 behavior pre-2026-05-14).
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { argv, exit } from "node:process";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+
+import {
+  resolveScope,
+  extractBashBlocks,
+  extractCurls,
+  parseCurl,
+  pathSegmentsFromUrl,
+  buildSpecIndex,
+  matchSpecPath,
+  templatePathMatchesSegments,
+} from "./lib/doc-examples-extract.mjs";
 
 // ── CLI parsing ──────────────────────────────────────────────────────────
 const args = argv.slice(2);
@@ -70,8 +80,6 @@ for (let i = 0; i < args.length; i++) {
     exit(2);
   }
 }
-const scopeDirs = scope.split(",").map((s) => s.trim()).filter(Boolean);
-
 // ── Known-drift allowlist ────────────────────────────────────────────────
 //
 // T5-1 ships green by allowlisting drift findings whose remediation belongs
@@ -116,19 +124,9 @@ const KNOWN_DRIFT = [
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)
 // so a single entry covers every example variant (`$AGENT_ID`,
-// `mnm-550e8...`, `smolt-...`). Match the entry's template against the
-// walker's literal segments the same way matchSpecPath does.
-function templatePathMatchesSegments(templatePath, segments) {
-  const tSegs = templatePath.split("/").filter(Boolean);
-  if (tSegs.length !== segments.length) return false;
-  for (let i = 0; i < tSegs.length; i++) {
-    const t = tSegs[i];
-    if (t.startsWith("{") && t.endsWith("}")) continue;
-    if (t !== segments[i]) return false;
-  }
-  return true;
-}
-
+// `mnm-550e8...`, `smolt-...`). `templatePathMatchesSegments` from the
+// shared lib applies the same template-match semantics that the executor
+// uses for fixture-resolution.
 function knownDriftEntry(file, method, segments) {
   return KNOWN_DRIFT.find(
     (e) =>
@@ -203,7 +201,6 @@ function knownBodyDriftEntry(file, method, segments, keyword, schemaPath) {
 
 // ── Load spec ────────────────────────────────────────────────────────────
 const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
-const specPaths = Object.keys(spec.paths ?? {});
 
 // ── Ajv + dereferencer ───────────────────────────────────────────────────
 //
@@ -305,297 +302,13 @@ function parseBody(raw) {
   }
 }
 
-// Pre-tokenize the spec's paths once. Each entry: { raw, segments[], methods[] }.
-const specIndex = specPaths.map((raw) => {
-  const segments = raw.split("/").filter(Boolean);
-  const methods = Object.keys(spec.paths[raw]).filter((k) =>
-    ["get", "post", "put", "patch", "delete", "head", "options"].includes(k),
-  );
-  return { raw, segments, methods };
-});
+// ── Spec index + file scope (both via shared lib) ────────────────────────
+const specIndex = buildSpecIndex(spec);
+const files = resolveScope(scope);
 
-// ── Walk MDX files ───────────────────────────────────────────────────────
-function walkMdx(dir, acc = []) {
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return acc;
-  }
-  for (const entry of entries) {
-    const full = join(dir, entry);
-    const s = statSync(full);
-    if (s.isDirectory()) walkMdx(full, acc);
-    else if (entry.endsWith(".mdx") || entry.endsWith(".md")) acc.push(full);
-  }
-  return acc;
-}
-
-const files = scopeDirs.flatMap((d) => {
-  try {
-    const s = statSync(d);
-    if (s.isFile()) return d.endsWith(".mdx") || d.endsWith(".md") ? [d] : [];
-    if (s.isDirectory()) return walkMdx(d);
-  } catch {
-    // Missing scope target — silent skip (lets the default include
-    // forward-compat additions before they exist on disk).
-    return [];
-  }
-  return [];
-});
-
-// ── Extract bash code blocks ─────────────────────────────────────────────
-//
-// Fenced code blocks open with ``` followed by a language tag (and
-// optionally a label like "bash cURL"). We accept the block as "bash"
-// when the first token after the fence is bash, sh, or curl.
-function extractBashBlocks(source) {
-  const blocks = [];
-  const lines = source.split("\n");
-  let inFence = false;
-  let isBash = false;
-  let buf = [];
-  let openLine = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith("```")) {
-      if (!inFence) {
-        const tag = line.slice(3).trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-        inFence = true;
-        isBash = ["bash", "sh", "shell", "curl", "console"].includes(tag);
-        buf = [];
-        openLine = i + 1;
-      } else {
-        if (isBash) blocks.push({ line: openLine, body: buf.join("\n") });
-        inFence = false;
-        isBash = false;
-      }
-    } else if (inFence && isBash) {
-      buf.push(line);
-    }
-  }
-  return blocks;
-}
-
-// ── Extract curl invocations from a bash block ───────────────────────────
-//
-// Curl commands can span many lines via `\` continuation. We first
-// rejoin continuations into single logical lines, then scan for tokens
-// starting with `curl`.
-function extractCurls(blockBody) {
-  // Rejoin backslash-line-continuations into single logical units. Inside
-  // single-quoted bodies (`-d '{...multi-line JSON...}'`) the JSON spans
-  // multiple physical lines WITHOUT `\` markers — those newlines must
-  // survive the tokenizer. After rejoin, walk the block as one stream,
-  // splitting only on top-level (unquoted) `;` / `&&` / `||`.
-  const text = blockBody.replace(/\\\n\s*/g, " ");
-
-  const curls = [];
-  let i = 0;
-  while (i < text.length) {
-    // Skip leading whitespace, newlines, and `#` comments.
-    while (i < text.length) {
-      const c = text[i];
-      if (/\s/.test(c)) {
-        i++;
-        continue;
-      }
-      if (c === "#") {
-        while (i < text.length && text[i] !== "\n") i++;
-        continue;
-      }
-      break;
-    }
-    if (i >= text.length) break;
-
-    // Consume one shell command, respecting single/double quote state.
-    // Quoted newlines are preserved into the captured slice.
-    const start = i;
-    let sq = false;
-    let dq = false;
-    while (i < text.length) {
-      const c = text[i];
-      if (c === "\\" && !sq && i + 1 < text.length) {
-        i += 2;
-        continue;
-      }
-      if (c === "'" && !dq) sq = !sq;
-      else if (c === '"' && !sq) dq = !dq;
-      else if (!sq && !dq) {
-        if (c === ";") break;
-        if (c === "&" && text[i + 1] === "&") break;
-        if (c === "|" && text[i + 1] === "|") break;
-        if (c === "\n") {
-          // A top-level newline that isn't continued ends the command.
-          break;
-        }
-      }
-      i++;
-    }
-    const cmd = text.slice(start, i).trim();
-    if (cmd.startsWith("curl ") || cmd === "curl") curls.push(cmd);
-    if (text[i] === ";" || text[i] === "\n") i++;
-    else if (text[i] === "&" || text[i] === "|") i += 2;
-  }
-  return curls;
-}
-
-// ── Parse a single curl invocation ───────────────────────────────────────
-//
-// Returns { method, url } when the curl targets api.mnemom.ai/v1/*. Returns
-// null when the URL is out of scope (gateway, localhost, GitHub, etc.) or
-// when we can't recover a URL.
-const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
-function parseCurl(invocation) {
-  // Tokenize respecting quoted segments.
-  const tokens = shellTokenize(invocation);
-  if (tokens[0] !== "curl") return null;
-
-  let method = "GET";
-  let url = null;
-  let body = null;
-  let explicitMethod = false;
-
-  for (let i = 1; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (t === "-X" || t === "--request") {
-      const m = (tokens[++i] ?? "").toUpperCase();
-      if (HTTP_METHODS.has(m)) {
-        method = m;
-        explicitMethod = true;
-      }
-    } else if (t.startsWith("-X")) {
-      const m = t.slice(2).toUpperCase();
-      if (HTTP_METHODS.has(m)) {
-        method = m;
-        explicitMethod = true;
-      }
-    } else if (t === "-H" || t === "--header") {
-      i++; // skip header arg
-    } else if (t === "-d" || t === "--data" || t === "--data-raw" || t === "--data-binary") {
-      body = tokens[++i] ?? null;
-      if (!explicitMethod) method = "POST";
-    } else if (t === "-u" || t === "--user" || t === "-A" || t === "--user-agent") {
-      i++;
-    } else if (t === "-o" || t === "--output" || t === "--cookie" || t === "-b") {
-      i++;
-    } else if (t.startsWith("--")) {
-      // long flag with attached value (`--data-urlencode=foo`) or boolean
-      if (t.includes("=") === false && (t === "--silent" || t === "--fail" || t === "--location" || t === "--include" || t === "--verbose")) {
-        // boolean flag; nothing to skip
-      } else if (!t.includes("=")) {
-        // long flag with separate value
-        i++;
-      }
-    } else if (t.startsWith("-")) {
-      // short combined flags like -sSL — boolean, no skip
-    } else if (!url && (t.startsWith("http://") || t.startsWith("https://"))) {
-      url = t;
-    }
-  }
-  return url ? { method, url, body } : null;
-}
-
-function shellTokenize(line) {
-  const out = [];
-  let buf = "";
-  let sq = false;
-  let dq = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === "'" && !dq) {
-      sq = !sq;
-      continue;
-    }
-    if (c === '"' && !sq) {
-      dq = !dq;
-      continue;
-    }
-    if (c === "\\" && (i + 1) < line.length && !sq) {
-      buf += line[++i];
-      continue;
-    }
-    if (/\s/.test(c) && !sq && !dq) {
-      if (buf) {
-        out.push(buf);
-        buf = "";
-      }
-    } else {
-      buf += c;
-    }
-  }
-  if (buf) out.push(buf);
-  return out;
-}
-
-// ── Normalize a URL path against the spec ────────────────────────────────
-//
-// Strip scheme/host/query/fragment, drop the `/v1` prefix, tokenize. Then
-// search specIndex for the unique entry with same segment-count where every
-// non-`{...}` segment matches literally. Multiple matches are allowed only
-// if `{param}` slots disambiguate; otherwise we return all candidates so
-// the caller can flag ambiguity (rare in practice).
-function pathSegmentsFromUrl(url) {
-  let path;
-  try {
-    const u = new URL(url);
-    if (u.hostname !== "api.mnemom.ai") return { skip: true, reason: `host=${u.hostname}` };
-    path = u.pathname;
-  } catch {
-    return { skip: true, reason: "unparseable" };
-  }
-
-  if (path.startsWith("/v1/")) path = path.slice(3); // keep leading slash
-  else if (path === "/v1") path = "/";
-  else return { skip: true, reason: "not /v1/*" };
-
-  // Trim trailing slash unless root.
-  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
-
-  // URL parsing percent-encodes literal `{` / `}`. The docs grammar lets
-  // pages use `{agent_id}` to show the URL shape (illustrative templates),
-  // and that should match the spec's `{agent_id}` slot directly. Decode
-  // each segment so the matcher sees the original characters.
-  const segs = path
-    .split("/")
-    .filter(Boolean)
-    .map((s) => {
-      try {
-        return decodeURIComponent(s);
-      } catch {
-        return s;
-      }
-    });
-  return { skip: false, segments: segs };
-}
-
-function matchSpecPath(segments) {
-  const candidates = [];
-  for (const entry of specIndex) {
-    if (entry.segments.length !== segments.length) continue;
-    let ok = true;
-    let paramCount = 0;
-    for (let i = 0; i < segments.length; i++) {
-      const specSeg = entry.segments[i];
-      if (specSeg.startsWith("{") && specSeg.endsWith("}")) {
-        paramCount++;
-        continue; // {param} matches anything (including placeholders and literal IDs)
-      }
-      if (specSeg !== segments[i]) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) candidates.push({ entry, paramCount });
-  }
-  if (candidates.length === 0) return null;
-  // Prefer the most-specific match (fewest `{param}` slots). This is well
-  // defined because the spec doesn't overload a literal segment against a
-  // parameter at the same position in two distinct entries with equal
-  // specificity (verified by manual inspection of openapi.json).
-  candidates.sort((a, b) => a.paramCount - b.paramCount);
-  return candidates[0].entry;
-}
+// matchSpecPath in this file always uses the local specIndex; wrap to
+// match the lib's signature.
+const matchSpecPathLocal = (segments) => matchSpecPath(segments, specIndex);
 
 // ── Walk + validate ──────────────────────────────────────────────────────
 const failures = [];
@@ -624,7 +337,7 @@ for (const file of files) {
         continue;
       }
       const normalizedPath = "/" + norm.segments.join("/");
-      const matched = matchSpecPath(norm.segments);
+      const matched = matchSpecPathLocal(norm.segments);
       if (!matched) {
         const allow = knownDriftEntry(file, method, norm.segments);
         const entry = { file, line: block.line, method, path: normalizedPath, curl: clip(curl), reason: `no spec path matches ${method} /v1${normalizedPath}`, allowKey: allow ? `${allow.file}|${allow.method}|${allow.path}` : null, owner: allow?.owner };
@@ -755,7 +468,7 @@ function formatAjvError(e) {
 
 // ── Report ───────────────────────────────────────────────────────────────
 const fileCount = files.length;
-console.log(`Scanned ${fileCount} MDX file(s) across [${scopeDirs.join(", ")}].`);
+console.log(`Scanned ${fileCount} MDX file(s) across [${scope}].`);
 console.log(`Extracted ${totalCurls} curl invocation(s) targeting api.mnemom.ai/v1/*.`);
 if (checkBodies) {
   console.log(`Body validation: ${bodiesValidated} body(ies) validated against requestBody schemas (${totalBodies - bodiesValidated} skipped: no schema, parse-error, or compile-error).`);
