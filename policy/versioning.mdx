@@ -1,0 +1,108 @@
+---
+title: "API Versioning Policy"
+description: "Mnemom's canonical commitment for how the API evolves, how versions are negotiated, how long each version is supported, and how deprecations are signaled."
+sidebarTitle: "Versioning Policy"
+icon: "scale-balanced"
+---
+
+This page is Mnemom's **canonical commitment** for how the API evolves. It is the contract we expect every customer integration to be able to rely on. For how-to detail, see the [API Versioning guide](/guides/api-versioning).
+
+## The two version axes
+
+Mnemom versions the API at two independent levels:
+
+| Axis | Where it lives | When it changes | What it gates |
+|---|---|---|---|
+| **URL generation** | `/v1/` prefix in every path | Only for complete API redesigns. Expected cadence: at most once every several years. | The shape of the surface — paths, resource hierarchy, top-level abstractions. |
+| **Date-pinned behavior** | `X-Mnemom-Version: YYYY-MM-DD` request/response header | Each breaking change inside a `/v1/`-generation | Field names, response shapes, default behavior, enum values, validation rules. |
+
+Both axes are independent. A new `X-Mnemom-Version` date never moves the URL; a new URL generation does not invalidate active date-pinned integrations.
+
+This dual model mirrors [Stripe-Version](https://stripe.com/docs/api/versioning) and [GitHub's `X-GitHub-Api-Version`](https://docs.github.com/en/rest/overview/api-versions). Per the [ADR-042 amendment](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) (Q2 ratification 2026-05-08), `X-Mnemom-Version` is the 7th Mnemom-namespaced header and is permanent contract.
+
+## How clients pin a version
+
+**Production integrations must pin** by sending the `X-Mnemom-Version` header on every request:
+
+```http
+GET /v1/agents/mnm-... HTTP/1.1
+Host: api.mnemom.ai
+X-Mnemom-Api-Key: ...
+X-Mnemom-Version: 2026-04-13
+```
+
+If the header is omitted, the **latest stable version** is served. This is fine for exploratory calls; it is **not** safe for production systems — and especially not for AI agents, whose embedded environments rarely self-update in response to version-cutover messages.
+
+The response always echoes the version that was applied:
+
+```http
+HTTP/1.1 200 OK
+X-Mnemom-Version: 2026-04-13
+```
+
+If you request a version we don't recognize (typo, future date, retired version), we serve the closest valid predecessor and the response header tells you which one was applied. We never 4xx on an unrecognized version — silent fallback to the predecessor is the supported failure mode.
+
+## Support window
+
+| Change class | Minimum support window | Notes |
+|---|---|---|
+| Standard breaking change | **18 months** from the new version's release date | Longer than most APIs (typical industry standard is 12). The premium reflects Mnemom's service to the agentic internet: an agent in production may not be able to update on a human cadence. |
+| Security-critical change | **30 days** minimum | Rare; only when continued support of the old behavior would create a customer-facing security exposure. We notify and assist migration on an accelerated path. |
+| Enterprise / contract terms | Per contract | Some enterprise contracts negotiate longer windows. |
+
+After the window closes, calls to the retired version receive a 410 Gone with a `Sunset` header and a link to the migration guide. There is no silent re-mapping past retirement — the surface is final.
+
+## What counts as a breaking change
+
+A change is **breaking** (requires a new version date) if any of:
+
+- A response field is removed or renamed.
+- A response field's type changes.
+- A previously optional request field becomes required.
+- An enum loses a value, or an enum's set of valid values is constrained.
+- An endpoint is removed.
+- A default behavior changes in a way client code could observe.
+
+A change is **non-breaking** (no new version date) if any of:
+
+- A new endpoint is added.
+- A new optional response field is added.
+- A new optional request parameter is added.
+- An enum gains a new value.
+- A new response header is introduced.
+
+For non-breaking changes, clients are expected to follow the **Tolerant Reader** discipline — ignore unknown fields, treat unknown enum values as the documented fallback (we always document the fallback), and never assume a fixed set of headers. This is the same discipline `protobuf` / `Stripe-Version`-style ecosystems require. Tooling that fails closed on additive evolution is brittle.
+
+## Deprecation signals
+
+When a version is deprecated, calls to that version surface:
+
+```http
+Deprecation: true
+Sunset: Mon, 13 Oct 2027 00:00:00 GMT
+Link: <https://docs.mnemom.ai/policy/versioning>; rel="deprecation"
+X-Mnemom-Deprecation-Note: Version 2026-04-13 deprecated; migrate to 2026-10-01 by Oct 2027
+```
+
+The headers conform to [RFC 8594](https://datatracker.ietf.org/doc/html/rfc8594) (`Sunset`) and [draft-ietf-httpapi-deprecation-header](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-deprecation-header) (`Deprecation`).
+
+In parallel, we send email notifications to the org owner and to any integration contacts on file at:
+
+- **T+0** — deprecation announcement.
+- **T+12 months** — half-window mark.
+- **T+16 months** — 60-day warning.
+- **T+17 months** — 30-day final warning.
+
+## What we will not do
+
+- We will **not** break date-pinned production behavior within `/v1/` without bumping the date.
+- We will **not** retire a version before the published `Sunset` date.
+- We will **not** silently change `X-Mnemom-Version` resolution behavior. The fallback rule (closest valid predecessor) is part of the contract.
+- We will **not** introduce a `/v2/` URL generation for individual breaking changes. URL increments are reserved for resource-model overhauls.
+
+## Related
+
+- [API Versioning guide](/guides/api-versioning) — integration how-to, SDK pinning, working examples.
+- [API Reference overview](/api-reference/overview) — base URL, auth, the version table.
+- [Migration guides](/migration/smoltbot-to-mnemom-headers) — version-cutover walkthroughs as they're published.
+- [ADR-042 — Header Rationalization](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — the architectural decision that locked `X-Mnemom-Version` as canonical, post-2026-05-08 amendment.
