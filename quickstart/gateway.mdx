@@ -67,6 +67,33 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     </Tip>
   </Step>
 
+  <Step title="What you'll want to read on the way back">
+    The gateway adds response headers that carry the Safe House verdict, support-correlation metadata, and advisory entries. A compliant integration should parse and observe these — at minimum surface them when something goes wrong.
+
+    | Header | When emitted | What to do with it |
+    |---|---|---|
+    | `X-Mnemom-Request-Id` | Always | UUIDv4 per request. **Always log this.** Paste into a support ticket and we can pull every log line for the request. |
+    | `X-Mnemom-Verdict` | Always (gateway) | Structured `front=…; autonomy=…; integrity=…; back=…` with each value in `{pass \| observed \| nudged \| enforced}`. Parse it; the four-checkpoint state tells you what Safe House observed (front+back), what CLPI did on tool calls (autonomy), and what AIP did on reasoning (integrity). |
+    | `X-Mnemom-Advisory` | When the gateway has advisories | Compact JSON `[{source, text, severity?, id?}, …]`. Surface entries to your operator UI / logs. Omitted entirely when empty. |
+    | `X-Mnemom-Agent` | When the request is bound to a named agent | The agent identifier the gateway resolved your request to (e.g., `mnm-a1b2c3d4…`). Useful for cross-referencing dashboard rows. |
+    | `X-Mnemom-Session` | On multi-turn sessions | Stable session correlation token. Echo it back on the next turn to maintain session continuity. |
+    | `Retry-After` | On `429` and some `503` | Seconds to wait before retrying. **Honor it.** |
+
+    Quick parse:
+
+    ```typescript
+    const v = response.headers.get('X-Mnemom-Verdict')!;
+    const checkpoints = Object.fromEntries(v.split(';').map(s => s.trim().split('=')));
+    // checkpoints.front, checkpoints.autonomy, checkpoints.integrity, checkpoints.back
+
+    if (checkpoints.integrity === 'enforced') {
+      // Same-turn AIP replacement happened — surface that in your UI.
+    }
+    ```
+
+    See the [Headers reference](/api-reference/headers) for the full canonical set + per-language parsers, and the [Errors reference](/api-reference/errors) for the verdict-to-status mapping (when `enforced` becomes a 422 quarantine or 403 block).
+  </Step>
+
   <Step title="Check status">
     Verify the gateway is reachable and your agent is connected:
 
