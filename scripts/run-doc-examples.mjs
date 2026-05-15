@@ -326,9 +326,21 @@ for (const file of files) {
       const pathOnly = final.pathname.replace(/^\/v1\//, "/");
       const stagingURL = stagingBase.replace(/\/$/, "") + pathOnly + final.search;
 
-      // Inject Authorization header.
+      // Inject auth header. The header choice depends on the token shape:
+      // `mnm_*` / `mnemom_*` are Mnemom API keys and MUST go via
+      // `X-Mnemom-Api-Key` (per guides/api-keys.mdx — Authorization: Bearer
+      // for these keys is deprecated and rejected by `getAuthUser`-gated
+      // routes like /v1/safe-house/*). Supabase user JWTs (header starts
+      // with `eyJ`) go via Authorization: Bearer. Anything else falls back
+      // to Authorization: Bearer so a misshapen token still hits the
+      // server (where it 401s honestly rather than skipping silently here).
       const filteredHeaders = headers.filter((h) => !/^authorization\s*:/i.test(h) && !/^x-mnemom-api-key\s*:/i.test(h));
-      filteredHeaders.push(`Authorization: Bearer ${stagingToken ?? "DRY_RUN_TOKEN"}`);
+      const tokenValue = stagingToken ?? "DRY_RUN_TOKEN";
+      if (/^mnm_|^mnemom_/.test(tokenValue)) {
+        filteredHeaders.push(`X-Mnemom-Api-Key: ${tokenValue}`);
+      } else {
+        filteredHeaders.push(`Authorization: Bearer ${tokenValue}`);
+      }
 
       plan.push({
         file,
