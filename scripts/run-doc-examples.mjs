@@ -145,12 +145,22 @@ if (!stagingToken && !dryRun) {
 const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
 const specIndex = buildSpecIndex(spec);
 
-// Write allowlist — empty in v1. Each entry: { method, path } templated.
-// Adding to this list is an intentional opt-in that says: "this write op is
-// safe to run live against staging from CI, including cleanup." Most writes
+// Write allowlist. Each entry: { method, path } templated. Adding to
+// this list is an intentional opt-in that says: "this write op is safe
+// to run live against staging from CI, including cleanup." Most writes
 // have side effects (create agent, register webhook) that require an
 // idempotency-key + cleanup pass.
-const WRITE_ALLOWLIST = [];
+//
+// Per T5-1.3 v2: the first entry sends a test webhook to the fixture
+// endpoint. Idempotent — the receiver is a known test sink, every test
+// delivery is independent, no cleanup needed.
+const WRITE_ALLOWLIST = [
+  {
+    method: "POST",
+    path: "/orgs/{org_id}/webhooks/{endpoint_id}/test",
+    rationale: "Sends a test webhook to the doc-fixtures endpoint (T5-1.3 v2); idempotent, no cleanup.",
+  },
+];
 
 function isWriteAllowed(method, specPath) {
   return WRITE_ALLOWLIST.some((e) => e.method === method && e.path === specPath);
@@ -182,11 +192,18 @@ function pathSegmentsNeedingFixture(segments) {
   for (const seg of segments) {
     const decoded = seg;
     if (TEMPLATE_RE.test(decoded)) {
-      needs.push(decoded);
+      // {template} slot: skip only if the fixture for the upper-cased
+      // slot name is unset. If fixtures has ORG_ID for {org_id}, we'll
+      // substitute it in resolvePlaceholders and the URL becomes runnable.
+      const name = decoded.slice(1, -1).toUpperCase();
+      if (fixtures[name] === undefined) needs.push(decoded);
       continue;
     }
     for (const re of EXAMPLE_ID_PATTERNS) {
       if (re.test(decoded)) {
+        // Literal example ID like mnm-550e8400-... or agent-xyz. Always
+        // needs a fixture (we can't tell which {param} it corresponds
+        // to without ambiguity).
         needs.push(decoded);
         break;
       }
@@ -210,7 +227,7 @@ function resolvePlaceholders(str) {
     }
     return String(v);
   });
-  // $VAR form (must be followed by non-identifier char)
+  // $VAR form
   out = out.replace(/\$([A-Z_][A-Z0-9_]*)/g, (m, name) => {
     const v = fixtures[name];
     if (v === undefined) {
@@ -223,6 +240,17 @@ function resolvePlaceholders(str) {
   out = out.replace(/<([a-z][a-z0-9-]*(?:-[a-z0-9]+)*)>/gi, (m, name) => {
     const key = name.toUpperCase().replace(/-/g, "_");
     const v = fixtures[key] ?? fixtures[name];
+    if (v === undefined) {
+      missing.add(name);
+      return m;
+    }
+    return String(v);
+  });
+  // {template_name} form — OpenAPI-style URL parameter slots. Match
+  // fixture keys by upper-cased slot name (e.g., {org_id} → ORG_ID).
+  out = out.replace(/\{([a-z][a-z0-9_]*)\}/g, (m, name) => {
+    const key = name.toUpperCase();
+    const v = fixtures[key];
     if (v === undefined) {
       missing.add(name);
       return m;
