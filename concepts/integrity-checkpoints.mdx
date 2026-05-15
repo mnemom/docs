@@ -7,7 +7,9 @@ icon: "shield-check"
 
 # Integrity Checkpoints
 
-An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block -- the internal reasoning the model produces before or alongside its visible response. Where [AP-Traces](/concepts/ap-traces) record what happened after the fact, integrity checkpoints evaluate what the agent is thinking in real time, before the next action executes.
+An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block — the internal reasoning the model produces before or alongside its visible response. The checkpoint runs **same-turn** between the model's response generation and delivery to the user (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) — `enforce` blocks the offending action at every checkpoint same-turn; the chat completes 2xx, and the agent's response references what was prevented).
+
+[AP-Traces](/concepts/ap-traces) are the durable artifact the checkpoint writes; the trace records what happened — both the model's thinking and the integrity verdict — in the same turn. Drift detection and coherence analysis then operate on the trace surface longitudinally (sideband) across multiple turns.
 
 Integrity Checkpoints are the primary data structure of the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), the sister protocol to [AAP](/protocols/aap/specification).
 
@@ -17,13 +19,13 @@ Integrity Checkpoints are the primary data structure of the [Agent Integrity Pro
 
 ## Why Integrity Checkpoints exist
 
-AAP's post-hoc verification provides comprehensive transparency, but it operates after the action has already been taken -- typically 30-60 seconds later when the Observer Worker processes the gateway log. This delay creates a window of vulnerability:
+Real-time analysis of the thinking block lets `integrity_mode = enforce` prevent these three failure modes **before** the response reaches the user:
 
-- **Prompt injection**: A malicious prompt causes the agent to exfiltrate data. The trace records it faithfully, but the data is already gone.
-- **Gradual drift**: An agent's reasoning shifts subtly over multiple turns. Each individual action passes verification, but the cumulative direction is misaligned.
-- **Misaligned intent**: The agent's thinking block reveals it intends to take a forbidden action, but the thinking block is only examined retroactively.
+- **Prompt injection**: A malicious prompt would otherwise cause the agent to exfiltrate data. The checkpoint catches the intent in the thinking block; enforcement replaces the response same-turn before delivery.
+- **Gradual drift**: Each individual checkpoint is same-turn, but the longitudinal pattern across many turns reveals subtle direction shifts. The sideband drift detector reads the trace surface and emits a `pending_advisory` on the next turn (per [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md)) when a threshold is crossed.
+- **Misaligned intent**: The thinking block reveals an intended forbidden action; the checkpoint catches it before the action lands.
 
-All three of these failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints fill this gap.
+All three failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints make that visibility actionable same-turn.
 
 ## How it works
 

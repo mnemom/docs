@@ -226,15 +226,16 @@ A tool can match multiple capabilities. This isn't an error — it means the too
 </CardGroup>
 
 <Warning>
-Policy enforcement (`enforcement.default_mode`) and alignment enforcement (`integrity.enforcement_mode`) are parallel systems. Setting alignment enforcement to `enforce` does not affect policy enforcement, and vice versa. An agent can be in alignment `observe` mode and policy `enforce` mode simultaneously — meaning alignment violations are logged but policy violations are blocked.
+Policy enforcement (`enforcement.default_mode`), action-policing alignment (`autonomy_mode`), and values-policing alignment (`integrity_mode`) are three parallel systems with three independent master switches per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md). Setting one to `enforce` does not affect the others — an agent can sit at `autonomy_mode: observe` + `integrity_mode: enforce` + `enforcement.default_mode: nudge` simultaneously, each on its own independent ladder.
 </Warning>
 
-### Relationship to alignment enforcement
+### Relationship to the alignment master switches
 
-| System | Card section | What it checks | Verdict source |
+| System | Master switch | What it checks | Verdict source |
 |---|---|---|---|
-| **Alignment enforcement** | `integrity.enforcement_mode` | Agent behavior against card values and autonomy envelope | AIP integrity checkpoints, AAP verification |
-| **Policy enforcement** | `enforcement.default_mode` | Tool usage against policy rules and capability mappings | Policy engine evaluation |
+| **Action-policing alignment** | `autonomy_mode` (alignment card, top-level) | Tool calls + bounded-action envelope | CLPI tool-use policy + observer trace verification |
+| **Values-policing alignment** | `integrity_mode` (alignment card, top-level) | Agent behavior against card values + conscience | AIP integrity checkpoints + drift detection |
+| **Policy enforcement** | `enforcement.default_mode` (alignment card, nested) | Tool usage against policy rules + capability mappings | Policy engine evaluation |
 
 Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
 
