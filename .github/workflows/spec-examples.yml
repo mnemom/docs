@@ -1,0 +1,57 @@
+name: Spec Examples Validation
+
+# T5-3 (Safe House Hardening) — specification-page example audit.
+# Parses every YAML / JSON / JSONC fenced block in
+# `specifications/*.mdx` and validates opted-in blocks against the
+# canonical schema in `api-reference/openapi.json` via Ajv 2020.
+#
+# Opt-in: a block validates only when annotated with
+# `# t5-3:full-example` (YAML) or `// t5-3:full-example` (JSON).
+# Pseudo-schema notation (e.g., `"a" | "b"` enum alternatives) opts
+# out of parse via `# t5-3:skip-parse`. See
+# `scripts/check-spec-examples.mjs` for the contract.
+#
+# Triggers:
+#   - pull_request when specs / openapi / the script / lib / package
+#     manifest changes
+#   - schedule daily (15 min after doc-examples) — catches drift when
+#     mnemom-api ships a schema change synced into openapi.json
+#   - workflow_dispatch (manual)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "specifications/**/*.mdx"
+      - "api-reference/openapi.json"
+      - "scripts/check-spec-examples.mjs"
+      - "scripts/lib/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/spec-examples.yml"
+  schedule:
+    - cron: "0 7 * * *" # 15 min after doc-examples.yml
+  workflow_dispatch:
+
+jobs:
+  check-spec-examples:
+    name: Validate spec-page YAML / JSON examples
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      - name: Install deps (ajv + yaml)
+        run: npm ci
+
+      - name: Walk spec-page examples
+        run: node scripts/check-spec-examples.mjs --verbose
