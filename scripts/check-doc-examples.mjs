@@ -140,18 +140,15 @@ function knownDriftEntry(file, method, segments) {
 // multiple errors on the same body. As T5-2 / T5-4 close, entries get
 // removed.
 const KNOWN_BODY_DRIFT = [
-  // ── Webhook `event_types` enum drift ───────────────────────────────
-  // Docs reference event names like `safe_house.evaluation.block` that
-  // the spec's enum doesn't include. May be spec drift rather than doc
-  // drift — mnemom-api openapi.json's webhook event enum should be
-  // verified against the runtime event taxonomy (likely a follow-up
-  // against mnemom-api, tagged separately). Until verified, treat as
-  // doc-side and allowlist.
-  { file: "guides/improving-reputation.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
-  { file: "guides/safe-house-webhooks.mdx", method: "PATCH", path: "/orgs/{org_id}/webhooks/{endpoint_id}", keyword: "enum", owner: "T5-4 (verify spec enum)" },
-  { file: "guides/safe-house-webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
-  { file: "guides/trust-recovery.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
-  { file: "guides/webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
+  // (closed 2026-05-15 by T5-4 PR 7: docs/api-reference/openapi.json's
+  // event_types enum expanded from 8 → 47 to match the canonical
+  // mnemom-api/schemas/webhooks/ taxonomy, plus doc-side prefix fixes:
+  // safe_house.* → sh.* and drift.detected → sideband.drift.fired in
+  // guides/safe-house-webhooks.mdx, guides/webhooks.mdx. The upstream
+  // spec fix in mnemom-api/openapi.json (which also has the stale
+  // 8-event enum in openapi/tags/webhook-notifications.ts source) is
+  // a separate cross-repo follow-up — flagged in
+  // safe-house-hardening/audit/.)
 
   // (closed 2026-05-15 by T5-4 PR 6 — 11 body-drift entries spanning
   // /policies/evaluate (added the `policy` field), alignment-card

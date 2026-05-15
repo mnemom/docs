@@ -9,15 +9,15 @@ icon: "webhook"
 
 **React to threats in real-time.** Safe House emits webhook events when it blocks a message, quarantines a session, detects a canary trigger, or identifies a cross-agent attack campaign. Route these events to PagerDuty, Slack, your SIEM, or any HTTP endpoint.
 
-Safe House webhooks reuse the existing AIP webhook infrastructure. If you already have AIP webhooks configured, add `safe_house.*` to your `event_types` — no new endpoints or secrets required.
+Safe House webhooks reuse the existing AIP webhook infrastructure. If you already have AIP webhooks configured, add `sh.*` to your `event_types` — no new endpoints or secrets required.
 
 ```
 Safe House evaluation ──→ Gateway ──→ Signed POST (X-AIP-Signature) ──→ Your Endpoint
                                             │
-                                            ├── PagerDuty (safe_house.evaluation.block)
-                                            ├── Slack (safe_house.evaluation.quarantine)
-                                            ├── SIEM (all safe_house.*)
-                                            └── Security on-call (safe_house.canary.triggered)
+                                            ├── PagerDuty (sh.evaluation.block)
+                                            ├── Slack (sh.evaluation.quarantine)
+                                            ├── SIEM (all sh.*)
+                                            └── Security on-call (sh.canary.triggered)
 ```
 
 ---
@@ -26,12 +26,12 @@ Safe House evaluation ──→ Gateway ──→ Signed POST (X-AIP-Signature) 
 
 | Event | When It Fires | Severity |
 |-------|--------------|----------|
-| `safe_house.evaluation.warn` | Safe House flags a turn above the warn threshold but below block | Informational |
-| `safe_house.evaluation.quarantine` | Safe House quarantines a turn for human review | High |
-| `safe_house.evaluation.block` | Safe House blocks a turn outright | Critical |
-| `safe_house.canary.triggered` | A canary credential was used — indicating active exploitation | Critical |
-| `safe_house.session.escalated` | Session risk has risen to `high` across multiple turns | High |
-| `safe_house.campaign.detected` | Multiple agents have received similar attacks from the same infrastructure | Critical |
+| `sh.evaluation.warn` | Safe House flags a turn above the warn threshold but below block | Informational |
+| `sh.evaluation.quarantine` | Safe House quarantines a turn for human review | High |
+| `sh.evaluation.block` | Safe House blocks a turn outright | Critical |
+| `sh.canary.triggered` | A canary credential was used — indicating active exploitation | Critical |
+| `sh.session.escalated` | Session risk has risen to `high` across multiple turns | High |
+| `sh.campaign.detected` | Multiple agents have received similar attacks from the same infrastructure | Critical |
 
 ---
 
@@ -39,11 +39,11 @@ Safe House evaluation ──→ Gateway ──→ Signed POST (X-AIP-Signature) 
 
 All events share a common envelope. The `data` object varies by event type.
 
-### `safe_house.evaluation.block`
+### `sh.evaluation.block`
 
 ```json
 {
-  "event": "safe_house.evaluation.block",
+  "event": "sh.evaluation.block",
   "timestamp": "2026-03-30T14:32:11Z",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
   "session_id": "18a228f3-1234",
@@ -62,11 +62,11 @@ All events share a common envelope. The `data` object varies by event type.
 }
 ```
 
-### `safe_house.evaluation.quarantine`
+### `sh.evaluation.quarantine`
 
 ```json
 {
-  "event": "safe_house.evaluation.quarantine",
+  "event": "sh.evaluation.quarantine",
   "timestamp": "2026-03-30T15:11:04Z",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
   "session_id": "18a228f3-1234",
@@ -86,11 +86,11 @@ All events share a common envelope. The `data` object varies by event type.
 }
 ```
 
-### `safe_house.canary.triggered`
+### `sh.canary.triggered`
 
 ```json
 {
-  "event": "safe_house.canary.triggered",
+  "event": "sh.canary.triggered",
   "timestamp": "2026-03-30T16:00:00Z",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
   "session_id": "18a228f3-5678",
@@ -104,11 +104,11 @@ All events share a common envelope. The `data` object varies by event type.
 }
 ```
 
-### `safe_house.session.escalated`
+### `sh.session.escalated`
 
 ```json
 {
-  "event": "safe_house.session.escalated",
+  "event": "sh.session.escalated",
   "timestamp": "2026-03-30T16:45:22Z",
   "agent_id": "mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b",
   "session_id": "a9f34c12-2233",
@@ -122,11 +122,11 @@ All events share a common envelope. The `data` object varies by event type.
 }
 ```
 
-### `safe_house.campaign.detected`
+### `sh.campaign.detected`
 
 ```json
 {
-  "event": "safe_house.campaign.detected",
+  "event": "sh.campaign.detected",
   "timestamp": "2026-03-30T17:22:09Z",
   "data": {
     "campaign_id": "camp_b3c9d4a1",
@@ -189,7 +189,7 @@ if (age > 5 * 60 * 1000) {
 
 ## Registration
 
-Safe House events use the same webhook registration as AIP webhooks. Add `safe_house.*` to your `event_types`:
+Safe House events use the same webhook registration as AIP webhooks. Add `sh.*` to your `event_types`:
 
 ```bash
 # Add Safe House events to an existing webhook endpoint
@@ -199,13 +199,13 @@ curl -X PATCH https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id} \
   -d '{
     "event_types": [
       "integrity.violation",
-      "drift.detected",
-      "safe_house.evaluation.block",
-      "safe_house.evaluation.quarantine",
-      "safe_house.evaluation.warn",
-      "safe_house.canary.triggered",
-      "safe_house.session.escalated",
-      "safe_house.campaign.detected"
+      "sideband.drift.fired",
+      "sh.evaluation.block",
+      "sh.evaluation.quarantine",
+      "sh.evaluation.warn",
+      "sh.canary.triggered",
+      "sh.session.escalated",
+      "sh.campaign.detected"
     ]
   }'
 ```
@@ -220,10 +220,10 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
     "url": "https://your-server.com/webhooks/safe-house",
     "description": "Safe House security alerts",
     "event_types": [
-      "safe_house.evaluation.block",
-      "safe_house.evaluation.quarantine",
-      "safe_house.canary.triggered",
-      "safe_house.campaign.detected"
+      "sh.evaluation.block",
+      "sh.evaluation.quarantine",
+      "sh.canary.triggered",
+      "sh.campaign.detected"
     ]
   }'
 ```
@@ -252,12 +252,12 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/deliveries/{deliver
 
 ## Integration patterns
 
-### Route `safe_house.evaluation.block` to on-call
+### Route `sh.evaluation.block` to on-call
 
 High-confidence blocks warrant immediate human attention. Page your security on-call directly.
 
 ```typescript
-if (event.event === 'safe_house.evaluation.block' && event.data.overall_risk > 0.9) {
+if (event.event === 'sh.evaluation.block' && event.data.overall_risk > 0.9) {
   await pagerduty.createIncident({
     title: `Safe House block: ${event.data.top_threat.type} on agent ${event.agent_id}`,
     severity: 'critical',
@@ -267,12 +267,12 @@ if (event.event === 'safe_house.evaluation.block' && event.data.overall_risk > 0
 }
 ```
 
-### Route `safe_house.evaluation.quarantine` to human reviewer
+### Route `sh.evaluation.quarantine` to human reviewer
 
 Quarantined items need human review before the session can continue. Post to Slack with the review link.
 
 ```typescript
-if (event.event === 'safe_house.evaluation.quarantine') {
+if (event.event === 'sh.evaluation.quarantine') {
   await slack.postMessage({
     channel: '#security-review',
     text: [
@@ -285,12 +285,12 @@ if (event.event === 'safe_house.evaluation.quarantine') {
 }
 ```
 
-### Treat `safe_house.canary.triggered` as a security incident
+### Treat `sh.canary.triggered` as a security incident
 
 A canary trigger means an attacker has gained access to a credential planted specifically to detect exploitation. Escalate immediately.
 
 ```typescript
-if (event.event === 'safe_house.canary.triggered') {
+if (event.event === 'sh.canary.triggered') {
   await incidentResponse.openP0({
     title: `Canary credential triggered — active exploitation suspected`,
     agentId: event.agent_id,
@@ -334,7 +334,7 @@ Send a test event to your endpoint without waiting for a real threat:
 curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id}/test \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"event_type": "safe_house.evaluation.block"}'
+  -d '{"event_type": "sh.evaluation.block"}'
 ```
 
 The test payload uses synthetic data but is signed with your real signing secret — your signature verification code runs against a real payload.
