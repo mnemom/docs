@@ -1,0 +1,51 @@
+name: Doc Examples vs OpenAPI
+
+# T5-1 (Safe House Hardening) — doc-as-spec static walker.
+#
+# Asserts every `curl https://api.mnemom.ai/v1/...` invocation in customer-
+# facing MDX corresponds to a real {path, method} in api-reference/openapi.json.
+# Catches structural drift between docs and the manifest-generated spec; the
+# spec itself is enforced by the openapi-drift-check workflow + the four-layer
+# T4 defense in mnemom-api.
+#
+# Triggers:
+#   - pull_request to main (any docs change can introduce drift)
+#   - schedule daily (catches drift introduced when api-reference/openapi.json
+#     is synced from mnemom-api without a corresponding doc update)
+#   - workflow_dispatch (manual)
+#
+# Known-drift allowlist lives inside scripts/check-doc-examples.mjs. Each
+# entry is tagged with the T5 sub-track that will close it (T5-2 concept
+# audit, T5-4 guide audit). The allowlist shrinks as those sub-tracks land.
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/*.mdx"
+      - "**/*.md"
+      - "api-reference/openapi.json"
+      - "scripts/check-doc-examples.mjs"
+      - ".github/workflows/doc-examples.yml"
+  schedule:
+    - cron: "45 6 * * *" # 15 min after openapi-drift-check
+  workflow_dispatch:
+
+jobs:
+  check-examples:
+    name: Walk MDX curl examples vs openapi.json
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      - name: Walk doc examples
+        run: node scripts/check-doc-examples.mjs
