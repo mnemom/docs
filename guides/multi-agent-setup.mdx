@@ -303,49 +303,23 @@ Each agent in your fleet can have its own enforcement mode, controlling how the 
 | **nudge** | Inject feedback into the agent's next request so it can self-correct. |
 | **enforce** | Hard block (403) for non-streaming requests. Falls back to nudge for streaming. |
 
-Set enforcement mode per agent via the API:
+Set enforcement mode per agent by updating the alignment card's top-level `integrity_mode` / `autonomy_mode` fields. Per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md), these are master switches on the alignment card; the legacy per-agent `/enforcement` endpoint was retired 2026-05-14. The pattern is the standard alignment-card read-modify-write flow — see [Card Management](/guides/card-management).
 
-<CodeGroup>
-```python Python
-import requests
+The simplest fleet-scale loop (CLI):
 
-# Production agents: enforce mode
-requests.put(
-    "https://api.mnemom.ai/v1/agents/shopping.agent/enforcement",
-    json={"mode": "enforce"},
-    headers={"Authorization": "Bearer YOUR_API_KEY"},
-)
+```bash
+# Production agents → enforce
+for agent in shopping.agent checkout.agent; do
+  mnemom card edit --agent "$agent" --set integrity_mode=enforce --set autonomy_mode=enforce
+done
 
-# Staging agents: observe mode
-requests.put(
-    "https://api.mnemom.ai/v1/agents/staging.recommender/enforcement",
-    json={"mode": "observe"},
-    headers={"Authorization": "Bearer YOUR_API_KEY"},
-)
+# Staging agents → observe
+for agent in staging.recommender staging.support; do
+  mnemom card edit --agent "$agent" --set integrity_mode=observe --set autonomy_mode=observe
+done
 ```
 
-```typescript TypeScript
-// Production agents: enforce mode
-await fetch('https://api.mnemom.ai/v1/agents/shopping.agent/enforcement', {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_API_KEY',
-  },
-  body: JSON.stringify({ mode: 'enforce' }),
-});
-
-// Staging agents: observe mode
-await fetch('https://api.mnemom.ai/v1/agents/staging.recommender/enforcement', {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_API_KEY',
-  },
-  body: JSON.stringify({ mode: 'observe' }),
-});
-```
-</CodeGroup>
+The programmatic SDK path mirrors the same shape — fetch the alignment card, update the master switches, PUT it back. See [Card Management § Read-modify-write](/guides/card-management) for the full request/response examples and idempotency-key handling.
 
 A common fleet pattern:
 
