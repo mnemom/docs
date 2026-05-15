@@ -261,6 +261,16 @@
             }
           }
         }
+      },
+      "ServiceUnavailable": {
+        "description": "An upstream dependency is currently unavailable. The request was not processed; retry after the cooldown window.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -6913,99 +6923,6 @@
                     },
                     "agent_id": {
                       "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/agents/{agent_id}/enforcement": {
-      "get": {
-        "operationId": "getEnforcement",
-        "summary": "Get AIP enforcement mode",
-        "tags": [
-          "Enforcement"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/AgentId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Enforcement mode",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnforcementMode"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "setEnforcement",
-        "summary": "Update AIP enforcement mode",
-        "tags": [
-          "Enforcement"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/AgentId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "mode"
-                ],
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "observe",
-                      "enforce",
-                      "nudge"
-                    ]
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Enforcement mode updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "agent_id": {
-                      "type": "string"
-                    },
-                    "enforcement_mode": {
-                      "type": "string"
-                    },
-                    "updated": {
-                      "type": "boolean"
                     }
                   }
                 }
@@ -27674,6 +27591,399 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/webhooks/events/{event_id}/replay": {
+      "post": {
+        "operationId": "replayWebhookEvent",
+        "summary": "Replay a webhook event to its eligible endpoints",
+        "description": "Re-dispatches a previously recorded webhook event to all org endpoints subscribed to its event_type (or to the explicit subset supplied in the request body). Requires the `webhook_notifications` feature flag and owner/admin role on the target org. Cross-tenant access returns 404. Replay is idempotent on the `Idempotency-Key` header; a replayed key with a different body returns 422 and a conflicting in-flight key returns 409. When no endpoints are eligible the response is 200 with an empty `deliveries` array; when at least one delivery is enqueued the response is 201 with delivery descriptors (and an optional `failed_endpoints` list for endpoints that could not be enqueued).",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "description": "Identifier of the webhook event to replay. Must belong to the path org_id; cross-tenant lookups return 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Client-supplied key that makes replay idempotent. Re-sending the same key with the same body returns the original result; re-sending with a different body returns 422; a conflicting in-flight key returns 409.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "endpoint_ids": {
+                    "type": "array",
+                    "description": "Optional explicit subset of endpoint ids to replay to. Endpoints not subscribed to the event's type are silently skipped. When omitted, all eligible endpoints are targeted.",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "maxItems": 100,
+                    "uniqueItems": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "No eligible endpoints — nothing was enqueued. Returned when the event has no subscribers (or the supplied `endpoint_ids` subset matches none).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "event_id",
+                    "event_type",
+                    "deliveries",
+                    "message"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "event_type": {
+                      "type": "string"
+                    },
+                    "deliveries": {
+                      "type": "array",
+                      "maxItems": 0,
+                      "items": {}
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "One or more deliveries were enqueued for replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "event_id",
+                    "event_type",
+                    "deliveries"
+                  ],
+                  "properties": {
+                    "event_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "event_type": {
+                      "type": "string"
+                    },
+                    "deliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "delivery_id",
+                          "endpoint_id"
+                        ],
+                        "properties": {
+                          "delivery_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "endpoint_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        }
+                      }
+                    },
+                    "failed_endpoints": {
+                      "type": "array",
+                      "description": "Endpoints that matched the event but could not be enqueued (e.g. transient infrastructure error). Each entry names the endpoint and the reason.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "endpoint_id",
+                          "reason"
+                        ],
+                        "properties": {
+                          "endpoint_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "An in-flight replay with the same Idempotency-Key is still being processed."
+          },
+          "422": {
+            "description": "The Idempotency-Key has been reused with a different request body."
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/orgs/{org_id}/webhooks/listen": {
+      "get": {
+        "operationId": "listenWebhookEvents",
+        "summary": "Stream webhook events for an org over Server-Sent Events",
+        "description": "Opens a Server-Sent Events stream that emits webhook events delivered to the org in near-real-time. Requires the `webhook_notifications` feature flag and owner/admin role on the target org. The cursor is resolved from the `since` query parameter, falling back to the `Last-Event-ID` header when `since` is absent — clients reconnecting after a drop should send the last event id they observed. The stream caps at 5 minutes per connection, polls the underlying queue every 1 second, and emits a keepalive comment every 15 seconds. Frame types emitted on the stream:\n\n- `ready` — sent immediately after the stream opens, carries the resolved cursor.\n- `webhook.event` — one frame per webhook event, payload mirrors the event record.\n- keepalive — SSE comment line (`:keepalive`) every 15s to keep intermediaries from idling the connection.\n- `close` — sent when the 5-minute cap is reached, before the server closes the socket.\n- `error` — sent on unrecoverable stream errors before the socket closes.",
+        "tags": [
+          "Webhook Notifications"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Cursor (event id) to resume from. When omitted, the server falls back to the `Last-Event-ID` request header; when neither is supplied, the stream starts at the current tail.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "description": "Standard SSE reconnection header. Used as the cursor when the `since` query parameter is not supplied.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream of webhook events. The connection is capped at 5 minutes; clients should reconnect and resume via `Last-Event-ID` or `since`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Disables intermediary caching of the stream.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-cache"
+                  ]
+                }
+              },
+              "X-Accel-Buffering": {
+                "description": "Disables proxy response buffering (nginx-family) so frames flush immediately.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no"
+                  ]
+                }
+              },
+              "Connection": {
+                "description": "Keeps the underlying TCP connection open for the duration of the stream.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "keep-alive"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Sequence of SSE frames. Each non-keepalive frame has an `event:` line naming the frame type (`ready`, `webhook.event`, `close`, `error`), an `id:` line carrying the event cursor (for `webhook.event` frames), and a `data:` line containing a JSON payload. Keepalive frames are SSE comments (`:keepalive`)."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/teams/{team_id}/coherence-history": {
+      "get": {
+        "operationId": "getTeamCoherenceHistory",
+        "summary": "Get governance-median coherence history for a team",
+        "description": "Internal service-to-service endpoint for the mnemom-reputation cron. Returns the governance-median coherence history for a team. Authentication is via the `X-Internal-Key` header validated against the `INTERNAL_API_KEY` server secret; this is not a standard security scheme, so `security` is empty and the header is declared as a required parameter.",
+        "tags": [
+          "Teams"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "X-Internal-Key",
+            "in": "header",
+            "required": true,
+            "description": "Internal service-to-service shared secret. Must match the server's `INTERNAL_API_KEY` value.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Governance-median coherence history for the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "team_id",
+                    "governance_median_history",
+                    "note"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "team_id": {
+                      "type": "string",
+                      "description": "The team identifier echoed from the path."
+                    },
+                    "governance_median_history": {
+                      "type": "array",
+                      "description": "Time-ordered samples of the governance-median coherence value for the team.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "value",
+                          "at"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "number",
+                            "description": "Governance-median coherence value at the sample timestamp."
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Sample timestamp (ISO-8601 UTC)."
+                          }
+                        }
+                      }
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "Human-readable note describing the history payload (e.g., data-source caveats)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid `X-Internal-Key` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "description": "Database read failure while fetching coherence history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }

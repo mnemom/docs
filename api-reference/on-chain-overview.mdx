@@ -17,12 +17,14 @@ The On-Chain API provides programmatic access to Mnemom's on-chain verification 
 
 ---
 
+<Note>
+Anchoring and score publishing are Mnemom-operated cron jobs, not customer-callable endpoints. Customers consume on-chain data through the three read endpoints below, or by querying the smart contracts on Base L2 directly. See the [On-Chain Verification guide](/guides/on-chain-verification) for the operational details.
+</Note>
+
 ## Authentication
 
 | Endpoint | Auth Required | Notes |
 |----------|--------------|-------|
-| `POST /v1/on-chain/anchor-root` | API key | Anchors a Merkle root on-chain |
-| `POST /v1/on-chain/publish-scores` | API key | Publishes scores on-chain |
 | `GET /v1/on-chain/verify-proof/{agent_id}` | API key | Verifies an agent's on-chain score |
 | `GET /v1/on-chain/status/{agent_id}` | API key | Checks on-chain status for an agent |
 | `GET /v1/on-chain/history` | API key | Retrieves anchoring and publishing history |
@@ -41,8 +43,6 @@ API keys can be created in your dashboard under Settings or via `POST /v1/api-ke
 
 | Endpoint | Rate Limit | Window |
 |----------|-----------|--------|
-| `POST /on-chain/anchor-root` | 10 requests | per minute |
-| `POST /on-chain/publish-scores` | 10 requests | per minute |
 | `GET /on-chain/verify-proof/{agent_id}` | 30 requests | per minute |
 | `GET /on-chain/status/{agent_id}` | 30 requests | per minute |
 | `GET /on-chain/history` | 30 requests | per minute |
@@ -53,128 +53,6 @@ Rate-limited responses return HTTP `429` with a `Retry-After` header.
 
 ## Endpoints
 
-### POST /v1/on-chain/anchor-root
-
-Anchor a Merkle root from the integrity checkpoint tree to the `MnemoMerkleAnchor` contract on Base L2. Creates an immutable, tamper-evident reference point for off-chain checkpoint data.
-
-**Request body:**
-
-```json
-{
-  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
-  "leaf_count": 347,
-  "tree_depth": 9
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `merkle_root` | string | Yes | Merkle root hash to anchor (hex-encoded, 32 bytes) |
-| `leaf_count` | number | Yes | Number of leaves (checkpoints) in the tree |
-| `tree_depth` | number | Yes | Depth of the Merkle tree |
-
-**Response:** `200 OK`
-
-```json
-{
-  "anchor_id": "anc-7f8a9b2c",
-  "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
-  "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-  "block_number": 18234567,
-  "gas_used": 48732,
-  "chain": "base",
-  "anchored_at": "2026-02-26T10:30:00.000Z"
-}
-```
-
-**Response fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `anchor_id` | string | Unique identifier for this anchor operation |
-| `merkle_root` | string | The anchored Merkle root (echoed back) |
-| `tx_hash` | string | Base L2 transaction hash |
-| `block_number` | number | Block number containing the anchor transaction |
-| `gas_used` | number | Gas consumed by the transaction |
-| `chain` | string | Chain identifier (always `"base"`) |
-| `anchored_at` | string | ISO 8601 timestamp of when the root was anchored |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `400` | Invalid Merkle root format, missing required fields, or invalid tree parameters |
-| `401` | API key required or invalid |
-| `409` | Merkle root has already been anchored |
-| `429` | Rate limit exceeded |
-
----
-
-### POST /v1/on-chain/publish-scores
-
-Publish one or more agent reputation scores to the `MnemoReputationRegistry` contract on Base L2. Scores are published in a single batch transaction for gas efficiency.
-
-**Request body:**
-
-```json
-{
-  "publications": [
-    {
-      "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-      "score": 782,
-      "grade": "A"
-    },
-    {
-      "agent_id": "mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b",
-      "score": 650,
-      "grade": "BBB"
-    }
-  ]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `publications` | array | Yes | Array of score publication objects (max 200) |
-| `publications[].agent_id` | string | Yes | Agent identifier |
-| `publications[].score` | number | Yes | Composite reputation score (0-1000) |
-| `publications[].grade` | string | Yes | Letter grade: `AAA`, `AA`, `A`, `BBB`, `BB`, `B`, or `CCC` |
-
-**Response:** `200 OK`
-
-```json
-{
-  "publication_id": "pub-3e4f5a6b",
-  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  "block_number": 18234589,
-  "gas_used": 142350,
-  "agent_count": 2,
-  "published_at": "2026-02-26T10:35:00.000Z"
-}
-```
-
-**Response fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `publication_id` | string | Unique identifier for this publication batch |
-| `tx_hash` | string | Base L2 transaction hash |
-| `block_number` | number | Block number containing the publish transaction |
-| `gas_used` | number | Gas consumed by the transaction |
-| `agent_count` | number | Number of agents published in this batch |
-| `published_at` | string | ISO 8601 timestamp of when scores were published |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `400` | Missing `publications`, empty array, exceeds 200 agents, invalid score range, or invalid grade |
-| `401` | API key required or invalid |
-| `404` | One or more agent IDs not found |
-| `422` | One or more agents do not have a computed reputation score (below 50-checkpoint minimum) |
-| `429` | Rate limit exceeded |
-
----
 
 ### GET /v1/on-chain/verify-proof/{agent_id}
 
@@ -386,29 +264,10 @@ All error responses follow the standard envelope:
 
 ```typescript
 import {
-  anchorMerkleRoot,
-  publishScores,
   verifyOnChainScore,
   getOnChainStatus,
   getOnChainHistory,
 } from '@mnemom/on-chain';
-
-// Anchor a Merkle root
-const anchor = await anchorMerkleRoot({
-  merkleRoot: '0xabc123def456789012345678901234567890123456789012345678901234abcd',
-  leafCount: 347,
-  treeDepth: 9,
-});
-console.log(`Root anchored in tx: ${anchor.tx_hash}`);
-
-// Publish scores for multiple agents
-const publication = await publishScores({
-  publications: [
-    { agentId: 'mnm-550e8400-e29b-41d4-a716-446655440000', score: 782, grade: 'A' },
-    { agentId: 'mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b', score: 650, grade: 'BBB' },
-  ],
-});
-console.log(`Published ${publication.agent_count} agents in tx: ${publication.tx_hash}`);
 
 // Verify an agent's on-chain score
 const proof = await verifyOnChainScore('mnm-550e8400-e29b-41d4-a716-446655440000');
@@ -431,31 +290,6 @@ import httpx
 
 API_BASE = "https://api.mnemom.ai"
 HEADERS = {"Authorization": f"Bearer {api_key}"}
-
-# Anchor a Merkle root
-anchor = httpx.post(
-    f"{API_BASE}/v1/on-chain/anchor-root",
-    headers=HEADERS,
-    json={
-        "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
-        "leaf_count": 347,
-        "tree_depth": 9,
-    },
-).json()
-print(f"Root anchored in tx: {anchor['tx_hash']}")
-
-# Publish scores
-publication = httpx.post(
-    f"{API_BASE}/v1/on-chain/publish-scores",
-    headers=HEADERS,
-    json={
-        "publications": [
-            {"agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000", "score": 782, "grade": "A"},
-            {"agent_id": "mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b", "score": 650, "grade": "BBB"},
-        ]
-    },
-).json()
-print(f"Published {publication['agent_count']} agents in tx: {publication['tx_hash']}")
 
 # Verify an agent's on-chain score
 proof = httpx.get(

@@ -123,6 +123,15 @@ const KNOWN_DRIFT = [
   // method+path normalization on the GET side because the doc actually
   // uses PUT twice. Owner: T5-4 guide audit.
   { file: "gateway/org-card-templates.mdx", method: "PUT", path: "/agents/{agent_id}/org-card-exempt", owner: "T5-4" },
+
+  // PUT /v1/agents/{id}/enforcement retired by mnemom-api PR #409
+  // (2026-05-14). Replacement: PUT /v1/agents/{id}/alignment-card with
+  // integrity_mode in the body (the column agents.aip_enforcement_mode
+  // was dropped by migration 129). These five doc examples still teach
+  // the legacy shape; T5-4 rewrites them onto the alignment-card
+  // pattern.
+  { file: "quickstart/gateway.mdx", method: "PUT", path: "/agents/{agent_id}/enforcement", owner: "T5-4" },
+  { file: "gateway/enforcement.mdx", method: "PUT", path: "/agents/{agent_id}/enforcement", owner: "T5-4" },
 ];
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)

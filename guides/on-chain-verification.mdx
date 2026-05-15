@@ -12,7 +12,7 @@ icon: "link"
 For the conceptual overview — why on-chain anchoring exists, how the Merkle tree maps to integrity checkpoints, and what ERC-8004 means for interop — see [On-Chain Verification](/concepts/on-chain-verification).
 
 <Note>
-Anchoring (`POST /v1/on-chain/anchor-root`) and score publishing (`POST /v1/on-chain/publish-scores`) are **not customer-callable endpoints**. Mnemom's backend runs them on a 6-hour cron under an internal service key. Customers consume on-chain data through the three read endpoints below, or by querying the contracts directly.
+Anchoring and score publishing are **not customer-callable endpoints**. Mnemom's backend runs them on a 6-hour cron under an internal service key. Customers consume on-chain data through the three read endpoints below, or by querying the contracts directly.
 </Note>
 
 ---
@@ -244,7 +244,7 @@ Mnemom's backend runs a **6-hour cron** that:
 3. Calls `MnemoMerkleAnchor.anchorRoot(root, leafCount, treeDepth)` on Base.
 4. Publishes eligible agents' reputation scores in a batch to `MnemoReputationRegistry.publishBatch(records)` (up to 200 agents per tx per contract limit).
 
-This runs under an internal service key — customers never call `POST /v1/on-chain/anchor-root` or `POST /v1/on-chain/publish-scores` themselves; those endpoints are gated behind `X-Service-Key` and reject any other auth. Gas is paid from the Mnemom operational wallet; there is no customer-facing billing line for on-chain operations. You do not need to hold ETH on Base to use any part of this system.
+This runs under an internal service key — customers never call the underlying anchor or publish endpoints themselves; those are gated behind `X-Service-Key` and reject any other auth. Gas is paid from the Mnemom operational wallet; there is no customer-facing billing line for on-chain operations. You do not need to hold ETH on Base to use any part of this system.
 
 If you need an off-cycle anchor or publish (e.g., for a time-critical compliance filing), contact support — the backend team can run the cron manually.
 
