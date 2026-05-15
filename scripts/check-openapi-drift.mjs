@@ -136,9 +136,15 @@ function walkContent(dir, acc = []) {
 // Patterns target the `/v1/<staff>` form because customer MDX references
 // the API surface via the versioned `/v1/` URL prefix (the spec strips it
 // into `servers[].url`).
+// Standard regex-meta escape (MDN-recommended set). Our inputs today are
+// path strings with `/` and `-`, but a future addition could carry any
+// metachar; escape the whole set so the gate stays sound.
+function escapeRegex(s) {
+  return s.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
+}
 const staffRefPatterns = [
-  ...STAFF_PREFIXES.map((pre) => new RegExp(`/v1${pre.replace(/[-/]/g, "\\$&")}`)),
-  ...[...STAFF_PATHS].map((p) => new RegExp(`/v1${p.replace(/[-/]/g, "\\$&")}\\b`)),
+  ...STAFF_PREFIXES.map((pre) => new RegExp(`/v1${escapeRegex(pre)}`)),
+  ...[...STAFF_PATHS].map((p) => new RegExp(`/v1${escapeRegex(p)}\\b`)),
 ];
 // Files where historical references to retired staff paths are
 // legitimate. Changelogs document path removals; the references are
