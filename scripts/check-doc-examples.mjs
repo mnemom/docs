@@ -153,34 +153,13 @@ const KNOWN_BODY_DRIFT = [
   { file: "guides/trust-recovery.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
   { file: "guides/webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum", owner: "T5-4 (verify spec enum)" },
 
-  // ── /policies/evaluate missing `policy` ────────────────────────────
-  // The eval endpoints require a `policy` field per the spec; doc
-  // examples lack it. Likely real drift (rename or example omitted the
-  // field).
-  { file: "guides/policy-management.mdx", method: "POST", path: "/policies/evaluate", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
-  { file: "guides/policy-management.mdx", method: "POST", path: "/policies/evaluate/historical", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
-  { file: "guides/trust-recovery.mdx", method: "POST", path: "/policies/evaluate", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
-
-  // ── alignment-card examples missing required nested fields ─────────
-  // `autonomy.escalation_triggers` and `audit.queryable` are spec-
-  // required nested fields the examples omit. Either the spec is too
-  // strict (legitimate optionality) or the doc examples are incomplete.
-  // T5-2 / T5-4 should reconcile.
-  { file: "guides/card-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
-  { file: "guides/policy-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
-  { file: "guides/policy-management.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/audit/required", owner: "T5-4" },
-  { file: "guides/upgrading-to-0-5.mdx", method: "PUT", path: "/agents/{agent_id}/alignment-card", keyword: "required", schemaPath: "#/properties/autonomy/required", owner: "T5-4" },
-
-  // ── hash_proof too short / missing ─────────────────────────────────
-  { file: "guides/multi-agent-setup.mdx", method: "POST", path: "/agents", keyword: "minLength", schemaPath: "#/properties/hash_proof/minLength", owner: "T5-4" },
-  { file: "for-agents/index.mdx", method: "POST", path: "/agents", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
-
-  // ── team/card.values.declared shape mismatch ───────────────────────
-  // Example uses simplified shape; spec requires object items.
-  { file: "guides/team-management.mdx", method: "PUT", path: "/teams/{team_id}/card", keyword: "type", schemaPath: "#/properties/values/properties/declared/items/type", owner: "T5-4" },
-
-  // ── trust-edges missing to_agent ───────────────────────────────────
-  { file: "guides/upgrading-to-0-5.mdx", method: "POST", path: "/agents/{agent_id}/trust-edges", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+  // (closed 2026-05-15 by T5-4 PR 6 — 11 body-drift entries spanning
+  // /policies/evaluate (added the `policy` field), alignment-card
+  // (added `autonomy.escalation_triggers` + `audit.queryable`),
+  // POST /agents (full-length hash_proof on multi-agent-setup +
+  // for-agents), /teams/{id}/card (values.declared as objects, not
+  // strings), and POST /agents/{id}/trust-edges (`to_agent` not
+  // `target_agent_id`).)
 ];
 
 function knownBodyDriftEntry(file, method, segments, keyword, schemaPath) {

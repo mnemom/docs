@@ -230,7 +230,8 @@ curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
     "values": { "declared": ["transparency", "honesty"] },
     "autonomy": {
       "bounded_actions": ["inference", "read", "web_fetch", "web_search"],
-      "forbidden_actions": ["exfiltrate_data"]
+      "forbidden_actions": ["exfiltrate_data"],
+      "escalation_triggers": []
     },
     "capabilities": {
       "web_browsing": {
@@ -253,6 +254,7 @@ curl -X PUT https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card \
     "audit": {
       "trace_format": "ap-trace-v1",
       "retention_days": 90,
+      "queryable": true,
       "tamper_evidence": "append_only"
     }
   }'
@@ -286,11 +288,14 @@ curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "policy": { "meta": { "schema_version": "1.0", "name": "support-agent", "scope": "agent" } },
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
     "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
     "context": "gateway"
   }'
 ```
+
+The `policy` field is the policy document to evaluate against; pass the inline policy YAML (parsed into JSON) you want to test. See the [Policy DSL spec](/specifications/policy-dsl) for the canonical schema.
 
 The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and per-tool detail: which capability each tool matched, which forbidden rule it tripped, or whether it fell through to `unmapped_tool_action`. Use this in CI to catch regressions before publishing a card — `POST /v1/policies/evaluate/historical` does the same thing against a date range of actual past traces.
 
@@ -303,6 +308,7 @@ curl -X POST https://api.mnemom.ai/v1/policies/evaluate/historical \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "policy": { "meta": { "schema_version": "1.0", "name": "support-agent", "scope": "agent" } },
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
     "from": "2026-02-01T00:00:00Z",
     "to": "2026-03-01T00:00:00Z"
