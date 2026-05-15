@@ -1,0 +1,163 @@
+---
+title: "Error Responses"
+description: "The canonical error-response contract: status codes, named codes, retry semantics, and Safe House verdict-to-status mapping."
+sidebarTitle: "Errors"
+icon: "triangle-exclamation"
+---
+
+This page is the **canonical reference** for everything a client integration needs to know about Mnemom API errors: which status codes the API emits, what each one means, the named error codes ([Stripe-style](https://stripe.com/docs/error-codes)) clients should branch on, retry semantics, and the Safe House verdict-to-status mapping.
+
+## Response shape
+
+Every error response carries the same body shape:
+
+```jsonc
+{
+  "error": {
+    "code": "invalid_json_body",        // stable snake_case identifier
+    "message": "Invalid JSON body",     // human-readable summary
+    "details": { /* optional */ }       // structured per-code data when present
+  }
+}
+```
+
+Plus three response headers that are always set on errors:
+
+- **`X-Mnemom-Request-Id`** — UUIDv4. Paste this into a support ticket and we can pull every log line for the request.
+- **`X-Mnemom-Verdict`** — structured per-checkpoint verdict (see [headers](/api-reference/headers#x-mnemom-verdict-structured-per-checkpoint-state)). Even on 4xx, the verdict reflects what Safe House observed before the error fired.
+- **`Retry-After`** — present on `429` and some `503` responses. The number of seconds to wait before retrying.
+
+Branch on `error.code`, not on `error.message`. Messages are human-facing and may evolve; codes are stable contract.
+
+## Status codes at a glance
+
+| Status | Meaning | Retryable? |
+|---|---|---|
+| **`400 Bad Request`** | Request shape / validation problem. | No — fix the request and resubmit. |
+| **`401 Unauthorized`** | Missing or invalid credentials. | No — re-authenticate. |
+| **`403 Forbidden`** | Authenticated, not authorized. **Includes Safe House `enforce`-mode blocks.** | No — see error code for whether it's a Safe House block or a permission issue. |
+| **`404 Not Found`** | Resource doesn't exist. | No. |
+| **`409 Conflict`** | Concurrent modification / version conflict. | Yes — re-read, re-modify, re-submit. |
+| **`413 Payload Too Large`** | Request body exceeded the size budget. | No — split or shrink the payload. |
+| **`422 Unprocessable Entity`** | Request structurally valid but semantically rejected (typically Safe House `quarantine` verdict). | No — the verdict header explains why. |
+| **`429 Too Many Requests`** | Rate limit hit. `Retry-After` header tells you when to retry. | Yes — back off per `Retry-After`. |
+| **`500 Internal Server Error`** | Unexpected server-side condition. | Limited — see retry guidance below. |
+| **`503 Service Unavailable`** | Downstream provider or service is unhealthy. `Retry-After` may be set. | Yes — back off per `Retry-After`, default to exponential backoff if absent. |
+| **`529 Site is Overloaded`** | Gateway saturation. | Yes — back off per `Retry-After`. |
+
+## 400 Bad Request — high-frequency codes
+
+The most common 400 codes a client integration will encounter:
+
+| Code | Message | When |
+|---|---|---|
+| `invalid_json_body` | Invalid JSON body | The request body isn't parseable JSON. |
+| `agent_id_required` | Agent ID is required | A path or body field expected `agent_id` and got nothing. |
+| `name_required` | name is required | Creating an entity (api-key, agent) without the required `name`. |
+| `hash_proof_required` | hash_proof is required | Agent creation without `hash_proof`. |
+| `invalid_key_hash_format` | new_key_hash must be exactly 16 lowercase hex characters | Rekey or verify-binding with a malformed hash. |
+| `invalid_offset_parameter` | Invalid offset parameter (must be >= 0) | Pagination with a negative offset. |
+| `invalid_limit_parameter` | Invalid limit parameter (must be 1-N) | Pagination with `limit` outside the documented range. |
+| `invalid_request` | (various) | Catch-all for shape violations not yet broken out into a named code. |
+
+The full taxonomy is auto-generated from `mnemom-api/src/index.ts`'s `errorResponse(...)` call sites and gates the CI contract — every emitted message corresponds to a documented code. If you see an unfamiliar 400 message, capture the `X-Mnemom-Request-Id` and open a support ticket; we treat that as a contract bug.
+
+## 401 / 403 / 404 — auth and ownership
+
+| Code | Status | When |
+|---|---|---|
+| `auth_required` | 401 | No credentials presented. |
+| `invalid_credentials` | 401 | API key revoked, JWT expired, signature mismatch. |
+| `insufficient_scope` | 403 | Authenticated, but the token's scope set doesn't include this operation. |
+| `org_access_denied` | 403 | Token belongs to a different org. |
+| `safe_house_blocked` | 403 | The agent's `protection.mode = enforce` blocked the inbound message. The response body's `details` includes the verdict and (when available) the quarantine ID. See [Safe House verdict-to-status mapping](#safe-house-verdict-to-status-mapping) below. |
+| `agent_not_found` | 404 | `agent_id` doesn't exist (or doesn't belong to the caller's org). Includes ID mistypes and just-deleted agents. |
+| `resource_not_found` | 404 | Generic — the target endpoint or sub-resource doesn't exist. |
+
+## 422 — Safe House quarantine
+
+A `422 Unprocessable Entity` is the dedicated status code for Safe House `quarantine` verdicts: the inbound message was structurally valid (so not 400) and you were authorized (so not 403), but the content tripped the quarantine threshold and the gateway is holding it for review instead of forwarding it to the upstream provider.
+
+```jsonc
+{
+  "error": {
+    "code": "safe_house_quarantined",
+    "message": "Inbound message quarantined for review",
+    "details": {
+      "quarantine_id": "qr_01HXYZ9ABCDEF123456789",
+      "verdict": "quarantine",
+      "score": 0.87,
+      "threshold": 0.80
+    }
+  }
+}
+```
+
+Use `quarantine_id` to fetch the held message via `GET /v1/safe-house/quarantine/{quarantine_id}` or, with operator role, to release it via `POST /v1/safe-house/quarantine/{quarantine_id}/release`.
+
+## 429 — rate limits
+
+`429` responses always carry a `Retry-After` header. The value is **seconds** (integer per [RFC 9110 §10.2.3](https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3)):
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 4
+X-Mnemom-Request-Id: 8f446ed6-ca87-4c1d-aa90-e2bc6e9ef580
+
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "message": "Rate limit exceeded for this endpoint"
+  }
+}
+```
+
+Per-endpoint limits are documented on each endpoint's reference page. The gateway-wide free-tier limits are documented in the [pricing overview](/pricing/overview).
+
+**Idempotent retries.** When retrying after a 429, include an `Idempotency-Key` header — if the request actually went through and the gateway is reporting back the 429 (rare but possible mid-failure), the second attempt is idempotent on key match.
+
+## 5xx / 529 — server-side and saturation
+
+| Status | When | Retry pattern |
+|---|---|---|
+| **`500`** | Unexpected server condition. | Limited retry — at most once, immediately. If 500 persists, do not retry-loop; capture `X-Mnemom-Request-Id` and file a ticket. |
+| **`503`** | A downstream provider (Anthropic / OpenAPI / Gemini upstream) returned 5xx or timed out, OR a Mnemom service is in scheduled maintenance. `Retry-After` may be set. | Exponential backoff, starting at 1s. Honor `Retry-After` when present. |
+| **`529`** | Gateway-saturation overload. `Retry-After` is always set. | Honor `Retry-After`. Treat 529 as "back off and re-route through the same endpoint when the window expires" — not "permanent failure." |
+
+The distinction between 503 (downstream unhealthy) and 529 (gateway-saturated) matters for your fallback strategy: 503 means the gateway is fine but the LLM provider isn't; 529 means the gateway itself is shedding load. A client that has a backup provider should switch on 503 but not on 529.
+
+## Safe House verdict-to-status mapping
+
+The Safe House front-door inspects every inbound message and emits a verdict (`pass | observed | nudged | enforced`). When the agent's `protection.mode` is `enforce`, the verdict drives the HTTP response:
+
+| Verdict | HTTP status | Error code | Notes |
+|---|---|---|---|
+| `pass` | 200 (request proceeds) | — | The inbound message was clean. |
+| `observed` | 200 (request proceeds) | — | Detector matched, but mode is `observe`. Verdict logged. |
+| `nudged` | 200 (request proceeds) | — | Advisory injected into the agent's prompt context; the `X-Mnemom-Advisory` response header carries the entries. |
+| `enforced` (warn → quarantine threshold) | **422** | `safe_house_quarantined` | Held for review. |
+| `enforced` (quarantine → block threshold) | **403** | `safe_house_blocked` | Inbound message blocked outright. |
+
+The same mapping applies symmetrically on the back-door (outbound screening) — though `enforced` outbound replaces or redacts content rather than dropping the response, so the customer-visible status is still 200 with a modified body.
+
+The `X-Mnemom-Verdict` response header reflects the full per-checkpoint state even on error responses — useful for distinguishing "front-door blocked" (`front=enforced`) from "agent's own integrity intervention" (`integrity=enforced`).
+
+## Retry semantics summary
+
+| Class | Retry? | Honor `Retry-After`? | Use `Idempotency-Key`? |
+|---|---|---|---|
+| 4xx (except 409 / 429) | No | n/a | Idempotency-Key is still safe — guarantees the same response on retry instead of a different validation failure. |
+| 409 Conflict | Yes (re-read first) | n/a | Yes. |
+| 429 | Yes | **Yes** | Yes. |
+| 500 | Once, immediately | n/a | Yes. |
+| 503 | Yes, exponential backoff | Yes (when present) | Yes. |
+| 529 | Yes | **Yes** | Yes. |
+
+`Idempotency-Key` semantics + the `Idempotent-Replay: true` response echo are documented in the [Headers reference](/api-reference/headers).
+
+## See also
+
+- [Headers](/api-reference/headers) — request-id, verdict structure, retry headers.
+- [Safe House](/concepts/safe-house) — the four-mode protection contract and three-layer detection model.
+- [API Versioning Policy](/policy/versioning) — what we will (and won't) change about the error surface across versions.
+- [API Overview](/api-reference/overview) — base URL, auth, rate-limit headers.
