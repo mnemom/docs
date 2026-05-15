@@ -209,13 +209,13 @@ The Mnemom Gateway supports three enforcement modes when an integrity violation 
 | `nudge` | Detect violations, inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct. |
 | `enforce` | Hard block with HTTP 403 for non-streaming requests. Falls back to nudge for streaming. |
 
-Set enforcement mode via the API:
+Set enforcement mode by updating the agent's alignment card. Per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md), `integrity_mode` and `autonomy_mode` are top-level fields on the alignment card; the legacy `/v1/agents/{id}/enforcement` endpoint was retired 2026-05-14.
 
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/YOUR_AGENT_ID/enforcement \
-  -H "content-type: application/json" \
-  -d '{"mode": "nudge"}'
-```
+Three paths, pick the one that fits your workflow:
+
+- **Dashboard:** open `https://mnemom.ai/dashboard/agents/{your-agent-id}/card`, toggle `integrity_mode`, save. Easiest path.
+- **CLI:** `mnemom card edit` opens the current alignment-card YAML in `$EDITOR`; change `integrity_mode: nudge`, save, the CLI publishes + recomposes.
+- **Programmatic:** [`PUT /v1/agents/{agent_id}/alignment-card`](/api-reference/endpoint/put-agents-agent-id-alignment-card) with the full canonical card. See the [Card Management guide](/guides/card-management) for the read-modify-write flow and the [alignment-card schema](/specifications/alignment-card-schema) for field requirements.
 
 ## Next steps
 

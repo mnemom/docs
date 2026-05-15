@@ -47,13 +47,7 @@ In observe mode, the gateway detects and records all violations but takes no act
 - For compliance auditing where you need a record but not intervention
 - When evaluating whether to enable more active enforcement
 
-**Configuration:**
-
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "observe"}'
-```
+**Configuration:** set `integrity_mode: observe` (and/or `autonomy_mode: observe`) on the agent's [alignment card](/specifications/alignment-card-schema). See [Setting enforcement mode](#setting-enforcement-mode) below for the three paths (dashboard / CLI / API).
 
   </Tab>
   <Tab title="Nudge">
@@ -91,13 +85,7 @@ In nudge mode, when a violation is detected, the gateway creates a pending nudge
 - When building trust in the enforcement system before enabling hard blocks
 - For `advisory` or `delegated_authority` principal relationships
 
-**Configuration:**
-
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "nudge"}'
-```
+**Configuration:** set `integrity_mode: nudge` (and/or `autonomy_mode: nudge`) on the agent's [alignment card](/specifications/alignment-card-schema). See [Setting enforcement mode](#setting-enforcement-mode) below.
 
   </Tab>
   <Tab title="Enforce">
@@ -118,13 +106,7 @@ In enforce mode, the gateway actively blocks requests when critical violations a
 - For agents handling sensitive data or financial transactions
 - When regulatory requirements demand active intervention
 
-**Configuration:**
-
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/:id/enforcement \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "enforce"}'
-```
+**Configuration:** set `integrity_mode: enforce` (and/or `autonomy_mode: enforce`) on the agent's [alignment card](/specifications/alignment-card-schema). See [Setting enforcement mode](#setting-enforcement-mode) below.
 
 <Warning>
 Enforce mode will block non-streaming API calls when violations are detected. Ensure your application handles 403 responses gracefully before enabling this mode.
@@ -181,28 +163,21 @@ The grace decision is per-(agent, tool) and is tracked in the platform's `tool_f
 
 ## Setting enforcement mode
 
-Set enforcement mode via the API:
+Per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md), enforcement mode is a top-level field on the alignment card — `autonomy_mode` for the action-policing pipeline (CLPI tool-use policy + bounded actions) and `integrity_mode` for the values/conscience pipeline (AIP + drift). The legacy `PUT /v1/agents/{id}/enforcement` endpoint was retired 2026-05-14.
+
+Three paths, pick the one that fits your workflow:
+
+**Dashboard.** Open `https://mnemom.ai/dashboard/agents/{your-agent-id}/card`, toggle `autonomy_mode` and/or `integrity_mode`, save. Easiest path for one-off changes.
+
+**CLI.**
 
 ```bash
-PUT /v1/agents/:id/enforcement
+mnemom card edit    # opens current alignment-card YAML in $EDITOR
+# change autonomy_mode and/or integrity_mode (off | observe | nudge | enforce)
+# save and exit; CLI publishes + triggers recompose
 ```
 
-**Request body:**
-
-```json
-{
-  "mode": "observe" | "nudge" | "enforce"
-}
-```
-
-**Example:**
-
-```bash
-# Enable nudge mode
-curl -X PUT https://api.mnemom.ai/v1/agents/agent_abc123/enforcement \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "nudge"}'
-```
+**Programmatic.** [`PUT /v1/agents/{agent_id}/alignment-card`](/api-reference/endpoint/put-agents-agent-id-alignment-card) with the full canonical card. See [Card Management](/guides/card-management) for the read-modify-write flow and the [alignment-card schema](/specifications/alignment-card-schema) for the field requirements.
 
 ## Nudge strategy
 
