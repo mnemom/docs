@@ -79,7 +79,7 @@ Field-level composition semantics vary by section:
 - `autonomy.forbidden_actions` — **union** (deny-overrides: agent can never remove a platform or org forbidden action; they can only add more)
 - `autonomy.bounded_actions` — **agent-scoped** (platform/org suggest defaults; agent cards take effect)
 - `conscience.values` — **union with deduplication by content**; platform/org commitments are inviolable floors
-- `integrity.enforcement_mode` — **strictest wins** (if org requires `enforce`, agent cannot downgrade to `observe`)
+- `integrity_mode` — **strictest wins** (if org requires `enforce`, agent cannot downgrade to `observe`)
 - `capabilities.*` — **agent-scoped** (capabilities are local to each agent's tooling)
 
 See [Card Composition](/concepts/card-composition) for the full composition rules table and worked examples.
@@ -106,7 +106,7 @@ Every request through the Mnemom gateway:
 2. Maps the unified card to the locked AAP `AlignmentCard` shape for any call to `@mnemom/agent-alignment-protocol`.
 3. Extracts policy from `capabilities` + `enforcement` sections for policy evaluation via `@mnemom/policy-engine`.
 4. Fetches the canonical **protection card** for [Safe House](/concepts/safe-house) detection.
-5. Applies `autonomy.forbidden_actions` as hard deny; applies `integrity.enforcement_mode` to the checkpoint pipeline.
+5. Applies `autonomy.forbidden_actions` as hard deny; applies `integrity_mode` to the checkpoint pipeline.
 
 All of this is one canonical-card read per concern, not a lazy per-request merge.
 
@@ -149,13 +149,13 @@ See [Card Lifecycle](/concepts/card-lifecycle) for state transitions and [Card C
 
 Both cards use the `observe` / `nudge` / `enforce` vocabulary, but apply it to different layers:
 
-| Value | Alignment card (`integrity.enforcement_mode`) | Protection card (`mode`) |
+| Value | Alignment card (`integrity_mode`) | Protection card (`mode`) |
 |-------|----------------------------------------------|---------------------------|
 | `observe` | Integrity checkpoints run; violations are logged but not acted on | Safe House detectors run; signals are logged |
 | `nudge` | Violations trigger a nudge to the agent (soft warning) | Detectors return guidance; agent may choose to revise |
 | `enforce` | Violations hard-block the action | Detectors may block the action outright |
 
-A fleet is most coherent when both cards use matching modes across all agents. The [v2 fleet coherence scorer](/concepts/fleet-coherence) checks `integrity.enforcement_mode` uniformity as a structural invariant (`integrity_uniform`).
+A fleet is most coherent when both cards use matching modes across all agents. The [v2 fleet coherence scorer](/concepts/fleet-coherence) checks `integrity_mode` uniformity as a structural invariant (`integrity_uniform`).
 
 ## Migration from the pre-UC format
 

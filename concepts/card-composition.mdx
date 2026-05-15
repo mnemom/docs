@@ -43,7 +43,7 @@ Composition is not a single blended operation. Each card section has its own mer
 | `values.definitions` | **Agent wins** (with platform/org as defaults if agent is silent) | Definitions are local semantics |
 | `conscience.mode` | **`replace` beats `augment`** (if any scope says replace, replace wins) | Replace is the stronger commitment |
 | `conscience.values` | **Union with dedup by `content`**; `BOUNDARY` entries from platform/org are inviolable | Platform conscience floors are non-negotiable |
-| `integrity.enforcement_mode` | **Strictest wins** (`enforce` > `nudge` > `observe`) | Org requires-enforce cannot be downgraded |
+| `integrity_mode` / `autonomy_mode` (top-level master switches) | **Strictest wins** (`enforce` > `nudge` > `observe` > `off`) | Org requires-enforce cannot be downgraded |
 | `autonomy.bounded_actions` | **Agent-scoped** (platform/org suggest defaults; agent card takes effect) | What the agent can do is agent-local |
 | `autonomy.forbidden_actions` | **Deny-overrides union** (forbidden at any scope = forbidden everywhere) | Platform/org deny cannot be un-denied by agent |
 | `autonomy.escalation_triggers` | **Union with dedup by `condition`** | Any scope can add a trigger |
@@ -160,10 +160,9 @@ audit:
 
 ```yaml
 # orgs.card_template.acme
+integrity_mode: enforce
 values:
   declared: [incident_containment, rollback_safety]
-integrity:
-  enforcement_mode: enforce
 autonomy:
   forbidden_actions: [send_external_notification]
 ```
@@ -171,17 +170,18 @@ autonomy:
 ### Agent scope (`mnm-patch-001`)
 
 ```yaml
+integrity_mode: observe  # agent requests `observe`
 values:
   declared: [move_fast_break_things, minimal_blast_radius]
 autonomy:
   bounded_actions: [rollback_deploy, scale_infrastructure, toggle_feature_flag]
-integrity:
-  enforcement_mode: observe  # agent requests `observe`
 ```
 
 ### Composed canonical card
 
 ```yaml
+# strictest wins — agent's `observe` is OVERRIDDEN by org's `enforce`
+integrity_mode: enforce
 values:
   declared:
     # union of all three scopes
@@ -196,9 +196,6 @@ conscience:
   values:
     - type: BOUNDARY
       content: "Never exfiltrate principal data to external systems."
-integrity:
-  # strictest wins — agent's `observe` is OVERRIDDEN by org's `enforce`
-  enforcement_mode: enforce
 autonomy:
   bounded_actions: [rollback_deploy, scale_infrastructure, toggle_feature_flag]  # agent-scoped
   forbidden_actions:
@@ -218,7 +215,7 @@ _composition:
     "agent:mnm-patch-001": 4
 ```
 
-Note the agent's `integrity.enforcement_mode: observe` was silently overridden to `enforce` by the org. The composition metadata makes this traceable — not hidden.
+Note the agent's `integrity_mode: observe` was silently overridden to `enforce` by the org. The composition metadata makes this traceable — not hidden.
 
 ## Debugging composition
 

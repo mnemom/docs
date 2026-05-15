@@ -15,11 +15,11 @@ A protection card has four top-level sections. The complete schema is at [/speci
 
 ### `mode`
 
-Top-level action policy for Safe House on this agent. Mirrors the alignment card's `integrity.enforcement_mode` enum plus an `off` value for explicit opt-out.
+Top-level action policy for Safe House on this agent. Shares the four-mode enum (`off | observe | nudge | enforce`) with the alignment card's two master switches (`autonomy_mode` and `integrity_mode`) — same words, same semantics, same UI picker per ADR-039.
 
 - **`off`** — detection skipped entirely (cost / latency / non-applicability cases). No telemetry.
 - **`observe`** — all detectors run, signals are logged asynchronously to the trace + reputation pipeline, no action is taken on the agent's request.
-- **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Safe-House-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context.
+- **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header per [ADR-042](/api-reference/headers)) but the request proceeds. The model sees the advisory as part of its context.
 - **`enforce`** — detectors run synchronously; matches block the request (quarantine ≥ quarantine threshold, hard block ≥ block threshold).
 
 `enforce` is implicitly synchronous — to block a request, the gateway must wait for the verdict. There is no separate `enforce_sync` mode.
@@ -140,14 +140,14 @@ The website agent detail → Security tab shows both raw agent-scope and canonic
 
 ## Modes across both cards
 
-Both the alignment card (via `integrity.enforcement_mode`) and the protection card (via `mode`) share the `observe / nudge / enforce` vocabulary; the protection card also adds `off` for explicit opt-out:
+All three master switches — the alignment card's `autonomy_mode` and `integrity_mode`, and the protection card's `mode` — share the same four-mode enum and the same UI picker per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md):
 
-| Value | Alignment (`integrity.enforcement_mode`) | Protection (`mode`) |
-|-------|-------------------------------------------|----------------------|
-| `off` | (n/a — alignment integrity always runs) | Detection skipped entirely |
+| Value | Alignment (`integrity_mode`) | Protection (`mode`) |
+|-------|------------------------------|----------------------|
+| `off` | Skip AIP + drift detection | Detection skipped entirely |
 | `observe` | Integrity checkpoints run; violations logged | Safe House detectors run; signals logged |
-| `nudge` | Violations nudge the agent (soft) | Detectors attach advisory; request proceeds |
-| `enforce` | Violations hard-block | Detectors may block (quarantine / block) |
+| `nudge` | Violations inject advisory on next request | Detectors attach advisory; request proceeds |
+| `enforce` | Violations hard-block (auto-pause on boundary) | Detectors may block (quarantine / block) |
 
 A well-run fleet has both dimensions aligned across all agents. The [fleet coherence v2 scorer](/concepts/fleet-coherence) checks integrity uniformity as a first-order structural invariant.
 
