@@ -176,21 +176,17 @@ function knownBodyDriftEntry(file, method, segments, keyword, schemaPath) {
 // findings. Same tuple shape: (file, method, templated-path, keyword,
 // schemaPath?). Populated by the first full-repo run after T5-1.4 lands.
 const KNOWN_RESPONSE_DRIFT = [
-  // DELETE /agents/{agent_id} response shows `status: "pending"` (or
-  // similar) that the spec's enum doesn't include. Either the spec is
-  // missing a value or the doc shows a stale status name. T5-4 reconcile.
-  { file: "guides/gdpr-data-subject-rights.mdx", method: "DELETE", path: "/agents/{agent_id}", keyword: "enum", schemaPath: "#/properties/status/enum", owner: "T5-4" },
-
-  // GET /orgs/{org_id}/governance/coverage response example is a partial
-  // snippet missing 4 required top-level fields. Either the example is
-  // truncated for illustration (T5-4 normalize) or the spec is overly
-  // strict.
-  { file: "guides/operating-governance-signals.mdx", method: "GET", path: "/orgs/{org_id}/governance/coverage", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
-
-  // GET /agents/{agent_id}/trust-edges response missing 4 required
-  // top-level fields. Same shape as above; either the example is a
-  // partial snippet or the spec needs to relax required.
-  { file: "guides/upgrading-to-0-5.mdx", method: "GET", path: "/agents/{agent_id}/trust-edges", keyword: "required", schemaPath: "#/required", owner: "T5-4" },
+  // (closed 2026-05-15 by T5-4 PR 8 — three response-drift fixes:
+  //   - guides/gdpr-data-subject-rights.mdx: DELETE /agents/{id} 202
+  //     response status changed from "received" to "tombstoned"
+  //     (canonical initial state per the closed enum).
+  //   - guides/operating-governance-signals.mdx: governance/coverage
+  //     example aligned with canonical schema (org_id, window_days,
+  //     totals {fired, open}, by_source {fired/open per source},
+  //     by_severity {integer per severity}).
+  //   - guides/upgrading-to-0-5.mdx: trust-edges example aligned with
+  //     canonical schema (agent_id, direction, count, edges[] with
+  //     from_agent / to_agent fields).)
 ];
 
 function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
