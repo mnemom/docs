@@ -57,11 +57,18 @@ if (!token) {
   exit(2);
 }
 
+// `mnm_*` / `mnemom_*` are Mnemom API keys and MUST authenticate via
+// `X-Mnemom-Api-Key` (per docs/guides/api-keys.mdx). Supabase JWTs and
+// anything else go via `Authorization: Bearer`. Mirrors run-doc-examples.mjs.
+const authHeaders = /^mnm_|^mnemom_/.test(token)
+  ? { "X-Mnemom-Api-Key": token }
+  : { Authorization: `Bearer ${token}` };
+
 async function api(method, path, body) {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...authHeaders,
       "Content-Type": "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -79,27 +86,51 @@ async function api(method, path, body) {
   return json;
 }
 
-// ── 1. Identify the staging user + their default org ─────────────────────
-const me = await api("GET", "/auth/me");
-const orgId = me.default_org_id ?? me.org_id ?? me.user?.default_org_id;
+// ── 1. Identify the target org ────────────────────────────────────────
+// Explicit env var (MNEMOM_STAGING_ORG_ID) takes precedence — pins the
+// seeder to a known fixture org regardless of which orgs the principal
+// happens to be a member of. Falls back to `/api-keys/whoami` for
+// principals whose key is org-bound (whoami uses resolveAuthPrincipal,
+// which accepts both JWTs and `X-Mnemom-Api-Key`). `/auth/me` was the
+// previous discovery endpoint but is JWT-only (getAuthUser), so
+// API-key-bound seeders 401'd there.
+let orgId = env.MNEMOM_STAGING_ORG_ID ?? null;
 if (!orgId) {
-  throw new Error("Could not resolve org_id from /auth/me; check response shape against the spec.");
+  const me = await api("GET", "/api-keys/whoami");
+  orgId = me.org_id ?? me.default_org_id ?? me.user?.default_org_id ?? null;
+}
+if (!orgId) {
+  throw new Error(
+    "Could not resolve org_id. Either set MNEMOM_STAGING_ORG_ID explicitly, " +
+      "or bind the staging key to an org so /api-keys/whoami returns it.",
+  );
 }
 
 // ── 2. Find-or-create the doc-fixtures webhook endpoint ──────────────────
-const webhooks = await api("GET", `/orgs/${orgId}/webhooks`);
-const existingHook = (webhooks.endpoints ?? webhooks.data ?? webhooks).find?.(
-  (w) => w.description === fixtureName || w.name === fixtureName,
-);
-
-let webhookEndpointId = existingHook?.endpoint_id ?? existingHook?.id;
-if (!webhookEndpointId) {
-  const created = await api("POST", `/orgs/${orgId}/webhooks`, {
-    url: webhookReceiver,
-    description: fixtureName,
-    event_types: ["integrity.violation"],
-  });
-  webhookEndpointId = created.endpoint_id ?? created.id;
+// `/orgs/{org_id}/webhooks` is JWT-only (uses getAuthUser) — API-key
+// principals 401 there. Skip gracefully and continue: the executor's
+// WRITE_ALLOWLIST entry that needs WEBHOOK_ENDPOINT_ID will stay
+// skip-with-unresolved-placeholder until a JWT-authed seed runs.
+let webhookEndpointId = null;
+try {
+  const webhooks = await api("GET", `/orgs/${orgId}/webhooks`);
+  const existingHook = (webhooks.endpoints ?? webhooks.data ?? webhooks).find?.(
+    (w) => w.description === fixtureName || w.name === fixtureName,
+  );
+  webhookEndpointId = existingHook?.endpoint_id ?? existingHook?.id ?? null;
+  if (!webhookEndpointId) {
+    const created = await api("POST", `/orgs/${orgId}/webhooks`, {
+      url: webhookReceiver,
+      description: fixtureName,
+      event_types: ["integrity.violation"],
+    });
+    webhookEndpointId = created.endpoint_id ?? created.id;
+  }
+} catch (err) {
+  console.error(`[seed] WEBHOOK_ENDPOINT_ID unresolved: ${err.message}`);
+  console.error(
+    "[seed]   (org-scoped webhook routes are JWT-only; re-run with a Supabase session JWT to seed.)",
+  );
 }
 
 // ── 3. Find an existing agent on this user (do not create, since
@@ -109,11 +140,11 @@ if (!webhookEndpointId) {
 let agentId = null;
 try {
   const agents = await api("GET", "/agents");
-  const first = (agents.agents ?? agents.data ?? agents)[0];
+  const list = agents.agents ?? agents.data ?? agents;
+  const first = Array.isArray(list) ? list[0] : null;
   agentId = first?.agent_id ?? first?.id ?? null;
-} catch {
-  // No agents on this account — leave AGENT_ID unset; doc examples that
-  // need it will skip with "unresolved placeholder."
+} catch (err) {
+  console.error(`[seed] AGENT_ID unresolved: ${err.message}`);
 }
 
 // ── 4. Find an existing team (don't create — needs a team card which
@@ -121,10 +152,14 @@ try {
 let teamId = null;
 try {
   const teams = await api("GET", `/orgs/${orgId}/teams`);
-  const first = (teams.teams ?? teams.data ?? teams)[0];
+  const list = teams.teams ?? teams.data ?? teams;
+  const first = Array.isArray(list) ? list[0] : null;
   teamId = first?.team_id ?? first?.id ?? null;
-} catch {
-  // No teams — same as agents above.
+} catch (err) {
+  console.error(`[seed] TEAM_ID unresolved: ${err.message}`);
+  console.error(
+    "[seed]   (org-scoped team routes are JWT-only; re-run with a Supabase session JWT to seed.)",
+  );
 }
 
 // ── 5. Emit / write fixtures ─────────────────────────────────────────────
@@ -144,7 +179,7 @@ const merged = {
   values: {
     ...(existing.values ?? {}),
     ORG_ID: orgId,
-    WEBHOOK_ENDPOINT_ID: webhookEndpointId,
+    ...(webhookEndpointId ? { WEBHOOK_ENDPOINT_ID: webhookEndpointId } : {}),
     ...(agentId ? { AGENT_ID: agentId } : {}),
     ...(teamId ? { TEAM_ID: teamId } : {}),
   },
