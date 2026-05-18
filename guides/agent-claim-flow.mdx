@@ -1,0 +1,232 @@
+---
+title: "Agent claim flow"
+description: "How an authenticated owner delegates a Mnemom identity claim to an AI agent. The agent acts on the owner's behalf without holding standing credentials."
+sidebarTitle: "Agent claim flow"
+icon: "user-check"
+---
+
+# Agent claim flow
+
+The owner of an agent identity — a developer, an enterprise admin, or any human with the right to act for the agent — can delegate the **claim** of that identity to a trusted AI agent (Claude Desktop, ChatGPT with the Mnemom App, a custom agent running on Anthropic / OpenAI / Gemini / a local model). The agent presents a short-lived claim token at the gateway, finalizes the claim, and the resulting `Trust Rating` is bound to the owner's account.
+
+This is a deliberate, authenticated workflow — not a public crawl surface. The `/r/<slug>` URLs that flag *unclaimed* coherence reports are private by design and are 403'd at the edge for crawlers, indexers, and any UA that identifies as an agent; the markdown / preview-manifest / JSON variants of `/r/<slug>` return 404 to seal the existence side-channel. See the [agent-readiness commitment #13](https://www.mnemom.ai/for-agents) for the full privacy posture.
+
+<Note>
+This is the **EN-only** doc by design — every page under `docs/api-reference/*` and this delegated-claim guide stay English to match the convention every major API platform (Stripe, GitHub, AWS, GCP) ships. Localized translations of the conceptual + tutorial docs are in flight as part of T7; the API-shaped surfaces are not in scope.
+</Note>
+
+---
+
+## When you would use this
+
+Three concrete scenarios:
+
+1. **Your AI assistant integrates Mnemom on your behalf.** You authenticate to `mnemom.ai`, generate a claim token, and your AI assistant uses that token to finalize the agent's identity binding — without ever holding your password / SSO session.
+2. **A multi-agent orchestrator stands up agents at scale.** The orchestrator's owner mints claim tokens (one per agent) and hands them to the spawning workflow; each agent self-claims its identity on first start.
+3. **A regulated team automates onboarding.** An admin mints batch tokens (one per onboarding event); the agent registers, claims its identity, and the audit log shows the admin's delegation rather than the agent's standalone signup.
+
+The key invariant: **the owner authenticates first**. Mnemom never lets an unauthenticated request claim an identity, no matter how the request is shaped — the claim token is the unforgeable proof that an authenticated owner consented to the delegation.
+
+---
+
+## High-level shape
+
+```
+┌─ Owner (you, authenticated) ─┐
+│                              │
+│  1. Mint claim token         │
+│     POST /v1/claim/tokens    │
+│     → { token, expires_at }  │
+│                              │
+└───┬──────────────────────────┘
+    │ hand the token to the
+    │ agent through your own
+    │ trusted channel
+    ▼
+┌─ Agent ──────────────────────┐
+│                              │
+│  2. Initialize identity      │
+│     POST /v1/agents          │
+│     → { agent_id }           │
+│                              │
+│  3. Present claim token      │
+│     POST /v1/agents/{id}/    │
+│          claim               │
+│     headers: Authorization:  │
+│       Claim-Token <token>    │
+│     → { trust_rating, ... }  │
+│                              │
+└──────────────────────────────┘
+```
+
+The owner mints. The agent presents. The gateway verifies both — token signature + expiry + scope — and finalizes the binding atomically.
+
+---
+
+## Step 1 — Owner mints a claim token
+
+Authenticated as the owner (`Bearer <session-token>` or a long-lived API key with the `claim:write` scope), call the claim-token mint endpoint:
+
+```http
+POST /v1/claim/tokens HTTP/1.1
+Host: api.mnemom.ai
+Authorization: Bearer <owner-session-token>
+Content-Type: application/json
+
+{
+  "scope": "claim-one-agent",
+  "expires_in_seconds": 3600,
+  "agent_hint": {
+    "name": "research-assistant",
+    "model": "claude-opus-4-7"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "token": "ct_2026Z3...redacted...",
+  "expires_at": "2026-05-18T23:00:00Z",
+  "scope": "claim-one-agent",
+  "owner_user_id": "u_..."
+}
+```
+
+The token is:
+- **Single-use** when `scope: "claim-one-agent"` (default). Refuses to claim a second identity even if presented twice.
+- **Short-lived** — default 1 hour, capped at 24 hours. The expiry is enforced server-side; client-side checks are advisory.
+- **Bound to the owner's user_id at mint time**, baked into the signed payload. The agent cannot use a token minted for a different owner.
+
+For batch scenarios (many agents, one owner), use `scope: "claim-many-agents"` and set `"max_claims"` to bound the token's blast radius. The token is still single-owner; it just allows up to N claim operations.
+
+### Storage + transport
+
+The owner is responsible for getting the token to the agent through a trusted channel. Common patterns:
+
+| Channel | When |
+|---|---|
+| Environment variable in the agent's runtime | Local agents / scripts. Set `MNEMOM_CLAIM_TOKEN=<token>` before the agent starts. |
+| MCP server descriptor (per [SEP-1649](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1649)) | Agents launched via MCP. The owner pastes the token into Claude Desktop / Cursor's MCP config; the agent reads it from the MCP transport. |
+| ChatGPT Apps SDK delegated-auth flow | ChatGPT users. The owner authenticates inline via the Apps SDK; ChatGPT issues the agent a token without ever showing it to the user. |
+| OAuth-style redirect | Custom web apps. The owner authenticates against `mnemom.ai/claim/delegate`, gets redirected back to your app with a claim token as a one-time URL parameter. |
+
+The token format is opaque from the agent's perspective — it's a signed JWT-like blob, but agents should treat it as a bearer credential and never log or persist it.
+
+---
+
+## Step 2 — Agent initializes its identity
+
+The agent calls `POST /v1/agents` with its public key + identity metadata. This is an **unauthenticated** call by design — anyone can mint an unclaimed `agent_id`. The claim step (next) is what binds the identity to an owner.
+
+```http
+POST /v1/agents HTTP/1.1
+Host: api.mnemom.ai
+Content-Type: application/json
+
+{
+  "name": "research-assistant",
+  "model": "claude-opus-4-7",
+  "agent_hash": "<sha256 of public key + identity claim>",
+  "alignment_card": { ... }
+}
+```
+
+Response:
+
+```json
+{
+  "agent_id": "ag_...",
+  "claim_state": "unclaimed",
+  "claim_url": "https://www.mnemom.ai/r/<slug>"
+}
+```
+
+The `claim_url` is the private `/r/<slug>` share-link. It's not for the agent to read — it's for the owner if they want to inspect the freshly-minted identity in the browser before the agent claims it. The agent should ignore it; the next step doesn't go through that URL.
+
+---
+
+## Step 3 — Agent presents the claim token
+
+The agent finalizes the binding by `POST`ing to `/v1/agents/{agent_id}/claim` with the claim token in a custom `Authorization` scheme:
+
+```http
+POST /v1/agents/ag_.../claim HTTP/1.1
+Host: api.mnemom.ai
+Authorization: Claim-Token ct_2026Z3...redacted...
+Content-Type: application/json
+
+{
+  "agent_id": "ag_...",
+  "hash_proof": "<signature over agent_id + nonce>"
+}
+```
+
+The gateway:
+
+1. **Verifies the token** — signature, expiry, scope, owner_user_id.
+2. **Verifies `hash_proof`** — the agent signs a nonce derived from `agent_id` to prove possession of the private key that backs `agent_hash`.
+3. **Atomically binds** the agent to the owner: `agents.claimed_by = <owner_user_id>`, `agents.claimed_at = <now>`, `agents.claim_state = 'claimed'`.
+4. **Returns** the agent's initial `trust_rating` (computed from the alignment card + the platform default cascade — Charter §I13 floor `tp-platform-standard`), plus identity metadata.
+
+```json
+{
+  "agent_id": "ag_...",
+  "claimed_by": "u_...",
+  "claimed_at": "2026-05-18T22:15:00Z",
+  "claim_state": "claimed",
+  "trust_rating": {
+    "composite": 720,
+    "grade": "BBB",
+    "components": { ... }
+  },
+  "alignment_card_url": "/v1/agents/ag_.../alignment-card"
+}
+```
+
+If the token is expired, already used, scoped wrong, or signed by a different owner, the gateway returns **401** with a stable error code (`token_expired`, `token_already_used`, `scope_mismatch`, `owner_mismatch`). The agent should NOT retry blindly — these errors are owner-side mistakes, not transient failures.
+
+---
+
+## What happens after the claim
+
+Once `claim_state` flips to `claimed`, three things change:
+
+1. **The `/r/<slug>` private URL retires.** It still exists (for the owner's audit trail), but is no longer the "unclaimed" share-link surface; the agent's canonical URL becomes `https://www.mnemom.ai/agents/<agent_id>` if the owner publishes it.
+2. **The Trust Directory updates.** If the agent is opted into the public directory (`alignment_card.publish: true`), it appears at `/directory` and is discoverable by other agents + humans.
+3. **Audit log records the delegation.** The audit row carries both `owner_user_id` (mint) and `agent_id` (claim), so a regulator inspecting the trail sees the chain of consent.
+
+The owner remains the principal of record — every subsequent decision the agent makes flows through the owner's org, billing, and policy posture. Revoking the agent ([`DELETE /v1/agents/{id}`](/api-reference/agents/delete)) is an owner-side operation.
+
+---
+
+## Why not just OAuth?
+
+Two reasons we use a custom claim-token shape rather than vanilla OAuth:
+
+1. **Single-use is the default.** OAuth bearer tokens are designed for repeated calls; the claim token is consumed by exactly one operation, then dies. The OAuth model would require us to add a separate revocation surface for the one-shot case.
+2. **Audit shape matters.** The mint → present sequence creates a typed audit row (owner → agent_id) that a single bearer token can't. Regulators reviewing agent identity provenance read this audit shape directly, without joining across logs.
+
+If you have an existing OAuth flow you want to bridge into the claim flow, mint claim tokens server-side in your OAuth callback handler and hand them to the agent through the same trusted channel you'd use for any other delegated credential.
+
+---
+
+## Common failure modes
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `token_expired` | Token > expires_at; defaults to 1 hour | Mint a fresh token; set `expires_in_seconds` higher if your agent's startup window is longer. |
+| `token_already_used` | Token was `claim-one-agent` scope and a prior claim succeeded | Mint a new token, or use `claim-many-agents` scope with `max_claims`. |
+| `owner_mismatch` | Token minted by user A, presented to agent created by user B | The agent's `agent_id` was initialized under a different account. Verify both flows use the same owner. |
+| `scope_mismatch` | Token has `claim-one-agent` scope but request body includes multi-agent batch fields | Trim the request to a single agent or re-mint with the right scope. |
+| Network 5xx during claim | Transient gateway issue | Safe to retry once; the claim operation is idempotent on `(agent_id, token)`. Don't retry on 4xx. |
+
+---
+
+## Related
+
+- [`agents.txt`](https://www.mnemom.ai/agents.txt) — the agent-facing pitch for Mnemom; the entry point a competent agent finds first.
+- [Authentication](/guides/authentication) — the owner-side auth methods (passkey, AAL2, SSO, API keys) that gate the mint endpoint.
+- [API reference — agents](/api-reference/agents) — endpoint docs for `POST /v1/agents` and `POST /v1/agents/{id}/claim`.
+- [Agent-readiness commitment #13 (r-shield)](https://www.mnemom.ai/for-agents) — why `/r/<slug>` is private and what that means for honest agents.
