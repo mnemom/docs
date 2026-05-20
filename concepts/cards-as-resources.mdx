@@ -1,0 +1,164 @@
+---
+title: "Cards as Resources"
+description: "Mnemom's alignment and protection cards are first-class API resources, addressable through a uniform /v1/<resource>/<scope>/<scope_id> URL surface — the leading-teams pattern from Stripe, Kubernetes, AWS IAM, and Linear."
+sidebarTitle: "Cards as Resources"
+icon: "diagram-project"
+---
+
+Mnemom's two cards — **alignment** and **protection** — are first-class API resources. Every card, at every scope, has the same URL shape:
+
+```
+/v1/<resource>/<scope>/<scope_id>[/<verb>]
+```
+
+where `<resource>` is one of `alignment` or `protection`, `<scope>` is one of `platform`, `org`, `team`, `agent`, and `<scope_id>` is a stable identifier (the literal string `default` for platform scope).
+
+This page is the customer-facing orientation to the canonical URL surface, the four scopes, and the migration from the earlier scope-specific paths.
+
+## Resources × Scope × Verb
+
+Mnemom uses the **Resources × Scope × Verb** idiom — the same one Stripe uses for its Resource nouns, Kubernetes uses for spec/status, AWS IAM uses for Policy/Effective, and Linear uses for Settings. There are two resources, four scopes, and a small fixed set of verbs.
+
+```
+GET    /v1/alignment/agent/smolt-512448e7                  # this layer's spec
+PUT    /v1/alignment/agent/smolt-512448e7                  # full replace
+DELETE /v1/alignment/org/polis-mnemom-v1                   # clear this layer
+POST   /v1/alignment/org/polis-mnemom-v1/preview-compose   # dry-run composer
+```
+
+The same shape works for protection:
+
+```
+GET  /v1/protection/team/team-finance
+PUT  /v1/protection/platform/default
+POST /v1/protection/agent/smolt-512448e7/preview-compose
+```
+
+A single mental model covers the entire surface. Authoring tools, CI Actions, and SDKs build one routing table and address every scope through it.
+
+## The four scopes
+
+Cards compose across scopes in this order — every later layer can tighten what earlier layers declared, never loosen.
+
+| Scope | `scope_id` | What it declares | Who edits it |
+|-------|------------|------------------|--------------|
+| `platform` | `default` (singleton) | Mnemom's universal defaults — the catalog floor that ships with every customer. | Mnemom platform team. |
+| `org` | The org slug, e.g. `polis-mnemom-v1` | Org-wide values, modes, and trusted sources — applied to every agent in the org. | Org owner / admin. |
+| `team` | The team slug | Team-wide overlays — finance teams tighten financial primitives, growth teams loosen creative constraints, and so on. | Team admin (falls through to org admin). |
+| `agent` | The agent ID | Per-agent specialization — a single agent's value emphasis, capabilities, and protection thresholds. | Agent owner (falls through to team / org admin). |
+
+Composition runs platform → org → team → agent. The composed result is the agent's **effective** card, surfaced (in Wave 2 of cards-as-primitive) at `/v1/<resource>/<scope>/<scope_id>/effective`.
+
+## Naming retirement — *card* leaves the API surface
+
+Before this canonicalization, the same concept lived under four different nouns: `alignment-card`, `alignment-template`, `platform-card/alignment`, and bare `card`. That was unteachable. The reshape:
+
+| Layer | Old | New |
+|-------|-----|-----|
+| API resource | `alignment-card`, `alignment-template`, `platform-card/alignment` | `alignment` |
+| API resource | `protection-card`, `protection-template`, `platform-card/protection` | `protection` |
+| Source file (devs author) | "card YAML" | **manifest** (Kubernetes / Helm / Vercel idiom) |
+| Composed view | "canonical card" | **effective** sub-resource |
+| Internal storage tables | unchanged | unchanged |
+
+The word *card* survives in conversation and in the docs you're reading — it's a useful piece of shorthand. It just doesn't appear in URLs any more. The API spec uses *alignment* and *protection* as the resource nouns.
+
+## Legacy URL migration
+
+Every legacy URL returns **HTTP 308 Permanent Redirect** ([RFC 7538](https://www.rfc-editor.org/rfc/rfc7538)) to its canonical equivalent. RFC 7538 §3 guarantees that compliant clients preserve the original method and body across the redirect — so a `PUT` against a legacy URL becomes a `PUT` against the canonical URL with the same body, automatically.
+
+Every 308 carries three migration headers:
+
+- `Location:` the canonical URL (with the original query string preserved).
+- `Deprecation: true` ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594)) — flags the resource as deprecated for intermediaries and observability tooling.
+- `Sunset: Fri, 15 Jan 2027 00:00:00 GMT` — the date after which the legacy URL stops redirecting and returns 410 Gone. Roughly aligned with Mnemom Phase 5 GA.
+- `Link: <https://docs.mnemom.ai/concepts/cards-as-resources>; rel="deprecation"; type="text/html"` ([RFC 5988](https://www.rfc-editor.org/rfc/rfc5988)) — points you here.
+
+### Migration table
+
+| Legacy | Canonical |
+|--------|-----------|
+| `GET /v1/agents/{id}/alignment-card` | `GET /v1/alignment/agent/{id}` |
+| `PUT /v1/agents/{id}/alignment-card` | `PUT /v1/alignment/agent/{id}` |
+| `POST /v1/agents/{id}/alignment-card/preview-compose` | `POST /v1/alignment/agent/{id}/preview-compose` |
+| `GET /v1/agents/{id}/protection-card` | `GET /v1/protection/agent/{id}` |
+| `PUT /v1/agents/{id}/protection-card` | `PUT /v1/protection/agent/{id}` |
+| `POST /v1/agents/{id}/protection-card/preview-compose` | `POST /v1/protection/agent/{id}/preview-compose` |
+| `GET /v1/orgs/{id}/alignment-template` | `GET /v1/alignment/org/{id}` |
+| `PUT /v1/orgs/{id}/alignment-template` | `PUT /v1/alignment/org/{id}` |
+| `DELETE /v1/orgs/{id}/alignment-template` | `DELETE /v1/alignment/org/{id}` |
+| `POST /v1/orgs/{id}/alignment-template/preview-compose` | `POST /v1/alignment/org/{id}/preview-compose` |
+| `GET /v1/orgs/{id}/protection-template` | `GET /v1/protection/org/{id}` |
+| `PUT /v1/orgs/{id}/protection-template` | `PUT /v1/protection/org/{id}` |
+| `DELETE /v1/orgs/{id}/protection-template` | `DELETE /v1/protection/org/{id}` |
+| `POST /v1/orgs/{id}/protection-template/preview-compose` | `POST /v1/protection/org/{id}/preview-compose` |
+| `GET /v1/teams/{id}/alignment-template` | `GET /v1/alignment/team/{id}` |
+| `PUT /v1/teams/{id}/alignment-template` | `PUT /v1/alignment/team/{id}` |
+| `DELETE /v1/teams/{id}/alignment-template` | `DELETE /v1/alignment/team/{id}` |
+| `POST /v1/teams/{id}/alignment-template/preview-compose` | `POST /v1/alignment/team/{id}/preview-compose` |
+| `GET /v1/teams/{id}/protection-template` | `GET /v1/protection/team/{id}` |
+| `PUT /v1/teams/{id}/protection-template` | `PUT /v1/protection/team/{id}` |
+| `DELETE /v1/teams/{id}/protection-template` | `DELETE /v1/protection/team/{id}` |
+| `POST /v1/teams/{id}/protection-template/preview-compose` | `POST /v1/protection/team/{id}/preview-compose` |
+| `GET /v1/admin/platform-card/alignment` | `GET /v1/alignment/platform/default` |
+| `PUT /v1/admin/platform-card/alignment` | `PUT /v1/alignment/platform/default` |
+| `POST /v1/admin/platform-card/alignment/preview-compose` | `POST /v1/alignment/platform/default/preview-compose` |
+| `GET /v1/admin/platform-card/protection` | `GET /v1/protection/platform/default` |
+| `PUT /v1/admin/platform-card/protection` | `PUT /v1/protection/platform/default` |
+| `POST /v1/admin/platform-card/protection/preview-compose` | `POST /v1/protection/platform/default/preview-compose` |
+
+## Client compatibility
+
+Modern HTTP clients follow 308 with method and body preservation by default:
+
+- **`curl`** 7.46 and later — preserves method on 308. Pass `-L` to follow redirects.
+- **`fetch` / `node-fetch` / `undici`** — preserve method on 308 by default.
+- **Python `requests`** 2.7 and later — preserves method on 308.
+- **Python `httpx`** — preserves method on 308.
+- **Go `net/http`** since 1.8 — preserves method on 308.
+- **`axios`** — preserves method on 308.
+
+Older clients (curl ≤ 7.45, Python `requests` ≤ 2.6) may downgrade `POST` to `GET` on 308 — those vintages predate RFC 7538 strict-308 compliance. Upgrade the client or call the canonical URL directly.
+
+## Worked example
+
+A common Polis-side flow before canonicalization:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/agents/smolt-512448e7/alignment-card \
+  -H "X-Mnemom-Api-Key: $KEY" \
+  -H "Content-Type: application/yaml" \
+  -d @manifest.yaml
+```
+
+The same call works against the legacy URL today — it returns a 308 to the canonical URL and the client re-issues the `PUT`. The client doesn't need to change to keep working. **To stop the round-trip**, point the call at the canonical URL directly:
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7 \
+  -H "X-Mnemom-Api-Key: $KEY" \
+  -H "Content-Type: application/yaml" \
+  -d @manifest.yaml
+```
+
+That's the only change — one URL, one method, same body.
+
+## What this unlocks
+
+This canonicalization is the foundation for the rest of the cards-as-primitive surface:
+
+- **`GET /v1/<resource>/<scope>/<scope_id>/effective`** — the composed view, with per-key provenance back to whichever scope authored each field.
+- **`GET /v1/agents/{id}/state`** — the runtime composite: one call returns alignment + protection + capabilities with full tool definitions.
+- **Sub-resource verbs** — `PUT /v1/alignment/<scope>/<scope_id>/<primitive>` to set just one primitive (values, conscience, capabilities, etc.) without replacing the whole spec.
+- **AI-forward verbs** — `scaffold`, `explain`, `simulate`, `import` — natural-language and probing UX that all bind on the same root namespace.
+
+Each builds on the same Resources × Scope × Verb shape this page describes.
+
+## See also
+
+- [Alignment cards](/concepts/alignment-cards) — what an alignment card contains.
+- [Protection card](/concepts/protection-card) — what a protection card contains.
+- [Card composition](/concepts/card-composition) — how platform → org → team → agent layering works.
+- [Card lifecycle](/concepts/card-lifecycle) — versioning, ETag, and content-hash semantics.
+- [RFC 7538](https://www.rfc-editor.org/rfc/rfc7538) — HTTP 308 Permanent Redirect.
+- [RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) — the `Deprecation` and `Sunset` HTTP headers.
+- [RFC 5988](https://www.rfc-editor.org/rfc/rfc5988) — the `Link` header.
