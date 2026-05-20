@@ -201,7 +201,9 @@ function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
 }
 
 // ── Load spec ────────────────────────────────────────────────────────────
-const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
+// ADR-054: spec loaded from the live URL (or OPENAPI_SPEC_PATH override).
+import { loadSpec } from "./_load-spec.mjs";
+const spec = await loadSpec();
 
 // ── Ajv + dereferencer ───────────────────────────────────────────────────
 //
@@ -684,7 +686,7 @@ if (
 
 if (failures.length > 0) {
   console.log();
-  console.log(`❌ ${failures.length} NEW doc example(s) drift from api-reference/openapi.json:\n`);
+  console.log(`❌ ${failures.length} NEW doc example(s) drift from the live OpenAPI spec (https://api.mnemom.ai/openapi.json):\n`);
   const byFile = new Map();
   for (const f of failures) {
     if (!byFile.has(f.file)) byFile.set(f.file, []);

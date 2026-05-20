@@ -87,7 +87,9 @@ function knownDriftEntry(file, line, keyword) {
 }
 
 // ── Ajv + deref ──────────────────────────────────────────────────────────
-const spec = JSON.parse(readFileSync("api-reference/openapi.json", "utf8"));
+// ADR-054: spec loaded from the live URL (or OPENAPI_SPEC_PATH override).
+import { loadSpec } from "./_load-spec.mjs";
+const spec = await loadSpec();
 const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
 addFormats(ajv);
 

@@ -23,8 +23,9 @@ verified nightly by the watchdog.
   navigation, branding, integrations).
 - **MDX/MD** — pages are `.mdx` (full Mintlify components) or `.md`
   (plain markdown).
-- **OpenAPI specs** — `api-reference/` references machine-readable
-  spec files; `scripts/check-openapi-drift.mjs` enforces consistency.
+- **OpenAPI specs** — Mintlify fetches the live customer-facing slice
+  from `https://api.mnemom.ai/openapi.json` (ADR-054). No local
+  `api-reference/openapi.json` — drift impossible by construction.
 - No package.json, no build step. Mintlify handles everything.
 
 ## Local preview
