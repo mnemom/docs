@@ -3,15 +3,17 @@ name: Doc Examples vs OpenAPI
 # T5-1 (Safe House Hardening) — doc-as-spec static walker.
 #
 # Asserts every `curl https://api.mnemom.ai/v1/...` invocation in customer-
-# facing MDX corresponds to a real {path, method} in api-reference/openapi.json.
-# Catches structural drift between docs and the manifest-generated spec; the
-# spec itself is enforced by the openapi-drift-check workflow + the four-layer
-# T4 defense in mnemom-api.
+# facing MDX corresponds to a real {path, method} in the live OpenAPI spec
+# at https://api.mnemom.ai/openapi.json (ADR-054). Catches structural drift
+# between docs and the runtime; the spec itself is enforced by mnemom-api's
+# four-layer T4 defense, and there is no longer a local copy of the spec
+# in this repo to drift against.
 #
 # Triggers:
 #   - pull_request to main (any docs change can introduce drift)
-#   - schedule daily (catches drift introduced when api-reference/openapi.json
-#     is synced from mnemom-api without a corresponding doc update)
+#   - schedule daily (catches drift introduced when mnemom-api ships a new
+#     spec without a corresponding doc update — the walker now fetches the
+#     live URL on each run, so detection is immediate after deploy)
 #   - workflow_dispatch (manual)
 #
 # Known-drift allowlist lives inside scripts/check-doc-examples.mjs. Each
@@ -24,14 +26,14 @@ on:
     paths:
       - "**/*.mdx"
       - "**/*.md"
-      - "api-reference/openapi.json"
       - "scripts/check-doc-examples.mjs"
+      - "scripts/_load-spec.mjs"
       - "scripts/lib/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/doc-examples.yml"
   schedule:
-    - cron: "45 6 * * *" # 15 min after openapi-drift-check
+    - cron: "45 6 * * *" # daily
   workflow_dispatch:
 
 jobs:

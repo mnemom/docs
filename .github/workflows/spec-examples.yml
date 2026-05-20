@@ -3,7 +3,8 @@ name: Spec Examples Validation
 # T5-3 (Safe House Hardening) — specification-page example audit.
 # Parses every YAML / JSON / JSONC fenced block in
 # `specifications/*.mdx` and validates opted-in blocks against the
-# canonical schema in `api-reference/openapi.json` via Ajv 2020.
+# canonical schema fetched live from `https://api.mnemom.ai/openapi.json`
+# (ADR-054) via Ajv 2020.
 #
 # Opt-in: a block validates only when annotated with
 # `# t5-3:full-example` (YAML) or `// t5-3:full-example` (JSON).
@@ -12,10 +13,9 @@ name: Spec Examples Validation
 # `scripts/check-spec-examples.mjs` for the contract.
 #
 # Triggers:
-#   - pull_request when specs / openapi / the script / lib / package
-#     manifest changes
-#   - schedule daily (15 min after doc-examples) — catches drift when
-#     mnemom-api ships a schema change synced into openapi.json
+#   - pull_request when specs / the script / lib / package manifest changes
+#   - schedule daily — picks up runtime spec changes shipped by mnemom-api
+#     without any docs-side commit
 #   - workflow_dispatch (manual)
 
 on:
@@ -23,14 +23,14 @@ on:
     branches: ["main"]
     paths:
       - "specifications/**/*.mdx"
-      - "api-reference/openapi.json"
       - "scripts/check-spec-examples.mjs"
+      - "scripts/_load-spec.mjs"
       - "scripts/lib/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/spec-examples.yml"
   schedule:
-    - cron: "0 7 * * *" # 15 min after doc-examples.yml
+    - cron: "0 7 * * *" # daily
   workflow_dispatch:
 
 jobs:
