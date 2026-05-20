@@ -140,6 +140,38 @@ function knownDriftEntry(file, method, segments) {
 // multiple errors on the same body. As T5-2 / T5-4 close, entries get
 // removed.
 const KNOWN_BODY_DRIFT = [
+  // RE-OPENED 2026-05-20 by ADR-055 (live-URL OpenAPI).
+  //
+  // The 2026-05-15 closing comment below noted that the docs expanded
+  // to a 47-event taxonomy while `mnemom-api/openapi/tags/
+  // webhook-notifications.ts` kept the original 8-event enum, and that
+  // closing the gap was "a separate cross-repo follow-up." That
+  // follow-up is still open. Before ADR-055, the docs-side enum was
+  // hand-maintained at 47 events in `api-reference/openapi.json` and
+  // matched the MDX examples, so the doc-examples gate passed. After
+  // ADR-055 the docs-side spec is fetched live from
+  // `api.mnemom.ai/openapi.json` — which serves the *runtime*
+  // 8-event taxonomy. The drift between docs (47 events claimed) and
+  // runtime (8 events implemented) just became visible again, exactly
+  // as intended.
+  //
+  // Allowlisting here so ADR-055 ships; the proper fix is one of:
+  //   (a) expand the runtime enum in mnemom-api to the 47-event
+  //       taxonomy that the docs MDX already documents — most
+  //       customer-honest, but largest runtime change; or
+  //   (b) trim the docs MDX to the 8 events the runtime actually
+  //       supports — smallest change, content-destructive; or
+  //   (c) decide the docs were aspirational and split into
+  //       "supported today" vs "roadmap" sections.
+  //
+  // Tracked in: safe-house-hardening follow-up + audit log entry
+  // 2026-05-20-webhook-event-taxonomy-mismatch.
+  { file: "guides/improving-reputation.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum" },
+  { file: "guides/safe-house-webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum" },
+  { file: "guides/safe-house-webhooks.mdx", method: "PATCH", path: "/orgs/{org_id}/webhooks/{endpoint_id}", keyword: "enum" },
+  { file: "guides/trust-recovery.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum" },
+  { file: "guides/webhooks.mdx", method: "POST", path: "/orgs/{org_id}/webhooks", keyword: "enum" },
+
   // (closed 2026-05-15 by T5-4 PR 7: docs/api-reference/openapi.json's
   // event_types enum expanded from 8 → 47 to match the canonical
   // mnemom-api/schemas/webhooks/ taxonomy, plus doc-side prefix fixes:
@@ -149,6 +181,8 @@ const KNOWN_BODY_DRIFT = [
   // 8-event enum in openapi/tags/webhook-notifications.ts source) is
   // a separate cross-repo follow-up — flagged in
   // safe-house-hardening/audit/.)
+  //
+  // (RE-OPENED 2026-05-20 — see top of this list.)
 
   // (closed 2026-05-15 by T5-4 PR 6 — 11 body-drift entries spanning
   // /policies/evaluate (added the `policy` field), alignment-card
