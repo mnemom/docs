@@ -11,18 +11,20 @@
  *      dereferenced schema via Ajv 2020.
  *
  * This is the docs-side equivalent of the production validator that
- * mnemom-api runs on these payloads — the same Ajv compile against
- * the same component schemas in `api-reference/openapi.json`. Skeleton
- * examples that intentionally elide sub-objects (the load-bearing
- * documentation pattern on schema pages) are detected and skipped
- * with a notice.
+ * mnemom-api runs on these payloads — the same Ajv compile against the
+ * same component schemas in the live OpenAPI spec (loaded via
+ * `_load-spec.mjs`, which fetches `https://api.mnemom.ai/openapi.json`
+ * by default per ADR-055). Skeleton examples that intentionally elide
+ * sub-objects (the load-bearing documentation pattern on schema pages)
+ * are detected and skipped with a notice.
  *
  * Sibling to:
  *   - `check-doc-examples.mjs` (T5-1) — validates curl bodies / response
  *     examples on customer guide pages against `requestBody` /
  *     `responses[code]` schemas.
- *   - `check-openapi-drift.mjs` — validates the path-set sync between
- *     docs and mnemom-api source-of-truth.
+ *
+ * (Note: `check-openapi-drift.mjs` was retired in ADR-055; the live-URL
+ * pattern makes docs-vs-runtime spec drift impossible by construction.)
  *
  * Exits 0 on clean. Exits 1 on parse failure or schema failure that
  * isn't on the `KNOWN_SPEC_DRIFT` allowlist.
@@ -59,8 +61,9 @@ for (let i = 0; i < args.length; i++) {
 // ── Page → canonical schema map ──────────────────────────────────────────
 //
 // Spec pages whose YAML/JSON examples should validate against a specific
-// component schema in `api-reference/openapi.json`. Pages absent from
-// this map are still scanned for syntax errors but skip schema validation.
+// component schema in the live OpenAPI spec (loaded via `_load-spec.mjs`).
+// Pages absent from this map are still scanned for syntax errors but skip
+// schema validation.
 //
 // As T5-3 follow-ons add more schemas to openapi.json (or the docs side
 // publishes standalone JSON Schema files for the orphan types — trust

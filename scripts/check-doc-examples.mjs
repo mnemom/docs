@@ -5,9 +5,10 @@
  * Extracts every `curl https://api.mnemom.ai/v1/...` invocation from
  * fenced bash code blocks in customer-facing MDX pages and asserts:
  *
- *   1. The URL path corresponds to a real path in api-reference/openapi.json
- *      (after normalizing shell-var, all-caps, and example-ID placeholders
- *      to the spec's `{param}` slots).
+ *   1. The URL path corresponds to a real path in the live OpenAPI spec
+ *      (loaded via `_load-spec.mjs` from `https://api.mnemom.ai/openapi.json`
+ *      per ADR-055, after normalizing shell-var, all-caps, and example-ID
+ *      placeholders to the spec's `{param}` slots).
  *   2. The HTTP method on that path is declared in the spec.
  *   3. (T5-1.2) The `-d '{...}'` JSON body, when present, validates against
  *      the spec's `requestBody.content['application/json'].schema` via Ajv
@@ -259,7 +260,7 @@ const spec = await loadSpec();
 const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
 addFormats(ajv);
 
-// Manual deref. api-reference/openapi.json has 107 component schemas with
+// Manual deref. The OpenAPI spec has ~107 component schemas with
 // zero cycles (verified at T5-1.2 design time), so full inline expansion
 // terminates. We deref each requestBody schema lazily — once per unique
 // (path, method) — and cache the compiled validator.
