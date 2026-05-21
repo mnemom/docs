@@ -172,31 +172,35 @@ This creates a tamper-evident record that the Safe House analysis was performed 
 
 ## Hardened-default Safe House configuration
 
-For agents operating in high-trust, high-risk environments (financial automation, infrastructure management, regulated data handling), apply a hardened Safe House configuration via the standard CFD config endpoints. A reasonable starting baseline:
+For agents operating in high-trust, high-risk environments (financial automation, infrastructure management, regulated data handling), set a hardened protection card via `PUT /v1/agents/{agent_id}/protection-card`. A reasonable starting baseline against the canonical [`UnifiedProtectionCard`](/specifications/protection-card-schema):
 
 ```json
 {
+  "card_version": "protection/2026-04-26",
+  "agent_id": "mnm-xxxxxxxx-xxxx-xxxx",
   "mode": "enforce",
-  "surfaces": ["inbound", "tool_outputs", "outbound_dlp"],
   "thresholds": {
     "warn": 0.50,
     "quarantine": 0.70,
     "block": 0.85
   },
-  "canaries": {
-    "auto_seed": true,
-    "categories": ["api_keys", "db_credentials", "jwt_tokens"]
+  "screen_surfaces": {
+    "incoming": true,
+    "outgoing": true,
+    "tool_calls": true,
+    "tool_responses": true
   },
-  "trusted_sources": [],
-  "session_escalation": {
-    "enabled": true,
-    "risk_window_messages": 10,
-    "escalation_threshold": "high"
+  "trusted_sources": {
+    "domains": [],
+    "agent_ids": [],
+    "ip_ranges": []
   }
 }
 ```
 
-The key differences from default settings: all three surfaces are screened (not just inbound), thresholds are tighter than defaults, canaries are auto-seeded from the agent's context, and session escalation is active.
+The key differences from default settings: `enforce` mode is on (instead of `observe`); thresholds are tighter than defaults; and all four surfaces are screened — `incoming` (user/principal prompts), `outgoing` (the agent's response), `tool_calls` (arguments going to tools), and `tool_responses` (values coming back from tools). Trust nothing implicitly: `trusted_sources` starts empty and is widened only with explicit, audited entries.
+
+Canary credentials (`sh.canary.triggered`) and session-escalation policy are configured separately from the protection card; see [Canary credentials](/concepts/safe-house#canary-credentials) and the [webhook event catalog](/api-reference/webhook-events) for the canonical surfaces.
 
 ## Environment requirements
 

@@ -110,19 +110,29 @@ Any inbound message containing a canary pattern triggers an automatic `block` ve
 
 ## Source trust
 
-Not all message sources carry the same risk. Safe House lets you configure per-source `risk_multiplier` values to tune sensitivity:
+Per ADR-037, `trusted_sources` on the protection card is a typed allowlist with three buckets. A match on any bucket short-circuits the detector pipeline for that message — no detector cycles spent, but every skip emits a low-priority `sh_trusted_source_skip` audit trace so reviewers can see exactly what was waved through.
 
 ```json
 {
-  "trusted_sources": [
-    { "source_id": "internal-scheduler", "risk_multiplier": 0.0 },
-    { "source_id": "public-webhook", "risk_multiplier": 1.5 },
-    { "source_id": "unverified-user-input", "risk_multiplier": 2.0 }
-  ]
+  "trusted_sources": {
+    "domains": ["internal.acme.com", "vendor-api.example.com:8080"],
+    "agent_ids": ["mnm-aabbccdd-eeff-0011"],
+    "ip_ranges": ["10.0.0.0/8", "172.16.0.0/12"]
+  }
 }
 ```
 
-A `risk_multiplier` of `0.0` means fully trusted — Safe House analysis still runs but scores are suppressed and will not trigger a quarantine or block. A value of `2.0` doubles the computed risk score before applying verdict thresholds, making the source effectively twice as suspicious.
+| Bucket | Matches | Validator deny-list |
+|-------|---------|------------------|
+| `domains` | DNS name or `host:port`. | Public LLM endpoints (`api.openai.com`, `api.anthropic.com`, …) and public DNS-over-HTTPS providers cannot be allowlisted. |
+| `agent_ids` | Mnemom agent IDs in `mnm-*` format. No wildcards. | None — agent IDs are scoped per-tenant by construction. |
+| `ip_ranges` | IPv4 or IPv6 CIDR. | `0.0.0.0/0`, `::/0`, and public DNS resolver ranges (`8.8.8.0/24`, `1.1.1.0/24`, `9.9.9.0/24`) cannot be allowlisted. |
+
+Trust is **binary** — a match means "skip detection." Earlier designs that exposed a graduated `risk_multiplier` were withdrawn during the ADR-037 schema unification; tuning sensitivity is the job of `thresholds.{warn, quarantine, block}`, not per-source weights.
+
+Composition across scopes follows the same intersection-then-union rule as the rest of the card: the platform list is the compliance ceiling (downstream cannot widen trust), and org + agent take the union within that ceiling.
+
+**Security note:** the validator's deny-list is non-exhaustive — adding a publicly-routable IP range or a customer-controllable domain is a critical misconfiguration even if it passes the deny-list. Treat `trusted_sources` as a sharp tool. See the canonical schema at [/specifications/protection-card-schema#trusted_sources](/specifications/protection-card-schema#trusted_sources).
 
 ## Bidirectional screening
 
