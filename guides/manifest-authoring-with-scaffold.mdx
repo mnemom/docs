@@ -1,0 +1,160 @@
+---
+title: "Authoring a Manifest with Scaffold"
+description: "Step-by-step: describe an agent in natural language, get a starting manifest, edit it locally, then commit via PUT. The fastest path from idea to live agent."
+sidebarTitle: "Authoring with Scaffold"
+icon: "wand-magic-sparkles"
+---
+
+This guide walks you through the fastest path from "I want an agent that does X" to a live, composed alignment card. The full flow is: describe → scaffold → review → edit → commit → verify.
+
+## What you'll need
+
+- An API key with `api:write` scope ([create one](/guides/api-keys)).
+- The agent's `agent_id` (a `smolt-*` slug, created via [`POST /v1/agents`](/api-reference/endpoint/post-agents)).
+- About 10 minutes.
+
+## 1. Describe the agent
+
+Write a 1-3 sentence description of what the agent does. Be specific about:
+
+- **Who the principal is** — the human or org the agent serves.
+- **What actions** it takes (read-only? write? external comms?).
+- **What domain** it operates in (finance, engineering, comms, ...).
+
+Example:
+
+> "An assistant for the finance team that reads invoices from email, drafts payment summaries, and posts them to the #treasury Slack channel. Never executes payments itself; always escalates to the CFO for transfers over $10,000."
+
+## 2. Call scaffold
+
+```bash
+export MNEMOM_API_KEY="..."
+
+curl -X POST https://api.mnemom.ai/v1/alignment/scaffold \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "An assistant for the finance team that reads invoices from email, drafts payment summaries, and posts them to the #treasury Slack channel. Never executes payments itself; always escalates to the CFO for transfers over $10,000.",
+    "scope": "agent",
+    "hints": {
+      "industry": "finance",
+      "risk_appetite": "conservative",
+      "existing_tools": ["email_read", "slack_post"]
+    }
+  }' | jq .
+```
+
+The response carries four useful slots:
+
+```json
+{
+  "ok": true,
+  "resource": "alignment",
+  "manifest": "card_version: \"unified/2026-04-26\"\nagent_id: \"<placeholder>\"\nautonomy_mode: observe\n...",
+  "reasoning": "This manifest covers a finance agent that reads invoices and drafts summaries; the agent depends on a delegated_authority principal because payment execution would be outside its boundary. Values declared: alignment_with_principal_objective + policy_attentiveness(domain: financial) + deliberation_before_action — the financial domain depends on careful intermediate reasoning before acting. Audit retention is 90 days reflecting finance-domain norms. The escalation threshold of $10,000 lives in autonomy.escalation_triggers.",
+  "suggested_catalog_entries": [
+    "alignment_with_principal_objective",
+    "policy_attentiveness",
+    "deliberation_before_action"
+  ],
+  "coverage_gaps": [
+    {"axis": "conscience", "note": "consider adding a BOUNDARY entry forbidding direct payment execution"}
+  ],
+  "cached": false,
+  "model": "claude-haiku-4-5-20251001"
+}
+```
+
+## 3. Review the scaffold
+
+The `manifest` is editable YAML. Save it to a file:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/scaffold \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '@scaffold-request.json' \
+  | jq -r .manifest > finance-agent.yaml
+```
+
+Read it end-to-end. The model is good but not infallible — check:
+
+- **`agent_id`** — replace the `<placeholder>` with your actual agent ID.
+- **`values.declared[]`** — does the value set match your intent? The model's suggestions are starting points; reorder, add, remove per the catalog (`GET /v1/catalog/values`).
+- **`autonomy.bounded_actions[]`** — does the action surface match what the agent can actually do? Compare against your tool inventory.
+- **`autonomy.escalation_triggers[]`** — are the conditions encoded correctly? The $10,000 threshold should appear here.
+- **`conscience.values[]`** — the model surfaces gaps; address them or document why you're not.
+- **`audit.retention_days`** — finance-domain default is 90 days; adjust per your compliance posture.
+
+## 4. Address coverage gaps
+
+The response's `coverage_gaps[]` array calls out primitives the model thinks would benefit from operator attention. Each entry has an `axis` + `note`. Resolve them with [sub-resource verb](/concepts/sub-resource-verbs) PATCHes — or fold them into the full manifest before the first PUT.
+
+For the finance agent above, the gap is "consider adding a BOUNDARY entry forbidding direct payment execution". Edit the manifest's `conscience` block:
+
+```yaml
+conscience:
+  mode: augment
+  values:
+    - type: BOUNDARY
+      severity: mandatory
+      content: "Direct payment execution is outside this agent's boundary. Payment actions depend on the CFO's explicit authorization via a separate, human-approved workflow."
+```
+
+## 5. Simulate before you commit
+
+Before the first PUT, simulate a representative tool call to confirm the manifest composes cleanly. See [Simulate before commit](/guides/simulate-before-commit) for the full pattern.
+
+```bash
+# Simulate against a temporarily-PUT version (use a sandbox agent first if available)
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-finance-test/simulate \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"candidate_tool_call": {"tool_name": "slack_post", "tool_args": {"channel": "treasury"}}}' \
+  | jq '{allowed, conditions, suggestions}'
+```
+
+## 6. Commit the manifest
+
+When you're satisfied, PUT the full manifest. This is the [root-level write surface](/concepts/cards-as-resources):
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7 \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/yaml" \
+  --data-binary "@finance-agent.yaml"
+```
+
+The composer recomposes the agent's effective card, returns the new `content_hash` + `version`, and updates `field_provenance` for every leaf. Downstream gateway + observer evaluators pick up the new state on the next request.
+
+## 7. Verify with explain
+
+After committing, run [explain](/guides/explain-and-remediate) to confirm the policy engine sees the spec the way you intended.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  | jq '.trace.verdict, .trace.coverage.coverage_pct, .suggested_remediations | length'
+```
+
+A clean spec returns `verdict: "pass"`, `coverage_pct: 100`, and zero suggested remediations.
+
+## Caching
+
+Identical scaffold requests return identical responses from cache (24-hour TTL). The cache key is `sha256(model + scope + description + hints)`. Two operators describing the same agent will see the same manifest — useful for review-then-iterate workflows where you want to confirm the deterministic output before editing.
+
+Override the model with `"model": "sonnet"` for prose-heavy reasoning; the cache scopes per-model.
+
+## Rate limits
+
+Scaffold consumes the per-principal LLM budget (10 calls/hour per user, 100/hour per org). Cache hits don't consume the budget. On exceed, the endpoint returns 429 with `Retry-After` + a care-framed body.
+
+## What to do next
+
+- [Sub-resource verbs](/concepts/sub-resource-verbs) — for surgical edits to a single primitive without rewriting the whole spec.
+- [Explain and remediate](/guides/explain-and-remediate) — for debugging an existing card.
+- [Simulate before commit](/guides/simulate-before-commit) — for testing tool calls pre-write.
+- [Cards as Resources](/concepts/cards-as-resources) — for the full URL surface map.

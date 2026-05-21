@@ -1,0 +1,231 @@
+---
+title: "AI Helpers"
+description: "Four AI-forward verbs that turn the cards API into a self-serve developer experience: scaffold (NL → manifest), explain (why was this enforced?), simulate (dry-run), and tools/import (bulk import). All read-style; never auto-commit."
+sidebarTitle: "AI Helpers"
+icon: "wand-magic-sparkles"
+---
+
+The cards API ships four AI-forward verbs that make manifest authoring self-serve. They wrap the platform's existing capabilities — LLM, policy engine, observer — and surface them through care-framed HTTP endpoints.
+
+| Verb | Endpoint | What it does |
+|---|---|---|
+| **scaffold** | `POST /v1/<resource>/scaffold` | Natural-language description → starting-point manifest YAML + reasoning. |
+| **explain** | `POST /v1/<resource>/<scope>/<id>/explain` | "Why did the policy engine flag this?" Returns structured trace + remediations. |
+| **simulate** | `POST /v1/<resource>/<scope>/<id>/simulate` | Dry-run gateway + observer against a hypothetical tool call. |
+| **tools/import** | `POST /v1/tools/import` | Bulk preview from OpenAPI 3.0+ spec or Polis YAML manifest. |
+
+All four are **read-style POSTs**. They don't mutate state, so they don't take `Idempotency-Key` or `If-Match`. They're idempotent by construction.
+
+## scaffold — natural language to a manifest
+
+You describe what you want; the platform writes the starting manifest.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/scaffold \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "A finance agent that reads invoices, drafts payment summaries, and posts to a treasury Slack channel — never executes payments itself",
+    "scope": "agent",
+    "hints": {
+      "industry": "finance",
+      "risk_appetite": "conservative"
+    }
+  }'
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "resource": "alignment",
+  "manifest": "card_version: \"unified/2026-04-26\"\nagent_id: \"<placeholder>\"\nautonomy_mode: observe\n...",
+  "reasoning": "This manifest covers a finance agent that depends on read-only access to invoices and outbound communication. The agent's principal would benefit from a `delegated_authority` relationship — payments are an irreversible external write and stay outside the agent's autonomy. Two values are declared: `alignment_with_principal_objective` and `policy_attentiveness` with `domain: financial`. The audit retention is 90 days reflecting finance-domain norms.",
+  "suggested_catalog_entries": ["alignment_with_principal_objective", "policy_attentiveness", "deliberation_before_action"],
+  "coverage_gaps": [],
+  "cached": false,
+  "model": "claude-haiku-4-5-20251001"
+}
+```
+
+- **`manifest`** — editable YAML. Run it through `PUT /v1/alignment/<scope>/<id>` to commit, or hand it to the [`mnemom/cards-action`](/guides/manifest-authoring-with-scaffold) for PR review.
+- **`reasoning`** — care-framed prose explaining the choices.
+- **`suggested_catalog_entries`** — values the model would recommend; consider them, then accept or adjust.
+- **`coverage_gaps`** — primitives the model thinks would benefit from operator attention.
+- **`cached`** — true when the response was served from the description-hash cache (24h TTL).
+
+See [the scaffold guide](/guides/manifest-authoring-with-scaffold) for the full authoring flow.
+
+## explain — why did the policy engine flag this?
+
+You ask "what's wrong with this agent's spec?"; the platform runs the policy engine and translates the structured findings into prose you can act on.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "resource": "alignment",
+  "trace": {
+    "verdict": "warn",
+    "violations": [],
+    "warnings": [
+      {"type": "unmapped_tool", "tool": "filesystem_read", "reason": "..."}
+    ],
+    "card_gaps": [],
+    "coverage": { "coverage_pct": 92, "total_card_actions": 13, "mapped_card_actions": [...] }
+  },
+  "reasoning": "The alignment policy evaluation completed in 2ms with verdict `warn`. 1 warning present. Coverage: 92% of the agent's declared actions map to capabilities (12/13).",
+  "suggested_remediations": [
+    {
+      "for": "warning",
+      "index": 0,
+      "remediation": "Mapping `filesystem_read` to a capability would replace this warning with explicit coverage. Run `PATCH /v1/alignment/agent/smolt-512448e7/capabilities`.",
+      "method": "PATCH",
+      "url": "/v1/alignment/agent/smolt-512448e7/capabilities"
+    }
+  ],
+  "enriched": false
+}
+```
+
+Each remediation carries a `method` + `url` hint that points at the [sub-resource verb](/concepts/sub-resource-verbs) that would resolve it. Care-framing throughout — the prose uses "would benefit from", "depends on", "would close this gap" rather than compliance language.
+
+Set `"enrich": true` in the body to call the LLM and expand the structured remediations into long-form prose (off by default; rate-limited).
+
+See [the explain guide](/guides/explain-and-remediate) for the full debug-and-fix flow.
+
+## simulate — dry-run before you commit
+
+You describe a hypothetical tool call; the platform runs the gateway and observer evaluators against the agent's current spec and tells you whether the call would be allowed.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/simulate \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "candidate_tool_call": {
+      "tool_name": "campfire_send_message",
+      "tool_args": {"channel": "treasury", "message": "..."}
+    }
+  }'
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "resource": "alignment",
+  "allowed": "conditional",
+  "conditions": ["receipt:think needed before invoking `campfire_send_message`"],
+  "suggestions": ["Run the `think` consultation first, then retry — the gateway hook would clear."],
+  "gateway_decision": {
+    "verdict": "warn",
+    "violations": [],
+    "warnings": [],
+    "missing_receipts": ["think"]
+  },
+  "observer_assessment": {
+    "verdict": "pass",
+    "violations": [],
+    "warnings": []
+  },
+  "evaluated_at": "2026-05-21T18:42:13Z"
+}
+```
+
+`allowed` is one of:
+
+- `"true"` — both gateway and observer pass with no conditions.
+- `"false"` — at least one verdict is `fail`.
+- `"conditional"` — passes but requires a receipt or carries warnings. The `conditions[]` array names what's needed.
+
+Use this before you commit a manifest change, or to test whether a specific tool call would clear the policy.
+
+See [the simulate guide](/guides/simulate-before-commit) for the full pre-commit workflow.
+
+## tools/import — bulk preview from OpenAPI or YAML
+
+You point the endpoint at an OpenAPI 3.0+ spec or a Polis-style tool manifest; the platform walks the operations, extracts proposed tool definitions, and LLM-infers the class + domain for each.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "openapi",
+    "source": "url",
+    "url": "https://api.github.com/openapi.yaml",
+    "infer_class_domain": true
+  }'
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "imported": [
+    {
+      "name": "github_create_issue",
+      "class": "internal_write",
+      "domain": "engineering",
+      "description": "Create a new GitHub issue",
+      "schema": {...},
+      "confidence": 0.92,
+      "from_path": "/repos/{owner}/{repo}/issues",
+      "from_method": "POST"
+    }
+  ],
+  "inferred_class_domain": {
+    "github_create_issue": { "class": "internal_write", "domain": "engineering", "confidence": 0.92 }
+  },
+  "conflicts": [],
+  "commit_url": "POST /v1/tools",
+  "preview_token": "tools-import:..."
+}
+```
+
+The preview never auto-commits — you iterate `imported[]` and write each tool individually via `POST /v1/tools`. Platform-admin only.
+
+See [the bulk import guide](/guides/bulk-tool-import) for the full ingest-and-confirm workflow.
+
+## Rate limits
+
+LLM-backed verbs (scaffold and tools/import-with-inference) share a per-principal budget:
+
+| Window | Default | Override |
+|---|---|---|
+| Per user | 10 calls/hour | `LLM_USER_HOURLY_CAP` env var |
+| Per org | 100 calls/hour | `LLM_ORG_HOURLY_CAP` env var |
+
+On exceed: `429 Too Many Requests` with a `Retry-After` header and a care-framed body. explain and simulate are pure-sync (no LLM by default); they don't consume the LLM budget unless you pass `"enrich": true`.
+
+## Care-framed by construction
+
+Every customer-facing string in the response surface — error messages, reasoning prose, suggested remediations — is asserted by the platform's care-framing test to avoid compliance vocabulary (Blocked / Denied / Required / Forbidden / Violation / Must). The replacement vocabulary is *would benefit from*, *depends on*, *run X then retry*, *you'd be supported by*. LLM-generated prose runs through a post-check that swaps any slips automatically.
+
+## Cache + freshness
+
+scaffold and tools/import-with-inference cache LLM responses by hash of the input. Identical inputs return identical outputs without burning the LLM budget. Cache TTLs:
+
+- scaffold: 24 hours (description-hash → manifest + reasoning)
+- tools/import inference: 7 days (tool_name + method + path + tags → class + domain inference)
+
+explain and simulate are not cached — they consume live spec state.
+
+## Related reading
+
+- [Sub-resource verbs](/concepts/sub-resource-verbs) — the write surface the remediations point at.
+- [Cards as Resources](/concepts/cards-as-resources) — the URL surface that wraps it all.
+- [Policy engine](/concepts/policy-engine) — what explain and simulate are surfacing.
+- [Care-framing doctrine](/for-agents) — the operator vocabulary every helper uses.

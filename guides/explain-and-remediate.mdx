@@ -1,0 +1,200 @@
+---
+title: "Explain and Remediate"
+description: "Use the explain endpoint to understand why an agent's policy evaluation produced a particular verdict, then act on the structured remediations to resolve each finding."
+sidebarTitle: "Explain and Remediate"
+icon: "magnifying-glass"
+---
+
+When an agent's spec doesn't behave the way you expect, the **explain** endpoint runs the policy engine in dry-run mode against the agent's composed alignment card and reformats the structured findings into care-framed prose with sub-resource verb hints for each remediation.
+
+## What explain tells you
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' | jq .
+```
+
+The response has three useful sections:
+
+1. **`trace`** — the raw `EvaluationResult` from `@mnemom/policy-engine`. Carries `verdict` (`pass` / `warn` / `fail`), `violations[]`, `warnings[]`, `card_gaps[]`, `coverage` report, `policy_id`, `policy_version`.
+2. **`reasoning`** — care-framed prose summarizing the verdict + counts.
+3. **`suggested_remediations[]`** — per-finding structured hints. Each carries:
+   - `for`: `violation` / `warning` / `card_gap`
+   - `index`: position in the corresponding trace array
+   - `remediation`: a care-framed prose remediation
+   - `method` + `url` (optional): the [sub-resource verb](/concepts/sub-resource-verbs) that would resolve it
+
+## The four violation types
+
+The policy engine surfaces four classes of `PolicyViolation.type`. Each maps to a deterministic remediation template.
+
+### `forbidden`
+
+A tool the agent is using matches a pattern in `enforcement.forbidden_tools[]`.
+
+```json
+{
+  "for": "violation",
+  "index": 0,
+  "remediation": "Removing the pattern `exfil:*` from `enforcement.forbidden_tools` would unblock; or document the exception via `POST /v1/exemptions`.",
+  "method": "PATCH",
+  "url": "/v1/alignment/agent/smolt-512448e7/enforcement"
+}
+```
+
+Two paths forward: edit the forbidden list (if the rule was over-broad), or grant a documented exemption via `POST /v1/exemptions` (if the agent legitimately needs this action).
+
+### `capability_exceeded`
+
+The agent invoked a tool that isn't mapped to any capability's `tools[]` list.
+
+```json
+{
+  "for": "violation",
+  "index": 1,
+  "remediation": "Adding `slack_post` to `capabilities.comms.tools` would close this gap.",
+  "method": "PATCH",
+  "url": "/v1/alignment/agent/smolt-512448e7/capabilities"
+}
+```
+
+Apply the suggested PATCH:
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/capabilities \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'If-Match: "sha256:<current-hash>"' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comms": {
+      "tools": ["slack_post", "email_send"]
+    }
+  }'
+```
+
+### `unmapped_denied`
+
+The agent used a tool that has no capability mapping, AND `enforcement.allow_unmapped_tools: false` (the default).
+
+```json
+{
+  "for": "violation",
+  "index": 2,
+  "remediation": "Either grant `filesystem_read` via a capability, or set `enforcement.allow_unmapped_tools: true` (with caution — this widens the default action surface).",
+  "method": "PATCH",
+  "url": "/v1/alignment/agent/smolt-512448e7/capabilities"
+}
+```
+
+Two surfaces would fix this:
+
+- The principled path: add the tool to an appropriate capability via `PATCH /capabilities`.
+- The escape hatch: set `enforcement.allow_unmapped_tools: true` via `PATCH /enforcement`. This loosens the default surface — only use it for sandbox / development agents.
+
+### `gateway_hook_missing_receipt`
+
+A tool the agent invoked matches a catalog gateway hook (e.g., `policy_attentiveness` binds on financial tools), but the required receipt (e.g., `think`) wasn't present in the conversation history.
+
+```json
+{
+  "for": "violation",
+  "index": 3,
+  "remediation": "Adding a `think` consultation receipt before invoking `campfire_send_message` would satisfy the gateway hook. The catalog entry depends on this receipt to bind action to deliberation."
+}
+```
+
+This one isn't a spec edit — it's a runtime pattern. The agent's prompt or scaffolding would benefit from a `think` consultation before invoking the gated tool. See [governance signals](/concepts/governance-signals) and the [policy engine](/concepts/policy-engine) for the receipt mechanism.
+
+## Warnings
+
+Warnings don't block; they surface drift the operator may want to address.
+
+```json
+{
+  "for": "warning",
+  "index": 0,
+  "remediation": "Mapping `filesystem_read` to a capability would replace this warning with explicit coverage."
+}
+```
+
+## Card gaps
+
+`card_gaps[]` flag capabilities that exist but whose action surfaces aren't fully declared.
+
+```json
+{
+  "for": "card_gap",
+  "index": 0,
+  "remediation": "The `comms` capability would benefit from explicit `actions: [\"slack_post\", \"email_send\"]`. Currently the tool exists but the action surface isn't declared."
+}
+```
+
+## LLM enrichment
+
+If you want long-form prose explanations (useful for non-technical reviewers), pass `"enrich": true`:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enrich": true}'
+```
+
+The endpoint calls Claude via the [LLM substrate](/concepts/ai-helpers) and expands the structured remediations into 4-6 sentences of care-framed prose. The pure-sync path is the floor; the LLM enrichment is additive. LLM failure doesn't break explain — the structured `reasoning` always renders.
+
+Enrichment consumes the per-principal LLM budget (10/hour/user; 100/hour/org). Off by default.
+
+## Targeted explain — bind to a specific gateway turn
+
+If you saw a verdict in production logs and want to explain THAT specific evaluation, pass the `turn_id`:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"turn_id": "ttx-abc123"}'
+```
+
+The endpoint loads the spec state as it was at that turn (where available) and replays the evaluation. Useful for post-incident review.
+
+## Hypothetical explain — what would happen?
+
+You can also explain a hypothetical tool call against the current spec:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_snippet": {
+      "tool_name": "campfire_send_message",
+      "tool_args": {"channel": "treasury"}
+    }
+  }'
+```
+
+For "would this specific call pass?" use [simulate](/guides/simulate-before-commit) instead — it runs both gateway and observer contexts and combines them into an allowed-verdict.
+
+## The full debug-and-fix flow
+
+1. Run `explain` against the agent.
+2. For each `suggested_remediation`, check the `method` + `url` hint.
+3. Apply the [sub-resource PATCH](/concepts/sub-resource-verbs) with the suggested change.
+4. Re-run `explain` to confirm the finding is gone.
+5. Repeat until `verdict: "pass"`.
+
+## What explain doesn't do
+
+- It doesn't write anything. It's a read-style POST.
+- It doesn't replace the [simulate](/guides/simulate-before-commit) endpoint — explain is about the current spec; simulate is about a hypothetical call against that spec.
+- It doesn't run the protection card's policy. V1 returns a `Phase 5 deferred` shape on `POST /v1/protection/agent/<id>/explain` until the dedicated protection evaluator ships.
+
+## Related reading
+
+- [Sub-resource verbs](/concepts/sub-resource-verbs) — the PATCH surface remediations point at.
+- [Simulate before commit](/guides/simulate-before-commit) — for testing a hypothetical call.
+- [Policy engine](/concepts/policy-engine) — the evaluator explain is reformatting.
+- [Governance signals](/concepts/governance-signals) — the receipts gateway hooks bind on.

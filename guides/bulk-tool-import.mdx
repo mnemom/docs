@@ -1,0 +1,215 @@
+---
+title: "Bulk Tool Import"
+description: "Import tool definitions in bulk from an OpenAPI 3.0+ spec or a Polis-style YAML manifest. LLM-inferred class+domain, preview-only with operator confirmation."
+sidebarTitle: "Bulk Tool Import"
+icon: "file-import"
+---
+
+The **tools/import** endpoint walks an OpenAPI 3.0+ spec or a Polis-style tool manifest, extracts proposed tool definitions, and returns a preview with LLM-inferred class + domain per tool. The preview never auto-commits — you review each entry, then write it to the registry individually.
+
+**Platform-admin only.** The endpoint gates on `principal.isAdmin === true`.
+
+## When to use bulk import
+
+- **Onboarding a new connector** — point at the connector's OpenAPI spec; preview every operation as a candidate tool.
+- **Migrating a Polis-style manifest** — feed an existing connector manifest YAML through the inference pipeline.
+- **Catalog audit** — compare a vendor's OpenAPI against your registry; the response surfaces collisions where the inferred class/domain disagrees with the existing entry.
+
+For a single tool, just use `POST /v1/tools` directly (the W1.1 tools registry surface). Bulk import is for batches of 5-500 tools.
+
+## Two source formats
+
+### OpenAPI 3.0+
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "openapi",
+    "source": "url",
+    "url": "https://api.github.com/openapi.yaml",
+    "infer_class_domain": true
+  }'
+```
+
+The parser walks `paths` × HTTP methods. For each operation it extracts:
+
+- **`name`** — from `operationId` (with connector-name prefix derived from `info.title`), or `<method>_<path-slug>` fallback.
+- **`description`** — from the operation's `description` or `summary`.
+- **`schema`** — from `requestBody` (if present).
+- **`from_path` + `from_method`** — recorded for traceability.
+
+You can also send the spec inline:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "openapi",
+    "source": "inline",
+    "content": "openapi: 3.0.0\ninfo:\n  title: GitHub API\n  version: 1.0.0\npaths:\n  /repos/{owner}/{repo}/issues:\n    post:\n      operationId: create_issue\n      description: Create a GitHub issue\n",
+    "infer_class_domain": true
+  }'
+```
+
+### Polis-style YAML
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "polis_yaml",
+    "source": "inline",
+    "content": "connector: github\ntools:\n  - name: github_create_issue\n    class: internal_write\n    domain: engineering\n    description: Create a GitHub issue\n  - name: github_close_issue\n    class: internal_write\n    domain: engineering\n",
+    "infer_class_domain": false
+  }'
+```
+
+The Polis YAML parser respects inline `class` / `domain` declarations. Set `"infer_class_domain": false` to skip LLM inference entirely.
+
+## The response
+
+```json
+{
+  "ok": true,
+  "imported": [
+    {
+      "name": "github_create_issue",
+      "class": "internal_write",
+      "domain": "engineering",
+      "description": "Create a new GitHub issue",
+      "schema": { "...openapi requestBody schema..." },
+      "confidence": 0.92,
+      "rationale": "POST under /repos/.../issues implies state mutation in a code-management domain",
+      "from_path": "/repos/{owner}/{repo}/issues",
+      "from_method": "POST",
+      "source_connector": "github_api"
+    }
+  ],
+  "inferred_class_domain": {
+    "github_create_issue": {
+      "class": "internal_write",
+      "domain": "engineering",
+      "confidence": 0.92,
+      "rationale": "POST under /repos/.../issues implies state mutation in a code-management domain"
+    }
+  },
+  "conflicts": [
+    {
+      "name": "campfire_send",
+      "reason": "tool already in registry with different class/domain",
+      "existing_class": "comms_external",
+      "proposed_class": "comms_internal"
+    }
+  ],
+  "commit_url": "POST /v1/tools",
+  "preview_token": "tools-import:1qr8xz:a1b2c3d4"
+}
+```
+
+- **`imported[]`** — every extracted tool. Editable preview.
+- **`inferred_class_domain`** — same data keyed by tool name, including the model's `confidence` (0.0-1.0). Low-confidence inferences (< 0.7) deserve operator override before commit.
+- **`conflicts[]`** — names that already exist in the registry with a different class/domain. Resolve before committing.
+- **`preview_token`** — opaque token; carry it back to your commit script for traceability.
+
+## Class + domain taxonomy
+
+The LLM inference picks from a closed enum.
+
+**8 classes**:
+
+| Class | Meaning |
+|---|---|
+| `read` | Observe only; no state change. |
+| `internal_write` | Mutates state inside the calling agent's org. |
+| `consequential_internal_write` | Irreversible internal state change (e.g., delete records). |
+| `consequential_external_write` | Irreversible external change (e.g., send invoice, transfer funds). |
+| `comms_internal` | Agent-to-org messaging. |
+| `comms_external` | Agent-to-external-party messaging. |
+| `engineering_attestation` | Proofs of engineering correctness (test runs, deploys). |
+| `governance_write` | Policy / role / alignment-card mutations. |
+
+**9 domains**:
+
+`financial` / `engineering` / `intelligence` / `growth` / `operations` / `governance` / `comms` / `identity` / `security`
+
+If the model's inference doesn't match your operational classification, override before commit. The taxonomy is documented at [`mnemom-contracts/tool-manifest/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/tool-manifest/v1.yaml).
+
+## Inference cache
+
+Identical (tool_name + method + path + source_connector) tuples return the same inference from cache (7-day TTL). Re-importing the same OpenAPI spec doesn't re-burn the LLM budget.
+
+## Commit each tool individually
+
+The endpoint deliberately doesn't auto-write. You iterate `imported[]` and commit each tool via `POST /v1/tools`:
+
+```bash
+# Stash the preview locally
+curl -s -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '@import-request.json' > preview.json
+
+# Review (e.g., open in your editor)
+$EDITOR preview.json
+
+# Commit each tool individually
+jq -c '.imported[]' preview.json | while read tool; do
+  curl -X POST https://api.mnemom.ai/v1/tools \
+    -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+    -H "Idempotency-Key: $(uuidgen)" \
+    -H "Content-Type: application/json" \
+    -d "$tool" \
+    --fail || echo "Skipped: $(echo $tool | jq .name)"
+done
+```
+
+## Safety: SSRF defense
+
+When `source: "url"`, the URL fetch is defended against SSRF:
+
+- Rejects non-http(s) protocols (no `file://`, `ftp://`, etc.).
+- Rejects `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`.
+- Rejects RFC-1918 private ranges (`10.*`, `172.16-31.*`, `192.168.*`).
+- Rejects link-local (`169.254.*`).
+- Caps fetched body at 4 MiB.
+- 10-second fetch timeout.
+
+Inline bodies cap at 1 MiB.
+
+## Size caps + limits
+
+| What | Limit |
+|---|---|
+| Inline body | 1 MiB |
+| URL fetched body | 4 MiB |
+| URL fetch timeout | 10 seconds |
+| Tools per import (no hard limit; rate limit applies) | ~100 practical |
+
+The endpoint consumes the per-principal LLM budget once per tool when `infer_class_domain: true`. For a 100-tool import, that's 100 LLM calls (cached on replay).
+
+## Common patterns
+
+### Connector onboarding
+
+1. Get the vendor's OpenAPI spec URL.
+2. Run import with `infer_class_domain: true`.
+3. Review `imported[]`; for each tool with `confidence < 0.7`, set the class + domain manually.
+4. Resolve `conflicts[]` — accept the new classification, or update the existing registry entry.
+5. Commit each tool via `POST /v1/tools`.
+
+### Re-importing after a vendor update
+
+1. Re-run import with the new spec URL.
+2. Compare `imported[]` against existing — `conflicts[]` calls out changed shapes.
+3. Update existing tools via `PATCH /v1/tools/<name>` for schema bumps.
+4. Commit new tools via `POST /v1/tools`.
+
+## Related reading
+
+- [AI helpers](/concepts/ai-helpers) — overview of the four AI-forward verbs.
+- Tools registry (`GET /v1/tools` + `POST /v1/tools`) — the surface this writes to.
+- [`mnemom-contracts/tool-manifest`](https://github.com/mnemom/mnemom-contracts) — the canonical class + domain taxonomy.

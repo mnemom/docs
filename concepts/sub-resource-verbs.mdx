@@ -1,0 +1,132 @@
+---
+title: "Sub-Resource Verbs"
+description: "Per-primitive PUT/PATCH on alignment and protection cards — update one slot of a spec without rewriting the whole card. Idempotency-Key and If-Match required; recompose-on-write; care-framed errors."
+sidebarTitle: "Sub-Resource Verbs"
+icon: "pen-to-square"
+---
+
+Mnemom's alignment and protection cards are composed of independent **primitives** — values, modes, principal, autonomy, capabilities, conscience, enforcement, audit on the alignment side; mode, thresholds, screen_surfaces, trusted_sources on the protection side. Each primitive has its own write surface:
+
+```
+PUT   /v1/<resource>/<scope>/<scope_id>/<primitive>
+PATCH /v1/<resource>/<scope>/<scope_id>/<primitive>
+```
+
+You can update one slot of a spec without rewriting the whole card. The composer recomposes after every write; downstream agents pick up the new effective state on their next request.
+
+## The shape
+
+The full set is 12 primitives × 4 scopes × 2 verbs = **96 endpoints**. Every endpoint shares the same contract:
+
+| Header | Status | Meaning |
+|---|---|---|
+| `Idempotency-Key` | 400 if absent | Required. 24-hour dedup window. Replays return the cached response. |
+| `If-Match: "sha256:<hex64>"` | 428 absent, 412 stale, 400 malformed | Required. Optimistic concurrency vs the current ETag. Closes the lost-update race. |
+
+| Status | Meaning |
+|---|---|
+| 200 | The primitive was updated. Response carries `value`, `content_hash`, `version` (agent scope) or `agents_flagged_for_recompose` (org/team/platform), and an optional `_warnings` array for pre-existing structural issues outside the modified primitive. |
+| 400 | Validation failed inside the primitive (care-framed), the `If-Match` header is malformed, the primitive name is unknown, or the body shape is invalid. |
+| 401 / 403 | Authentication / RBAC (uniform across the four scopes). |
+| 412 / 428 | `If-Match` stale / missing. |
+| 413 | Body exceeds 64 KiB. |
+
+## PUT vs PATCH
+
+**PUT replaces the entire primitive.** The body is the new full value of that spec key.
+
+```bash
+curl -X PUT https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/principal \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'If-Match: "sha256:<current-hash>"' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "human",
+    "identifier": "alex",
+    "relationship": "delegated_authority",
+    "escalation_contact": "alex@example.com"
+  }'
+```
+
+**PATCH applies RFC 7396 JSON Merge Patch.** `null` deletes a key, missing keeps it, present replaces it. Arrays are replaced wholesale (RFC 7396 §1, not item-merged).
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/principal \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H 'If-Match: "sha256:<current-hash>"' \
+  -H "Content-Type: application/json" \
+  -d '{"escalation_contact": "alex@example.com"}'
+```
+
+The PATCH above adds `escalation_contact` to the existing `principal` block. The `type`, `identifier`, and `relationship` fields are kept; the response carries the merged shape.
+
+## The primitive list
+
+### Alignment (8 primitives)
+
+| Slug | Spec key | What it carries |
+|---|---|---|
+| `values` | `values` | Declared catalog entries + definitions / hierarchy / conflicts. |
+| `modes` | `autonomy_mode` + `integrity_mode` | The two top-level master switches. PUT requires both keys; PATCH may include either. |
+| `principal` | `principal` | The who-the-agent-is identity block. |
+| `autonomy` | `autonomy` | `bounded_actions[]` + `forbidden_actions[]` + `escalation_triggers[]` + `max_autonomous_value`. |
+| `capabilities` | `capabilities` | Keyed map of `{capability_name → CardCapability}` tool grants. |
+| `conscience` | `conscience` | Augment-vs-replace + the conscience values list. |
+| `enforcement` | `enforcement` | Fine-grained tool-use policy. |
+| `audit` | `audit` | Trace format, retention, query endpoint. |
+
+### Protection (4 primitives)
+
+| Slug | Spec key | What it carries |
+|---|---|---|
+| `mode` | `mode` | The protection master switch (`off` / `observe` / `nudge` / `enforce`). |
+| `thresholds` | `thresholds` | `warn` / `quarantine` / `block` trip points; `warn ≤ quarantine ≤ block ∈ [0, 1]`. |
+| `screen_surfaces` | `screen_surfaces` | Which traffic surfaces the protection card inspects (`incoming` / `outgoing` / `tool_calls` / `tool_responses`). |
+| `trusted_sources` | `trusted_sources` | Domain / agent / IP-range allow-list bypassing screening. |
+
+## Recompose-on-write
+
+Every sub-resource write triggers a recompose so the agent's effective card reflects the change immediately.
+
+- **Agent scope** — recompose runs synchronously in the request lifecycle. The response carries the new `content_hash` + `version`.
+- **Org / team / platform scope** — fan-out: every member agent is marked for recompose. The response carries `agents_flagged_for_recompose: N`. Background workers drain the queue over the next few seconds.
+
+## Splice-and-validate-whole
+
+Writes don't blindly accept your patch. The composer reads the current full spec, splices your primitive in, then validates the merged result against the [unified card schema](/api-reference/unified-cards-overview).
+
+- **Errors *inside* the primitive you wrote** — 400 with a care-framed message. The write doesn't land.
+- **Errors *outside* the primitive** (pre-existing structural problems in unrelated keys) — surface as `_warnings` on the 200 response. The write lands; you're alerted to issues elsewhere in the spec that would benefit from a follow-up.
+
+This means a PATCH on `principal` is never blocked by a validation problem in, say, `audit` — but you're told about the unrelated problem so it can be addressed on its own write.
+
+## Care-framed errors
+
+Every error path returns a structured JSON body with care-framed prose. The runtime asserts no compliance language slips through; the test suite scans the source modules for the forbidden words.
+
+```json
+{
+  "ok": false,
+  "error": "if_match_absent",
+  "message": "Sub-resource writes depend on an `If-Match` header carrying the current ETag. Run `GET` first to read the live ETag, then retry your write with `If-Match: \"sha256:...\"`."
+}
+```
+
+The vocabulary on every customer-facing message: *would benefit from*, *depends on*, *run X then retry*, *you'd be supported by*.
+
+## When to use sub-resource verbs
+
+- **Operator updates one slot** — bump retention_days, change the principal's escalation_contact, add a forbidden tool. Sub-resource verbs are surgical.
+- **CI Action edits a single primitive** — the upcoming [`mnemom/cards-action`](/guides/manifest-authoring-with-scaffold) drives sub-resource verbs from per-file YAML diffs.
+- **Programmatic auditing tooling** — a script that audits a fleet and tightens one mode value across many agents.
+
+For the full-spec replace path (publishing a new manifest end-to-end), use the root-level `PUT /v1/<resource>/<scope>/<scope_id>` documented in [Cards as Resources](/concepts/cards-as-resources). For previewing a write before committing, use the [simulate endpoint](/guides/simulate-before-commit).
+
+## Related reading
+
+- [Cards as Resources](/concepts/cards-as-resources) — the URL surface this builds on.
+- [AI helpers](/concepts/ai-helpers) — scaffold + explain + simulate + tools/import as a coordinated authoring surface.
+- [Unified Cards overview](/api-reference/unified-cards-overview) — the alignment + protection spec.
+- [Card composition](/concepts/card-composition) — how the four scopes merge.
