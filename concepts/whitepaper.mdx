@@ -467,18 +467,18 @@ Safe House supports planting fake API keys, tokens, or identifiers inside agent 
 
 #### 5.3.6 Source trust
 
-Not all message sources carry the same risk. Per-source `risk_multiplier` values tune sensitivity — an `internal-scheduler` source with multiplier 0.0 is fully trusted (analysis still runs but scores are suppressed); an `unverified-user-input` source with multiplier 2.0 doubles the computed risk score before thresholding. This turns per-source trust from a binary into a continuous dial.
+Not all upstreams carry the same risk. Per ADR-037, `trusted_sources` on the protection card is a typed allowlist with three buckets — `domains` (DNS names), `agent_ids` (Mnemom agent identifiers for agent-to-agent traffic), and `ip_ranges` (IPv4/IPv6 CIDR). A match on any bucket short-circuits detection for that message; each skip emits a low-priority `sh_trusted_source_skip` audit trace so reviewers can see what was waved through. Trust is binary by design — graduated per-source multipliers were considered during the schema unification and rejected as an attack surface (operator misconfiguration risk dominates the precision win). Sensitivity tuning lives in `thresholds.{warn, quarantine, block}` instead.
 
 #### 5.3.7 Modes
 
-Safe House modes align with the same `observe` / `enforce` vocabulary used by the alignment card's `integrity.enforcement_mode`:
+Safe House modes follow the canonical four-value `ProtectionMode` enum, mirroring the alignment card's `integrity_mode`:
 
-- **Disabled.** Default. No analysis runs.
-- **Simulate.** Full analysis runs synchronously; no messages are blocked. Verdicts are returned in a response header. Used to understand the threat landscape before enabling enforcement.
-- **Observe.** Analysis runs asynchronously via `waitUntil` — zero latency impact. Verdicts and session risk scores are logged.
-- **Enforce.** Full synchronous analysis. Messages receiving `quarantine` or `block` verdicts do not reach the agent.
+- **`off`.** Detection skipped entirely. No telemetry. Used for cost / latency / non-applicability cases.
+- **`observe`.** Detectors run, signals logged asynchronously, no request-path action. Verdicts and session risk scores appear in traces.
+- **`nudge`.** Detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Safe-House-Advisory` response header) but the request proceeds. The agent sees that something was flagged and can decide whether to comply.
+- **`enforce`.** Detectors run synchronously; matches block the request (`quarantine ≥ quarantine threshold`, hard block at `≥ block threshold`).
 
-This is the first mode a new customer typically sees. Deploying Safe House in `simulate` first produces a no-impact risk picture; `observe` turns that picture into a signal; `enforce` makes it a control.
+Customers typically deploy through this sequence: `observe` first to map the threat landscape with no customer impact, then `nudge` to add a model-in-the-loop signal, then `enforce` to make it a control. Composition across scopes follows strictest-wins: `enforce > nudge > observe > off`. An agent cannot drop below the platform/org floor.
 
 #### 5.3.8 Cross-layer feedback
 
