@@ -1,0 +1,180 @@
+---
+title: "Simulate Before Commit"
+description: "Use the simulate endpoint to dry-run gateway + observer evaluators against a hypothetical input or tool call. Verify a tool call would clear policy before you let an agent invoke it in production."
+sidebarTitle: "Simulate Before Commit"
+icon: "flask"
+---
+
+The **simulate** endpoint runs the gateway and observer policy evaluators against an agent's current composed spec — without crossing into the real gateway / observer runtime. You describe a hypothetical input or tool call; the platform tells you whether it would be allowed.
+
+## When to simulate
+
+- **Before a manifest change goes live** — verify the new spec accepts the calls you want and rejects the ones you don't.
+- **Before an agent prompt change** — check whether a new tool the agent might call would clear policy.
+- **During post-incident review** — replay a problematic tool call to understand why the gateway flagged it.
+- **In CI** — wire simulate into your test suite to gate spec changes on hypothetical-call coverage.
+
+## The request shape
+
+Two body fields, either or both:
+
+```json
+{
+  "candidate_input": {
+    "messages": [
+      {"role": "user", "content": "Send the treasury team a status update"}
+    ]
+  },
+  "candidate_tool_call": {
+    "tool_name": "campfire_send_message",
+    "tool_args": {"channel": "treasury", "message": "..."}
+  }
+}
+```
+
+If `candidate_tool_call` is set without `candidate_input`, the platform synthesizes an assistant message carrying the `toolUses` block. If both are set, the explicit `candidate_input.messages` wins. If neither is set, simulate runs against the empty conversation (useful for "does this agent's spec compose cleanly?").
+
+## The response shape
+
+```json
+{
+  "ok": true,
+  "resource": "alignment",
+  "allowed": "conditional",
+  "conditions": ["receipt:think needed before invoking `campfire_send_message`"],
+  "suggestions": ["Run the `think` consultation first, then retry — the gateway hook would clear."],
+  "gateway_decision": {
+    "verdict": "warn",
+    "violations": [],
+    "warnings": [],
+    "missing_receipts": ["think"]
+  },
+  "observer_assessment": {
+    "verdict": "pass",
+    "violations": [],
+    "warnings": []
+  },
+  "evaluated_at": "2026-05-21T18:42:13Z"
+}
+```
+
+## The `allowed` verdict
+
+`allowed` is one of three values:
+
+| Value | Meaning |
+|---|---|
+| `"true"` | Both gateway and observer passed cleanly. The call would clear policy. |
+| `"false"` | At least one evaluator returned `verdict: "fail"`. The call would be rejected. |
+| `"conditional"` | One or both evaluators returned `verdict: "warn"`, OR a `gateway_hook_missing_receipt` violation surfaced. `conditions[]` enumerates what's needed. |
+
+The derivation table:
+
+| Gateway | Observer | + missing receipts? | `allowed` |
+|---|---|---|---|
+| pass | pass | no | `"true"` |
+| fail | * | * | `"false"` |
+| * | fail | * | `"false"` |
+| warn | * | * | `"conditional"` |
+| * | warn | * | `"conditional"` |
+| pass | pass | yes | `"conditional"` |
+
+## Common patterns
+
+### Test a manifest before committing
+
+When iterating on a new manifest, PUT it to a sandbox agent, simulate the calls you expect the agent to make, then promote to production once they all pass.
+
+```bash
+# 1. PUT new spec to sandbox
+curl -X PUT https://api.mnemom.ai/v1/alignment/agent/smolt-sandbox-finance \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/yaml" \
+  --data-binary "@finance-agent-v2.yaml"
+
+# 2. Simulate the expected golden-path tool calls
+for tool in slack_post email_send invoice_read; do
+  echo "=== $tool ==="
+  curl -s -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-sandbox-finance/simulate \
+    -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"candidate_tool_call\": {\"tool_name\": \"$tool\"}}" \
+    | jq '.allowed'
+done
+
+# 3. Simulate the calls you DON'T want to clear (regression check)
+curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-sandbox-finance/simulate \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"candidate_tool_call": {"tool_name": "stripe_create_transfer"}}' \
+  | jq '.allowed, .gateway_decision.verdict'
+# Expected: "false", "fail" — finance agent should not execute payments directly
+```
+
+### Discover required receipts
+
+The gateway hooks bind on catalog values like `policy_attentiveness` and `deliberation_before_action`. They require specific consultation receipts (typically `think`) before invoking certain tool classes. Simulate surfaces the requirement:
+
+```bash
+curl -s -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/simulate \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"candidate_tool_call": {"tool_name": "campfire_send_message"}}' \
+  | jq '.gateway_decision.missing_receipts'
+# Output: ["think"]
+```
+
+Add the `think` consultation to the agent's prompt scaffolding, then re-simulate to confirm the receipt closes the requirement.
+
+### Wire simulate into CI
+
+The [`mnemom/cards-action`](/guides/manifest-authoring-with-scaffold) (Wave 5 deliverable) drives simulate per-PR — every spec change runs a configurable set of hypothetical calls and posts the verdicts as a PR comment. Until that ships, you can wire it manually:
+
+```yaml
+# .github/workflows/simulate-spec.yml
+name: Simulate manifest changes
+on:
+  pull_request:
+    paths:
+      - 'agents/**/*.yaml'
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simulate golden-path calls
+        env:
+          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+        run: |
+          for agent in $(yq '.changed_agents[]' manifest.yaml); do
+            for call in $(yq '.golden_path_calls[]' tests/simulate.yaml); do
+              result=$(curl -s -X POST "https://api.mnemom.ai/v1/alignment/agent/$agent/simulate" \
+                -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"candidate_tool_call\": $call}" \
+                | jq -r .allowed)
+              [[ "$result" == "true" ]] || { echo "FAIL: $agent / $call → $result"; exit 1; }
+            done
+          done
+```
+
+## Pure-sync only
+
+Simulate calls `@mnemom/policy-engine` directly twice (once with `context: "gateway"`, once with `context: "observer"`) using `dryRun: true`. It never crosses worker boundaries — no real gateway state change, no observer ledger entry. The evaluation is deterministic for a given (spec, candidate) pair.
+
+## Protection scope
+
+`POST /v1/protection/agent/<id>/simulate` returns a Phase 5 deferred shape — the dedicated protection-policy evaluator isn't shipped yet. For V1, the endpoint exists so the URL surface is symmetric; the protection card itself still composes through the same scope cascade as alignment, surfacable via [`/effective`](/api-reference/endpoint/get-protection-agent-agent-id-effective).
+
+## Rate limits + cost
+
+Simulate is pure-sync — no LLM call, no rate-limit budget consumed. You can simulate freely in CI loops, test suites, and pre-commit hooks.
+
+## Related reading
+
+- [AI helpers](/concepts/ai-helpers) — overview of the four AI-forward verbs.
+- [Explain and remediate](/guides/explain-and-remediate) — for understanding violations on the current spec.
+- [Sub-resource verbs](/concepts/sub-resource-verbs) — for applying the fix once simulate identifies what's needed.
+- [Policy engine](/concepts/policy-engine) — the evaluator simulate drives.
