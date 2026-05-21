@@ -117,17 +117,11 @@ const KNOWN_DRIFT = [
   // onto the alignment-card master-switch pattern. The legacy
   // PUT /v1/agents/{id}/enforcement was retired by mnemom-api #409.)
 
-  // Cards-as-Primitive Phase 4 W1.2b — concepts/cards-as-resources.mdx
-  // ships the customer-facing concept page for the canonical
-  // `/v1/<resource>/<scope>/<scope_id>` URL surface. The page must land
-  // in docs *before* the paired mnemom-api PR (which adds the path to
-  // openapi.json) so the legacy 308's `Link: <...cards-as-resources>;
-  // rel="deprecation"` header resolves. Until mnemom-api W1.2b merges,
-  // the worked PUT example below references a path that the live spec
-  // doesn't list yet. The allowlist entry closes automatically — the
-  // stale-detection at the bottom of this file flags it for removal
-  // once api.mnemom.ai/openapi.json includes the canonical path.
-  { file: "concepts/cards-as-resources.mdx", method: "PUT", path: "/alignment/agent/{agent_id}" },
+  // (closed 2026-05-20 by mnemom-api cards-phase-4-w1.2b: the canonical
+  // `/v1/<resource>/<scope>/<scope_id>` surface — including
+  // PUT /alignment/agent/{agent_id} — is now in api.mnemom.ai/openapi.json,
+  // so the concepts/cards-as-resources.mdx worked example validates
+  // against the live spec.)
 ];
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)
