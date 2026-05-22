@@ -1,0 +1,128 @@
+---
+title: "Protection Manifest"
+description: "The editorial source for an agent's protection card — what you author at .mnemom/protection/<role-id>.yaml. The composer reads this and emits the canonical protection card; the canonical adds composer-derived fields the manifest never authors."
+sidebarTitle: "Protection Manifest"
+icon: "shield-keyhole"
+---
+
+The **protection manifest** is the editorial source for an agent's [protection card](/concepts/protection-card). You write it at `.mnemom/protection/<role-id>.yaml` in your repo. When you publish — via [`publish_manifest --resource=protection`](/guides/publishing-manifests) — the Mnemom composer reads the manifest, splices it into the current canonical, validates the shape, and stores the result as the canonical protection card.
+
+The manifest and the canonical card are not the same shape. The manifest contains the **editorial intent** — the fields a human authors. The canonical contains those fields plus composer-derived fields (`card_id`, `content_hash`, `version`, `_composition.field_provenance`, `issued_at`, `expires_at`). The composer fills those in at publish time.
+
+## Schema
+
+The published schema lives at [`mnemom-contracts/protection-manifest-schema/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/protection-manifest-schema/v1.yaml). It's JSON Schema Draft 2020-12 in YAML form, mirroring the [alignment manifest schema](https://github.com/mnemom/mnemom-contracts/blob/main/manifest-schema/v1.yaml).
+
+```yaml
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://mnemom.ai/contracts/protection-manifest-schema/v1.yaml"
+title: "Mnemom Agent Protection Manifest v1"
+type: object
+required: [role_id, agent_id]
+additionalProperties: false
+
+properties:
+  role_id:        # kebab-case, matches the alignment manifest
+  agent_id:       # smolt-* identifier
+  mode:           # off | observe | nudge | enforce
+  thresholds:     # { warn, quarantine, block } in [0, 1], monotone
+  screen_surfaces:# { incoming, outgoing, tool_calls, tool_responses }
+  trusted_sources:# { domains, agent_ids, ip_ranges }
+  extensions:     # forward-compatible nested object
+```
+
+Unknown top-level keys are declined by `additionalProperties: false` at publish time.
+
+## Example
+
+```yaml
+# .mnemom/protection/role-ai-cfo-v1.yaml
+role_id: role-ai-cfo-v1
+agent_id: smolt-512448e7
+mode: observe
+thresholds:
+  warn: 0.6
+  quarantine: 0.8
+  block: 0.95
+screen_surfaces:
+  incoming: true
+  outgoing: true
+  tool_calls: true
+  tool_responses: true
+trusted_sources:
+  domains:
+    - internal.mnemom.ai
+    - api.mnemom.ai
+  agent_ids: []
+  ip_ranges: []
+```
+
+The five Polis agents — Solon, Themis, Cassandra, Blackbeard, Wintermute — ship with this exact shape across their five `.mnemom/protection/<role-id>.yaml` files. All observe-first, all default thresholds.
+
+## Field-by-field
+
+### `mode`
+
+Master switch for protection screening intensity. One of:
+
+- `off` — protection is off; screening surfaces no-op.
+- `observe` — screening runs and emits telemetry; no enforcement.
+- `nudge` — screening runs; risk-score crossings emit a care-framed advisory but the action proceeds.
+- `enforce` — screening runs; the surface is set aside when `block` threshold is crossed.
+
+**Observe-first rollout** is the operator default. The five Polis agents shipped at `observe` and promote per the operator runbook (one agent at a time, audit between promotions). See [Operator Runbook](/guides/operator-runbook) for the ladder.
+
+### `thresholds`
+
+Risk-score boundaries in `[0, 1]`. The composer enforces monotone ordering `warn ≤ quarantine ≤ block` at publish time — a manifest that lists `warn: 0.9, block: 0.5` is declined with a care-framed validation error.
+
+| Threshold | Default | What crossing this means |
+|---|---|---|
+| `warn` | `0.6` | The screened surface logs an advisory. |
+| `quarantine` | `0.8` | The screened surface is set aside for review. |
+| `block` | `0.95` | The screened surface is declined and an alert opens. |
+
+### `screen_surfaces`
+
+Booleans for the four surfaces protection can cover. All four default to `true` when the manifest leaves the key out.
+
+| Surface | Covers |
+|---|---|
+| `incoming` | Messages reaching the agent. |
+| `outgoing` | The agent's generated responses before they leave the gateway. |
+| `tool_calls` | Arguments to tool invocations. |
+| `tool_responses` | Values returned by tools before the agent reads them. |
+
+### `trusted_sources`
+
+Hosts, agent IDs, and IP ranges whose payloads bypass the threshold check. Use sparingly — every entry would benefit from being justified in the role charter. The composer doesn't currently enforce justification, but the [Cards Action](/concepts/cards-action) surfaces the diff so reviewers see additions explicitly.
+
+| Field | Shape | Example |
+|---|---|---|
+| `domains` | array of strings | `["internal.mnemom.ai", "api.mnemom.ai"]` |
+| `agent_ids` | array of `smolt-*` IDs | `["smolt-e2ca60ef"]` |
+| `ip_ranges` | array of CIDRs | `["10.0.0.0/8", "::1/128"]` |
+
+### `extensions`
+
+Reserved for forward-compatible per-extension nesting. Unknown top-level keys are declined; per-extension nesting under `extensions` keeps the surface composable.
+
+## Publishing
+
+```bash
+export MNEMOM_API_KEY=$(op read 'op://mnemom-api-keys/operator-key/credential')
+cd packages/core
+uv run python -m emps.publish_manifest --all-agents --resource=protection --dry-run --report
+uv run python -m emps.publish_manifest --all-agents --resource=protection
+```
+
+The `--resource=protection` flag tells `publish_manifest` to read from `.mnemom/protection/<role-id>.yaml` (rather than `.mnemom/agents/<role-id>.yaml`) and PUT to `/v1/protection/agent/<id>` (rather than `/v1/alignment/agent/<id>`). The GET-modify-PUT semantics, idempotency-key handling, and care-framed error surface are identical across both resource types.
+
+The protection-only `--mode-override` flag overrides the manifest's `mode` field at publish time. Alignment-only dials (`--intensity-floor`, `--autonomy-mode-override`, `--integrity-mode-override`) are no-ops with `--resource=protection` — the CLI surfaces a care-framed warning if you pass one.
+
+## See also
+
+- [Protection Card](/concepts/protection-card) — the canonical card shape this manifest projects into.
+- [Cards as Resources](/concepts/cards-as-resources) — the URL surface protection publishes to.
+- [Cards Action](/concepts/cards-action) — the per-PR editorial-feedback layer for protection manifests.
+- [Publishing Manifests](/guides/publishing-manifests) — full operator runbook.

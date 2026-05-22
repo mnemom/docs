@@ -1,0 +1,125 @@
+---
+title: "Cards Action (GitHub)"
+description: "mnemom/cards-action@v1 — the GitHub Action that posts a care-framed PR comment whenever a .mnemom/<scope>/**.yaml manifest changes. Editorial-feedback layer for the cards primitive."
+sidebarTitle: "Cards Action"
+icon: "code-pull-request"
+---
+
+`mnemom/cards-action@v1` is the **editorial-feedback** layer of the cards primitive. It's a GitHub Action that runs on every pull request that touches a `.mnemom/<scope>/**.yaml` file and posts a single, care-framed PR comment showing the proposed composed-view diff, simulate verdicts for golden-path tool calls, and the explain trace from the policy engine.
+
+The action is **read-only**. It never writes a canonical card. The merge step doesn't auto-publish — an operator runs [`publish_manifest`](/guides/publishing-manifests) to update the canonical card after merge.
+
+<Note>
+**Org-wide enforcement** (Semgrep + CodeQL rulesets, branch-protection automation across every repo, compliance posture dashboard, AAP attestation chain) ships separately as the **Mnemom Compliance Suite** — Phase 6 deliverable. The Cards Action is the productivity layer the Compliance Suite builds on top of.
+</Note>
+
+## What the PR comment looks like
+
+The action posts one **sticky** comment per PR (updated on each push, never duplicated). The comment has up to four sections per changed manifest:
+
+- **Composed view diff** — the manifest's editorial overlay projected onto the canonical field set, side-by-side against the agent's current effective state.
+- **Care-framed advisories** — local monotone-tightening checks (e.g. "would relax autonomy_mode from `nudge` to `observe`") for the operator to consider.
+- **Simulate** — per case from `.mnemom/tests/simulate-cases.yaml`, a `true` / `false` / `conditional` verdict with the conditions the gateway and observer surfaced.
+- **Explain** — the policy engine's current trace + suggested remediations (with HTTP verb + URL pointing at [W3.1 sub-resource verbs](/concepts/sub-resource-verbs)).
+
+The PR comment is the only customer-facing surface, so it's care-framed end to end. The doctrine scanner in the action's test suite enforces this: forbidden compliance-language words (Blocked, Denied, Required, Forbidden, Violation, Must) surface as a self-test failure before any comment goes out.
+
+## How to install
+
+```yaml
+# .github/workflows/cards-action.yml
+name: Cards Action
+on:
+  pull_request:
+    paths:
+      - '.mnemom/**'
+jobs:
+  cards-action:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mnemom/cards-action@v1
+        with:
+          api-key: ${{ secrets.MNEMOM_API_KEY }}
+```
+
+The `MNEMOM_API_KEY` repository secret depends on an API key with `api:read` scope. The action's HTTP traffic is read-style — `/effective`, `/simulate`, `/explain` — so the narrowest scope is sufficient. See [API Keys](/guides/api-keys) for setup.
+
+When the secret is absent (e.g. on a fork PR), the action skips silently rather than failing red. That's intentional — Cards Action is a productivity layer, not a gate.
+
+## Failure modes
+
+Behavior is configurable per-repo via `.mnemom/ci-config.yaml`:
+
+```yaml
+behavior:
+  on_allowed_false: hard_fail       # hard_fail | soft_warn | pass
+  on_allowed_conditional: soft_warn
+  on_allowed_true: pass
+  on_action_error: soft_warn        # behavior when the API is unreachable
+```
+
+Defaults match the example: hard-fail on `false`, soft-warn on `conditional`, pass on `true`, soft-warn on transport errors.
+
+## Golden-path simulate cases
+
+Per-repo `.mnemom/tests/simulate-cases.yaml` declares the action's golden-path cases. The action filters cases by `agent_id` per manifest:
+
+```yaml
+cases:
+  - agent_id: smolt-512448e7
+    resource: alignment
+    description: "Send a campfire message in #ops"
+    candidate_tool_call:
+      tool_name: campfire_send_message
+      tool_args:
+        channel: ops
+        message: "Daily standup"
+```
+
+Each case POSTs to `/v1/<resource>/agent/<agent_id>/simulate`. The action accumulates verdicts and renders them in the PR comment.
+
+## Source-of-truth model
+
+Cards Action sits at the editorial seam of the [cards-as-resources](/concepts/cards-as-resources) flow:
+
+```
+.mnemom/agents/*.yaml          GitHub PR              mnemom/cards-action            api.mnemom.ai
+.mnemom/protection/*.yaml  →   open / push     →     reads via api:read       →     reads /effective + /simulate + /explain
+                                                       posts PR comment
+                                                       updates on every push
+
+                                                            ↓ merge
+
+                                                       operator runs publish_manifest (out of band)
+                                                            ↓
+                                                       PUT /v1/<resource>/agent/<id>
+                                                            ↓
+                                                       Canonical card updated; gateway, observer, AIP enforce against new state.
+```
+
+The GitHub editorial source and the Mnemom canonical state are kept in sync **at publish time** by `publish_manifest`. The Cards Action's role is to make the PR readable before that publish happens.
+
+## Scope: GitHub-only V1
+
+V1 ships for GitHub. GitLab CI, Bitbucket Pipelines, Azure DevOps Pipelines, Gitea Actions, and Forgejo Actions ports are post-V1-GA backlog — same underlying Mnemom API surface, different glue layer.
+
+If you'd benefit from a port to one of those, file an issue at [`mnemom/cards-action`](https://github.com/mnemom/cards-action/issues).
+
+## Repository + Marketplace
+
+- **GitHub:** [`mnemom/cards-action`](https://github.com/mnemom/cards-action)
+- **Marketplace:** [Mnemom Cards](https://github.com/marketplace/actions/mnemom-cards) *(submitted alongside the v1.0.0 release)*
+- **License:** MIT
+
+## See also
+
+- [Cards as Resources](/concepts/cards-as-resources) — the URL surface the action reads from.
+- [AI Helpers](/concepts/ai-helpers) — simulate / explain / scaffold / tools-import.
+- [Care Framing Doctrine](/concepts/care-framing-doctrine) — the forbidden-words list the action enforces in every comment.
+- [Publishing Manifests](/guides/publishing-manifests) — the operator-PUT path that runs after merge.
