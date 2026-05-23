@@ -1,0 +1,110 @@
+---
+title: "Verify a Canonical Card Offline"
+description: "Use mnemom verify-card to prove a Mnemom-published canonical card was composed at the claimed identity, without holding any Mnemom credentials."
+sidebarTitle: "Verify Card"
+icon: "circle-check"
+---
+
+`mnemom verify-card` is the operator-facing CLI for **offline verification** of a Mnemom-published canonical card's AAP attestation token + Merkle inclusion proof. It needs no Mnemom credentials — only the agent_id and the public JWKS, both of which are publicly reachable.
+
+## Install
+
+```bash
+npm install -g @mnemom/mnemom@latest
+mnemom verify-card --help
+```
+
+## Verify the current live posture
+
+```bash
+mnemom verify-card smolt-e2ca60ef
+```
+
+This fetches the agent's [A2A AgentCard](/concepts/a2a-export), extracts the embedded [AAP attestation](/concepts/aap-attestation), fetches the JWKS (cached at `~/.mnemom/cache/aap-jwks.json` for 1 hour), and verifies the JWS signature + Merkle inclusion proof. The output is a machine-readable JSON envelope on stdout plus a care-framed status line on stderr.
+
+```json
+{
+  "ok": true,
+  "agent_id": "smolt-e2ca60ef",
+  "card_kind": "alignment",
+  "content_hash": "a6c4f...beef",
+  "version": 17,
+  "composed_at": "2026-05-22T12:00:00Z",
+  "integrated_time": "2026-05-22T12:00:01Z",
+  "signing_key_id": "aap-2026-05-22",
+  "historic_backfill": false,
+  "findings": [
+    "signature: ok (kid=aap-2026-05-22)",
+    "merkle: inclusion proof ok (log_index=4711, tree_size=12345)"
+  ]
+}
+```
+
+## Verify the historic posture at a specific time
+
+```bash
+mnemom verify-card smolt-e2ca60ef --at 2026-04-01T00:00:00Z
+```
+
+Returns the [transparency log](/concepts/transparency-log) row whose `composed_at` is the greatest at-or-before the timestamp, then verifies the signed attestation + the inclusion proof. Works regardless of whether the token's `exp` has passed — the log row's `signed_attestation` continues to verify as long as the signing key is in the JWKS (active or retired-within-window).
+
+## Verify the protection card
+
+```bash
+mnemom verify-card smolt-e2ca60ef --card-kind protection
+```
+
+The transparency log carries both alignment and protection card identities. The default is `alignment`; pass `--card-kind protection` to verify the protection card's identity instead.
+
+## Strict mode
+
+```bash
+mnemom verify-card smolt-e2ca60ef --strict
+```
+
+`--strict` bypasses the JWKS cache (refetches `/v1/.well-known/jwks.json` every invocation) and exits non-zero on any verification gap (signature, expiry, proof, root signature). Use this in CI/CD pipelines that need a clean signal.
+
+## Custom API base
+
+```bash
+mnemom verify-card smolt-e2ca60ef --api https://api-staging.mnemom.ai
+```
+
+The default is `https://api.mnemom.ai`. Use the `--api` flag to point at a staging or self-hosted Mnemom instance.
+
+## What gets verified
+
+1. **JWS signature** — Ed25519 over the canonical header + payload, against the matching `kid` in the JWKS.
+2. **Token expiry** — `now() < exp`. (For `--at` queries, this check is informational: the durable proof of historic posture is the transparency-log row, not the token's TTL.)
+3. **Merkle inclusion proof** — reconstructs the signed root from the leaf + sibling hashes.
+
+Each check surfaces a line in the `findings[]` array. The CLI exits 0 only when every check passes; non-zero on any gap (or when `--strict` and the JWKS fetch failed).
+
+## How verification works without credentials
+
+The verifier needs:
+
+- `<api>/v1/.well-known/jwks.json` — public; no auth.
+- `<api>/v1/agents/{id}/a2a-agent-card` — public; no auth (per-agent opt-in gate).
+- `<api>/v1/transparency/log/{id}/...` — public; no auth.
+- `<api>/v1/transparency/root` — public; no auth.
+
+That's the entire surface. Any third party — including audit teams that aren't in your org — can verify your agents' canonical posture with the agent_id alone.
+
+## Programmatic verification
+
+If a CLI isn't a fit, the verification logic is small and reproducible:
+
+1. Parse the JWS into header + payload + signature (RFC 7515 base64url).
+2. Verify the Ed25519 signature against the matching key from the JWKS.
+3. Decode the payload and check `iss` + `exp`.
+4. Compute the Merkle leaf hash from `(agent_id, card_kind, content_hash, version, composed_at)` and verify the inclusion proof against the signed root.
+
+Both [schemas](/specifications/attestation-token) and the [tree shape](/specifications/transparency-log-schema#merkle-tree-construction) are documented. Any JOSE/JWT library that supports EdDSA, plus a stock SHA-256, is sufficient.
+
+## See also
+
+- [AAP attestation concept](/concepts/aap-attestation)
+- [Transparency log concept](/concepts/transparency-log)
+- [Attestation token schema](/specifications/attestation-token)
+- [Transparency log schema](/specifications/transparency-log-schema)

@@ -1,0 +1,74 @@
+---
+title: "Attestation Token Schema"
+description: "Canonical wire format for AAP attestation tokens (v1). JWS Compact serialization, EdDSA-signed payload conforming to mnemom-contracts/attestation-token/v1.yaml."
+sidebarTitle: "Attestation Token"
+icon: "file-shield"
+---
+
+The canonical wire format for [AAP attestation tokens](/concepts/aap-attestation). Mirrors [`mnemom-contracts/attestation-token/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/attestation-token/v1.yaml).
+
+## Envelope
+
+JWS Compact Serialization (RFC 7515):
+
+```
+<base64url(header)>.<base64url(payload)>.<base64url(signature)>
+```
+
+## Header
+
+Fixed shape:
+
+```json
+{
+  "alg": "EdDSA",
+  "kid": "<key_id>",
+  "typ": "AAP-Attestation/v1"
+}
+```
+
+| Field | Constraint |
+|---|---|
+| `alg` | Always `"EdDSA"` (Ed25519). |
+| `kid` | Key identifier; matches a `kid` in [`/v1/.well-known/jwks.json`](/concepts/aap-attestation#verification). |
+| `typ` | Always `"AAP-Attestation/v1"`. Mirrored in the payload for defense-in-depth. |
+
+## Payload
+
+JSON object conforming to JSON Schema 2020-12. All required fields below; `additionalProperties: false`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `typ` | const `"AAP-Attestation/v1"` | yes | Mirrors the header `typ`. |
+| `iss` | string (URI) | yes | Issuer — always `https://mnemom.ai` for production. Verifiers reject other issuers. |
+| `sub` | string | yes | Subject — the Mnemom `agent_id` (e.g., `smolt-e2ca60ef`). |
+| `iat` | integer (Unix seconds) | yes | Issued-at, UTC. Verifiers reject `iat > now() + clock_skew_grace` (default 60s). |
+| `exp` | integer (Unix seconds) | yes | Expiry, UTC. Default TTL is `iat + 3600` (1 hour). |
+| `content_hash` | string (`^[0-9a-f]{64}$`) | yes | SHA-256 hex of the canonical card body at attestation time. |
+| `version` | integer (≥ 1) | yes | Monotone canonical-card version at attestation time. |
+| `composed_at` | string (date-time) | yes | ISO-8601 UTC timestamp at which the canonical card was composed. |
+| `card_kind` | enum `"alignment" \| "protection"` | yes | Which canonical card the token attests to. |
+| `smolt_id` | string (`^smolt-[a-z0-9]+$`) | no | Optional convenience claim for consumers binding on smolt-id. |
+| `historic_backfill` | const `true` | no | Present (and only `true`) on tokens minted by the one-shot backfill script for canonical cards that pre-date the transparency log. |
+
+## Signature
+
+Ed25519 signature over the byte string `<base64url(header)>.<base64url(payload)>`. Base64url-encoded; **no padding**, **no whitespace**, **no line wrapping** (per RFC 7515 §3.1).
+
+## Beyond expiry
+
+Tokens are short-lived. After `exp`, the embedded token is no longer cryptographically valid for new use, but the [transparency log](/concepts/transparency-log) preserves it indefinitely. Consumers wanting to verify a historic posture query the log via `mnemom verify-card --at <ISO>`; the JWS inside the log row continues to verify against the JWKS as long as the signing key remains in the JWKS (active or retired-within-window).
+
+## Editorial source
+
+Schema authored at [`mnemom-contracts/attestation-token/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/attestation-token/v1.yaml). Runtime consumers:
+
+- [`mnemom-api/src/attestation/signer.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/signer.ts) — issuer
+- [`mnemom-api/src/attestation/verifier.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/verifier.ts) — server-side verifier
+- [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) — offline verifier CLI
+
+## See also
+
+- [AAP attestation concept](/concepts/aap-attestation)
+- [Transparency log schema](/specifications/transparency-log-schema)
+- [`mnemom verify-card` guide](/guides/verify-card)

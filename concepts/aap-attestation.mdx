@@ -1,0 +1,87 @@
+---
+title: "AAP Attestation Tokens"
+description: "Mnemom-signed JWS tokens that prove a canonical card's identity. Verifiable offline against /v1/.well-known/jwks.json, no Mnemom credentials needed."
+sidebarTitle: "AAP Attestation"
+icon: "key"
+---
+
+An **AAP attestation token** is a Mnemom-signed JWS (JSON Web Signature) committing to a canonical card's identity tuple — `(agent_id, content_hash, version, composed_at, card_kind)`. Any consumer holding the public key from `<api>/v1/.well-known/jwks.json` can verify it offline, without ever holding a Mnemom credential.
+
+The attestation is the cryptographic glue between three Phase 5 surfaces:
+
+- The [**A2A AgentCard export**](/concepts/a2a-export) attaches a fresh attestation as an extension on every public read.
+- The [**transparency log**](/concepts/transparency-log) stores the attestation alongside the canonical identity for durable historic verification.
+- The [**`mnemom verify-card` CLI**](/guides/verify-card) consumes the JWKS + log to verify offline.
+
+## Wire format
+
+JWS Compact Serialization (RFC 7515):
+
+```
+<base64url(header)>.<base64url(payload)>.<base64url(signature)>
+```
+
+| Section | Shape |
+|---|---|
+| **Header** | `{ "alg": "EdDSA", "kid": "<key_id>", "typ": "AAP-Attestation/v1" }` |
+| **Payload** | See [the schema](/specifications/attestation-token) — `iss`, `sub`, `iat`, `exp`, `content_hash`, `version`, `composed_at`, `card_kind`, optional `smolt_id`, optional `historic_backfill` |
+| **Signature** | Ed25519 over `<base64url(header)>.<base64url(payload)>` |
+
+## What it commits to
+
+The payload binds the identity. A change to **any** of these fields produces a different attestation:
+
+| Claim | Source |
+|---|---|
+| `content_hash` | `canonical_*_cards.content_hash` |
+| `version` | `canonical_*_cards.version` |
+| `composed_at` | `canonical_*_cards._composition.composed_at` |
+| `card_kind` | `alignment` or `protection` |
+| `sub` | `agents.agent_id` |
+
+The token **doesn't carry the card body** — consumers fetch the body separately (via [`/v1/agents/{id}/a2a-agent-card`](/concepts/a2a-export) or [`/v1/agents/{id}/state`](/concepts/agent-state)) and check the body's `content_hash` matches the attestation's `content_hash`.
+
+## Verification
+
+The full verification flow ([`mnemom verify-card`](/guides/verify-card) executes this for you):
+
+1. Fetch `<iss>/v1/.well-known/jwks.json`.
+2. Locate the key with `kid` matching the token's header.
+3. Verify the Ed25519 signature.
+4. Check `iss` matches the expected issuer (`https://mnemom.ai` for production).
+5. Check `now() < exp` (the verifier may apply a small clock-skew grace; default 60 seconds).
+6. Check the canonical card body's `content_hash` matches the attestation's `content_hash`.
+
+If you'd benefit from a code reference, the runtime verifier lives at [`mnemom-api/src/attestation/verifier.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/verifier.ts) and the CLI verifier at [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts).
+
+## Key rotation + JWKS lifetime
+
+The JWKS includes the **active** key plus **recently-retired** keys still inside their verification window. Once the retirement window plus the token-TTL plus a small grace has elapsed, the retired key drops out of the JWKS.
+
+| Window | Default | Configurable via |
+|---|---|---|
+| Token TTL | 1 hour | `AAP_ATTESTATION_TTL_SECONDS` |
+| Retirement grace | 25 hours | `AAP_ATTESTATION_RETIREMENT_WINDOW_SECONDS` |
+
+Rotation is performed by the operator via the admin endpoint:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/admin/signing-keys/rotate \
+  -H "Authorization: Bearer $MNEMOM_ADMIN_TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"new_key_id": "aap-2026-06-01", "new_public_key_jwk": {...}, "rotation_reason": "scheduled-rotation"}'
+```
+
+The retired key remains verifiable for any token signed before its `retired_at` timestamp.
+
+## Relationship to the transparency log
+
+Tokens are short-lived (1-hour TTL by default). The durable record is the [transparency log](/concepts/transparency-log): every canonical card identity ever composed has a row in `card_attestations` with the full signed token + a Merkle inclusion proof. Beyond the token's expiry, consumers query the log — not the token.
+
+## See also
+
+- [Schema reference](/specifications/attestation-token) — canonical wire format
+- [`mnemom verify-card`](/guides/verify-card) — operator CLI for offline verification
+- [Transparency log](/concepts/transparency-log) — durable record beyond the TTL window
+- [A2A AgentCard export](/concepts/a2a-export) — where the attestation surfaces on the public discovery API
