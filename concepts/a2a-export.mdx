@@ -1,0 +1,109 @@
+---
+title: "A2A AgentCard Export"
+description: "One-way projection of the canonical alignment card into the A2A AgentCard envelope, with the AAP attestation token attached as an A2A extension."
+sidebarTitle: "A2A Export"
+icon: "share-from-square"
+---
+
+The **A2A AgentCard export** is a public-discovery surface that projects a Mnemom-composed canonical alignment card into the [A2A AgentCard](https://github.com/google/A2A) v1.x envelope. The endpoint is **unauthenticated**: any consumer can fetch it; per-agent opt-in keeps the surface explicit.
+
+The export is **one-way**. Mnemom doesn't accept inbound A2A registration in v1; that's deferred to a future phase. The export pattern is the standard "publish for discovery" half of A2A.
+
+## Endpoint
+
+```
+GET /v1/agents/{agent_id}/a2a-agent-card
+```
+
+| Property | Value |
+|---|---|
+| Auth | None — public surface |
+| Per-agent gate | `agents.a2a_export_enabled` — when false, the endpoint returns **404 (not 403)** to avoid leaking which agents exist on the platform |
+| Caching | `Cache-Control: public, max-age=60, stale-while-revalidate=300` |
+| ETag | `"sha256:<canonical content_hash>"` — clients can issue `If-None-Match` for cheap revalidation |
+| CORS | `*` — the endpoint is intentionally cross-origin |
+
+## What the projection includes
+
+```json
+{
+  "schemaVersion": "1.0",
+  "name": "Themis",
+  "description": "Mnemom-composed alignment card declaring deliberation_before_action, policy_attentiveness, evidence_grounded.",
+  "url": "https://mnemom.ai/v1/agents/smolt-e2ca60ef",
+  "version": "1.17.0",
+  "capabilities": { "streaming": false, "pushNotifications": false },
+  "skills": [
+    { "id": "campfire_create_chart_account", "name": "campfire_create_chart_account" }
+  ],
+  "extensions": [
+    {
+      "uri": "https://aap.mnemom.ai/v1/attestation",
+      "required": false,
+      "body": {
+        "token": "<jws-compact>",
+        "jwks_uri": "https://mnemom.ai/v1/.well-known/jwks.json"
+      }
+    },
+    {
+      "uri": "https://aap.mnemom.ai/v1/alignment",
+      "required": false,
+      "body": { "autonomy_mode": "observe", "values": { "declared": [...] }, "principal": {...} }
+    }
+  ],
+  "metadata": {
+    "content_hash": "<sha256-hex>",
+    "composed_at": "2026-05-22T12:00:00Z"
+  }
+}
+```
+
+| Field | Source |
+|---|---|
+| `name` | `principal.identifier` from the alignment card; falls back to `agent_id` |
+| `description` | Care-framed summary of the first six declared values |
+| `version` | `1.<canonical version>.0` (semver shape) |
+| `skills` | First 50 entries of `autonomy.bounded_actions` |
+| `extensions[aap/attestation]` | Present when `AAP_ATTESTATION_SIGNING_ENABLED=true`; soft-omits on signing error |
+| `extensions[aap/alignment]` | Public-safe subset of the canonical card |
+
+## What the projection deliberately excludes
+
+The public-discovery surface filters operator-internal fields:
+
+- `card_id` (smolt-internal)
+- `_composition.source_card_id` / `_composition.source_policy_id`
+- `field_provenance` (the [caller-aware redaction](/concepts/agent-state#caller-aware-redaction) is server-side; A2A consumers don't get a redacted view, they get no view)
+- Internal connector grants beyond the bare tool name surface
+
+If you'd benefit from the full composed view including provenance, use [`/v1/agents/{id}/state`](/concepts/agent-state) under an authenticated principal.
+
+## Opt-in
+
+Agents default to **opted out**. An org admin flips the per-agent flag:
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/agents/<agent_id>/settings \
+  -H "Authorization: Bearer $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"a2a_export_enabled": true}'
+```
+
+Once flipped, the AgentCard is live within seconds. Flipping back returns to 404 immediately (the per-request flag check happens on every fetch).
+
+## Verifying the embedded attestation
+
+Any A2A consumer can extract the `extensions[aap/attestation].body.token` and verify it offline against the published JWKS. The [`mnemom verify-card`](/guides/verify-card) CLI does this for you in one command:
+
+```bash
+mnemom verify-card smolt-e2ca60ef
+```
+
+For programmatic verification, the wire format is [documented](/specifications/attestation-token); any JOSE/JWT library that supports EdDSA can verify.
+
+## See also
+
+- [AAP attestation tokens](/concepts/aap-attestation) — the JWS extension
+- [Transparency log](/concepts/transparency-log) — durable historic verification
+- [`mnemom verify-card`](/guides/verify-card) — offline verification CLI
+- [Card lifecycle](/concepts/card-lifecycle) — where the export fits in the lifecycle

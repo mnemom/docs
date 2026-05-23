@@ -1,0 +1,170 @@
+---
+title: "Set Up Card-Change Observability"
+description: "Subscribe to SSE or webhook notifications when a canonical card changes. Real-time reactive updates without polling."
+sidebarTitle: "Observability Setup"
+icon: "satellite-dish"
+---
+
+Phase 5 ships two complementary surfaces for reactive observability of canonical card changes:
+
+- **Server-Sent Events** at `GET /v1/agents/{id}/stream` — long-lived HTTP connection; consumers receive a `card_changed` SSE frame whenever the agent's canonical card recomposes.
+- **Signed webhook subscriptions** at `POST /v1/agents/{id}/notifications/webhook` — Mnemom POSTs a signed payload to your URL on each canonical change.
+
+Both surfaces consume the [transparency log](/concepts/transparency-log) as their event source. Subscriptions are **per-agent** + opt-in: the agent's administrator flips `agents.sse_enabled` / `agents.webhook_enabled` first.
+
+## SSE channel
+
+### Connect
+
+```bash
+curl -N https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
+```
+
+The response is `Content-Type: text/event-stream`. Each canonical change emits a frame like:
+
+```
+event: card_changed
+id: 4711
+data: {"agent_id":"smolt-e2ca60ef","card_kind":"alignment","content_hash":"...","version":17,"composed_at":"2026-05-22T12:00:00Z","log_index":4711,"attestation_jws":"..."}
+```
+
+### Reconnect with cursor
+
+The `id` field on each frame is the transparency-log `log_index`. On reconnect, pass it as `Last-Event-ID` (SSE convention) or as the `since` query parameter:
+
+```bash
+curl -N -H "Last-Event-ID: 4711" https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
+# OR
+curl -N "https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream?since=4711"
+```
+
+Frames are delivered strictly in `log_index ASC` order, so the cursor is monotone.
+
+### Stream lifetime
+
+Connections cap at 5 minutes (Cloudflare Workers HTTP response budget). Clients reconnect with the latest cursor — the SSE convention handles this automatically in EventSource. A `: keepalive <timestamp>` comment frame is emitted every 15 seconds; a final `event: close` frame fires before the connection drops.
+
+### Authentication
+
+Currently the endpoint is unauthenticated when the per-agent flag is on — the same access pattern as the [A2A AgentCard export](/concepts/a2a-export). If the per-agent flag is off the endpoint returns 404 (no enumeration).
+
+## Webhook channel
+
+### Subscribe
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/notifications/webhook \
+  -H "Authorization: Bearer $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook_url": "https://your-server.example.com/mnemom/card-changed",
+    "consumer_id": "tenant-a"
+  }'
+```
+
+Response:
+
+```json
+{
+  "subscription_id": "sub-3e8f...",
+  "webhook_url": "https://your-server.example.com/mnemom/card-changed",
+  "secret": "wEbHt73...JNkP",
+  "expires_at": "2026-06-21T00:00:00Z"
+}
+```
+
+The `secret` is shown **exactly once** — store it server-side. Mnemom holds only the hash; subsequent verifications use the hash.
+
+### Delivery shape
+
+On every canonical card change, Mnemom POSTs to your URL:
+
+```json
+{
+  "type": "card_changed",
+  "delivered_at": "2026-05-22T12:00:01.234Z",
+  "data": {
+    "agent_id": "smolt-e2ca60ef",
+    "card_kind": "alignment",
+    "content_hash": "...",
+    "version": 17,
+    "composed_at": "2026-05-22T12:00:00Z",
+    "log_index": 4711,
+    "attestation_jws": "..."
+  }
+}
+```
+
+With headers:
+
+```
+X-Mnemom-Webhook-Id: sub-3e8f...
+X-Mnemom-Signature: t=1716393600,v1=<hex-hmac-sha256>
+User-Agent: mnemom-cards/1 (+https://mnemom.ai/v1)
+Content-Type: application/json
+```
+
+### Verify the signature
+
+The HMAC-SHA256 signature is computed over the string `<timestamp>.<raw-body>`:
+
+```python
+import hmac, hashlib
+
+def verify_mnemom_webhook(body: str, signature_header: str, secret: str) -> bool:
+    parts = dict(p.split("=", 1) for p in signature_header.split(","))
+    t = parts["t"]
+    expected = hmac.new(secret.encode(), f"{t}.{body}".encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, parts["v1"])
+```
+
+### Idempotent delivery
+
+Each subscription tracks `last_sent_log_index`. If the compose hook reruns the same log entry (e.g., the reconciler closes a gap that the compose path also closed), the dispatcher skips re-delivery for any subscription whose `last_sent_log_index >= log_index`.
+
+### Unsubscribe
+
+```bash
+curl -X DELETE https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/notifications/sub-3e8f... \
+  -H "Authorization: Bearer $MNEMOM_API_KEY"
+```
+
+Returns 204 on success, 404 if the subscription is already gone (idempotent).
+
+## Opt-in
+
+By default, both flags are off:
+
+```bash
+curl -X PATCH https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/settings \
+  -H "Authorization: Bearer $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sse_enabled": true, "webhook_enabled": true}'
+```
+
+Without the flag flipped, both endpoints return 404 (avoids enumeration of which agents exist).
+
+## Webhook URL constraints
+
+- `https://` only. http URLs are declined.
+- No loopback / private-network space (10/8, 172.16/12, 192.168/16, 169.254/16, fc00::/7, fe80::/10).
+- No `.local` / `.internal` TLDs.
+
+These constraints defend against SSRF on outbound delivery. If your dev environment would benefit from a tunnel, [ngrok](https://ngrok.com) or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) work cleanly.
+
+## SSE vs webhook — which to use
+
+| Use case | Channel |
+|---|---|
+| Backend service that wants real-time reactivity, can keep an HTTP connection open | **SSE** |
+| Serverless / Lambda / Cloud Functions that prefer push-on-event | **Webhook** |
+| Browser / dashboard UI consuming card changes | **SSE** (via EventSource) |
+| Compliance / SIEM / archive that wants a durable POST trail | **Webhook** |
+
+Both surfaces deliver the **same** payload from the **same** event source (the transparency log). Choosing both is fine — they don't conflict.
+
+## See also
+
+- [A2A AgentCard export](/concepts/a2a-export) — the pull-side counterpart
+- [Transparency log](/concepts/transparency-log) — the event source
+- [AAP attestation tokens](/concepts/aap-attestation) — the `attestation_jws` field

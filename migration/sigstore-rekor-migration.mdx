@@ -1,0 +1,80 @@
+---
+title: "Migrating the Transparency Log to Sigstore Rekor"
+description: "Forward-looking plan for migrating the thin Postgres canonical-card transparency log to Sigstore Rekor when the time comes. Data move, not a schema rewrite."
+sidebarTitle: "Sigstore Rekor Migration"
+icon: "right-left"
+---
+
+The [canonical-card transparency log](/concepts/transparency-log) ships on a **thin Postgres** backend in v1. The row shape is intentionally [Sigstore Rekor](https://www.sigstore.dev/rekor)-compatible so the future migration to Rekor is a **data move**, not a schema rewrite.
+
+This page is forward-looking — it documents the migration plan so consumers can build against the v1 surface confident that the wire shape won't break when the move happens. The migration itself is deferred to **post-V1-GA**.
+
+## Why migrate
+
+The thin Postgres log is sufficient for Mnemom's V1 scale (≤ 10K canonical recomposes per day). Sigstore Rekor brings:
+
+- **Decoupling** — the log lives outside Mnemom's infrastructure; a Mnemom compromise can't silently rewrite it.
+- **Industry standard** — Rekor is the [Linux Foundation Sigstore](https://www.sigstore.dev/) project's canonical transparency log. Consumers already trust it for software supply-chain attestations.
+- **Community tooling** — `rekor-cli`, `cosign`, and the Sigstore client libraries become first-class verification paths alongside `mnemom verify-card`.
+
+## Column mapping
+
+| Mnemom column | Rekor entry field | Notes |
+|---|---|---|
+| `log_index` | `LogIndex` | Direct; both are monotone integers |
+| `integrated_time` | `IntegratedTime` (Unix epoch) | RFC 3339 → Unix conversion on insert |
+| `signing_key_id` | `Body.spec.signature.publicKey.content` | base64-encoded public key (extracted from JWKS by `kid`) |
+| `signed_attestation` | `Body.spec.envelope` | Wrapped in a DSSE envelope (see below) |
+| `merkle_leaf_hash` | `Verification.InclusionProof.LeafHash` | Direct |
+| `tree_size_after` | `Verification.InclusionProof.TreeSize` | Direct |
+| (computed on demand) | `Verification.InclusionProof.Hashes` | Rebuilt from `merkle_leaf_hash` rows |
+| (computed on demand) | `Verification.InclusionProof.RootHash` | Rebuilt at proof issuance |
+
+## Entry kind
+
+Rekor entries use a `kind` discriminator. The closest fit for an AAP attestation is **DSSE** (Dead Simple Signing Envelope, [SLSA spec](https://github.com/secure-systems-lab/dsse)). The DSSE wrapper around the JWS looks like:
+
+```json
+{
+  "payloadType": "application/vnd.mnemom.aap-attestation+jws",
+  "payload": "<base64(signed_attestation)>",
+  "signatures": [
+    {
+      "keyid": "<signing_key_id>",
+      "sig": "<base64(jws-signature-bytes)>"
+    }
+  ]
+}
+```
+
+Rekor's `dsse` entry kind accepts this shape directly.
+
+## Migration steps (post-V1-GA)
+
+1. **Stand up the Rekor instance.** Choose between the [public Sigstore instance](https://rekor.sigstore.dev) or self-hosted. The public instance has no SLA; self-hosted gives Mnemom + customers operational control.
+2. **Replay historic rows.** Walk `card_attestations` in `log_index ASC` order; wrap each `signed_attestation` in a DSSE envelope; POST to `/api/v1/log/entries`. Rekor assigns its own `LogIndex` — store the mapping in a new `rekor_index` column on `card_attestations`.
+3. **Dual-write window.** For some number of weeks, every new compose-hook append writes both to Postgres + Rekor. Smoke-test that the two roots stay aligned.
+4. **Cutover read paths.** `GET /v1/transparency/log/{id}/...` starts returning the Rekor inclusion proof alongside (or instead of) the Postgres-derived proof. `mnemom verify-card` learns the `--rekor` flag for explicit Rekor-only verification.
+5. **Retire the Postgres tree-build.** Once Rekor reads are stable, drop the in-process Merkle reconstruction. The `card_attestations` Postgres table stays as a hot cache + a defense-in-depth ledger; Rekor becomes the authoritative source.
+
+## Consumer impact
+
+| Consumer | Impact |
+|---|---|
+| [`mnemom verify-card`](/guides/verify-card) | Gains a `--rekor` flag; default mode honors whichever path the API points it at |
+| [A2A AgentCard export](/concepts/a2a-export) | The `extensions[aap/attestation]` extension body gains a `rekor_index` claim alongside `token` + `jwks_uri` |
+| Custom verifiers (the [schema docs](/specifications/attestation-token)) | Continue to verify the JWS as before. Optionally consume Rekor's inclusion proof for cross-source defense |
+
+The wire format of the **attestation token itself does not change**. Consumers verifying just the JWS continue to work; consumers wanting full transparency-log proofs gain an optional second source.
+
+## Timeline
+
+Deferred to **post-V1-GA**. Until that migration ships, the Postgres log + S3-with-object-lock backup is the authoritative public log. The v1 schema documented at [`mnemom-contracts/transparency-log/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/transparency-log/v1.yaml) is stable.
+
+## See also
+
+- [Transparency log concept](/concepts/transparency-log)
+- [Transparency log schema](/specifications/transparency-log-schema)
+- [Sigstore project](https://www.sigstore.dev/)
+- [Rekor documentation](https://docs.sigstore.dev/rekor/overview/)
+- [DSSE specification](https://github.com/secure-systems-lab/dsse)

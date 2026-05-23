@@ -1,0 +1,99 @@
+---
+title: "Transparency Log Schema"
+description: "Canonical row shape for the append-only canonical-card transparency log (v1). Sigstore-Rekor-compatible mapping documented."
+sidebarTitle: "Transparency Log"
+icon: "file-lines"
+---
+
+The canonical row shape for the [transparency log](/concepts/transparency-log). Mirrors [`mnemom-contracts/transparency-log/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/transparency-log/v1.yaml).
+
+## Row shape
+
+JSON object conforming to JSON Schema 2020-12. All required fields below; `additionalProperties: false`.
+
+| Field | Type | Description |
+|---|---|---|
+| `log_index` | integer (≥ 1) | Monotone log position. Determines leaf ordering for the Merkle tree. |
+| `agent_id` | string | Mnemom agent identifier. Matches `agents.agent_id`. |
+| `card_kind` | enum `"alignment" \| "protection"` | Which canonical card kind this row attests to. |
+| `content_hash` | string (`^[0-9a-f]{64}$`) | SHA-256 hex of the canonical card body at composition time. |
+| `version` | integer (≥ 1) | Canonical-card version at composition time. |
+| `composed_at` | string (date-time) | ISO-8601 UTC composition timestamp. |
+| `signed_attestation` | string | Full [AAP attestation token](/specifications/attestation-token) (JWS Compact). |
+| `signing_key_id` | string | Foreign key into `signing_keys.key_id`. Identifies which key signed `signed_attestation`. |
+| `merkle_leaf_hash` | string (`^[0-9a-f]{64}$`) | SHA-256 hex of `0x00 \|\| canonical_json({agent_id, card_kind, content_hash, version, composed_at})`. |
+| `tree_size_after` | integer (≥ 1) | Size of the Merkle tree immediately after this row's inclusion. |
+| `integrated_time` | string (date-time) | Wall-clock time at which this row was appended (server-side). Distinct from `composed_at` for backfill rows. |
+
+## Inclusion proof shape
+
+Returned by the by-index + at-timestamp endpoints alongside the row:
+
+```json
+{
+  "entry": { /* row above */ },
+  "inclusion_proof": {
+    "leaf_hash": "<sha256-hex>",
+    "log_index": 4711,
+    "tree_size": 12345,
+    "hashes": [
+      { "sibling": "<sha256-hex>", "position": "right" },
+      { "sibling": "<sha256-hex>", "position": "left" }
+    ]
+  }
+}
+```
+
+`position` describes which side of the pair the sibling occupies — `right` means `H(0x01 || current || sibling)`, `left` means `H(0x01 || sibling || current)`. The verifier walks the proof bottom-up and compares the result against the [signed root](/concepts/transparency-log#endpoints).
+
+## Merkle tree construction
+
+| Property | Value |
+|---|---|
+| **Leaf hash** | `SHA-256(0x00 \|\| canonical_json(...))` |
+| **Internal hash** | `SHA-256(0x01 \|\| left \|\| right)` |
+| **Leaf ordering** | by `log_index ASC` |
+| **Odd-count** | last unpaired hash promoted unchanged (Bitcoin / Sigstore-compatible — **not** RFC 6962's duplicate-last) |
+| **Persistence** | none; rebuilt on demand from rows. Layer arrays cached in KV for 60s; cache busts on every append. |
+
+The canonical TypeScript implementation lives at [`mnemom-api/src/transparency/merkle.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/merkle.ts). The offline CLI verifier mirrors it byte-for-byte.
+
+## Append discipline
+
+| Property | Detail |
+|---|---|
+| DB-level append-only | Service role has `SELECT + INSERT` only; no `UPDATE` or `DELETE` |
+| Idempotent | UNIQUE INDEX on `(agent_id, card_kind, content_hash, version)` |
+| Compose hook | Best-effort post-commit; 5-minute reconciler closes gaps |
+| Backfill | One-shot script for canonical rows that pre-date the log; marks tokens with `historic_backfill: true` |
+
+## Rekor mapping
+
+The row shape is intentionally [Sigstore Rekor](https://www.sigstore.dev/rekor)-shaped so the future migration is a data move rather than a schema rewrite:
+
+| Mnemom column | Rekor entry field |
+|---|---|
+| `log_index` | `LogIndex` |
+| `integrated_time` | `IntegratedTime` (RFC 3339 → Unix epoch) |
+| `signing_key_id` | `Body.spec.signature.publicKey.content` |
+| `signed_attestation` | `Body.spec.envelope` (DSSE envelope wrap) |
+| `merkle_leaf_hash` | `Verification.InclusionProof.LeafHash` |
+| `tree_size_after` | `Verification.InclusionProof.TreeSize` |
+| (computed on demand) | `Verification.InclusionProof.Hashes` |
+| (computed on demand) | `Verification.InclusionProof.RootHash` |
+
+Rekor's entry-kind closest to our shape is [DSSE](https://github.com/secure-systems-lab/dsse). The migration plan is [documented](/migration/sigstore-rekor-migration).
+
+## Editorial source
+
+Schema authored at [`mnemom-contracts/transparency-log/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/transparency-log/v1.yaml). Runtime consumers:
+
+- [`mnemom-api/src/transparency/log.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/log.ts) — append + read
+- [`mnemom-api/src/transparency/merkle.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/merkle.ts) — tree + proof
+- [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) — offline verifier
+
+## See also
+
+- [Transparency log concept](/concepts/transparency-log)
+- [Attestation token schema](/specifications/attestation-token)
+- [Sigstore Rekor migration](/migration/sigstore-rekor-migration)

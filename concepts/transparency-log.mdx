@@ -1,0 +1,95 @@
+---
+title: "Transparency Log"
+description: "An append-only public log of every canonical card identity Mnemom has ever composed. Sigstore-Rekor-compatible row shape, Merkle inclusion proofs on demand."
+sidebarTitle: "Transparency Log"
+icon: "list-tree"
+---
+
+The **transparency log** is an append-only public record of every canonical card identity Mnemom has ever composed. Each row carries a [signed AAP attestation token](/concepts/aap-attestation) + the Merkle leaf hash + the tree size at integration time. Inclusion proofs are computed on demand from rows ordered by `log_index`.
+
+## What it proves
+
+For any historic timestamp `t` and any `agent_id`:
+
+| Question | Endpoint |
+|---|---|
+| **What canonical alignment did this agent commit to at time `t`?** | `GET /v1/transparency/log/{agent_id}?at=<t>` returns the row with the greatest `composed_at ≤ t` |
+| **Was the canonical card I'm holding actually composed by Mnemom?** | The row's `signed_attestation` verifies against [`/v1/.well-known/jwks.json`](/specifications/attestation-token) |
+| **Could a row have been silently rewritten?** | The Merkle tree is deterministically rebuildable from `merkle_leaf_hash` values ordered by `log_index` — any edit breaks the leaf hash + the cached layer arrays + verification |
+
+## Endpoints
+
+All three are **unauthenticated** — the log is meant to be publicly verifiable.
+
+### `GET /v1/transparency/root`
+
+Returns the current signed Merkle root + tree size + published_at, signed by the active AAP signing key under a distinct `typ` (`AAP-TransparencyRoot/v1`) so the per-card attestation and the root commitment can't be confused.
+
+```json
+{
+  "tree_size": 12345,
+  "root_hash": "<sha256-hex>",
+  "published_at": "2026-05-22T12:34:56Z",
+  "signing_key_id": "aap-2026-05-22",
+  "signature": "<base64url-Ed25519-over-canonical-json>"
+}
+```
+
+### `GET /v1/transparency/log/{agent_id}?at=<ISO>[&card_kind=alignment|protection]`
+
+Point-in-time query. Returns the row whose `composed_at ≤ at` is greatest, plus a freshly-computed inclusion proof against the current root.
+
+### `GET /v1/transparency/log/{agent_id}/{log_index}`
+
+Direct by-index lookup; returns the row + an inclusion proof against the current root. Use this when you already know the `log_index` (e.g., from a previous response).
+
+## Row shape
+
+Mirrors the [schema](/specifications/transparency-log-schema). One row per canonical card identity:
+
+```json
+{
+  "log_index": 4711,
+  "agent_id": "smolt-e2ca60ef",
+  "card_kind": "alignment",
+  "content_hash": "<sha256-hex>",
+  "version": 17,
+  "composed_at": "2026-05-22T12:00:00Z",
+  "signed_attestation": "<jws-compact>",
+  "signing_key_id": "aap-2026-05-22",
+  "merkle_leaf_hash": "<sha256-hex>",
+  "tree_size_after": 4711,
+  "integrated_time": "2026-05-22T12:00:01Z"
+}
+```
+
+`merkle_leaf_hash = SHA-256(0x00 || canonical_json({agent_id, card_kind, content_hash, version, composed_at}))`. The `0x00` prefix is the [RFC 6962-style](https://datatracker.ietf.org/doc/html/rfc6962) domain separator.
+
+## Append discipline
+
+- **Append-only at the DB role level** — the application's service role has `SELECT, INSERT` grants on `card_attestations`. No `UPDATE`, no `DELETE`. Append-only is enforced at the role layer, not just at the application layer.
+- **Idempotent** — unique index on `(agent_id, card_kind, content_hash, version)` makes re-append a no-op. The compose-hook and the 5-minute reconciler are both safe to retry.
+- **Best-effort from the compose path** — the canonical write commits first; the log append + signing happen post-commit. A 5-minute reconciler closes any gap that arose from a worker crash mid-flight.
+
+## Merkle tree
+
+| Property | Value |
+|---|---|
+| **Leaf** | `SHA-256(0x00 \|\| canonical_json(...))` |
+| **Internal node** | `SHA-256(0x01 \|\| left \|\| right)` |
+| **Leaf ordering** | by `log_index ASC` |
+| **Odd-count** | last unpaired hash promoted unchanged (Bitcoin / Sigstore-compatible — **not** RFC 6962's duplicate-last) |
+| **Storage** | rebuilt on demand from rows; layer arrays cached in Wrangler KV for 60 seconds; cache busts on every append |
+
+## Sigstore Rekor compatibility
+
+The row shape is intentionally [Sigstore Rekor](https://www.sigstore.dev/rekor)-shaped so the future migration is a **data move** rather than a schema rewrite. The mapping is documented in [the schema spec](/specifications/transparency-log-schema#rekor-mapping) and the migration plan at [migration/sigstore-rekor-migration](/migration/sigstore-rekor-migration).
+
+Until that migration ships (post-V1-GA), the thin Postgres log serves as Mnemom's authoritative public log. Backups land in S3 with object-lock to defend against database compromise + rewrite.
+
+## See also
+
+- [Schema reference](/specifications/transparency-log-schema) — canonical row shape
+- [AAP attestation tokens](/concepts/aap-attestation) — the JWS embedded per row
+- [`mnemom verify-card`](/guides/verify-card) — operator CLI that consumes the log + JWKS
+- [Sigstore Rekor migration](/migration/sigstore-rekor-migration) — forward-looking data-move plan
