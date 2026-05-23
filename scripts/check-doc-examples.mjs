@@ -122,6 +122,19 @@ const KNOWN_DRIFT = [
   // PUT /alignment/agent/{agent_id} — is now in api.mnemom.ai/openapi.json,
   // so the concepts/cards-as-resources.mdx worked example validates
   // against the live spec.)
+
+  // cards-as-primitive Phase 5 deploy-lag allowlist (temporal).
+  //
+  // The endpoints below shipped on `main` in mnemom-api PRs #522 / #526 /
+  // #527 / #529 and mnemom-platform #306, but the api.mnemom.ai worker
+  // redeploy that publishes the new openapi.json is human-gated and
+  // hasn't landed yet. Once the redeploy is live, drop each entry —
+  // each removal narrows the CI gate by one finding. See the
+  // staging+prod-openapi-catchup pattern set by W1.2b above.
+  { file: "concepts/aap-attestation.mdx",      method: "POST",   path: "/admin/signing-keys/rotate" },
+  { file: "guides/observability-setup.mdx",    method: "GET",    path: "/agents/{agent_id}/stream" },
+  { file: "guides/observability-setup.mdx",    method: "POST",   path: "/agents/{agent_id}/notifications/webhook" },
+  { file: "guides/observability-setup.mdx",    method: "DELETE", path: "/agents/{agent_id}/notifications/{subscription_id}" },
 ];
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)
