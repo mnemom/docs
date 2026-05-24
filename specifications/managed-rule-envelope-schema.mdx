@@ -1,0 +1,181 @@
+---
+title: "Managed Rule Envelope Schema"
+description: "Wire format for the signed envelope the AEGIS promoter writes to Workers KV and R2 and the gateway reads at request time. Documents the customer-readable surface; per-recipe internal columns are out of scope."
+sidebarTitle: "Managed Rule Envelope"
+icon: "file-shield"
+---
+
+Normative reference for the **Managed Rule envelope** — the signed wire format the [AEGIS](/concepts/aegis) promoter writes to Workers KV and R2 and the gateway reads at request time. This is the wire surface the gateway consumes during failover; it is not a customer-side verification surface (see §4 below).
+
+The canonical implementation is in `mnemom-api/src/composition/envelope-signer.ts` (signer) and `mnemom-platform/gateway/src/aegis-recipes.ts` (verifier). Both envelopes — the KV variant and the R2 variant — share the same shape; only the signing key (`key_id`) differs.
+
+## 1. Top-level structure
+
+```json
+{
+  "recipes": [ /* array of recipe row objects, see §3 */ ],
+  "signature": "<base64url(ed25519(<key_id>.<signed_at>.<sha256_hex(canonical_json(recipes))>))>",
+  "key_id": "<kid; matches one entry in the corresponding JWKS>",
+  "signed_at": "<ISO-8601 UTC>"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `recipes` | array | Yes | Array of recipe row objects. See §3. |
+| `signature` | string | Yes | Base64url-encoded Ed25519 signature over the canonical-hash message. |
+| `key_id` | string | Yes | Identifier of the signing key; matches the rotation cohort. |
+| `signed_at` | string | Yes | ISO-8601 UTC timestamp at which the envelope was signed. |
+
+### Canonical-hash message
+
+The signature is computed over the UTF-8 bytes of the dotted message:
+
+```
+<key_id>.<signed_at>.<sha256-hex(canonical_json(recipes))>
+```
+
+where `canonical_json` recursively sorts object keys and emits compact JSON (no whitespace, no insignificant separators). The resulting digest is the SHA-256 hash in lowercase hex.
+
+The signature wraps `key_id` and `signed_at` *in the message*, so an attacker that obtained the per-row recipe payload but did not produce the signature cannot replay the envelope under a different `signed_at`.
+
+## 2. The two envelope variants
+
+The promoter writes two parallel envelopes in the same canonical recipe set. They differ only in the key they use:
+
+| Variant | Storage | Signing key | Gateway tier |
+|---|---|---|---|
+| **KV envelope** | Workers KV key `sh:aegis-recipes:v1` | `RECIPE_KV_SIGNING_KEY` | Primary read path; 300 s TTL |
+| **R2 envelope** | R2 bucket `aegis-recipes-failover`, key `composed-recipe-set/latest` | `RECIPE_R2_SIGNING_KEY` | Secondary read path; per-promotion refresh |
+
+The two signing chains are **independent**. KV poisoning degrades gracefully to R2; the gateway's tiered read pipeline (see [Managed Rules](/concepts/managed-rules)) verifies each tier with its own JWKS binding and fails over on signature failure.
+
+## 3. Per-recipe row shape
+
+Each entry in `recipes` carries the wire-readable subset of the recipe row. Customer-readable fields are limited to:
+
+| Field | Type | Notes |
+|---|---|---|
+| `recipe_id` | string | Stable identifier for the recipe; survives version bumps. |
+| `composition_scope` | enum | `"platform" \| "org" \| "team" \| "agent" \| null`. Drives the [card cascade](/concepts/card-composition) target. |
+| `surface` | string[] | The screening surfaces the recipe applies to (`incoming`, `outgoing`, `tool_calls`, `tool_responses`). |
+| `severity_p` | enum | `"p0" \| "p1" \| "p2" \| null`. See terminology note. |
+| `scope` | enum | `"arena_only" \| "canary" \| "production"`. |
+
+### Terminology note: `severity_p` vs "tier"
+
+Concept-level docs (for example [Managed Rules](/concepts/managed-rules) and [AEGIS](/concepts/aegis)) use the words *tier 1*, *tier 2*, *tier 3*. The database canonical is the column `severity_p` with values `p0 / p1 / p2`. The two vocabularies refer to the same dimension; spec pages use the database canonical so wire-format consumers can map directly. The bridge is fixed:
+
+| Concept-page label | `severity_p` value |
+|---|---|
+| Tier 1 (would block prod; highest severity) | `p0` |
+| Tier 2 (would block prod; high severity) | `p1` |
+| Tier 3 (low blast radius; observe / nudge default) | `p2` |
+
+### Per-row promotion signature
+
+Each recipe row also carries a per-row Ed25519 signature, written into the internal `detection_recipes.promotion_signature` column. The signature is computed over the canonical-hash inputs `recipe_id, version, composition_scope, surface, severity_p, scope, created_by, created_at`. The per-row signature is **not** carried inline in the envelope; the envelope signature wraps the recipe set, and the gateway re-checks the per-row signature against the canonical inputs after envelope verification succeeds.
+
+Internal detection-routing fields are out of scope for this spec. The detection-engine internal vocabulary (the per-checkpoint detection routing fields) persists on the internal `detection_recipes` table per ADR-AEGIS-01 §3d but is not part of the wire-format envelope; the spec documents what the gateway reads from the envelope, not what the platform writes into the internal table.
+
+## 4. Signature verification — internal-resilience, not customer-side
+
+<Warning>
+At GA, the envelope signature exists for **gateway-internal verification only**. There is no public JWKS endpoint at which customers can independently verify a Managed Rule envelope signature.
+</Warning>
+
+The verification model and what it does and does not provide:
+
+- **What the envelope signature provides.** Defense in depth between the KV and R2 read tiers. The gateway verifies on every read; a poisoned KV envelope (whose signature does not verify against `kvVerifyJwks`) falls through to R2 (a different signing chain). A poisoned R2 envelope falls through to the last-known-good in-isolate cache.
+- **What it does not provide.** Customer-side cryptographic attestation. The verify halves — `kvVerifyJwks` and `r2VerifyJwks` — are passed in as worker bindings; they are secrets in the gateway's worker environment, not customer-reachable URLs.
+- **The customer-facing transparency surface.** The append-only audit chain on `recipe_review_actions` is the recipe-level provenance trail, verifiable via the admin API surface. The published [`/trust/slos`](/trust/slos) describe propagation, freshness, and failover commitments. The [advisory](/concepts/advisories) and [IoC](/concepts/iocs) surfaces describe the network-level signal output.
+- **`/v1/.well-known/jwks.json` publishes a different set of keys.** That endpoint publishes [AAP](/concepts/aap-attestation) attestation keys (the `aap_signing_keys` table). Recipe-set signing keys are escrowed in 1Password under the operator's rotation policy and are not part of the public JWKS.
+
+A future public JWKS surface for recipe-set verification keys is not currently on the roadmap; if and when one ships, this section is updated and a customer-side verification guide lands.
+
+## 5. Three independent signing chains
+
+The full rule plane uses three Ed25519 keys, each rotated under Class A annual rotation (90-day JWKS overlap) per `safe-house-hardening/ADR-005`:
+
+| Key | What it signs | Where it sits |
+|---|---|---|
+| `RECIPE_PROMOTION_SIGNING_KEY` | Per-row promotion signature (`detection_recipes.promotion_signature`) | 1Password operator vault |
+| `RECIPE_KV_SIGNING_KEY` | The KV envelope (§2) | 1Password operator vault |
+| `RECIPE_R2_SIGNING_KEY` | The R2 envelope (§2) | 1Password operator vault |
+
+Three independent compromise paths required to fully poison the pipeline. KV poisoning degrades gracefully to R2 (different signing chain). KV + R2 compromise is still defeated by the per-row promotion signature: the gateway re-checks each row against the promotion signature after envelope verification, and a forged row will not match.
+
+## 6. Failover behavior
+
+The gateway's tiered read pipeline at request time:
+
+1. **In-isolate memory cache** — fresh entries (< 60 s) served from in-isolate state.
+2. **Workers KV primary** — 300 s TTL; signed with `RECIPE_KV_SIGNING_KEY`.
+3. **R2 secondary** — per-promotion refresh; signed with `RECIPE_R2_SIGNING_KEY` (independent chain).
+4. **Last-known-good in-isolate** — staleness up to 24 hours; fail-closed on safety-critical checkpoints at 24 h.
+5. **Fail-closed 503** with `X-Mnemom-Reason: aegis-data-plane-unavailable`.
+
+Customers MUST NOT depend on the failover path; the SLO is rule-set freshness P99 ≤ 5 min under normal operation. See [`/trust/slos`](/trust/slos) for the published commitments.
+
+<Note>
+**Honest GA disclosure.** The production R2 binding deploys at the Phase 4 production cutover (2026-05-29). Until then the R2 tier is staging-bound; the KV tier is the primary production path. The published SLOs apply once the R2 binding is live.
+</Note>
+
+## 7. Failover alert tags
+
+The gateway emits stable alert tags on the failover path. These are operator-facing diagnostic tags drawn from the cell-matrix vocabulary; customers may see the corresponding SLO impact on [`/trust/slos`](/trust/slos) but do not consume these tag values directly.
+
+| Tag | Severity | Condition |
+|---|---|---|
+| `P1_kv_unreachable` | P1 | KV read returned an unreachable error. |
+| `P0_kv_sig_fail` | P0 | KV envelope signature did not verify. |
+| `P0_r2_unreachable` | P0 | R2 fallback read returned an unreachable error. |
+| `P0_r2_sig_fail` | P0 | R2 envelope signature did not verify. |
+| `P1_isolate_stale` | P1 | Last-known-good in-isolate cache exceeded freshness target. |
+| `P0_isolate_stale_24h` | P0 | Last-known-good in-isolate cache exceeded 24 h staleness; fail-closed on safety-critical checkpoints. |
+| `P0_coordinated_attack` | P0 | Both KV and R2 signatures failed in a single read — the layered-defense signal. |
+| `P0_data_plane_unavailable` | P0 | All read tiers exhausted; gateway returns 503. |
+
+## 8. Example — a signed envelope at GA
+
+The Day-1 envelope carries the five GA-seeded synthetic Managed Rules. Signatures, identifiers, and signed-at are placeholder-shaped here; production envelopes carry the real cryptographic values.
+
+```json
+{
+  "recipes": [
+    {
+      "recipe_id": "rec_synthetic_001",
+      "composition_scope": "platform",
+      "surface": ["incoming"],
+      "severity_p": "p2",
+      "scope": "production"
+    },
+    {
+      "recipe_id": "rec_synthetic_002",
+      "composition_scope": "platform",
+      "surface": ["incoming", "tool_responses"],
+      "severity_p": "p2",
+      "scope": "production"
+    }
+    /* ... three more synthetic seed entries ... */
+  ],
+  "signature": "<base64url ed25519>",
+  "key_id": "rkv-2026-q2-a",
+  "signed_at": "2026-05-30T00:00:00Z"
+}
+```
+
+## 9. Validation notes
+
+- **Versioning.** `key_id` includes the rotation cohort. The gateway verifies against the JWKS bound in its worker env, never a hardcoded key.
+- **Signature failure is loud.** The gateway emits `P0_kv_sig_fail` or `P0_r2_sig_fail` on signature failure and falls through to the next tier. It does not silently accept an envelope whose signature did not verify.
+- **Replay defense.** The signed message includes `key_id` and `signed_at` — an envelope captured at time T cannot be replayed under a different `signed_at` because the signature would not verify.
+
+## See also
+
+- [Managed Rules](/concepts/managed-rules) — concept page; pipeline + reviewer modes
+- [AEGIS](/concepts/aegis) — the protection-layer framing
+- [Protection Network](/concepts/protection-network) — L0-L5 model; envelope ships at L3
+- [`/trust/slos`](/trust/slos) — published SLOs on freshness, propagation, failover
+- [Card Composition](/concepts/card-composition) — composition_scope semantics
+- [IoC STIX mapping](/specifications/ioc-stix-mapping) — the IoC wire format AEGIS publishes at `/v1/trust/iocs`
