@@ -17,6 +17,18 @@ When you install a recent version of any `@mnemom/*` package, the tarball on the
 
 No long-lived npm tokens are used. All publishes authenticate via GitHub OIDC to npm's [Trusted Publisher](https://docs.npmjs.com/trusted-publishers) system.
 
+## Runtime supply-chain detection with AEGIS
+
+SLSA provenance verifies the package at *build time*. The May 2026 *Mini Shai-Hulud* worm demonstrated that valid SLSA Build Level 3 attestations can be produced for malicious packages when the attacker controls the build pipeline. The cryptographic claim — *"this package was built by that build pipeline"* — is true; what the claim does not protect against is a compromised pipeline producing a signed worm. Runtime detection is the complementary layer.
+
+[AEGIS](/concepts/aegis)'s [substrate fingerprint](/concepts/substrate-fingerprint) is the cross-tenant runtime signal. Every evaluation, integrity checkpoint, and arena attempt across every Mnemom customer is stamped with a `substrate_id` identifying the AI substrate the agent ran on (`<provider>:<model>` at GA, extending to include SDK version and an optional customer-set lockfile hash). The [L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator) rolls behavioral signal per substrate axis-bucket. Behavioral deviation that appears at every customer running on the same substrate simultaneously is the signature SLSA cannot produce — because the attacker controls the build pipeline, not every customer's traffic.
+
+Customer action items, in order of effort:
+
+1. **Keep verifying SLSA provenance.** This guide's existing content remains the canonical package-layer step. SLSA + Sigstore + the Mnemom Trusted Publisher path is the build-layer foundation.
+2. **Read AEGIS L4 + L5 surfaces.** The [threat thermometer](/concepts/protection-network#l4--threat-thermometer) and the [IoCs](/concepts/iocs) + [advisories](/concepts/advisories) surfaces publish what AEGIS is detecting in the network — including any substrate-attributed behavioral deviations. Both surfaces are honest about state per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract): if the network is calm, the page shows calm.
+3. **Opt in to elevated supply-chain attribution.** When the lockfile-hash opt-in feature ships, set the lockfile-hash header on outbound requests for deployed-dependency-graph attribution at AEGIS's L0 axis. See the [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) when the feature is live.
+
 ## Verifying a package
 
 ### Quick check with npm

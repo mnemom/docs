@@ -1,6 +1,6 @@
 ---
 title: "Safe House"
-description: "Pre-screening layer that evaluates every inbound message before it reaches your AI agent — blocking prompt injections, social engineering, and data exfiltration attempts before they cause harm"
+description: "Per-customer perimeter that screens every agent transaction at four checkpoints — front door, back door, inside.autonomy, inside.integrity — under the canonical off / observe / nudge / enforce enforcement modes."
 sidebarTitle: "Safe House"
 icon: "door-open"
 ---
@@ -25,25 +25,31 @@ Agents that operate in the open world face a threat class that alignment cards a
 Safe House solves this by treating every inbound message as untrusted until it passes inspection. It does not replace AIP or enforcement modes — it extends them. A message that Safe House quarantines never reaches the model, so there is no behavior for AIP to analyze in the first place.
 
 <Note>
-Safe House is disabled by default for all agents. Enabling it in `simulate` mode first is strongly recommended — it gives you a picture of your threat landscape with zero operational impact before you commit to blocking.
+Safe House is `off` by default for all agents. Enabling it in `observe` mode first is strongly recommended — it gives you a picture of your threat landscape with zero operational impact before moving to `nudge` or `enforce`.
 </Note>
 
 ## Modes
 
+Safe House uses the canonical four-mode enum shared with the [Protection Card](/concepts/protection-card) and the [Alignment Card](/concepts/alignment-cards) master switches per ADR-039. Same words, same semantics, same UI picker.
+
 <CardGroup cols={2}>
-  <Card title="Disabled" icon="circle-xmark">
-    **Default.** Safe House is inactive. No analysis is performed. All messages pass through to the agent unchanged.
-  </Card>
-  <Card title="Simulate" icon="flask">
-    Full L1→L2→L3 analysis runs synchronously, but no messages are blocked or quarantined. The verdict is returned in the `X-Safe-House-Simulated-Verdict` response header. Use this to understand your threat landscape before enabling enforcement.
+  <Card title="Off" icon="circle-xmark">
+    Detection is skipped entirely. No analysis, no telemetry, no headers. The agent's traffic passes through unchanged.
   </Card>
   <Card title="Observe" icon="eye">
-    Analysis runs asynchronously via `waitUntil` — zero latency impact on the request. Verdicts and session risk scores are logged and available in the Observatory. The `X-Safe-House-Session-Risk` header reflects the current session's accumulated risk level.
+    Full evaluation runs; verdicts and session-risk scores are logged in the Observatory and surfaced in response headers. Zero operational impact on the transaction — no message is blocked, no advisory is injected. Use this to characterize your threat landscape before escalating.
+  </Card>
+  <Card title="Nudge" icon="bell">
+    Detectors run; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context and can adjust behavior accordingly.
   </Card>
   <Card title="Enforce" icon="shield-halved">
-    Full synchronous analysis. Messages that receive a `quarantine` or `block` verdict do not reach the agent. Quarantined messages are held in a review queue; blocked messages are dropped entirely. This is the only mode that actively protects the agent.
+    Full synchronous analysis. Messages that score above the `quarantine` threshold are held in a review queue; messages above `block` are dropped entirely. This is the only mode that actively blocks the agent's traffic.
   </Card>
 </CardGroup>
+
+<Note>
+**Vocabulary canonicalization (ADR-039).** Earlier releases of this page documented `disabled / simulate / observe / enforce`. The canonical post-ADR-039 vocabulary is `off / observe / nudge / enforce` — the same enum used by the [Protection Card](/concepts/protection-card), the Alignment Card master switches, and the cross-tenant AEGIS [Managed Rules](/concepts/managed-rules). The legacy `simulate` mode has been merged into `observe` (full evaluation, no blocking); `disabled` has been renamed `off`. The new mode is `nudge` (advisory injection without blocking) between `observe` and `enforce`.
+</Note>
 
 ## Three-layer detection
 
@@ -83,10 +89,10 @@ Safe House adds headers to every gateway response so your application can inspec
 
 | Header | Present When | Values |
 |--------|-------------|--------|
-| `X-Safe-House-Verdict` | `observe` or `enforce` mode | `pass`, `warn`, `quarantine`, `block` |
-| `X-Safe-House-Quarantine-Id` | Verdict is `quarantine` | UUID of the quarantine entry |
-| `X-Safe-House-Simulated-Verdict` | `simulate` mode | `pass`, `warn`, `quarantine`, `block` |
-| `X-Safe-House-Session-Risk` | `observe` mode | `low`, `medium`, `high`, `critical` |
+| `X-Safe-House-Verdict` | `observe`, `nudge`, or `enforce` mode | `pass`, `warn`, `quarantine`, `block` |
+| `X-Safe-House-Quarantine-Id` | Verdict is `quarantine` (under `enforce`) | UUID of the quarantine entry |
+| `X-Mnemom-Advisory` | `nudge` mode and verdict is `warn` or higher | Advisory annotation surfaced into model context |
+| `X-Safe-House-Session-Risk` | `observe`, `nudge`, or `enforce` mode | `low`, `medium`, `high`, `critical` |
 
 ## Canary credentials
 
@@ -160,8 +166,17 @@ Safe House's runtime treatment is configured by **two parallel cascades** of nam
 
 [Trust Posture vs. Cards](/concepts/posture-vs-cards) covers in detail why these are *parallel* artifact types (postures don't fold into cards; cards don't fold into postures) and the two well-defined join points where they cooperate (detector input + carryover bridge).
 
+## Safe House and AEGIS
+
+Safe House is the per-customer perimeter. [AEGIS](/concepts/aegis) is the cross-tenant defensive network above it — connecting all Safe House customers, identifying signals that tie events across customers into single campaign signatures, and feeding signed [Managed Rules](/concepts/managed-rules) back to every gateway in the network. Per-customer Safe Houses detect on what they can see; AEGIS sees across all of them.
+
+See [Protection Network](/concepts/protection-network) for the five-layer L0-L5 model AEGIS adds on top of Safe House, and [Managed Rules](/concepts/managed-rules) for the signed rule pipeline AEGIS pushes to the Safe House gateway.
+
 ## See also
 
+- [AEGIS](/concepts/aegis) — the cross-tenant protection layer above Safe House
+- [Protection Network](/concepts/protection-network) — the L0-L5 model AEGIS adds on top
+- [Managed Rules](/concepts/managed-rules) — the signed cross-tenant rule pipeline
 - [Safe House Gateway Integration](/gateway/safe-house-overview) — How Safe House fits into the Mnemom gateway request pipeline
 - [Safe House Quickstart](/quickstart/safe-house-protection) — Enable and test Safe House in 5 minutes
 - [Enforcement Modes](/gateway/enforcement) — How the gateway handles violations after they reach the agent
