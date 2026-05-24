@@ -1,0 +1,150 @@
+---
+title: "Protection Network"
+description: "The five-layer cross-tenant defensive model AEGIS adds on top of Safe House: L0 axis identity, L1 aggregator, L2 under-attack overlay, L3 Managed Rules push, L4 threat thermometer, L5 IoC feed + advisories."
+sidebarTitle: "Protection Network"
+icon: "diagram-project"
+---
+
+# Protection Network
+
+The **Protection Network** is the five-layer cross-tenant defensive model [Mnemom AEGIS](/concepts/aegis) adds on top of [Safe House](/concepts/safe-house). Per-customer Safe Houses detect on what they can see — one tenant's traffic, one tenant's agents. The Protection Network aggregates the cross-tenant signal, signs the resulting Managed Rules, and propagates them back to every gateway in the network.
+
+The layers stack from per-evaluation identity to public transparency:
+
+| Layer | Function | Surface |
+|---|---|---|
+| **L0** — Axis identity | Stamp every evaluation with `(substrate, vertical, pattern, source)` | Internal, on every row |
+| **L1** — Cross-tenant aggregator | Roll up rolling stats per axis-bucket | Internal; customer-readable view via `/v1/network/threat-state` |
+| **L2** — Under-attack overlay | Composition-layer auto-elevation during active campaigns | Per-org toggle + dashboard |
+| **L3** — Managed Rules push | Sign + propagate cross-tenant detection content | Gateway evaluates at the four checkpoints |
+| **L4** — Threat thermometer | Per-axis state surfaced to the customer | `/dashboard/threats` |
+| **L5** — IoC feed + advisories | Public transparency surface | `/v1/trust/iocs` + `/trust/advisories` |
+
+All five layers ship with the mechanism wired at GA. Where any layer's *content* is partial (no campaigns active; the IoC feed empty), the surface displays the partial state honestly — see the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract).
+
+## L0 — Axis identity
+
+Every evaluation, checkpoint, and trace row that flows through Safe House is stamped server-side with four axis-identity fingerprints:
+
+- **`substrate_id`** — the AI substrate the agent ran on (`<provider>:<model>` at minimum; see [Substrate fingerprint](/concepts/substrate-fingerprint) for the full composition).
+- **`vertical_id`** — the customer industry vertical the agent serves (enum).
+- **`pattern_fingerprint`** — the canonicalized hash of the detection pattern that matched (or the empty pattern, for unflagged evaluations).
+- **`source_fingerprint`** — the canonicalized hash of the request source identity (channel + principal class + region).
+
+The stamping is pure derivation from row context — there is no customer-side opt-in for the substrate, vertical, pattern, or source fields. L0 is backfilled across the three observation tables (`integrity_checkpoints`, `arena_attempts`, `sideband_analyses`) so every historical row carries axis identity as well.
+
+L0 is the foundation of every upstream layer: the aggregator (L1) buckets by axis; the under-attack overlay (L2) elevates per-axis; the Managed Rules push (L3) targets per-axis. Without L0, none of the cross-tenant primitives have a substrate to operate on.
+
+## L1 — Cross-tenant aggregator
+
+L1 maintains rolling stats per axis-bucket. For each `(axis, bucket, window)` triple — substrate × 24h, vertical × 1h, pattern × 6h, etc. — the aggregator counts detection events, computes baseline rate, and triggers state transitions when the rolling delta crosses thresholds.
+
+The wire format readable by customers is [`GET /v1/network/threat-state`](/specifications/threat-state-response-schema). The endpoint returns per-axis arrays of `{ bucket, threat_level, updated_at }` objects; the `threat_level` enum is `calm | elevated | high | under_attack`. The aggregator's internal table schema is not part of the public surface; what is on the wire is documented in [Threat state response schema](/specifications/threat-state-response-schema).
+
+## L2 — Under-attack overlay
+
+L2 is a composition-layer auto-elevation. When an axis-bucket transitions to `high` or `under_attack`, AEGIS inserts an under-attack overlay layer between Platform and Org in the [card cascade](/concepts/card-composition) — present only during the campaign, removed when the bucket falls back to `calm`. The overlay tightens detection thresholds and surfaces the elevation to the affected customers.
+
+### Under-attack ceiling — additive ratcheting, not override
+
+L2 honors a customer-configured **elevation ceiling**. The platform may auto-ratchet protection up to the ceiling; it does not override the customer's hard configured maximum. This matches the Cloudflare "I'm Under Attack" pattern:
+
+```
+effective_mode = max(normal_posture, min(threat_level_suggested, elevation_ceiling))
+```
+
+Two posture knobs per org:
+
+1. **Normal posture** — `enforcement_mode` during calm conditions (`off / observe / nudge / enforce`).
+2. **Elevation ceiling** — maximum AEGIS may auto-ratchet to during a campaign. Default `enforce` (full headroom); customers may clamp lower.
+
+### Three honest customer scenarios
+
+| Customer config | Threat level | Customer sees |
+|---|---|---|
+| Ceiling = `enforce`, normal = `nudge` | `high` | "AEGIS elevated your agents to enforce because of active campaign X. Revert here." |
+| Ceiling = `nudge`, normal = `nudge` | `under_attack` | "AEGIS detected a critical campaign affecting your substrate. You have clamped your maximum at nudge; we recommend raising your ceiling for the duration of this campaign. [Raise temporarily]" |
+| Ceiling = `enforce`, normal = `enforce` | `under_attack` | "You are at your maximum configured posture and at the highest threat level. No further elevation possible. Additional protections active: canaries planted, credential issuance frozen, AIP proof rate = 100%." |
+
+The third scenario surfaces a key insight: **the under-attack overlay is not just `enforcement_mode` ratcheting** — it is a whole overlay layer of "what under_attack means." Most of the integrity-side primitives (canaries planted, credential issuance frozen, full AIP proofs) kick in regardless of customer ceiling because they are not posture changes; they are integrity-side primitives the customer cannot toggle.
+
+<Note>
+**Honest GA disclosure.** The L2 mechanism is wired at GA — the bucket transitions fire, the toggle UI is live, the audit log records every elevation. The composition-layer auto-elevation ships in Phase 4 (depends on the cards-phase-4 composition primitive); manual operator override on the org flag covers the interim. Un-defer trigger: Phase 4 production cutover (2026-05-29).
+</Note>
+
+## L3 — Managed Rules push
+
+L3 is the cross-tenant rule plane. A candidate enters the review queue with a `writer_identity` stamped by its auth context (arena-bypass, customer-fn-report, researcher-submission, internal-observation, or manual-admin). After review, the candidate is signed with `RECIPE_PROMOTION_SIGNING_KEY` and propagated to every gateway via two parallel signed envelopes:
+
+1. **KV envelope** — signed with `RECIPE_KV_SIGNING_KEY`; the gateway's primary read tier.
+2. **R2 envelope** — signed with `RECIPE_R2_SIGNING_KEY` (an *independent* signing chain from KV); the gateway's secondary read tier for failover.
+
+Promotion target: **P95 ≤ 30s** propagation latency from approve-action to gateway-active. See [`/trust/slos`](/trust/slos) for the published commitments and [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) for the wire format.
+
+### The protective invariant
+
+A tier-1 or tier-2 Managed Rule — one that would block real production traffic — can never auto-promote without a human in the loop, regardless of how aggressive the platform's reviewer-mode setting is. The invariant is enforced structurally by a schema CHECK constraint (`promotion_quorum_met = TRUE` required when `status = 'active'`), not procedurally. See [Managed Rules](/concepts/managed-rules) for the three reviewer modes and the tier breakdown.
+
+### 24-hour observe soak
+
+Newly-promoted rules enter `observe` mode for 24 hours before any mode escalation. The aggregator computes the per-recipe false-positive rate during the soak; rules above the FP threshold auto-rollback under [CLPI Phase 2 trust recovery](/concepts/card-lifecycle). Only rules that survive the soak escalate to their target mode.
+
+## L4 — Threat thermometer
+
+L4 is the customer-facing read of L1. The `/dashboard/threats` page displays per-axis state pulled live from the aggregator — `calm`, `elevated`, `high`, or `under_attack` per axis-bucket — plus a 30-day trend line per axis.
+
+At GA, if all axes are calm, the thermometer shows calm. There is no fabricated activity to make the page look busy; the page reflects actual operational state per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract).
+
+## L5 — IoC feed + advisories
+
+L5 is the public transparency surface. Two endpoints:
+
+- **`/v1/trust/iocs`** — STIX 2.1 bundle of Indicators of Compromise AEGIS has published to the network. See [IoCs](/concepts/iocs) and the wire-format spec at [IoC STIX mapping](/specifications/ioc-stix-mapping).
+- **`/trust/advisories`** — published per-incident summaries. See [Advisories](/concepts/advisories).
+
+At GA both surfaces are honest about the calm state. The IoC bundle is `{ "type": "bundle", "objects": [] }` — empty by design. The advisories page lists the synthetic seed post-mortem with `synthetic: true`. When AEGIS publishes a real advisory it will carry `synthetic: false`; the field is reliable.
+
+## How a signal becomes a Managed Rule
+
+The end-to-end flow from raw signal to gateway-active enforcement:
+
+```
+1.  Signal arrives
+    arena bypass / customer FN report / sideband cross-tenant aggregator hit
+                  │
+                  ▼
+2.  Candidate inserted with writer_identity stamp
+                  │
+                  ▼
+3.  Review queue
+    manual / auto-approve-trusted-sources / auto-approve-high-confidence
+    (tier 1-2 always requires dual-control human approval)
+                  │
+                  ▼
+4.  Signed promotion (Ed25519, per-row promotion_signature)
+                  │
+                  ▼
+5.  KV + R2 envelope dual-write
+    (independent signing chains; P95 ≤ 30s propagation)
+                  │
+                  ▼
+6.  Gateway evaluates at the four checkpoints
+    initial mode: observe (24h soak)
+                  │
+                  ▼
+7.  Escalation to target mode (or auto-rollback on FP threshold)
+```
+
+See [Managed Rules](/concepts/managed-rules) for the pipeline in detail, including the three reviewer modes and the writer-identity taxonomy.
+
+## See also
+
+- [AEGIS](/concepts/aegis) — the overall protection-layer framing
+- [Managed Rules](/concepts/managed-rules) — the signed rule plane (L3)
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — the supply-chain axis stamped at L0
+- [IoCs](/concepts/iocs) — the STIX 2.1 transparency feed (L5)
+- [Advisories](/concepts/advisories) — published post-incident summaries (L5)
+- [Safe House](/concepts/safe-house) — the per-customer perimeter the Protection Network operates above
+- [Card Composition](/concepts/card-composition) — the scope cascade Managed Rules compose into
+- [Threat state response schema](/specifications/threat-state-response-schema) — wire format for L1 read
+- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — wire format for L3 push
