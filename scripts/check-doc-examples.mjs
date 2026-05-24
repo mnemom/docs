@@ -130,6 +130,15 @@ const KNOWN_DRIFT = [
   // concepts/aap-attestation.mdx + guides/observability-setup.mdx worked
   // examples validate against the live spec. Substrate landed in
   // mnemom-api #522 / #526 / #527 / #529 and mnemom-platform #306.)
+
+  // AEGIS-16 deploy-lag allowlist (temporal).
+  //
+  // /v1/trust/iocs ships in mnemom-api on `main` per AEGIS-13 (mig 239 +
+  // src/trust/iocs.ts) and was verified live 2026-05-23 00:54 UTC per
+  // positioning brief §15. The api.mnemom.ai worker redeploy that publishes
+  // the matching openapi.json may lag the docs PR. Once live, drop this
+  // entry — same pattern as the cards-phase-5 deploy-lag entries above.
+  { file: "guides/ioc-feed-consumption.mdx",   method: "GET",    path: "/trust/iocs" },
 ];
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)
