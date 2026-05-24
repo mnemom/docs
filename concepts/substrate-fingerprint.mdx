@@ -1,0 +1,108 @@
+---
+title: "Substrate Fingerprint"
+description: "The AI substrate identity stamped on every evaluation, checkpoint, and trace row — the cross-tenant axis that catches behavioral signatures of supply-chain compromise that package-layer provenance cannot."
+sidebarTitle: "Substrate Fingerprint"
+icon: "fingerprint"
+---
+
+# Substrate fingerprint
+
+The **substrate fingerprint** is the identity of the AI substrate an agent ran on. Every evaluation, integrity checkpoint, arena attempt, and sideband analysis is stamped server-side with a `substrate_id` field that names the provider and model — plus, post-GA, optionally the SDK version and a customer-set lockfile hash. The fingerprint is the L0 stamp of the [Protection Network](/concepts/protection-network) — without it, the [L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator) has no substrate axis to aggregate against.
+
+This page is the conceptual page; the [supply-chain trust guide](/guides/supply-chain-trust) covers the customer-facing how-to for package-level provenance and the runtime layer below.
+
+## The threat model
+
+The supply-chain attack class AEGIS is positioned against is **the compromised AI substrate**: a bad SDK patch, a fine-tuned model whose alignment has been silently regressed, a vendored prompt template with a hidden injection. The May 2026 *Mini Shai-Hulud* worm compromised more than 170 npm packages — including Mistral AI's SDK on npm and PyPI and Guardrails AI's package on PyPI — and shipped **valid SLSA Build Level 3 attestations on the malicious packages**. It was the first documented case of legitimate signed provenance for malicious packages: the attacker controlled the build pipeline, so the provenance system did exactly what it was supposed to do — sign what was built — and the result was a signed worm.
+
+A runtime layer that watches behavior at the agent transaction level, across every customer running on the same substrate, is the layer the attacker cannot also control. Where SLSA verifies the package at build time, the substrate fingerprint identifies the runtime substrate so cross-tenant behavioral aggregation can flag what no single customer would catch.
+
+## What a substrate fingerprint is
+
+Per migration 217 (the L0 axis-identity migration), the substrate identity is stamped on the `BEFORE INSERT` trigger of every row in three observation tables: `integrity_checkpoints`, `arena_attempts`, `sideband_analyses`. The triggers are pure derivation from row context plus request headers — there is no customer-side opt-in for the GA substrate field; it is on every row from the first day.
+
+### GA shape (production rows)
+
+| Table | `substrate_id` format | Example |
+|---|---|---|
+| `integrity_checkpoints` | `<provider>:<model>` | `anthropic:claude-sonnet-4-6` |
+| `arena_attempts` | `arena:<model>` (or `arena:unknown` for pre-AEGIS rows) | `arena:claude-haiku-4-5` |
+| `sideband_analyses` | `sideband:<analyzer_model>` | `sideband:claude-haiku-4-5` |
+
+The three table prefixes make it possible for the L1 aggregator to bucket production vs adversarial vs analyst signal independently — a behavioral deviation observed only in `integrity_checkpoints` rows (production traffic) is a different signal than the same deviation in `arena_attempts` rows (probe traffic).
+
+### Planned enrichments (post-GA)
+
+Migration 217's column comment names two enrichments that compose with the GA fingerprint:
+
+| Enrichment | Effect | State |
+|---|---|---|
+| **SDK version** | Extends production rows to `<provider>:<model>@<sdk_version>` when the customer sends the SDK-version header through the gateway. | Phase 2 trigger update; un-defer trigger: SDK-version header plumbed through the gateway. |
+| **Lockfile hash** | Adds `#<lockfile-hash>` for customers who opt in via the lockfile-hash header, giving deployed-dependency-graph attribution. | Planned ship before AEGIS-16 closeout; un-defer trigger: customer-set lockfile-hash header wired through the gateway. The [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) lands when the feature ships. |
+
+<Note>
+**Honest GA disclosure.** At GA the production substrate fingerprint is `<provider>:<model>` per migration 217. The SDK-version and lockfile-hash enrichments are planned and named with their un-defer triggers; this page is updated when the trigger extensions ship and the format string carries the extra dimensions. Until then, the L1 aggregator buckets on the GA shape only.
+</Note>
+
+## The four axis-identity fields
+
+The substrate fingerprint is one of four L0 axis-identity fields stamped on every row. The full set per ADR-AEGIS-01 §4:
+
+| Field | What it identifies | GA derivation |
+|---|---|---|
+| `substrate_id` | The AI substrate the agent ran on | `<provider>:<model>` from request context |
+| `vertical_id` | The customer industry vertical | Defaults to `unspecified` at GA; Phase 2 enrichment from `agent.metadata.vertical` |
+| `pattern_fingerprint` | The canonicalized hash of the detection pattern (or the verdict, for integrity rows) | Per-table derivation: `ic:<verdict>` for integrity, `<category>:<technique>` for arena, prefix-based for sideband |
+| `source_fingerprint` | The canonicalized hash of the request source identity | `agent_id` for direct rows; `attempt_id` for sideband |
+
+Together the four fields define the L1 aggregator bucket dimension. A campaign that spans every customer running on `anthropic:claude-sonnet-4-6` with a specific BEC-style pattern across financial-services agents shows up as a per-bucket signal even when no single customer can see the cross-tenant pattern.
+
+## How fingerprints flow to the aggregator
+
+The full path from row stamp to cross-tenant signal:
+
+```
+1.  Agent transaction hits the gateway
+        │
+        ▼
+2.  Integrity checkpoint (or arena probe, or sideband analysis) row created
+    BEFORE INSERT trigger stamps:
+        substrate_id, vertical_id, pattern_fingerprint, source_fingerprint
+        │
+        ▼
+3.  L1 cross-tenant aggregator (network_campaign_state) rolls up per-axis stats
+    per (axis, bucket, window) — e.g., per substrate × 24h
+        │
+        ▼
+4.  When a bucket's rolling delta crosses threshold:
+        threat_level transitions calm → elevated → high → under_attack
+        │
+        ▼
+5.  L2 under-attack overlay engages (Phase 4) / L3 Managed Rule promotion candidate
+    L4 threat thermometer surface updates / L5 IoC entry candidate
+```
+
+The customer-readable read of the aggregator is [`GET /v1/network/threat-state?axis=substrate`](/specifications/threat-state-response-schema), which returns per-axis bucket states. The internal aggregator table schema is platform-internal — the wire format documented in the spec is what is on the wire.
+
+## Why this catches what package-layer provenance cannot
+
+SLSA / Sigstore / package provenance verifies the package against the build pipeline. The cryptographic claim is *"this package was built by that build pipeline."* That claim is true even when the build pipeline is compromised — the system is doing exactly what it was designed to do, and the result is a valid signature on malicious code.
+
+The runtime layer is different. AEGIS's substrate fingerprint plus the L1 aggregator observes *behavior at the agent transaction layer*, cross-tenant, in aggregate. Behavioral deviation that appears at every customer running on the same substrate simultaneously is the signature the attacker does not control — because the attacker controls the build pipeline, not every customer's traffic.
+
+<Note>
+**Honest claim.** AEGIS detects *behavioral signatures consistent with* supply-chain compromise. It does **not** replace package-level provenance verification. SLSA and Sigstore are the package-layer; AEGIS is the runtime layer; the two compose, neither replaces the other.
+</Note>
+
+## OWASP ASI06 mapping
+
+Substrate fingerprinting maps to **ASI06 (Agentic Supply Chain Compromise)** in the [OWASP Top 10 for Agentic Applications](https://owasp.org/), published December 2025. The mapping is a *mapping*, not a *coverage guarantee*: AEGIS covers the runtime-behavior dimension of ASI06; package-layer provenance and dependency-graph hygiene remain the customer's responsibility.
+
+## See also
+
+- [AEGIS](/concepts/aegis) — the protection-layer framing
+- [Protection Network](/concepts/protection-network) — the L0-L5 model the fingerprint feeds (the substrate axis at L0)
+- [Supply-chain trust guide](/guides/supply-chain-trust) — package-level provenance + the runtime AEGIS layer
+- [IoCs](/concepts/iocs) — substrate fingerprints surface as STIX 2.1 indicators when AEGIS publishes them
+- [Threat state response schema](/specifications/threat-state-response-schema) — wire format for the L1 read; substrate is one of four axes
+- [Managed Rules](/concepts/managed-rules) — the signed rule plane that substrate-attributed deviation patterns flow into
