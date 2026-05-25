@@ -1,0 +1,225 @@
+---
+title: "IoC STIX 2.1 Mapping"
+description: "The STIX 2.1 bundle wire format the AEGIS IoC feed publishes at /v1/trust/iocs, plus the mapping from Mnemom's internal indicator types to STIX 2.1 SDOs."
+sidebarTitle: "IoC STIX Mapping"
+icon: "file-binary"
+---
+
+Normative reference for the **STIX 2.1 bundle** the [AEGIS](/concepts/aegis) [IoC feed](/concepts/iocs) publishes at `GET /v1/trust/iocs`, and the mapping from Mnemom's internal indicator types to STIX 2.1 Stix Domain Objects.
+
+The bundle conforms to OASIS STIX 2.1 and is consumable by any STIX 2.1-aware tool (MISP, OpenCTI, Anomali, ThreatConnect, custom pipelines). Mnemom-specific metadata is carried in a single `property-extension` per indicator, identified by a stable extension-definition ID; STIX consumers that do not understand the extension are required by spec to ignore it.
+
+The canonical implementation is `mnemom-api/src/trust/iocs.ts`.
+
+## 1. Bundle structure
+
+```jsonc
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": [ /* indicator SDOs, see §3 */ ]
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | string (literal `"bundle"`) | Yes | STIX 2.1 bundle marker. |
+| `id` | string | Yes | Per-response UUID; not stable across calls. |
+| `objects` | array | Yes | Indicator SDOs (§3). Empty array at GA per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract). |
+
+### Pagination
+
+When the response carries `?limit` rows and there are further rows available, the bundle includes a Mnemom extension `next_after` at the bundle level whose value is the ISO-8601 `last_seen_at` timestamp of the final indicator in the bundle. Resume by passing that value as `?after=` on the next request. STIX consumers that do not understand the extension ignore it.
+
+```jsonc
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": [ /* ... */ ],
+  "extensions": {
+    "extension-definition--mnemom-aegis-2026-05": {
+      "extension_type": "property-extension",
+      "next_after": "2026-05-30T12:14:07Z"
+    }
+  }
+}
+```
+
+## 2. Indicator SDO shape
+
+Every IoC row is mapped to a STIX 2.1 `indicator` SDO with the following shape:
+
+```json
+{
+  "type": "indicator",
+  "spec_version": "2.1",
+  "id": "indicator--<uuid>",
+  "created": "<first_seen_at ISO-8601>",
+  "modified": "<last_seen_at ISO-8601>",
+  "valid_from": "<first_seen_at ISO-8601>",
+  "indicator_types": ["malicious-activity"],
+  "confidence": 15,
+  "object_marking_refs": ["marking-definition--<tlp>"],
+  "pattern": "<STIX pattern, present only for sha256 / domain / url>",
+  "pattern_type": "stix",
+  "extensions": {
+    "extension-definition--mnemom-aegis-2026-05": {
+      "extension_type": "property-extension",
+      "mnemom_type": "substrate_fingerprint",
+      "mnemom_value": "<raw indicator value>",
+      "mnemom_tlp": "white",
+      "mnemom_synthetic": true,
+      "mnemom_related_advisory_id": null
+    }
+  }
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | string (literal `"indicator"`) | Yes | STIX SDO type. |
+| `spec_version` | string (literal `"2.1"`) | Yes | STIX version. |
+| `id` | string | Yes | `indicator--<uuid>`; stable per IoC row. |
+| `created` | string | Yes | First observation, ISO-8601 UTC. |
+| `modified` | string | Yes | Most recent observation, ISO-8601 UTC. Mirrors `valid_from` and is used for pagination ordering. |
+| `valid_from` | string | Yes | First observation, ISO-8601 UTC. |
+| `indicator_types` | string[] | Yes | Always `["malicious-activity"]` at GA. |
+| `confidence` | integer | Yes | Numeric confidence per STIX 2.1 §3.7; see §3 mapping. |
+| `object_marking_refs` | string[] | Yes | TLP marking-definition reference; see §4 TLP encoding. |
+| `pattern` | string | Cond. | STIX pattern; present for `sha256` / `domain` / `url` IoC types. Absent for `substrate_fingerprint` and `technique_id`. |
+| `pattern_type` | string (literal `"stix"`) | Cond. | Present when `pattern` is present. |
+| `extensions` | object | Yes | Carries the Mnemom property-extension. See §5. |
+
+### Confidence mapping
+
+The IoC row's qualitative confidence is mapped to the STIX 2.1 numeric confidence scale (§3.7):
+
+| Qualitative confidence | Numeric confidence |
+|---|---|
+| `low` | 15 |
+| `medium` | 50 |
+| `high` | 85 |
+
+## 3. IoC type → STIX pattern mapping
+
+| Mnemom IoC type | STIX pattern | Notes |
+|---|---|---|
+| `sha256` | `[file:hashes.'SHA-256' = '<value>']` | Standard STIX pattern; `pattern_type: "stix"`. |
+| `domain` | `[domain-name:value = '<value>']` | Standard STIX pattern; `pattern_type: "stix"`. |
+| `url` | `[url:value = '<value>']` | Standard STIX pattern; `pattern_type: "stix"`. |
+| `substrate_fingerprint` | *(no STIX pattern emitted)* | Value carried in `mnemom_type` + `mnemom_value` extension fields. See [Substrate fingerprint](/concepts/substrate-fingerprint). |
+| `technique_id` | *(no STIX pattern emitted)* | Value carried in `mnemom_type` + `mnemom_value` extension; maps to MITRE ATT&CK / MITRE ATLAS technique IDs via the value. |
+
+The `substrate_fingerprint` and `technique_id` types do not emit STIX patterns because the standard STIX pattern grammar does not have native predicates for them. STIX-aware consumers that want to match on these types should read the extension fields directly.
+
+## 4. TLP encoding
+
+Mnemom's traffic-light protocol (TLP) value is mapped to STIX 2.1 marking-definition references and also surfaced verbatim in the Mnemom extension:
+
+| `mnemom_tlp` | STIX `object_marking_refs` |
+|---|---|
+| `white` | `marking-definition--<tlp-white>` |
+| `green` | `marking-definition--<tlp-green>` |
+| `amber` | `marking-definition--<tlp-amber>` |
+| `red` | `marking-definition--<tlp-red>` |
+
+(Specific marking-definition UUIDs follow OASIS-published TLP markings; consumers SHOULD resolve them against the canonical OASIS TLP markers.)
+
+## 5. The Mnemom extension definition
+
+The Mnemom property-extension is identified by the stable extension-definition ID:
+
+```
+extension-definition--mnemom-aegis-2026-05
+```
+
+The extension is `property-extension` per STIX 2.1 §11.4, attached at the per-indicator level. Field names are stable:
+
+| Field | Type | Notes |
+|---|---|---|
+| `mnemom_type` | enum | `"sha256" \| "domain" \| "url" \| "substrate_fingerprint" \| "technique_id"`. |
+| `mnemom_value` | string | The raw indicator value, before STIX-pattern encoding. |
+| `mnemom_tlp` | enum | `"white" \| "green" \| "amber" \| "red"`. |
+| `mnemom_synthetic` | boolean | `true` for the GA synthetic seed; `false` for real published indicators. **Consumers can rely on this field.** |
+| `mnemom_related_advisory_id` | string \| null | UUID of the published [advisory](/concepts/advisories) this IoC is associated with, or `null`. |
+
+## 6. Example — calm-at-GA bundle (empty objects)
+
+At GA, the bundle is empty by design per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract).
+
+```json
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": []
+}
+```
+
+That is the system telling the truth: no real cross-tenant IoCs have been published yet.
+
+## 7. Example — one synthetic indicator
+
+Calibrated to be clearly synthetic and not mistakeable for a real attack pattern.
+
+```json
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": [
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--<uuid>",
+      "created": "2026-05-30T00:00:00Z",
+      "modified": "2026-05-30T00:00:00Z",
+      "valid_from": "2026-05-30T00:00:00Z",
+      "indicator_types": ["malicious-activity"],
+      "confidence": 15,
+      "object_marking_refs": ["marking-definition--<tlp-white>"],
+      "extensions": {
+        "extension-definition--mnemom-aegis-2026-05": {
+          "extension_type": "property-extension",
+          "mnemom_type": "substrate_fingerprint",
+          "mnemom_value": "synthetic:seed-2026-05-30",
+          "mnemom_tlp": "white",
+          "mnemom_synthetic": true,
+          "mnemom_related_advisory_id": null
+        }
+      }
+    }
+  ]
+}
+```
+
+## 8. Endpoint behavior
+
+The IoC feed is served at `GET /v1/trust/iocs`.
+
+| Query parameter | Type | Default | Notes |
+|---|---|---|---|
+| `type` | enum | (all) | Single-type filter: `sha256`, `domain`, `url`, `substrate_fingerprint`, `technique_id`. |
+| `after` | ISO-8601 string | (none) | Pagination cursor matching the indicator's `last_seen_at`. |
+| `limit` | integer | 100 | Max 1000. Determines the maximum number of indicators in the response bundle. |
+
+**Ordering:** `last_seen_at DESC`. Pagination via `?after=<last value seen>` is the canonical resume pattern; the `next_after` bundle-level extension (§1) surfaces the cursor for the next call.
+
+**Auth:** customer API key via `X-Mnemom-Api-Key: $MNEMOM_KEY`.
+
+**Rate limit:** 1 request per second per IP (KV-backed; fail-open if the rate-limit KV namespace is unbound). Cloudflare Workers KV has a 60 s minimum TTL, so the *effective* practical bound is closer to 1 request per minute per IP. Recommended polling cadence: every 5-15 minutes via cron. See the [IoC feed consumption guide](/guides/ioc-feed-consumption) for a runnable integration.
+
+## 9. Bundle-level signing
+
+<Note>
+At GA, the STIX bundle is **not** cryptographically signed. The IoC entries themselves are produced from rows in the internal `iocs` table. The Managed Rule envelope signing chain (see [Managed rule envelope schema](/specifications/managed-rule-envelope-schema)) protects the Managed Rule pipeline; the IoC bundle is a derived view of network-level signal output.
+
+Customers wanting cryptographic attestation for cross-tenant detection content should rely on the append-only audit chain (`recipe_review_actions`) plus the [`recipe.promoted`](/api-reference/webhook-events) and [`advisory.published`](/api-reference/webhook-events) webhook events plus the published [`/trust/slos`](/trust/slos) commitments.
+</Note>
+
+## See also
+
+- [IoCs](/concepts/iocs) — concept page for the IoC feed
+- [IoC feed consumption guide](/guides/ioc-feed-consumption) — runnable how-to
+- [AEGIS](/concepts/aegis) — protection-layer framing
+- [Advisories](/concepts/advisories) — published per-incident summaries (the `mnemom_related_advisory_id` target)
+- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — wire format for the signed rule plane
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — what `substrate_fingerprint` IoC values represent

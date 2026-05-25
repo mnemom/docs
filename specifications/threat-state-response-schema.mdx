@@ -1,0 +1,131 @@
+---
+title: "Threat State Response Schema"
+description: "Wire format for GET /v1/network/threat-state — the customer-readable read of the AEGIS L1 cross-tenant aggregator state. Per-axis arrays of bucket states."
+sidebarTitle: "Threat State Response"
+icon: "gauge"
+---
+
+Normative reference for `GET /v1/network/threat-state` — the customer-readable read of the [AEGIS Protection Network L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator). The endpoint returns a snapshot of per-axis bucket states for the customer's tenant view.
+
+The underlying aggregator table is internal; this spec documents what is on the wire, not the table column list. Per ADR-AEGIS-01 §3 the cross-tenant aggregator composes into the cards composition primitive via the four axis dimensions.
+
+## 1. Top-level response shape
+
+```jsonc
+{
+  "axes": {
+    "substrate": [ /* array of bucket state objects */ ],
+    "vertical":  [ /* ... */ ],
+    "pattern":   [ /* ... */ ],
+    "source":    [ /* ... */ ]
+  },
+  "as_of": "<ISO-8601 UTC>"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `axes` | object | Yes | Map of axis name → array of bucket state objects. The four axis names are fixed: `substrate`, `vertical`, `pattern`, `source`. |
+| `axes.<axis>` | array | Yes | Array of bucket-state objects for that axis. May be empty if the axis has no active buckets. |
+| `as_of` | string | Yes | ISO-8601 UTC timestamp of the aggregator snapshot serving this response. |
+
+## 2. Bucket state object
+
+```json
+{
+  "bucket": "<bucket id>",
+  "threat_level": "calm",
+  "updated_at": "<ISO-8601 UTC>"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `bucket` | string | Yes | Bucket identifier within the axis. Opaque to the customer; stable per `(axis, bucket)` pair across calls. See §3 for per-axis semantics. |
+| `threat_level` | enum | Yes | `"calm" \| "elevated" \| "high" \| "under_attack"`. See §4. |
+| `updated_at` | string | Yes | ISO-8601 UTC timestamp of the last threat-level transition for this bucket. |
+
+## 3. Per-axis bucket identifier semantics
+
+The four axes scope cross-tenant aggregation along orthogonal dimensions:
+
+| Axis | Bucket identity | Meaning |
+|---|---|---|
+| `substrate` | Hash of the [substrate fingerprint](/concepts/substrate-fingerprint) | Aggregates across customers running on the same AI substrate. |
+| `vertical` | Vertical-id enum value | Aggregates across customers in the same industry vertical. |
+| `pattern` | Canonicalized pattern fingerprint hash | Aggregates across customers seeing the same detection-pattern signature. |
+| `source` | Canonicalized source fingerprint hash | Aggregates across customers receiving traffic from the same source identity class. |
+
+Bucket identifiers are opaque to the customer; the customer reads the threat level, not the bucket's underlying composition. Internal aggregation thresholds and per-bucket state-transition logic are platform-level config — they are not surfaced on the wire.
+
+## 4. Threat-level enum
+
+The threat-level enum has four values, ordered by severity:
+
+| Value | Semantic | Customer-side effect |
+|---|---|---|
+| `calm` | Baseline; no anomalous cross-tenant signal on this bucket. | No L2 under-attack overlay engaged. |
+| `elevated` | Above baseline; one or more cross-tenant signals trending up. | L2 overlay candidate; not yet active. |
+| `high` | Sustained cross-tenant pressure on this bucket. | L2 under-attack overlay auto-elevates protection against the customer's [elevation ceiling](/concepts/protection-network#under-attack-ceiling--additive-ratcheting-not-override). |
+| `under_attack` | Active cross-tenant campaign confirmed on this bucket. | L2 overlay at maximum elevation; additional integrity-side primitives engage (canaries, frozen credential issuance, full AIP proof rate). |
+
+The state transitions are bidirectional with hysteresis; a bucket that elevates to `high` does not immediately demote to `calm` even when the underlying signal subsides — the aggregator requires sustained low signal across the exit hysteresis window before demotion.
+
+## 5. Query parameters
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `axis` | enum | (all axes) | Filter the response to a single axis: `substrate`, `vertical`, `pattern`, or `source`. |
+| `max_buckets` | integer | 100 | Bound the per-axis array size. Maximum value: 1000. Per-axis arrays are sorted by `threat_level` descending, then `updated_at` descending; truncation drops the tail. |
+
+**Auth:** customer API key via `X-Mnemom-Api-Key: $MNEMOM_KEY`.
+
+## 6. Example — calm-at-GA response
+
+At GA, with the network calm across all axes, the response per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract):
+
+```json
+{
+  "axes": {
+    "substrate": [
+      { "bucket": "sb-baseline", "threat_level": "calm", "updated_at": "2026-05-30T00:00:00Z" }
+    ],
+    "vertical": [
+      { "bucket": "v-financial-services", "threat_level": "calm", "updated_at": "2026-05-30T00:00:00Z" },
+      { "bucket": "v-customer-support",   "threat_level": "calm", "updated_at": "2026-05-30T00:00:00Z" }
+    ],
+    "pattern": [],
+    "source":  []
+  },
+  "as_of": "2026-05-30T00:00:00Z"
+}
+```
+
+## 7. Example — one bucket elevated (synthetic for documentation)
+
+This example is documentation-only — at GA there is no real elevated bucket. The shape is what the customer sees if the substrate axis registers cross-tenant elevation:
+
+```json
+{
+  "axes": {
+    "substrate": [
+      { "bucket": "sb-baseline",       "threat_level": "calm",     "updated_at": "2026-05-30T00:00:00Z" },
+      { "bucket": "sb-synthetic-test", "threat_level": "elevated", "updated_at": "2026-05-30T03:14:07Z" }
+    ],
+    "vertical": [
+      { "bucket": "v-financial-services", "threat_level": "calm", "updated_at": "2026-05-30T00:00:00Z" }
+    ],
+    "pattern": [],
+    "source":  []
+  },
+  "as_of": "2026-05-30T03:14:30Z"
+}
+```
+
+## See also
+
+- [Protection Network](/concepts/protection-network) — the five-layer model; L1 + L4 + L2 context
+- [AEGIS](/concepts/aegis) — protection-layer framing
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — what the `substrate` axis buckets aggregate
+- [Managed Rules](/concepts/managed-rules) — the rule plane the under-attack overlay engages
+- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — wire format on the rule push side (L3)
