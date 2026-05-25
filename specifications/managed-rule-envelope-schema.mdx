@@ -88,7 +88,7 @@ The verification model and what it does and does not provide:
 
 - **What the envelope signature provides.** Defense in depth between the KV and R2 read tiers. The gateway verifies on every read; a poisoned KV envelope (whose signature does not verify against `kvVerifyJwks`) falls through to R2 (a different signing chain). A poisoned R2 envelope falls through to the last-known-good in-isolate cache.
 - **What it does not provide.** Customer-side cryptographic attestation. The verify halves — `kvVerifyJwks` and `r2VerifyJwks` — are passed in as worker bindings; they are secrets in the gateway's worker environment, not customer-reachable URLs.
-- **The customer-facing transparency surface.** The append-only audit chain on `recipe_review_actions` is the recipe-level provenance trail, verifiable via the admin API surface. The published [`/trust/slos`](/trust/slos) describe propagation, freshness, and failover commitments. The [advisory](/concepts/advisories) and [IoC](/concepts/iocs) surfaces describe the network-level signal output.
+- **The customer-facing transparency surface.** The append-only audit chain on `recipe_review_actions` is the recipe-level provenance trail, verifiable via the admin API surface. The published [`/trust/slos`](https://www.mnemom.ai/trust/slos) describe propagation, freshness, and failover commitments. The [advisory](/concepts/advisories) and [IoC](/concepts/iocs) surfaces describe the network-level signal output.
 - **`/v1/.well-known/jwks.json` publishes a different set of keys.** That endpoint publishes [AAP](/concepts/aap-attestation) attestation keys (the `aap_signing_keys` table). Recipe-set signing keys are escrowed in 1Password under the operator's rotation policy and are not part of the public JWKS.
 
 A future public JWKS surface for recipe-set verification keys is not currently on the roadmap; if and when one ships, this section is updated and a customer-side verification guide lands.
@@ -115,7 +115,7 @@ The gateway's tiered read pipeline at request time:
 4. **Last-known-good in-isolate** — staleness up to 24 hours; fail-closed on safety-critical checkpoints at 24 h.
 5. **Fail-closed 503** with `X-Mnemom-Reason: aegis-data-plane-unavailable`.
 
-Customers MUST NOT depend on the failover path; the SLO is rule-set freshness P99 ≤ 5 min under normal operation. See [`/trust/slos`](/trust/slos) for the published commitments.
+Customers MUST NOT depend on the failover path; the SLO is rule-set freshness P99 ≤ 5 min under normal operation. See [`/trust/slos`](https://www.mnemom.ai/trust/slos) for the published commitments.
 
 <Note>
 **Honest GA disclosure.** The production R2 binding deploys at the Phase 4 production cutover (2026-05-29). Until then the R2 tier is staging-bound; the KV tier is the primary production path. The published SLOs apply once the R2 binding is live.
@@ -123,7 +123,7 @@ Customers MUST NOT depend on the failover path; the SLO is rule-set freshness P9
 
 ## 7. Failover alert tags
 
-The gateway emits stable alert tags on the failover path. These are operator-facing diagnostic tags drawn from the cell-matrix vocabulary; customers may see the corresponding SLO impact on [`/trust/slos`](/trust/slos) but do not consume these tag values directly.
+The gateway emits stable alert tags on the failover path. These are operator-facing diagnostic tags drawn from the cell-matrix vocabulary; customers may see the corresponding SLO impact on [`/trust/slos`](https://www.mnemom.ai/trust/slos) but do not consume these tag values directly.
 
 | Tag | Severity | Condition |
 |---|---|---|
@@ -176,6 +176,6 @@ The Day-1 envelope carries the five GA-seeded synthetic Managed Rules. Signature
 - [Managed Rules](/concepts/managed-rules) — concept page; pipeline + reviewer modes
 - [AEGIS](/concepts/aegis) — the protection-layer framing
 - [Protection Network](/concepts/protection-network) — L0-L5 model; envelope ships at L3
-- [`/trust/slos`](/trust/slos) — published SLOs on freshness, propagation, failover
+- [`/trust/slos`](https://www.mnemom.ai/trust/slos) — published SLOs on freshness, propagation, failover
 - [Card Composition](/concepts/card-composition) — composition_scope semantics
 - [IoC STIX mapping](/specifications/ioc-stix-mapping) — the IoC wire format AEGIS publishes at `/v1/trust/iocs`
