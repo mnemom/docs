@@ -1,0 +1,72 @@
+---
+title: "IoCs (Indicator-of-Compromise feed)"
+description: "The STIX 2.1 Indicator-of-Compromise feed AEGIS publishes at /v1/trust/iocs. Empty by design at GA per the calm-at-GA contract; populated as AEGIS detects."
+sidebarTitle: "IoCs"
+icon: "list-radio"
+---
+
+# IoCs
+
+An **IoC** in the AEGIS context is a behavioral fingerprint, substrate signature, or technique identifier that [AEGIS](/concepts/aegis) has published to the network because the cross-tenant aggregator promoted a [Managed Rule](/concepts/managed-rules) against it. The IoC feed lives at `GET /v1/trust/iocs` and is encoded as a [STIX 2.1](https://oasis-open.github.io/cti-documentation/) bundle.
+
+The feed is the [L5 layer](/concepts/protection-network#l5--ioc-feed--advisories) of the Protection Network — the public transparency surface that lets external SIEMs, threat-intel platforms, and partner networks consume the same indicators AEGIS pushes to every gateway internally.
+
+## The STIX 2.1 wire format
+
+Every IoC row maps to a STIX 2.1 `indicator` SDO. Mnemom-specific metadata is carried in a single `property-extension` per indicator, identified by a stable extension-definition ID:
+
+```
+extension-definition--mnemom-aegis-2026-05
+```
+
+Field names in the extension are stable: `mnemom_type`, `mnemom_value`, `mnemom_tlp`, `mnemom_synthetic`, `mnemom_related_advisory_id`. STIX consumers that do not understand the extension MUST ignore it per STIX 2.1 §11.
+
+The full wire format — bundle shape, indicator SDO shape, IoC type → STIX pattern mapping, confidence numeric mapping, endpoint behavior — is specified at [`/specifications/ioc-stix-mapping`](/specifications/ioc-stix-mapping). This concept page covers the conceptual surface; the spec covers the wire.
+
+## The IoC type taxonomy
+
+Mnemom's IoC types and their STIX 2.1 pattern surface:
+
+| Mnemom IoC type | STIX pattern | What it represents |
+|---|---|---|
+| `sha256` | `[file:hashes.'SHA-256' = '<value>']` | File / artifact hash |
+| `domain` | `[domain-name:value = '<value>']` | DNS name |
+| `url` | `[url:value = '<value>']` | URL |
+| `substrate_fingerprint` | *(no STIX pattern emitted)* | An AI substrate identity flagged for behavioral deviation. See [Substrate fingerprint](/concepts/substrate-fingerprint). |
+| `technique_id` | *(no STIX pattern emitted)* | A MITRE ATT&CK or MITRE ATLAS technique identifier |
+
+For `substrate_fingerprint` and `technique_id` indicators, the value is carried in the Mnemom extension's `mnemom_type` and `mnemom_value` fields. STIX 2.1's standard pattern grammar does not have native predicates for these, so consumers that want to match on them should read the extension fields directly.
+
+## Empty-by-design at GA — the calm-at-GA contract
+
+> If at GA the network is genuinely calm, the thermometer says calm, the advisory list shows the synthetic seed post-mortem, the IoC feed is empty. That's not a stub — that's the system telling the truth.
+
+At GA the bundle is `{ "type": "bundle", "id": "bundle--<uuid>", "objects": [] }`. Customers polling the feed see an empty `objects` array; the field is reliable.
+
+When AEGIS publishes a real IoC, it carries `mnemom_synthetic: false` in the Mnemom extension. The synthetic flag is the field customers can rely on to distinguish real published indicators from any documentation-only or test-seed entries. See [AEGIS — calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract).
+
+## Consumption
+
+The feed is consumable by any STIX 2.1-aware tool (MISP, OpenCTI, Anomali, ThreatConnect, custom pipelines). Customer integration is documented end-to-end in the [IoC feed consumption guide](/guides/ioc-feed-consumption), including:
+
+- Authentication (`X-Mnemom-Api-Key`)
+- Query filters (`?type=`, `?after=`, `?limit=`)
+- Pagination via the `next_after` bundle-level extension
+- Refresh cadence (recommended 5-15 minutes via cron; rate limit 1 req/sec/IP, KV-backed)
+- Mapping Mnemom IoC types into downstream tooling
+
+The wire format reference is [`/specifications/ioc-stix-mapping`](/specifications/ioc-stix-mapping); the runnable how-to is the guide.
+
+## Webhooks
+
+A new IoC insertion fires the `ioc.added` webhook. Subscribe via [Webhooks](/guides/webhooks); see the catalog entry on the [Webhook events](/api-reference/webhook-events#ioc-added) page.
+
+## See also
+
+- [AEGIS](/concepts/aegis) — protection-layer framing
+- [Advisories](/concepts/advisories) — the related per-incident transparency surface that IoC entries may reference via `mnemom_related_advisory_id`
+- [Managed Rules](/concepts/managed-rules) — the rule plane that promotions feed indicators from
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — the AI substrate identity that surfaces as one IoC type
+- [Transparency log](/concepts/transparency-log) — the parallel transparency surface for AAP attestation evidence
+- [IoC STIX mapping](/specifications/ioc-stix-mapping) — wire format specification
+- [IoC feed consumption guide](/guides/ioc-feed-consumption) — runnable integration how-to

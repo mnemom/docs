@@ -1,0 +1,77 @@
+---
+title: "Advisories"
+description: "AEGIS's post-incident transparency surface at /trust/advisories. Each advisory is a published JSON document with a synthetic boolean that distinguishes the GA synthetic seed from real published advisories."
+sidebarTitle: "Advisories"
+icon: "newspaper"
+---
+
+# Advisories
+
+An **advisory** is a per-incident summary [AEGIS](/concepts/aegis) publishes on `/trust/advisories` after a network-level event has run its course — the post-mortem surface where customers, partners, and external researchers read what happened, when it ran, what indicators it produced, and how the network responded.
+
+Advisories are the [L5 layer](/concepts/protection-network#l5--ioc-feed--advisories) of the Protection Network alongside the [IoC feed](/concepts/iocs). Where the IoC feed publishes machine-readable indicators, the advisory surface publishes prose summaries with structured metadata.
+
+## What an advisory contains
+
+Each advisory is published as a JSON document and rendered on `/trust/advisories/{slug}`. Fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `title` | string | Human-readable headline. |
+| `slug` | string | URL-stable identifier. The advisory is fetched at `/v1/trust/advisories/{slug}`. |
+| `summary` | string | One-paragraph plain-language summary. |
+| `timeline` | array | Chronologically ordered event entries with `at` + `event` fields. |
+| `iocs` | array | Indicator entries associated with this advisory. Maps to the [IoC feed](/concepts/iocs) via the indicators' `mnemom_related_advisory_id`. |
+| `related_campaign_id` | string \| null | UUID of the L1 aggregator campaign state row this advisory closes, or `null` for non-campaign-driven advisories. |
+| `references` | array | External references (CVE IDs, vendor advisories, news coverage). |
+| `published_at` | string | ISO-8601 UTC publication timestamp. |
+| `synthetic` | boolean | `true` for the GA synthetic seed; `false` for real published advisories. **Customers can rely on this field.** |
+
+The schema is documented at [`/specifications/pending-advisories-schema`](/specifications/pending-advisories-schema).
+
+## The synthetic flag
+
+Every advisory carries `synthetic: boolean`. At GA the only advisory is the synthetic seed post-mortem, clearly labeled with `synthetic: true`. The synthetic seed is the system telling the truth: AEGIS exercises the end-to-end advisory pipeline — draft, review, publish, IoC linkage, webhook emission — against a real workflow with synthetic content, so the pipeline is proven before the first real advisory needs it.
+
+When AEGIS publishes a real advisory it carries `synthetic: false`. The boolean is the field external pipelines, dashboards, and reputation systems can use to filter; the rule is simple and customer-readable.
+
+## The calm-at-GA framing
+
+> If at GA the network is genuinely calm, the thermometer says calm, the advisory list shows the synthetic seed post-mortem, the IoC feed is empty. That's not a stub — that's the system telling the truth.
+
+See [AEGIS — calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract). The advisory surface does not fabricate real-looking activity; the GA list contains one entry, clearly labeled. When AEGIS detects, the surface fills.
+
+## Authoring lifecycle
+
+Advisories transit a draft → review → publish pipeline managed via the platform admin CMS. The customer-facing endpoints serve published advisories only; the admin endpoints (the CMS) are documented separately in the API Reference under the **Trust & Network (AEGIS)** group:
+
+- `GET /v1/admin/security/advisories` — list (admin)
+- `POST /v1/admin/security/advisories` — create draft (admin)
+- `PUT /v1/admin/security/advisories/{id}` — update (admin)
+- `DELETE /v1/admin/security/advisories/{id}` — remove draft (admin)
+
+Customer-facing reads are:
+
+- `GET /v1/trust/advisories` — paginated list of published advisories
+- `GET /v1/trust/advisories/{slug}` — single advisory by slug
+
+## Webhooks
+
+Advisory publication fires the `advisory.published` webhook. Payload includes `slug`, `title`, `synthetic`, `published_at`, and `related_campaign_id`. Subscribe via [Webhooks](/guides/webhooks); see the catalog entry on the [Webhook events](/api-reference/webhook-events#advisory-published) page.
+
+## Consumption pattern
+
+A typical customer integration:
+
+1. **Subscribe to `advisory.published`** for push-based notification on new publications.
+2. **Periodically fetch `GET /v1/trust/advisories`** as a backup poll (1-2 calls per hour suffices given low publication cadence).
+3. **Filter by `synthetic: false`** when feeding internal alerting / dashboard surfaces.
+4. **Cross-link IoC entries** by resolving `iocs[].id` against the [IoC feed](/concepts/iocs) bundle.
+
+## See also
+
+- [AEGIS](/concepts/aegis) — protection-layer framing; calm-at-GA contract
+- [IoCs](/concepts/iocs) — the parallel machine-readable indicator surface advisories cross-link to
+- [Managed Rules](/concepts/managed-rules) — the rule plane whose promotions advisories cross-reference
+- [Transparency log](/concepts/transparency-log) — AAP-attestation transparency surface alongside the advisory transparency surface
+- [Pending advisories schema](/specifications/pending-advisories-schema) — wire format reference
