@@ -303,7 +303,12 @@ export function pathSegmentsFromUrl(url, expectedHost = "api.mnemom.ai") {
 export function buildSpecIndex(spec) {
   const specPaths = Object.keys(spec.paths ?? {});
   return specPaths.map((raw) => {
-    const segments = raw.split("/").filter(Boolean);
+    let segments = raw.split("/").filter(Boolean);
+    // pathSegmentsFromUrl pre-strips /v1 from URL paths, but the spec
+    // mixes /v1-prefixed (Phase 5 endpoints) with non-prefixed paths.
+    // Symmetrize by also stripping a leading "v1" segment from spec
+    // entries so URL-derived segments match either spec shape.
+    if (segments[0] === "v1") segments = segments.slice(1);
     const methods = Object.keys(spec.paths[raw]).filter((k) =>
       ["get", "post", "put", "patch", "delete", "head", "options"].includes(k),
     );
