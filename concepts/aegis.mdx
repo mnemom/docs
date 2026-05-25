@@ -1,0 +1,144 @@
+---
+title: "AEGIS"
+description: "Adaptive Enforcement, Governance & Intelligence Substrate — the protection layer of Safe House. Screens every agent transaction at four checkpoints, each independently set to one of four enforcement modes."
+sidebarTitle: "AEGIS"
+icon: "shield-check"
+---
+
+# Mnemom AEGIS
+
+**Mnemom AEGIS** — Adaptive Enforcement, Governance & Intelligence Substrate — is the protection layer of [Safe House](/concepts/safe-house). It screens every agent transaction at four checkpoints (front door, back door, inside.autonomy, inside.integrity), each independently set to one of four enforcement modes (`off`, `observe`, `nudge`, `enforce`). AEGIS is the cross-tenant defensive network above the per-customer perimeter: per-customer Safe Houses detect on what they can see; AEGIS sees across all of them and feeds signed Managed Rules back to every gateway in the network.
+
+AEGIS learns from three signal sources: a built-in adversarial arena that probes every Safe House around the clock, customer-reported false negatives and false positives, and aggregated cross-tenant patterns the network can see but no individual customer can. When a new detection pattern crosses the promotion bar, AEGIS converts it into an Ed25519-signed [Managed Rule](/concepts/managed-rules) and propagates it to every affected customer's gateway in under thirty seconds at P95. Tier-1 and tier-2 rules require dual-control human review under an append-only audit chain; the entire pipeline is governed by [published SLOs](/trust/slos) and a public STIX 2.1 [Indicator-of-Compromise feed](/concepts/iocs).
+
+This page is the conceptual entry point. The five-layer architecture is documented in [Protection Network](/concepts/protection-network); the rule pipeline in [Managed Rules](/concepts/managed-rules); the supply-chain detection dimension in [Substrate fingerprint](/concepts/substrate-fingerprint).
+
+## The four checkpoints × the four enforcement modes
+
+Every agent transaction passes four positions in the request lifecycle. Each position is independently configurable to one of four modes. This is the load-bearing bidirectional matrix Safe House operators tune; AEGIS does not introduce new modes or new checkpoints — it ships detection content that composes against the same matrix.
+
+### Four checkpoints
+
+| Checkpoint | Position | What it screens |
+|---|---|---|
+| **Front door** | Inbound, before agent | Prompt injection, indirect injection, social engineering, BEC fraud, agent spoofing |
+| **Inside.autonomy** | Mid-transaction | Tool-use policy, action verification, CLPI proofs |
+| **Inside.integrity** | Mid-transaction | AIP reasoning checks, drift detection, conscience |
+| **Back door** | Outbound, before delivery | PII leakage, exfiltration patterns, alignment-card violations, regulated advice |
+
+### Four enforcement modes
+
+| Mode | Semantics |
+|---|---|
+| **`off`** | Inactive. No analysis, no logging. |
+| **`observe`** | Full evaluation; verdict in header + Observatory; zero operational impact on the transaction. |
+| **`nudge`** | Soft intervention — warnings, prompts, advisories. Transaction proceeds. |
+| **`enforce`** | Synchronous block at quarantine / block thresholds. |
+
+The canonical enum is `off / observe / nudge / enforce`. See [Protection Card](/concepts/protection-card) for the per-agent configuration surface and [Card Composition](/concepts/card-composition) for the strictest-wins scope cascade.
+
+## The three signal loops
+
+AEGIS is one detection substrate fed by three signal loops plus the substrate-fingerprint cross-cutting dimension. Recipes are detection content; rules are control-plane state; both compose through the same machinery.
+
+```
+ARENA              CUSTOMER SIGNAL    CROSS-TENANT         SUPPLY-CHAIN
+(15 personas +     (FN/FP reports +   AGGREGATOR           (substrate
+ mutation phase)    sideband +         (rolling stats per   fingerprint +
+                    telemetry)         axis-bucket)         deviation patterns)
+       │                  │                   │                    │
+       └──────────────────┴───────────────────┴────────────────────┘
+                                  │
+                                  ▼
+                  CANDIDATE TABLE + REVIEW QUEUE       (writer_identity per source)
+                                  │
+                                  ▼
+                  SIGNED PROMOTION                     (Ed25519; dual-control on tier 1-2)
+                                  │
+                                  ▼
+                  PROMOTED RECIPES                     (compose like cards:
+                                                        Platform / Org / Team / Agent)
+                                  │
+                                  ▼ (KV-signed + R2-signed;
+                                  │  target P95 ≤ 30s propagation)
+                  GATEWAY EVALUATES AT 4 CKPT × 4 MODES
+                                  │
+                                  ▼
+                  L2 Under-Attack overlay (Phase 4) / L3 push / L5 IoC + advisories
+```
+
+Supply-chain detection is a sub-dimension of the same substrate, not a parallel system. Every evaluation gets a [substrate fingerprint](/concepts/substrate-fingerprint) attribute. Substrate-attributed deviation patterns become recipes that compose like every other recipe — that is how supply-chain detection lands inside the four-checkpoint model rather than alongside it.
+
+The five writer-identity sources stamped on every candidate row at write time:
+
+| Source loop | Writer identity | Auth |
+|---|---|---|
+| Arena | `arena-bypass` | `ARENA_RECIPE_CANDIDATE_TOKEN` |
+| Customer FN/FP report | `customer-fn-report` | Customer session JWT |
+| Researcher submission | `researcher-submission` | security@ triage (manual) |
+| Internal sideband | `internal-observation` | Service role + sideband origin tag |
+| Admin manual | `manual-admin` | Platform admin session JWT (dual-control for tier 1-2) |
+
+The taxonomy is enforced server-side by the auth context used at write time; the customer never sets it. The full pipeline — from candidate to promoted Managed Rule — is documented in [Managed Rules](/concepts/managed-rules).
+
+## Mutation-phase gating
+
+The arena's evolution gate. When the arena's per-bucket detection rate against a substrate × vertical × pattern × source bucket exceeds threshold, that bucket transitions from "find new bypasses" to "mutate against known good patches" — closing the loop that turns a one-time discovery into sustained adversarial pressure.
+
+**Locked parameters:**
+
+- **Entry threshold:** 95% detection rate per bucket.
+- **Window:** 48-hour rolling (180 → 360 sample size; SE ~1.1%).
+- **Hysteresis:** 24-hour sustained entry; 24-hour sustained exit.
+- **Exit threshold:** 90% (below entry, TCP slow-start shape).
+- **Per-bucket independence:** tracked per `(substrate × vertical × pattern × source)` independently.
+
+A customer with a financial-services agent might be in mutation phase against BEC vectors while still in cold-start against `prompt_injection`. The arena tracks the threshold per bucket independently.
+
+<Note>
+**Honest GA disclosure.** At GA the gate code is live and the bucket telemetry populates from the first arena epoch. The mutation-phase first-activation will be reported on [`/trust/advisories`](/concepts/advisories) when it happens; the page does not claim mutation phase is currently active in production.
+</Note>
+
+## The calm-at-GA contract
+
+> If at GA the network is genuinely calm, the thermometer says calm, the advisory list shows the synthetic seed post-mortem, the IoC feed is empty. That's not a stub — that's the system telling the truth.
+
+This is the load-bearing honesty principle. AEGIS surfaces never fabricate activity to look impressive. The [threat thermometer](/concepts/protection-network), the [IoC feed](/concepts/iocs), and the [advisory list](/concepts/advisories) reflect actual operational state. When the network is calm, the surfaces show calm. When AEGIS publishes a real advisory, it carries `synthetic: false` — and customers can rely on that field.
+
+The five GA-seeded synthetic [Managed Rules](/concepts/managed-rules) are sourced from real production detection content meeting platform-scope + hit-count + low-FP-history + tier-3 bars, then promoted through the full signed pipeline. Customers see live network protection on Day 1; what they do not see is fabricated incident telemetry.
+
+## Honest claims and limitations
+
+The discipline mirrored from [`/protocols/aap/limitations`](/protocols/aap/limitations): AEGIS is precise about what it does and does not do, what is shipped and what is deferred, and where capability is partial rather than complete.
+
+### What AEGIS does not claim
+
+1. **"AEGIS blocked X real attacks."** It has not. At GA the network is calm by design and by construction; the only `synthetic: false` advisories will be the ones AEGIS publishes when it actually detects something.
+2. **"Real campaigns detected in production."** The only advisory at GA is the synthetic seed post-mortem, clearly labeled `synthetic: true`.
+3. **"Mutation phase activated in production."** The gate code is live; the first crossing event has not been observed. When it is, it will be reported on [`/trust/advisories`](/concepts/advisories).
+4. **"Cryptographic identity at every layer."** AAP is a transparency protocol, not a trust protocol — see [`/protocols/aap/limitations`](/protocols/aap/limitations). The honest construction is: AAP declares it. AIP verifies it in flight. CLPI governs its lifecycle and anchors evidence on-chain. Safe House screens it at the perimeter. AEGIS signs the cross-tenant defenses that act on it.
+
+### Deferrals named with their un-defer triggers
+
+| Capability | State at GA | Un-defer trigger |
+|---|---|---|
+| **L2 under-attack overlay (auto-elevation)** | Mechanism wired; auto-elevation composition layer ships Phase 4 (depends on the cards-phase-4 composition primitive). Manual operator override on org flag covers the interim. | Phase 4 production cutover (2026-05-29). |
+| **Tier-1 / tier-2 dual-control promotion in production** | Mechanism live and CHECK-constraint enforced. All five GA-seeded Managed Rules are tier-3. First tier-1/-2 promotion is single-operator-constrained until the second platform admin is provisioned. | 2026-06-01 second platform-admin onboarding. |
+| **First mutation-phase activation observed** | Gate code live; activation requires first prod arena epoch + 95% per-bucket threshold crossing with 24h sustained entry. | First crossing event; reported on [`/trust/advisories`](/concepts/advisories) when it happens. |
+| **Customer-side Managed Rule envelope verification** | Envelope signing is gateway-internal-resilience at GA — see [Managed rule envelope schema §4](/specifications/managed-rule-envelope-schema). No public JWKS endpoint publishes recipe-set keys. | Future public JWKS surface for recipe-set verification keys (not on roadmap). |
+
+### Where AEGIS is one layer, not the whole answer
+
+- **Supply-chain compromise.** AEGIS detects *behavioral signatures consistent with* supply-chain compromise across every customer running on the same substrate. It does not replace package-level provenance verification — see [Substrate fingerprint](/concepts/substrate-fingerprint) and [Supply-chain trust](/guides/supply-chain-trust).
+- **Same-turn enforcement.** Inline enforcement at the four checkpoints is Safe House's job; AEGIS supplies the detection content. See [Safe House](/concepts/safe-house).
+- **Per-team oversight.** Sideband detectors observe team-level patterns; AEGIS consumes the signal for cross-tenant aggregation but does not auto-inject sideband observations into agent prompts. See [Sideband detection](/concepts/sideband-detection).
+
+## See also
+
+- [Protection Network](/concepts/protection-network) — the five-layer L0-L5 model AEGIS adds on top of Safe House
+- [Managed Rules](/concepts/managed-rules) — the signed detection-rule pipeline AEGIS publishes to every gateway
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — the cross-tenant supply-chain signal axis
+- [Safe House](/concepts/safe-house) — the per-customer perimeter AEGIS protects
+- [CLPI](/concepts/clpi) — the governance layer that composes with AEGIS
+- [AAP specification](/protocols/aap/specification) — the transparency protocol AEGIS does not replace
+- [AIP specification](/protocols/aip/specification) — the real-time integrity protocol AEGIS does not replace

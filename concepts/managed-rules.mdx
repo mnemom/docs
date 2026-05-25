@@ -1,0 +1,114 @@
+---
+title: "Managed Rules"
+description: "Signed detection rules AEGIS publishes to every gateway in the network. Tier-3 auto-promote with 24h observe soak; tier-1/-2 require dual-control human review under an append-only audit chain."
+sidebarTitle: "Managed Rules"
+icon: "shield-keyhole"
+---
+
+# Managed Rules
+
+A **Managed Rule** is the control-plane state that wraps a signed detection recipe propagated to every gateway in the network. Recipes are detection content; rules are the control-plane state; both compose through the same machinery as [agent cards](/concepts/agent-cards). When [AEGIS](/concepts/aegis) promotes a detection pattern — from the arena, from a customer FN/FP report, or from the cross-tenant aggregator — the result is a Managed Rule that lands at every affected customer's gateway under the P95 ≤ 30s propagation target.
+
+This page documents the rule pipeline: how a candidate becomes a promoted rule, how the protective invariant is enforced, how the three signing chains compose, and how the 24-hour observe soak governs mode escalation.
+
+## The signal-loop pipeline
+
+AEGIS Managed Rules are sourced from three signal loops plus the substrate-fingerprint cross-cutting dimension; see [AEGIS — three signal loops](/concepts/aegis#the-three-signal-loops). Every candidate row is stamped server-side with a `writer_identity` by the auth context used at write time:
+
+| Source loop | `writer_identity` | Auth |
+|---|---|---|
+| Arena | `arena-bypass` | `ARENA_RECIPE_CANDIDATE_TOKEN` |
+| Customer FN/FP report | `customer-fn-report` | Customer session JWT |
+| Researcher submission | `researcher-submission` | security@ triage (manual) |
+| Internal sideband | `internal-observation` | Service role + sideband origin tag |
+| Admin manual | `manual-admin` | Platform admin session JWT (dual-control for tier 1-2) |
+
+The customer never sets the writer identity. It is the server-side stamp that downstream review uses to scope auto-promotion eligibility (see Three reviewer modes below).
+
+## Three reviewer modes
+
+The graduated-trust pattern used by Cloudflare WAF Managed Rules, AWS Shield Advanced, and CrowdStrike Falcon. Confidence determines auto-eligibility; convenience is the customer's posture choice. Mode is set platform-wide via the platform-admin config.
+
+| Mode | Tier 3 (low blast radius; observe / nudge defaults) | Tier 1-2 (would block prod) |
+|---|---|---|
+| **`manual`** (default) | Platform admin reviews + approves | Platform admin reviews + ≥2 admins sign (dual-control) |
+| **`auto-approve-trusted-sources`** | Auto-promote when `source ∈ {arena-bypass, internal-observation}` and pattern complexity below threshold | Still requires dual-control human review — no exception |
+| **`auto-approve-high-confidence`** | Auto-promote when confidence-score ≥ threshold (function of `distinct_agents_bypassed × consistency × (1 / pattern_complexity)`) | Still requires ≥ 1 human approver under dual-control |
+
+The `manual` mode is the default for new platforms. Auto-modes are available to flip platform-wide via the platform-admin config page. The choice between modes only affects tier-3 candidates; tier-1 and tier-2 promotions are governed by the protective invariant below.
+
+## The protective invariant
+
+A tier-1 or tier-2 rule — one that would actually block real production traffic — can never promote without a human in the loop, regardless of how aggressive the reviewer mode is set. Auto-modes only accelerate tier-3 (observe / nudge / log) rule landing, where the blast radius of a bad call is bounded.
+
+The invariant is enforced **structurally** by the schema. A CHECK constraint requires `promotion_quorum_met = TRUE` whenever `status = 'active'`. The database refuses to write an active row that has not collected the required dual-control approvals. The invariant is not procedural — it is not a workflow that a misconfigured handler can skip; it is a constraint the storage engine enforces on every insert and update.
+
+<Note>
+**Honest GA disclosure.** All five GA-seeded synthetic Managed Rules are tier-3. The first tier-1 or tier-2 promotion is possible 2026-06-01 once the second platform admin is provisioned (CTO onboarding). Until then, the dual-control quorum constraint structurally blocks tier-1/-2 promotion under a single-operator deployment — and that is the system telling the truth about its current state, not a stub.
+</Note>
+
+## Signed promotion and the three signing chains
+
+Every promotion produces a signed row plus two parallel signed envelopes. The three keys are independent — they rotate independently, are escrowed independently, and would have to be compromised independently to fully poison the rule plane.
+
+| Key | What it signs | Where it sits |
+|---|---|---|
+| `RECIPE_PROMOTION_SIGNING_KEY` | Per-row promotion signature (`recipe_id, version, composition_scope, surface, severity_p, scope, created_by, created_at`) | Class A, annual rotation; escrowed in 1Password |
+| `RECIPE_KV_SIGNING_KEY` | The KV envelope (the gateway's primary read tier) | Class A, annual rotation; escrowed in 1Password |
+| `RECIPE_R2_SIGNING_KEY` | The R2 envelope (the gateway's secondary read tier; *independent* chain from KV) | Class A, annual rotation; escrowed in 1Password |
+
+Three independent compromise paths required to fully poison the pipeline. KV poisoning degrades gracefully to R2 (different signing chain). KV + R2 compromise is still defeated by the per-row promotion signature: even if both envelopes are forged, the gateway verifies each row against the promotion signature before evaluation, and a forged row will not match.
+
+See [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) for the wire format and [`/trust/slos`](/trust/slos) for the published SLOs on the failover behavior.
+
+## Propagation, soak, and auto-rollback
+
+A promoted rule transits four stages before it reaches its target enforcement mode:
+
+1. **Sign + dual-write.** Promotion writes the per-row signed entry, then dual-writes the KV and R2 envelopes. Both envelopes share the same canonical recipe set; only the signing key (`key_id`) differs.
+2. **Gateway propagation.** The gateway's tiered read pipeline picks up the new envelope within the P95 ≤ 30s propagation target.
+3. **24-hour observe soak.** The rule enters `observe` mode regardless of its target mode. During the soak, the aggregator computes the per-recipe false-positive rate; the 7-day rolling FP threshold governs whether the rule survives the soak.
+4. **Escalation or auto-rollback.** If the soak passes, the rule escalates to its target mode (`nudge` or `enforce`). If the soak fails on FP, the rule is auto-rolled-back under [CLPI Phase 2 trust recovery](/concepts/card-lifecycle); the `recipe.retired` webhook fires with `reason = 'observe_soak_fp'`.
+
+The soak is not bypassable. A platform admin cannot manually escalate before the 24-hour window completes; the only way to bring a rule to `enforce` faster is to publish it as `enforce` after the soak, never instead of it.
+
+## The five GA-seeded synthetic Managed Rules
+
+The Day-1 Managed Rules are sourced from real production detection content meeting four bars:
+
+- `status = 'active'` in the canonical detection-recipes registry.
+- Platform-scope (no org or agent specialization).
+- `hit_count > 0` (proven detection signal).
+- FP-rate below threshold over the trailing window (proven low false-positive history).
+- Tier 3 (low blast radius for single-operator dual-control constraint).
+
+Five rules selected via the GA seeding script and promoted through the full pipeline:
+
+1. Candidate insert via `internal-observation` writer identity.
+2. `created` and `approved` review actions chained in the append-only audit log.
+3. Signed per-row promotion (`promotion_signature` via `RECIPE_PROMOTION_SIGNING_KEY`).
+4. KV envelope write + R2 envelope write (independent signing chains).
+5. Initial `observe` mode for 24 hours.
+6. After soak, escalation to `enforce`.
+
+By GA, the L3 surface shows five real Managed Rules in `enforce` with effective-since timestamps. Customers see live network protection on Day 1; the rules are real detection content, the signatures are real, and the propagation latency is real. What is synthetic is the framing — they are platform-internal patterns promoted through the same pipeline a future cross-tenant detection event would use, not detections of an actual prod attack campaign.
+
+## Webhook events
+
+The rule lifecycle emits webhook events to the customer's subscription. See [Webhooks](/guides/webhooks) for the subscription setup and [Webhook contract](/concepts/webhook-contract) for the canonical payload shape.
+
+| Event | When | Notable fields |
+|---|---|---|
+| `recipe.promoted` | Promotion completes (or `transition='observe_to_active'` on soak escalation) | `recipe_id`, `version`, `composition_scope`, `transition`, `effective_at` |
+| `recipe.retired` | Rule retired (`reason='observe_soak_fp'` on auto-rollback, or `reason='admin'` on manual retirement) | `recipe_id`, `reason`, `retired_at` |
+| `network.threat_level.changed` | Axis-bucket threat-level transition (admin-platform scope at GA) | `axis`, `bucket_id`, `old_state`, `new_state`, `transitioned_at` |
+
+## See also
+
+- [AEGIS](/concepts/aegis) — the overall protection-layer framing
+- [Protection Network](/concepts/protection-network) — the five-layer L0-L5 model Managed Rules push into (L3)
+- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — the wire format on the KV and R2 envelopes
+- [CLPI](/concepts/clpi) — the governance layer that handles auto-rollback (Phase 2)
+- [Protection Card](/concepts/protection-card) — the per-agent configuration Managed Rules tune at the gateway
+- [Card Composition](/concepts/card-composition) — the scope cascade Managed Rules compose into
+- [`/trust/slos`](/trust/slos) — published SLOs for propagation, freshness, failover
