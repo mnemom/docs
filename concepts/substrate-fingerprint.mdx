@@ -7,7 +7,7 @@ icon: "fingerprint"
 
 # Substrate fingerprint
 
-The **substrate fingerprint** is the identity of the AI substrate an agent ran on. Every evaluation, integrity checkpoint, arena attempt, and sideband analysis is stamped server-side with a `substrate_id` field that names the provider and model — plus, post-GA, optionally the SDK version and a customer-set lockfile hash. The fingerprint is the L0 stamp of the [Protection Network](/concepts/protection-network) — without it, the [L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator) has no substrate axis to aggregate against.
+The **substrate fingerprint** is the identity of the AI substrate an agent ran on. Every evaluation, integrity checkpoint, arena attempt, and sideband analysis is stamped server-side with a `substrate_id` field that names the provider, the model, and — when the customer opts in via two headers — the SDK identifier and a lockfile hash. The fingerprint is the L0 stamp of the [Protection Network](/concepts/protection-network) — without it, the [L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator) has no substrate axis to aggregate against.
 
 This page is the conceptual page; the [supply-chain trust guide](/guides/supply-chain-trust) covers the customer-facing how-to for package-level provenance and the runtime layer below.
 
@@ -19,30 +19,43 @@ A runtime layer that watches behavior at the agent transaction level, across eve
 
 ## What a substrate fingerprint is
 
-Per migration 217 (the L0 axis-identity migration), the substrate identity is stamped on the `BEFORE INSERT` trigger of every row in three observation tables: `integrity_checkpoints`, `arena_attempts`, `sideband_analyses`. The triggers are pure derivation from row context plus request headers — there is no customer-side opt-in for the GA substrate field; it is on every row from the first day.
+Per migration 217 (the L0 axis-identity migration) plus migration 252 (the AEGIS-23 enrichment trigger), the substrate identity is stamped on the `BEFORE INSERT` trigger of every row in three observation tables: `integrity_checkpoints`, `arena_attempts`, `sideband_analyses`. The base derivation (`<provider>:<model>`) requires no customer-side opt-in and is stamped on every row. The SDK and lockfile-hash enrichments are opt-in via two request headers (covered below); when present, the trigger composes them into the four-component `substrate_id`.
 
-### GA shape (production rows)
+### Production row shape
 
 | Table | `substrate_id` format | Example |
 |---|---|---|
-| `integrity_checkpoints` | `<provider>:<model>` | `anthropic:claude-sonnet-4-6` |
+| `integrity_checkpoints` | `<provider>:<model>[:<sdk@ver>[:<lockfile-hash>]]` — collapses below | `anthropic:claude-sonnet-4-6:@anthropic-ai/sdk@0.65.0:9e8a…` |
 | `arena_attempts` | `arena:<model>` (or `arena:unknown` for pre-AEGIS rows) | `arena:claude-haiku-4-5` |
 | `sideband_analyses` | `sideband:<analyzer_model>` | `sideband:claude-haiku-4-5` |
 
-The three table prefixes make it possible for the L1 aggregator to bucket production vs adversarial vs analyst signal independently — a behavioral deviation observed only in `integrity_checkpoints` rows (production traffic) is a different signal than the same deviation in `arena_attempts` rows (probe traffic).
+The three table prefixes let the L1 aggregator bucket production vs. adversarial vs. analyst signal independently — a behavioral deviation observed only in `integrity_checkpoints` rows (production traffic) is a different signal than the same deviation in `arena_attempts` rows (probe traffic).
 
-### Planned enrichments (post-GA)
+### The four collapse forms
 
-Migration 217's column comment names two enrichments that compose with the GA fingerprint:
+The production trigger (migration 252) composes `substrate_id` from up to four components: `<provider>`, `<model>`, the SDK identifier `<sdk@ver>`, and the customer-set lockfile hash. The trigger collapses based on which optional inputs are present:
 
-| Enrichment | Effect | State |
+| Inputs present | Components | Resulting `substrate_id` shape |
 |---|---|---|
-| **SDK version** | Extends production rows to `<provider>:<model>@<sdk_version>` when the customer sends the SDK-version header through the gateway. | Phase 2 trigger update; un-defer trigger: SDK-version header plumbed through the gateway. |
-| **Lockfile hash** | Adds `#<lockfile-hash>` for customers who opt in via the lockfile-hash header, giving deployed-dependency-graph attribution. | Planned ship before AEGIS-16 closeout; un-defer trigger: customer-set lockfile-hash header wired through the gateway. The [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) lands when the feature ships. |
+| Provider + model only | 2 | `<provider>:<model>` |
+| SDK only | 3 | `<provider>:<model>:<sdk@ver>` |
+| Lockfile only | 4 | `<provider>:<model>::<lockfile-hash>` (empty third slot) |
+| Both | 4 | `<provider>:<model>:<sdk@ver>:<lockfile-hash>` |
 
-<Note>
-**Honest GA disclosure.** At GA the production substrate fingerprint is `<provider>:<model>` per migration 217. The SDK-version and lockfile-hash enrichments are planned and named with their un-defer triggers; this page is updated when the trigger extensions ship and the format string carries the extra dimensions. Until then, the L1 aggregator buckets on the GA shape only.
-</Note>
+The separator is `:` throughout. The `@` inside `<sdk@ver>` is internal to the SDK identifier (`@anthropic-ai/sdk@0.65.0`); it is not a top-level separator. The four collapse forms are covered by the `aegis23_substrate_trigger` pgTAP suite.
+
+### The two customer-set headers
+
+The fingerprint enrichments are surfaced through two opt-in request headers. Workers Headers handling is case-insensitive; the canonical names below are the casing used in the gateway's `LOCKFILE_HASH_HEADER` and `SDK_VERSION_HEADER` constants in `mnemom-platform/gateway/src/substrate-fingerprint.ts`.
+
+| Header | Effect | Validation |
+|---|---|---|
+| `X-Mnemom-Lockfile-Hash` | Customer-computed digest of the resolved manifest. Adds the lockfile-hash dimension to the substrate-id. | SHA-256, 64 hex chars. Mixed case accepted, normalized to lowercase. Malformed → 400 + `X-Mnemom-Error: invalid-lockfile-hash`. |
+| `X-Mnemom-Sdk-Version` | Customer-set override of the SDK identifier (preferred over User-Agent dispatch). | Free-form string in the SDK-canonical `<package>@<version>` form. |
+
+If `X-Mnemom-Sdk-Version` is not sent, the gateway falls back to dispatching the request's `User-Agent` over seven known SDK families to derive `<sdk@ver>`; if that also fails, the SDK component is `null` (collapsing the fingerprint per the table above). The lockfile hash is never inferred — it is only the digest the customer sends.
+
+Both opt-ins are header-only; there is no admin-UI toggle. See the [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) for the customer-facing how-to.
 
 ## The four axis-identity fields
 
