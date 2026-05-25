@@ -130,6 +130,11 @@ const KNOWN_DRIFT = [
   // concepts/aap-attestation.mdx + guides/observability-setup.mdx worked
   // examples validate against the live spec. Substrate landed in
   // mnemom-api #522 / #526 / #527 / #529 and mnemom-platform #306.)
+
+  // (closed 2026-05-25 by api.mnemom.ai redeploy: /v1/trust/iocs from
+  // AEGIS-13 mig 239 + src/trust/iocs.ts is now in openapi.json, so
+  // guides/ioc-feed-consumption.mdx curl examples validate against the
+  // live spec.)
 ];
 
 // KNOWN_DRIFT entries use templated paths (e.g., `/agents/{agent_id}/card`)

@@ -1,0 +1,214 @@
+---
+title: "Consuming the AEGIS IoC feed"
+description: "End-to-end integration: authenticate, fetch the STIX 2.1 bundle, parse the SDOs, ingest into your threat-intel pipeline, schedule refresh. Runnable curl + Python."
+sidebarTitle: "IoC feed consumption"
+icon: "list-radio"
+---
+
+# Consuming the AEGIS IoC feed
+
+This guide walks a security engineer through end-to-end integration with the [AEGIS](/concepts/aegis) [IoC feed](/concepts/iocs). You will authenticate, fetch the STIX 2.1 bundle, parse the Stix Domain Objects, ingest them into a downstream threat-intel pipeline, and schedule periodic refresh.
+
+If you are looking for the wire-format reference (bundle shape, indicator SDO fields, extension definition, confidence mapping), see [`/specifications/ioc-stix-mapping`](/specifications/ioc-stix-mapping). This page is the runnable how-to.
+
+## What you'll build
+
+A pipeline that:
+
+1. Polls `GET /v1/trust/iocs` on a refresh cadence.
+2. Parses the returned STIX 2.1 bundle.
+3. Filters `indicator` SDOs by Mnemom IoC type (`substrate_fingerprint`, `sha256`, `domain`, `url`, `technique_id`).
+4. Ingests them into your downstream tool (MISP, OpenCTI, Anomali, ThreatConnect, custom).
+5. Resumes from the last-seen `last_seen_at` timestamp on subsequent polls.
+
+## Prerequisites
+
+- A Mnemom API key. If you don't have one, see [API keys](/guides/api-keys) and [Authentication](/guides/authentication).
+- A STIX 2.1-aware downstream consumer. The Python `stix2` library is the canonical reference implementation; install with `pip install stix2`.
+- A polling scheduler (cron, Kubernetes CronJob, Cloudflare Cron Triggers, etc.).
+
+## Step 1 — Fetch the bundle
+
+Authenticate via the `X-Mnemom-Api-Key` header. The endpoint accepts three query parameters: `type` (single-IoC-type filter), `after` (ISO-8601 cursor matching `last_seen_at`), and `limit` (default 100, max 1000).
+
+<CodeGroup>
+```bash curl
+curl -sS \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/trust/iocs?limit=100"
+```
+
+```python Python (requests)
+import os
+import requests
+
+response = requests.get(
+    "https://api.mnemom.ai/v1/trust/iocs",
+    headers={"X-Mnemom-Api-Key": os.environ["MNEMOM_API_KEY"]},
+    params={"limit": 100},
+    timeout=10,
+)
+response.raise_for_status()
+bundle = response.json()
+```
+</CodeGroup>
+
+### Calm-at-GA expected output
+
+At GA the network is calm by design (see [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract)); a fresh fetch returns an empty `objects` array:
+
+```json
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": []
+}
+```
+
+This is the system telling the truth. Your pipeline should handle the empty case gracefully: log "0 new indicators" and move on.
+
+## Step 2 — Parse the SDOs
+
+Pass the bundle through `stix2.parse()` and iterate over indicator SDOs.
+
+```python Python
+import stix2
+
+bundle_obj = stix2.parse(bundle, allow_custom=True)
+
+for obj in bundle_obj.objects:
+    if obj.type != "indicator":
+        continue
+
+    # Extract canonical STIX fields
+    indicator_id = obj.id
+    confidence = obj.confidence           # 15 / 50 / 85
+    valid_from = obj.valid_from
+    pattern = getattr(obj, "pattern", None)  # absent for substrate_fingerprint / technique_id
+
+    # Extract the Mnemom property-extension
+    extensions = obj.extensions or {}
+    mnemom_ext = extensions.get(
+        "extension-definition--mnemom-aegis-2026-05",
+        {},
+    )
+    mnemom_type = mnemom_ext.get("mnemom_type")
+    mnemom_value = mnemom_ext.get("mnemom_value")
+    mnemom_synthetic = mnemom_ext.get("mnemom_synthetic", False)
+    mnemom_related_advisory = mnemom_ext.get("mnemom_related_advisory_id")
+
+    # ... ingest into your downstream tool ...
+```
+
+Use `allow_custom=True` so the `stix2` parser does not reject the Mnemom property-extension as unknown.
+
+## Step 3 — Map Mnemom IoC types into your tooling
+
+Mnemom emits five IoC types. Two of them (`substrate_fingerprint` and `technique_id`) do not carry a STIX `pattern`; their value is in the `mnemom_value` extension field.
+
+| Mnemom IoC type | STIX pattern present | Where to read the value |
+|---|---|---|
+| `sha256` | yes (`[file:hashes.'SHA-256' = '<value>']`) | `obj.pattern` |
+| `domain` | yes (`[domain-name:value = '<value>']`) | `obj.pattern` |
+| `url` | yes (`[url:value = '<value>']`) | `obj.pattern` |
+| `substrate_fingerprint` | no | `obj.extensions[...].mnemom_value` |
+| `technique_id` | no | `obj.extensions[...].mnemom_value` (maps to MITRE ATT&CK / MITRE ATLAS) |
+
+Filtering by type in the API call avoids loading types you don't consume:
+
+```bash
+curl -sS \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/trust/iocs?type=substrate_fingerprint&limit=100"
+```
+
+The `mnemom_synthetic` boolean tells you whether the indicator is real (`false`) or synthetic seed (`true`). For production alerting, filter to `mnemom_synthetic: false`.
+
+## Step 4 — Subscribe to push updates (optional)
+
+The poll path is the canonical integration. If you also want push-based notification on new IoC insertion, subscribe to the `ioc.added` webhook event:
+
+- Catalog entry: [`/api-reference/webhook-events`](/api-reference/webhook-events#ioc-added)
+- Subscription how-to: [Webhooks guide](/guides/webhooks)
+
+Push + poll together gives you near-real-time arrival plus a periodic full-state reconciliation. The poll path remains the source-of-truth for end-of-day reconciliation against your threat-intel platform.
+
+## Step 5 — Resume from where you left off
+
+The endpoint orders results `last_seen_at DESC`. The recommended resume pattern is to track the *most recent* `last_seen_at` your pipeline has ingested and pass it as `?after=` on the next call.
+
+When a response contains `limit` rows and more are available, the bundle carries a `next_after` extension at the bundle level:
+
+```json
+{
+  "type": "bundle",
+  "id": "bundle--<uuid>",
+  "objects": [ /* limit indicators */ ],
+  "extensions": {
+    "extension-definition--mnemom-aegis-2026-05": {
+      "extension_type": "property-extension",
+      "next_after": "2026-05-30T12:14:07Z"
+    }
+  }
+}
+```
+
+Pass `next_after` as `?after=` on the next request to paginate forward. STIX consumers that do not understand the extension ignore it; integrate the read in your own pipeline code.
+
+```python Python — full pagination loop
+def fetch_all_iocs(api_key: str, ioc_type: str | None = None, since: str | None = None):
+    base = "https://api.mnemom.ai/v1/trust/iocs"
+    headers = {"X-Mnemom-Api-Key": api_key}
+    cursor = since
+
+    while True:
+        params = {"limit": 1000}
+        if ioc_type:
+            params["type"] = ioc_type
+        if cursor:
+            params["after"] = cursor
+
+        response = requests.get(base, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        bundle = response.json()
+
+        for obj in bundle.get("objects", []):
+            yield obj
+
+        # Look for the bundle-level next_after extension to keep paginating.
+        next_after = (
+            bundle.get("extensions", {})
+                  .get("extension-definition--mnemom-aegis-2026-05", {})
+                  .get("next_after")
+        )
+        if not next_after:
+            break
+        cursor = next_after
+```
+
+## Refresh cadence and rate limits
+
+The endpoint is rate-limited to **1 request per second per IP** (KV-backed; fail-open if the rate-limit KV namespace is unbound). Cloudflare Workers KV has a 60-second minimum TTL, so the *effective* practical bound is closer to 1 request per minute per IP.
+
+**Recommended polling cadence:** every 5–15 minutes via cron. The IoC publication rate at GA is very low (calm-at-GA contract); more frequent polling burns rate-limit budget without producing more signal. If your downstream tooling needs near-real-time updates, combine cron polling with the `ioc.added` webhook (Step 4).
+
+## No bundle-level cryptographic signing at GA
+
+<Note>
+The STIX bundle is **not** cryptographically signed at GA. The IoC entries are produced from rows in the internal `iocs` table; per [ADR-AEGIS-02 §2](/concepts/managed-rules) the recipe-set envelope signing chain protects the [Managed Rule](/concepts/managed-rules) pipeline, but the IoC bundle is a derived view.
+
+Customers wanting cryptographic attestation for cross-tenant detection content should rely on:
+
+- The append-only audit chain on `recipe_review_actions` (recipe-level provenance via the admin API surface).
+- The [`recipe.promoted`](/api-reference/webhook-events#recipe-promoted) and [`advisory.published`](/api-reference/webhook-events#advisory-published) webhook events.
+- The published [`/trust/slos`](https://www.mnemom.ai/trust/slos) commitments.
+</Note>
+
+## See also
+
+- [IoCs](/concepts/iocs) — concept page
+- [IoC STIX 2.1 mapping](/specifications/ioc-stix-mapping) — wire-format reference
+- [AEGIS](/concepts/aegis) — protection-layer framing
+- [Advisories](/concepts/advisories) — the per-incident transparency surface IoC entries may reference via `mnemom_related_advisory_id`
+- [Webhooks](/guides/webhooks) — push-based IoC notifications
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — what `substrate_fingerprint` IoC values represent
