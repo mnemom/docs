@@ -142,6 +142,15 @@ The foundation is in place; the layers above it are tracked debt:
 
 These are the natural next steps once SOC 2 prep work formalizes. The architecture is intentionally compatible — none of them require changes to posture data model, just additional read paths over the existing rows.
 
+## AEGIS attestation surfaces
+
+Two AEGIS-introduced surfaces extend the attestation foundation:
+
+- **Signed [advisories](/concepts/advisories)** — per-incident published JSON documents with a `synthetic` boolean. Each advisory's lifecycle is recorded in the admin CMS audit log and emits an [`advisory.published`](/api-reference/webhook-events#advisory-published) webhook on publication. For SOC 2 / EU AI Act / ISO 42001 evidence flows, the advisory list is the authoritative cross-tenant incident record.
+- **The Managed Rule signing chain** — [Managed Rules](/concepts/managed-rules) carry Ed25519 per-row promotion signatures (`promotion_signature`); KV and R2 envelopes are independently signed; the gateway verifies on every read. The signing-key escrow + 90-day JWKS rotation overlap is auditable under `safe-house-hardening/ADR-005`. The wire format reference for downstream evidence systems is at [`/specifications/managed-rule-envelope-schema`](/specifications/managed-rule-envelope-schema).
+
+Both surfaces compose with the posture-versioning attestation primitives this guide otherwise covers — posture revisions + Managed Rule promotions together describe *what detection policy was in force* on date X, *which cross-tenant Managed Rules were active*, *what advisories were live*, and *which signing keys signed each*.
+
 ## See also
 
 - [Trust Posture](/concepts/trust-posture) — concept overview
@@ -149,3 +158,5 @@ These are the natural next steps once SOC 2 prep work formalizes. The architectu
 - [Trust Posture schema](/specifications/trust-posture-schema) — normative field reference
 - [Sideband detection](/guides/sideband-detection) — tuning the detectors
 - [Posture cloning workflow](/guides/posture-cloning) — clone-and-customize
+- [Managed Rules](/concepts/managed-rules) — the AEGIS signed cross-tenant rule pipeline
+- [Advisories](/concepts/advisories) — the AEGIS per-incident transparency surface

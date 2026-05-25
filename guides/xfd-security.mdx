@@ -1,287 +1,37 @@
 ---
-title: "XFD Security Architecture"
-description: "The Context Front Door (CFD), Context Back Door (CBD), AIP conscience, and Alignment Cards together form Mnemom's Safe House — a protected execution environment around every agent interaction."
-sidebarTitle: "XFD Security Architecture"
-icon: "shield-check"
+title: "XFD Security Architecture (retired)"
+description: "Retired guide. XFD was the internal codename for what is now documented as the Safe House perimeter and the AEGIS cross-tenant Protection Network. See /concepts/safe-house for canonical content."
+sidebarTitle: "XFD Security (retired)"
+icon: "ban"
 ---
 
-# XFD security architecture
+<Warning>
+**This guide is retired.** The page has been removed from the docs navigation; the URL remains for backward compatibility with prior inbound links.
+</Warning>
 
-Mnemom's XFD system is a multi-layer security envelope around every agent interaction. It combines two gates — the **Context Front Door (CFD)** and the **Context Back Door (CBD)** — with a synchronous conscience check (**AIP**) running inside the agent's reasoning loop. Together they form the **Safe House**: a protected execution environment with isolation, integrity attestation via ZK proofs, confidentiality via per-org encrypted storage, and remote auditability via the alignment card and proof chain.
+# XFD security architecture (retired)
 
-"XFD" is the collective name. _Any door, any direction._
+**XFD** was the internal engineering codename for the threat-detection architecture surrounding Mnemom agents. The customer-facing canonical surface is now [Safe House](/concepts/safe-house) — the per-customer perimeter with four checkpoints (front door, back door, inside.autonomy, inside.integrity), each independently set to one of four enforcement modes (`off`, `observe`, `nudge`, `enforce`).
 
-<Note>
-This page is the canonical reference for the full pipeline. For attack-class detail on what CFD catches, see [Safe House threat model](/guides/safe-house-threat-model). For the broader AAP and AIP threat analysis, see [Security and trust model](/guides/security-trust-model).
-</Note>
+The cross-tenant defensive network above Safe House is [AEGIS](/concepts/aegis) — the L0-L5 [Protection Network](/concepts/protection-network) that aggregates signals across customers, signs cross-tenant [Managed Rules](/concepts/managed-rules), and publishes [IoCs](/concepts/iocs) + [advisories](/concepts/advisories).
 
----
+## Where the content moved
 
-## The Safe House model
-
-```
-                       ╔══════════════════════════════════╗
-                       ║           SAFE HOUSE             ║
-                       ║                                  ║
-Inbound ──[ CFD ]─────►║  AGENT                           ║────[ CBD ]──► Outbound
-               Front   ║    + AIP Conscience (sync)       ║   Back
-                Door   ║    + Alignment Card              ║   Door
-                       ║    + Canary Alarms               ║
-                       ║    + ZK Proof Chain              ║
-                       ║                                  ║
-                       ╚══════════════════════════════════╝
-```
-
-- **CFD** screens every inbound message before the agent processes it. Threats are caught before they reach the LLM.
-- **CBD** screens every outbound response before it reaches the caller. Catches what the agent should not have produced.
-- **AIP** runs a synchronous conscience analysis inside the Safe House on the agent's thinking trace and output. It is the last line of defense against subtle reasoning compromise.
-- **Alignment Cards** define the agent's intent: its values, autonomy envelope, escalation triggers, and audit commitment. Every proof binds an execution to a specific card version.
-- **ZK proof chain** makes the audit trail independently verifiable. Third parties can reconstruct and verify the sequence of decisions without trusting Mnemom.
-
-The Safe House is an application-layer analog to a Trusted Execution Environment. Isolation is enforced at the gateway; integrity is attested by cryptographic verdicts; confidentiality is per-org by default; remote auditability is the whole point.
-
----
-
-## The request pipeline
-
-```
-INBOUND MESSAGE
-      │
-      ▼
-[ CFD FAST PATH ]   ~4ms   $0   always on
-  ├── Preprocessor         Unicode normalization, emoji strip, encoding detection
-  ├── PatternMatcher       Injection, spoofing patterns
-  ├── SignalScorer         BEC, social engineering — 10-language word lists
-  ├── DLPScanner           Inbound PII/credential detection
-  ├── FingerprintMatcher   MinHash similarity against multilingual card corpus
-  ├── CanaryMatcher        Canary values referenced inbound
-  └── SessionTracker       Cross-message risk escalation
-      │
-      ├─ verdict ≥ block       → HTTP 403, no content stored  ──► exit
-      ├─ verdict = quarantine  → HTTP 400, encrypt + store    ──► exit
-      │
-      ▼
-[ CFD SEMANTIC ]   ~200ms   paid enforce only   conditional
-  └── SemanticAnalyzer (Haiku) — triggered when score ≥ 0.4
-      OR surface = tool_result
-      OR non-Latin-script language detected
-      │
-      ▼
-[ QUOTA + POLICY ]   ~2ms   KV-cached
-      │
-      ▼
-[ AI PROVIDER ]   500–5000ms   streaming  ← dominates user latency
-      │
-      ▼
-[ CBD FAST PATH ]   ~3ms   $0   always on   per stream chunk
-  ├── CanaryMatcher        Canary in output → interrupt stream, P0 alert
-  ├── DLPScanner           Outbound PII/PHI (HIPAA-extended)
-  └── PromptLeakDetector   System prompt signature in output
-      │
-      ▼
-RESPONSE DELIVERED TO CALLER  ◄── user latency ends here
-      │
-      ▼
-[ ASYNC — waitUntil, never blocks ]
-  ├── AIP + CBD SEMANTIC (one combined call):
-  │     Conscience check | LaunderDetector
-  │     RegComplianceChecker | Prompt-leak semantic
-  ├── Observer logging (Tier-2 signals, batched)
-  ├── Usage increment (billing)
-  ├── Session state update (KV)
-  └── Card dedup check (if new pattern candidate flagged)
-```
-
-On **Enforce** and **Sovereign** tiers, the AIP + CBD combined call moves _sync_ — it runs between CBD fast path and response delivery. The caller waits 1–3s longer; real-time blocking is enabled.
-
----
-
-## The detector registry
-
-XFD is a named registry of detectors. There are no layers — the legacy L1/L2/L3 terminology is retired. Each detector contributes evidence independently, and the Verdict Engine combines them.
-
-### CFD detectors
-
-| Detector | Modality | Latency | Cost | Always on | What it catches |
-|---|---|---|---|---|---|
-| `PatternMatcher` | Regex | ~1ms | $0 | Yes | Injection, spoofing, explicit exfiltration commands |
-| `SignalScorer` | Word-signal scoring | ~1ms | $0 | Yes | BEC fraud, social engineering — 10 language word lists |
-| `DLPScanner` | Format regex + Luhn | ~1ms | $0 | Yes | Inbound PII and credentials |
-| `FingerprintMatcher` | MinHash LSH | ~2ms | $0 | Yes | Near-duplicate known attacks; all scripts/languages |
-| `CanaryMatcher` | Exact string | `<1ms` | $0 | Yes | Canary values referenced inbound |
-| `SessionTracker` | Score windowing | ~2ms | $0 | Yes | Cross-message escalation (risk multiplier) |
-| `SemanticAnalyzer` | LLM (Haiku) | ~200ms | ~$0.0003 | No | Indirect injection, hijack, nuanced threats, any language |
-
-### CBD detectors
-
-| Detector | Modality | Latency | Cost | Sync? | What it catches |
-|---|---|---|---|---|---|
-| `CanaryMatcher` | Exact string | `<1ms` | $0 | Yes | Canary in output — definitive compromise proof |
-| `DLPScanner` | Format regex + HIPAA 18 | ~2ms | $0 | Yes | PII/PHI in output, credential leakage |
-| `PromptLeakDetector` | Signature match | ~1ms | $0 | Yes | System prompt content in output |
-| `LaunderDetector` | LLM (via AIP) | merged | merged | async\* | CFD-warned message influenced output |
-| `RegComplianceChecker` | LLM (via AIP) | merged | merged | async\* | HIPAA, SEC, COPPA violations |
-
-_\* Sync on Sovereign / Regulated tier._
-
-### The AIP + CBD combined call
-
-AIP already sees the thinking trace, conversation context, and the agent's output. Rather than a separate CBD semantic call, the AIP prompt is extended to return both:
-
-```json
-{
-  "conscience_verdict": "pass | warn | flag",
-  "conscience_concerns": [],
-  "cbd_verdict": "pass | warn | hold | block",
-  "cbd_threats": [{ "type": "...", "confidence": 0.0 }],
-  "compliance_flags": []
-}
-```
-
-One LLM call covers both conscience analysis and CBD semantic screening. This eliminates a redundant round-trip at the most expensive point in the pipeline.
-
----
-
-## The Verdict Engine
-
-Detector outputs are combined into a single decision:
-
-```
-overall_risk = max(detector_confidences)
-             + min((unique_threat_types - 1) × 0.05, 0.15)   ← multi-threat bonus
-             × session_multiplier                              ← from SessionTracker
-
-verdict = threshold_lookup(overall_risk, agent_config)
-```
-
-Default thresholds (configurable per agent and org):
-
-| Verdict | Default | Conservative | Sovereign |
-|---|---|---|---|
-| `warn` | 0.60 | 0.50 | 0.50 |
-| `quarantine` | 0.80 | 0.70 | 0.70 |
-| `block` | 0.95 | 0.90 | 0.85 |
-
-Session multiplier: two or more messages scoring ≥ 0.6 in the last 10 minutes → 1.15×. Three or more → 1.30×.
-
-Evaluation records are persisted as Tier-2 signals. They contain the verdict, the combined risk, per-detector scores, and the detection sources — never the original payload.
-
----
-
-## The trust continuum
-
-Security is a user-configured dial. Every element adds latency and cost. Operators choose where they sit on the continuum; Mnemom engineers the full stack.
-
-```
-OpenClaw    Developer    Standard    Enforce    Sovereign    Regulated
- (Free)      (Free)      (Paid)     (Paid+)   (Enterprise) (Enterprise)
-
-CFD fast    CFD fast    CFD full    CFD sync    CFD sync    CFD sync
-CBD fast    CBD fast    AIP async   AIP async   AIP sync    AIP sync
-No AIP      No AIP      CBD async   CBD sync    CBD sync    CBD + regs
-                                    via AIP     via AIP
-
-~9ms        ~9ms        ~9ms        ~9ms+1–3s   ~9ms+1–3s   ~9ms+1–3s
-$0          $0          $$          $$$         $$$$        Custom
-```
-
-**Free-tier guarantee.** Every agent — even on OpenClaw — gets CFD fast path plus CBD fast path. Zero LLM calls. ~9ms added latency. $0 marginal cost. Catches roughly 65–70% of threats deterministically.
-
-**The 1–3s on Enforce+ is intentional.** Safety-critical agents pay for synchronous verification. This is not a bug to engineer away — it is the price of the guarantee. Operators see the cost transparently and choose their tier.
-
-### Mode names
-
-| Mode | Behavior |
+| Retired surface | Canonical replacement |
 |---|---|
-| `off` | No XFD |
-| `observe` | All detectors async; no blocking; full logging |
-| `enforce` | CFD fast path sync; AIP + CBD async |
-| `enforce_sync` | Everything sync including AIP + CBD; 1–3s added latency |
+| XFD as a system | [Safe House](/concepts/safe-house) — the per-customer perimeter |
+| Context Front Door (CFD) | Safe House front door checkpoint |
+| Context Back Door (CBD) | Safe House back door checkpoint |
+| The four-checkpoint × four-mode model | [Safe House — Modes](/concepts/safe-house#modes) and [Protection Card](/concepts/protection-card) |
+| Cross-tenant detection | [AEGIS](/concepts/aegis) + [Protection Network](/concepts/protection-network) + [Managed Rules](/concepts/managed-rules) |
+| Threat-class catalog | [Safe House threat model](/guides/safe-house-threat-model) |
+| AIP synchronous conscience | [Integrity checkpoints](/concepts/integrity-checkpoints) + [AIP specification](/protocols/aip/specification) |
 
----
+The four how-to guides for Safe House configuration, monitoring, threat model, and webhooks remain canonical:
 
-## Isolation model
+- [Safe House config](/guides/safe-house-config)
+- [Safe House monitoring](/guides/safe-house-monitoring)
+- [Safe House threat model](/guides/safe-house-threat-model)
+- [Safe House webhooks](/guides/safe-house-webhooks)
 
-The Safe House is not a runtime sandbox around the LLM provider — Mnemom does not host the model. Isolation is enforced at the control-plane boundary:
-
-- **Per-org encryption keys** protect Tier-3 content (quarantined messages, canary evidence). Keys are held in Supabase Vault, scoped per organization, and rotated on compromise signal.
-- **Row-level security** enforces tenant isolation in Postgres. Every table carrying traces, checkpoints, quarantine records, or cards is scoped by `org_id` with RLS policies.
-- **Gateway isolation** — each org's traffic is tagged at ingress with a workload identity that flows into every downstream call (CFD, AIP, AAP, observer). Cross-tenant bleed is prevented at the query layer, not just the application layer.
-- **Canary credentials** — fake but format-valid credentials are planted in agent system prompts. Values are high-entropy and unique; they cannot be guessed, only leaked. A canary match in any output is definitive proof of system-prompt extraction.
-- **ZK proof chain** — every verdict is signed with Ed25519, hash-chained, and (for the Integrity Protocol) accompanied by a STARK proof that the verdict was correctly derived from the analysis output. See [AIP verifiable verdicts](/protocols/aip/verifiable-verdicts).
-
----
-
-## Latency and cost tradeoffs
-
-The pipeline is designed so the free tier pays nothing and still catches most threats deterministically. Semantic analysis is conditional and paid-only, so operators never pay for LLM calls that fast-path detectors have already settled.
-
-| Stage | Typical cost per request | Latency impact |
-|---|---|---|
-| CFD fast path | $0 | ~4ms |
-| CFD semantic (conditional) | ~$0.0003 | ~200ms when triggered |
-| CBD fast path | $0 | ~3ms (per chunk) |
-| AIP + CBD semantic async | ~$0.001 | 0ms to user |
-| AIP + CBD semantic sync (Enforce+) | ~$0.001 | +1–3s to user |
-
-Fast-path coverage alone catches BEC fraud, canary exfiltration, PII leakage, system-prompt leakage, and the majority of known injection payloads — all at zero marginal cost.
-
----
-
-## Storage model
-
-Three tiers, aligned to the regulatory posture. Content is stored only when required, encrypted at rest, and subject to defined TTLs.
-
-| Tier | What is stored | Retention | GDPR scope |
-|---|---|---|---|
-| **Tier 1 — Commitment** | `SHA-256(content + timestamp + agent_id + session_id)` and verdict. No personal data. | Permanent | Out of scope (Article 19 satisfied) |
-| **Tier 2 — Signal** | Verdict, detector scores, threat types, surface, pseudonymized session, duration. No content. | 30–90 days | Article 5(1)(e) — defined TTL |
-| **Tier 3 — Content** | Actual message or response content. Encrypted AES-256-GCM per-org. CFD: only on `quarantine`. CBD: default off (analyze in flight, discard); exception for canary hit or regulated enterprise hold. | 30 days → auto-delete | Article 17 — erasable |
-
-For compliance detail, see [Compliance posture](/guides/compliance) and [EU AI Act compliance](/guides/eu-compliance).
-
----
-
-## Multilingual coverage
-
-XFD supports 10 languages (EN, FR, DE, IT, ES, PT, JA, ZH, AR, KO). The design principle: **maximize language-agnostic coverage; localize only what must be localized; use the LLM as the universal fallback.**
-
-| Detector | Language dependency | How handled |
-|---|---|---|
-| `DLPScanner` | None — format patterns are language-agnostic | Works as-is |
-| `FingerprintMatcher` | None — character-trigram MinHash works on any Unicode script | Works as-is |
-| `CanaryMatcher` | None — exact string match | Works as-is |
-| `SessionTracker` | None — score-based | Works as-is |
-| `SemanticAnalyzer` | None — LLM handles 100+ languages natively | Works as-is |
-| `SignalScorer` | Per-language word lists | 10 language packs |
-| `PatternMatcher` | Latin-script: shared normalized patterns. Non-Latin: structural ASCII markers only. | Semantic always triggered for non-Latin |
-
-Non-Latin-script content always triggers the SemanticAnalyzer, regardless of fast-path score, because regex and word-signal detectors are weaker there. The LLM compensates.
-
-The card corpus is multilingual at build time, not runtime: when a new pattern is confirmed in one language, Arena V2 auto-generates equivalents in the other nine and fingerprints them as child cards. FingerprintMatcher then catches cross-language variants with no language-specific runtime code.
-
----
-
-## What XFD does not protect against
-
-Being explicit about limits is as important as documenting coverage.
-
-- **Agent reasoning errors.** If the agent misinterprets a legitimate request and takes a harmful action, CFD does not catch this — the input was benign. AIP's conscience check is the layer that reasons about the agent's reasoning; see [AIP specification](/protocols/aip/specification).
-- **Novel indirect injection.** Semantically indistinguishable injection in large tool results may pass the fast path and the semantic layer. FingerprintMatcher reduces the gap, and Arena V2 promotes confirmed patterns into the corpus, but novel, carefully crafted payloads remain a residual risk.
-- **Model-level compromise.** If the underlying LLM has been fine-tuned or otherwise modified to comply with certain instruction patterns, pattern detection at the gateway doesn't change the model's behavior — only whether the payload reaches it in block mode.
-- **Tool-call side channels.** CFD screens inbound text; CBD screens outbound text. Tool call arguments are currently not covered by the synchronous path. The Agent Activity Protocol records all tool calls for post-hoc analysis (~60s latency); event-driven AAP screening on Enforce+ is on the roadmap.
-
-For the full threat-class breakdown mapped to MITRE ATLAS, see [Safe House threat model](/guides/safe-house-threat-model).
-
----
-
-## See also
-
-- [Safe House overview](/concepts/safe-house) — Architecture and how Safe House fits the gateway stack
-- [Safe House configuration](/guides/safe-house-config) — Per-agent thresholds, action routing, quarantine policy
-- [Safe House threat model](/guides/safe-house-threat-model) — Attack-class detail for CFD detectors
-- [Safe House monitoring](/guides/safe-house-monitoring) — Security Observatory, metrics, alerts
-- [AIP specification](/protocols/aip/specification) — The conscience layer inside the Safe House
-- [Verifiable verdicts](/protocols/aip/verifiable-verdicts) — ZK proof chain for independent audit
-- [Compliance posture](/guides/compliance) — Regulatory status
-- [SLA and incident response](/guides/sla-and-incident-response) — Uptime targets and incident process
+If you arrived here from an external link, the closest canonical page is [Safe House](/concepts/safe-house).
