@@ -14,7 +14,7 @@ The Policy Engine is **Phase 1 of [CLPI (Card Lifecycle & Policy Intelligence)](
 The policy engine translates [Alignment Card](/concepts/alignment-cards) declarations into enforceable rules over concrete tools. An alignment card says an agent may perform `web_fetch`. The `capabilities` section of the same card says `web_fetch` means `mcp__browser__navigate` and `mcp__browser__click` — but not `mcp__filesystem__delete`. The card declares intent. The `enforcement` section enforces it.
 
 <Note>
-**Since UC-4 (2026-04-15), policy is part of the alignment card, not a separate artifact.** The `capabilities`, `enforcement`, and per-capability `forbidden` rules live as sections of the unified card. There is no standalone policy YAML file, no `PUT /v1/agents/:id/policy` endpoint, and no `mnemom policy` CLI group. Use `mnemom card evaluate` + `PUT /v1/agents/{id}/alignment-card` instead. See the [policy management guide](/guides/policy-management) for the customer workflow and the [migration guide](/guides/migrating-to-unified-cards) if you're coming from the pre-UC model.
+**Policy is part of the alignment card, not a separate artifact.** The `capabilities`, `enforcement`, and per-capability `forbidden` rules live as sections of the unified card. There is no standalone policy YAML file, no `PUT /v1/agents/:id/policy` endpoint, and no `mnemom policy` CLI group. Use `mnemom card evaluate` + `PUT /v1/agents/{id}/alignment-card` instead. See the [policy management guide](/guides/policy-management) for the customer workflow.
 </Note>
 
 <Note>
@@ -226,7 +226,7 @@ A tool can match multiple capabilities. This isn't an error — it means the too
 </CardGroup>
 
 <Warning>
-Policy enforcement (`enforcement.default_mode`), action-policing alignment (`autonomy_mode`), and values-policing alignment (`integrity_mode`) are three parallel systems with three independent master switches per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md). Setting one to `enforce` does not affect the others — an agent can sit at `autonomy_mode: observe` + `integrity_mode: enforce` + `enforcement.default_mode: nudge` simultaneously, each on its own independent ladder.
+Policy enforcement (`enforcement.default_mode`), action-policing alignment (`autonomy_mode`), and values-policing alignment (`integrity_mode`) are three parallel systems with three independent master switches. Setting one to `enforce` does not affect the others — an agent can sit at `autonomy_mode: observe` + `integrity_mode: enforce` + `enforcement.default_mode: nudge` simultaneously, each on its own independent ladder.
 </Warning>
 
 ### Relationship to the alignment master switches
@@ -515,7 +515,7 @@ audit:
 
 ## Policy engine and AEGIS Managed Rules
 
-The Policy Engine is **Phase 1 of CLPI**; AEGIS [Managed Rules](/concepts/managed-rules) are a separate (but composable) layer. When a Managed Rule promotes, the gateway loads it via the tiered KV → R2 → in-isolate read substrate. The policy engine still enforces card-defined capability mappings; the Managed Rule adds detection thresholds that screen the inputs and outputs the policy engine then allows or denies. Both compose through the same cards composition primitive locked in [ADR-AEGIS-01 §3a](/concepts/aegis) — the recipe (detection content) and the rule (control-plane state) flow into the cards cascade Platform → Org → Team → Agent under strictest-wins composition.
+The Policy Engine is **Phase 1 of CLPI**; AEGIS [Managed Rules](/concepts/managed-rules) are a separate (but composable) layer. When a Managed Rule promotes, the gateway loads it via the tiered KV → R2 → in-isolate read substrate. The policy engine still enforces card-defined capability mappings; the Managed Rule adds detection thresholds that screen the inputs and outputs the policy engine then allows or denies. Both compose through the same [cards composition primitive](/concepts/aegis) — the recipe (detection content) and the rule (control-plane state) flow into the cards cascade Platform → Org → Team → Agent under strictest-wins composition.
 
 ## See also
 
@@ -525,5 +525,4 @@ The Policy Engine is **Phase 1 of CLPI**; AEGIS [Managed Rules](/concepts/manage
 - [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — `mnemom card evaluate` in GitHub Actions and GitLab CI
 - [Card Lifecycle](/concepts/card-lifecycle) — how alignment cards evolve and interact with policy
 - [Card Composition](/concepts/card-composition) — how platform / org / agent scopes merge
-- [Migrating to Unified Cards](/guides/migrating-to-unified-cards) — if you're coming from the pre-UC policy model
 - [Enforcement Modes](/gateway/enforcement) — alignment enforcement (observe/nudge/enforce) vs. policy enforcement

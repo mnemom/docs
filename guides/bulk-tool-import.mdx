@@ -1,21 +1,21 @@
 ---
 title: "Bulk Tool Import"
-description: "Import tool definitions in bulk from an OpenAPI 3.0+ spec or a Polis-style YAML manifest. LLM-inferred class+domain, preview-only with operator confirmation."
+description: "Import tool definitions in bulk from an OpenAPI 3.0+ spec or a connector YAML manifest. LLM-inferred class+domain, preview-only with operator confirmation."
 sidebarTitle: "Bulk Tool Import"
 icon: "file-import"
 ---
 
-The **tools/import** endpoint walks an OpenAPI 3.0+ spec or a Polis-style tool manifest, extracts proposed tool definitions, and returns a preview with LLM-inferred class + domain per tool. The preview never auto-commits — you review each entry, then write it to the registry individually.
+The **tools/import** endpoint walks an OpenAPI 3.0+ spec or a connector tool manifest, extracts proposed tool definitions, and returns a preview with LLM-inferred class + domain per tool. The preview never auto-commits — you review each entry, then write it to the registry individually.
 
 **Platform-admin only.** The endpoint gates on `principal.isAdmin === true`.
 
 ## When to use bulk import
 
 - **Onboarding a new connector** — point at the connector's OpenAPI spec; preview every operation as a candidate tool.
-- **Migrating a Polis-style manifest** — feed an existing connector manifest YAML through the inference pipeline.
+- **Migrating a connector manifest** — feed an existing connector manifest YAML through the inference pipeline.
 - **Catalog audit** — compare a vendor's OpenAPI against your registry; the response surfaces collisions where the inferred class/domain disagrees with the existing entry.
 
-For a single tool, just use `POST /v1/tools` directly (the W1.1 tools registry surface). Bulk import is for batches of 5-500 tools.
+For a single tool, just use `POST /v1/tools` directly (the tools registry surface). Bulk import is for batches of 5-500 tools.
 
 ## Two source formats
 
@@ -53,22 +53,6 @@ curl -X POST https://api.mnemom.ai/v1/tools/import \
     "infer_class_domain": true
   }'
 ```
-
-### Polis-style YAML
-
-```bash
-curl -X POST https://api.mnemom.ai/v1/tools/import \
-  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "format": "polis_yaml",
-    "source": "inline",
-    "content": "connector: github\ntools:\n  - name: github_create_issue\n    class: internal_write\n    domain: engineering\n    description: Create a GitHub issue\n  - name: github_close_issue\n    class: internal_write\n    domain: engineering\n",
-    "infer_class_domain": false
-  }'
-```
-
-The Polis YAML parser respects inline `class` / `domain` declarations. Set `"infer_class_domain": false` to skip LLM inference entirely.
 
 ## The response
 

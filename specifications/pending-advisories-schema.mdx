@@ -1,6 +1,6 @@
 ---
 title: "Pending Advisories Schema"
-description: "Wire format for pending_advisories rows + the closed source taxonomy and expansion contract (ADR-047)."
+description: "Wire format for pending_advisories rows + the closed source taxonomy and expansion contract."
 sidebarTitle: "Pending Advisories"
 icon: "envelope"
 ---
@@ -9,7 +9,7 @@ icon: "envelope"
 
 `pending_advisories` is the unified cross-turn carryover surface. One table, one read point at the start of each runtime turn (`gateway/src/index.ts::injectPendingNudges`), multiple sources via a closed `source` enum spanning runtime + sideband + manual contexts.
 
-This page documents the row shape every consumer can rely on (gateway, observer, dashboard, CLI, webhook subscribers) and the [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) expansion contract for adding new sources.
+This page documents the row shape every consumer can rely on (gateway, observer, dashboard, CLI, webhook subscribers) and the expansion contract for adding new sources.
 
 ## Row shape
 
@@ -28,13 +28,13 @@ interface PendingAdvisory {
 }
 ```
 
-**TTL.** Default 24 hours. Configurable platform-wide by Mnemom platform admins; not configurable per-org or per-agent (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md)).
+**TTL.** Default 24 hours. Configurable platform-wide by Mnemom platform admins; not configurable per-org or per-agent.
 
 **Status transitions.** Always forward: `pending → consumed` (gateway injected on a turn) or `pending → expired` (TTL elapsed without injection). No revivals.
 
 ## Source taxonomy
 
-Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047 expansion recipe](#expansion-contract) (ADR amendment + migration + producer + consumer-tolerance).
+Closed, hierarchical, append-only enum. Adding a new value requires the [expansion recipe](#expansion-contract) (schema amendment + migration + producer + consumer-tolerance).
 
 | Context | Producer | Examples |
 |---|---|---|
@@ -42,10 +42,10 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047
 | `manual.*` | mnemom-api admin handlers (human-attached) | `manual.admin` |
 
 <Warning>
-**ADR-048 §I15 invariant.** As of 2026-05-07, `sideband.*` sources are no longer accepted into `pending_advisories`. Cron-driven, fleet-shaped observations (the four legacy `sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` rows) now write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table, never to `pending_advisories`. A `NOT VALID` CHECK constraint on `pending_advisories.source` rejects new sideband.* writes; pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'` by migration 193.
+**Surface-separation invariant.** As of 2026-05-07, `sideband.*` sources are no longer accepted into `pending_advisories`. Cron-driven, fleet-shaped observations (the four legacy `sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` rows) now write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table, never to `pending_advisories`. A `NOT VALID` CHECK constraint on `pending_advisories.source` rejects new sideband.* writes; pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'` by migration 193.
 </Warning>
 
-### Current ratified values (post-ADR-048 cutover)
+### Current ratified values (post-cutover)
 
 | Source | Producer | Posture-gated | Webhook event |
 |---|---|---|---|
@@ -56,7 +56,7 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [ADR-047
 | `runtime.back_door.modification` | gateway (back-door handler) | No | (none) |
 | `manual.admin` | mnemom-api admin attach handler | No | future `manual.advisory_attached` |
 
-`sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here. They moved to [`governance_signals`](/specifications/governance-signals-schema) with the ADR-048 cutover; the four legacy `sideband.*.fired` and `drift.detected` webhook event names continue to fire for D+30 backwards-compat through 2026-06-07.
+`sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here. They moved to [`governance_signals`](/specifications/governance-signals-schema) with the 2026-05-07 cutover; the four legacy `sideband.*.fired` and `drift.detected` webhook event names continue to fire for D+30 backwards-compat through 2026-06-07.
 
 ## `source_ref` shapes
 
@@ -96,7 +96,7 @@ Every advisory's `text` follows a stable wrapper:
 [Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]
 ```
 
-The bracket wrapper enables the gateway's [I10 invariant](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) (user-visible-explanation 100%) to detect that an injection happened. Producers MUST keep the wrapper; if the wrapper is missing on a delivered turn, the gateway suffix-injects its own marker `[Mnemom: <intervention summary>]`.
+The bracket wrapper enables the gateway's user-visible-explanation guarantee to detect that an injection happened. Producers MUST keep the wrapper; if the wrapper is missing on a delivered turn, the gateway suffix-injects its own marker `[Mnemom: <intervention summary>]`.
 
 ## `concerns_summary` format
 
@@ -134,7 +134,7 @@ Service-key paths used by the observer cron (not customer-facing — gated behin
 
 To add a new value to `source`, a single PR train MUST land all of:
 
-1. **ADR amendment** to [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) §6 adding the value with its producer, consumer responsibilities, and `source_ref` shape.
+1. **Schema amendment** to the source taxonomy adding the value with its producer, consumer responsibilities, and `source_ref` shape.
 2. **Migration** (`ALTER TABLE pending_advisories DROP CONSTRAINT … ADD CONSTRAINT … CHECK (source IN (…))`) appending the new value. Migration MUST use the post-DDL `pg_proc.prosrc` ASSERT pattern from `mnemom-api/database/migrations/158_*.sql`.
 3. **Producer code** that writes rows with the new source — fire-and-forget, never throws on insert failure.
 4. **Consumer-tolerance discipline** — `gateway/src/index.ts::injectPendingNudges` MUST already render any unknown source as a generic advisory (the current code does this; it doesn't filter on source). Future consumers (dashboard filter chips, CLI `--source`, webhook event types) MUST tolerate the value via either pre-registration or graceful unknown-source fallback.
@@ -143,11 +143,11 @@ To add a new value to `source`, a single PR train MUST land all of:
 
 ### Removing a source
 
-**Forbidden.** Removing a source breaks compliance attestation (historical advisories with that source value become un-renderable) and breaks deserialization for any consumer holding archived rows. Deprecation is the only valid path: stop producing the source, document the deprecation in ADR-047, but leave the CHECK constraint accepting the value forever.
+**Forbidden.** Removing a source breaks compliance attestation (historical advisories with that source value become un-renderable) and breaks deserialization for any consumer holding archived rows. Deprecation is the only valid path: stop producing the source, document the deprecation, but leave the CHECK constraint accepting the value forever.
 
 ## Webhook events
 
-Each source's webhook event name follows `<source>.fired` per ADR-047 §5 — with one documented carve-out: `sideband.drift` keeps its legacy `drift.detected` name. Subscribers receive the standard webhook envelope:
+Each source's webhook event name follows `<source>.fired` — with one documented carve-out: `sideband.drift` keeps its legacy `drift.detected` name. Subscribers receive the standard webhook envelope:
 
 ```json
 {
@@ -173,6 +173,4 @@ See [Subscribing to Safe House webhooks](/guides/safe-house-webhooks) for the fu
 
 - [Sideband detection](/concepts/sideband-detection) — concept overview and the four-source taxonomy
 - [Trust Posture](/concepts/trust-posture) — the policy surface that drives `sideband.*` thresholds
-- [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) — same-turn enforcement + cross-turn carryover model
-- [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) — source taxonomy expansion contract (this page is its customer-facing render)
 - [Compliance attestation foundation](/guides/compliance-attestation-foundation) — how `sideband_sweep_log` + posture-versioned snapshots feed control mappings

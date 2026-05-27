@@ -7,7 +7,7 @@ icon: "shield-check"
 
 # Integrity Checkpoints
 
-An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block — the internal reasoning the model produces before or alongside its visible response. The checkpoint runs **same-turn** between the model's response generation and delivery to the user (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md) — `enforce` blocks the offending action at every checkpoint same-turn; the chat completes 2xx, and the agent's response references what was prevented).
+An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block — the internal reasoning the model produces before or alongside its visible response. The checkpoint runs **same-turn** between the model's response generation and delivery to the user (`enforce` blocks the offending action at every checkpoint same-turn; the chat completes 2xx, and the agent's response references what was prevented).
 
 [AP-Traces](/concepts/ap-traces) are the durable artifact the checkpoint writes; the trace records what happened — both the model's thinking and the integrity verdict — in the same turn. Drift detection and coherence analysis then operate on the trace surface longitudinally (sideband) across multiple turns.
 
@@ -22,7 +22,7 @@ Integrity Checkpoints are the primary data structure of the [Agent Integrity Pro
 Real-time analysis of the thinking block lets `integrity_mode = enforce` prevent these three failure modes **before** the response reaches the user:
 
 - **Prompt injection**: A malicious prompt would otherwise cause the agent to exfiltrate data. The checkpoint catches the intent in the thinking block; enforcement replaces the response same-turn before delivery.
-- **Gradual drift**: Each individual checkpoint is same-turn, but the longitudinal pattern across many turns reveals subtle direction shifts. The sideband drift detector reads the trace surface and emits a `pending_advisory` on the next turn (per [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md)) when a threshold is crossed.
+- **Gradual drift**: Each individual checkpoint is same-turn, but the longitudinal pattern across many turns reveals subtle direction shifts. The sideband drift detector reads the trace surface and emits a `pending_advisory` on the next turn when a threshold is crossed.
 - **Misaligned intent**: The thinking block reveals an intended forbidden action; the checkpoint catches it before the action lands.
 
 All three failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints make that visibility actionable same-turn.

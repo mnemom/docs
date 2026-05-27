@@ -40,7 +40,7 @@ Models the v1 promise applies to. Listed in the gateway's `/models.json` registr
 **Canonical model IDs** (what you pass in `model:` on a Mnemom API call):
 
 ```yaml
-# Supported tier per ADR-051. Mnemom's gateway exposes this set via
+# Supported tier. Mnemom's gateway exposes this set via
 # /models.json with `supported: true` flag; passthrough models route
 # but carry no v1 promise.
 supported_models:
@@ -90,7 +90,7 @@ OpenAI's reasoning APIs (`o3`, `o3-mini`) expose **reasoning summaries**, not ra
 - Boundary violations that would have surfaced in the model's hidden reasoning, but never reach the final response, are caught with **lower confidence** on OpenAI than on Anthropic or Gemini.
 - The AIP integrity-checkpoint **verdict** is still emitted on OpenAI; the **certainty** of that verdict is provider-conditional.
 
-This is the load-bearing honesty disclosure. Mnemom does not claim uniform AIP coverage across providers. See [SLI-P1 in the Safe House SLOs](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p1-aip-coverage-by-provider) for the public commitment.
+This is the load-bearing honesty disclosure. Mnemom does not claim uniform AIP coverage across providers.
 
 ### [3] Gemini — full `thoughts` exposure
 
@@ -106,7 +106,7 @@ OpenAI's prompt caching is **automatic** — the API decides what to cache based
 
 ### [6] Gemini — separate `CachedContent` API
 
-Gemini exposes prompt caching as a separate `CachedContent` resource (explicit cache lifecycle, named caches with TTL). The gateway today does not surface or use this API; requests are sent without referencing cached content. Customers using Gemini's cache outside Mnemom will see lower latency than they see through Mnemom — this is a known gap, tracked in the [Track 3 hardening plan](https://github.com/mnemom/safe-house-hardening/blob/main/implementation-plan.md#t3-2--aip-coverage-gaps-documented-honestly).
+Gemini exposes prompt caching as a separate `CachedContent` resource (explicit cache lifecycle, named caches with TTL). The gateway today does not surface or use this API; requests are sent without referencing cached content. Customers using Gemini's cache outside Mnemom will see lower latency than they see through Mnemom — this is a known gap on our roadmap.
 
 ## AIP coverage by provider — the headline commitment
 
@@ -119,20 +119,20 @@ Of all per-provider gaps, **integrity-checkpoint coverage** is the load-bearing 
 | OpenAI o-series (`o3`, `o3-mini`) | **≥ 50%** |
 | OpenAI non-thinking (`gpt-5`, `gpt-5-codex`, `gpt-4o`) | Excluded — AIP runs in degraded "surface-only" mode |
 
-<sup>[*]</sup> "AIP coverage" is defined as the percentage of customer-facing AIP analysis cycles where the verifier had full thinking-trace inspection. Anthropic and Gemini expose full traces; OpenAI o-series exposes reasoning summaries only; non-reasoning OpenAI models expose no internal reasoning. See [SLI-P1](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p1-aip-coverage-by-provider) for the rolling 30-day measurement methodology.
+<sup>[*]</sup> "AIP coverage" is defined as the percentage of customer-facing AIP analysis cycles where the verifier had full thinking-trace inspection. Anthropic and Gemini expose full traces; OpenAI o-series exposes reasoning summaries only; non-reasoning OpenAI models expose no internal reasoning. Coverage is measured on a rolling 30-day window.
 
 **If your application relies on AIP catching boundary violations in the model's reasoning** — particularly violations that would not surface in the final response — choose Anthropic or Gemini. OpenAI o-series is supported, with the documented coverage limitation. OpenAI non-thinking models are supported for inference but are not the right choice when AIP is the load-bearing safety layer.
 
 ## Latency expectations
 
-Per-provider P50/P95 latency for the Safe House dispatch path and AIP analysis is published on the [status page](https://status.mnemom.ai) and committed via [SLI-P2](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p2-per-provider-dispatch-overhead) and [SLI-P3](https://github.com/mnemom/safe-house-hardening/blob/main/slos.md#sli-p3-per-provider-aip-analysis-latency).
+Per-provider P50/P95 latency for the Safe House dispatch path and AIP analysis is published on the [status page](https://status.mnemom.ai).
 
 In aggregate:
 
 - **Safe House dispatch** adds ~15 ms P50 / ~60 ms P95 across all providers (the dispatch path is provider-agnostic).
 - **AIP analysis** runs post-response, pre-delivery. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash and OpenAI non-thinking models emit thin traces and complete AIP analysis in P50 ≤ 800 ms.
 
-Mid-stream interruption for integrity violations is not supported on any provider (per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md)). AIP runs after the upstream response completes, but before the gateway delivers it to the customer.
+Mid-stream interruption for integrity violations is not supported on any provider. AIP runs after the upstream response completes, but before the gateway delivers it to the customer.
 
 ## How we test against each provider
 
@@ -178,9 +178,9 @@ Passthrough-tier models that are removed from the upstream provider also disappe
 
 ## Out of scope
 
-Provider expansion beyond Anthropic + OpenAI + Gemini is **not in scope for v1**. Cohere, Mistral, Together, Groq, and other providers are not supported. Adding a provider is a multi-quarter effort (Safe House dispatch, AIP adapter, CLPI policy schema mapping, harness coverage, docs) — tracked separately.
+Provider expansion beyond Anthropic + OpenAI + Gemini is **not in scope for v1**. Cohere, Mistral, Together, Groq, and other providers are not supported. Adding a provider is a multi-quarter effort (Safe House dispatch, AIP adapter, CLPI policy schema mapping, test coverage, docs) — tracked separately.
 
-[BYOK (bring-your-own-key)](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-headers-rationalization.md) for upstream providers is also out of v1. v1 ships with Mnemom-only key custody.
+BYOK (bring-your-own-key) for upstream providers is also out of v1. v1 ships with Mnemom-only key custody.
 
 ## Related
 

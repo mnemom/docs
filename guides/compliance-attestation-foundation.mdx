@@ -7,7 +7,7 @@ icon: "scale-balanced"
 
 Versioned Trust Postures are the foundation for compliance attestation. They give auditors a single, queryable answer to the question "what was your detection policy at time T" — across SOC 2, EU AI Act, HIPAA, ISO 27001, and any other framework that mandates documented control state at point-in-time.
 
-This guide is the **foundation** layer. The full control-mapping (which posture field maps to which control) is debt #4 — tracked in `safe-house-hardening/debt/post-t1-3-1-cleanup.md` and landing once SOC 2 work formalizes. The foundation is enough to start collecting audit evidence today.
+This guide is the **foundation** layer. The full control-mapping (which posture field maps to which control) lands once SOC 2 work formalizes. The foundation is enough to start collecting audit evidence today.
 
 <Note>
   **Phase 5 — External Readiness** extends compliance evidence with cryptographic durability. Every canonical card composition is recorded in the [transparency log](/concepts/transparency-log) with a signed [AAP attestation token](/concepts/aap-attestation) and a Merkle inclusion proof. Auditors can answer "what was Agent X's canonical alignment posture on 2026-03-31" via [`mnemom verify-card <agent_id> --at 2026-03-31T00:00:00Z`](/guides/verify-card) and receive a verifiable cryptographic answer — independent of Mnemom's online services.
@@ -102,7 +102,7 @@ For each control your auditor wants evidence on:
 
 ### 1. Identify the posture body field that maps to the control
 
-Until debt #4 lands the formal map, this is manual. Examples:
+Until the formal control map lands, this is manual. Examples:
 
 | Control concept | Posture field |
 |---|---|
@@ -133,12 +133,12 @@ This is the "who tightened what, when" timeline. Pair it with the point-in-time 
 
 ## What's deferred
 
-The foundation is in place; the layers above it are tracked debt:
+The foundation is in place; the layers above it are on the roadmap:
 
-- **Compliance attestation snapshots** — a one-click "export this posture for SOC 2 evidence" button. Today, the SQL above is the manual equivalent. Debt #3.
-- **Compliance framework mapping** — formal SOC 2 / ISO 27001 / HIPAA / EU AI Act control → posture field map. Debt #4.
-- **Detection coverage scoring** — "% of fleet with each axis enabled" rolled up to a dashboard tile. Debt #5.
-- **Policy-as-code export** — Terraform provider + YAML round-trip. Debt #6.
+- **Compliance attestation snapshots** — a one-click "export this posture for SOC 2 evidence" button. Today, the SQL above is the manual equivalent.
+- **Compliance framework mapping** — formal SOC 2 / ISO 27001 / HIPAA / EU AI Act control → posture field map.
+- **Detection coverage scoring** — "% of fleet with each axis enabled" rolled up to a dashboard tile.
+- **Policy-as-code export** — Terraform provider + YAML round-trip.
 
 These are the natural next steps once SOC 2 prep work formalizes. The architecture is intentionally compatible — none of them require changes to posture data model, just additional read paths over the existing rows.
 
@@ -147,7 +147,7 @@ These are the natural next steps once SOC 2 prep work formalizes. The architectu
 Two AEGIS-introduced surfaces extend the attestation foundation:
 
 - **Signed [advisories](/concepts/advisories)** — per-incident published JSON documents with a `synthetic` boolean. Each advisory's lifecycle is recorded in the admin CMS audit log and emits an [`advisory.published`](/api-reference/webhook-events#advisory-published) webhook on publication. For SOC 2 / EU AI Act / ISO 42001 evidence flows, the advisory list is the authoritative cross-tenant incident record.
-- **The Managed Rule signing chain** — [Managed Rules](/concepts/managed-rules) carry Ed25519 per-row promotion signatures (`promotion_signature`); KV and R2 envelopes are independently signed; the gateway verifies on every read. The signing-key escrow + 90-day JWKS rotation overlap is auditable under `safe-house-hardening/ADR-005`. The wire format reference for downstream evidence systems is at [`/specifications/managed-rule-envelope-schema`](/specifications/managed-rule-envelope-schema).
+- **The Managed Rule signing chain** — [Managed Rules](/concepts/managed-rules) carry Ed25519 per-row promotion signatures (`promotion_signature`); KV and R2 envelopes are independently signed; the gateway verifies on every read. The signing-key escrow + 90-day JWKS rotation overlap is auditable. The wire format reference for downstream evidence systems is at [`/specifications/managed-rule-envelope-schema`](/specifications/managed-rule-envelope-schema).
 
 Both surfaces compose with the posture-versioning attestation primitives this guide otherwise covers — posture revisions + Managed Rule promotions together describe *what detection policy was in force* on date X, *which cross-tenant Managed Rules were active*, *what advisories were live*, and *which signing keys signed each*.
 

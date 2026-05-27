@@ -5,18 +5,16 @@ sidebarTitle: "Changelog"
 icon: "clock-rotate-left"
 ---
 
-> **Renamed:** Smoltbot is now Mnemom. The CLI command is now `mnemom`. Install: `npm install -g @mnemom/smoltbot`.
-
 Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, and tooling.
 
 ---
 
-## Governance signals — operator-actionable observation surface (ADR-048)
+## Governance signals — operator-actionable observation surface
 <sub>May 2026 (amended 2026-05-07)</sub>
 
 Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Fleet-shaped governance signals are operator content. The platform serves them to operators only — humans, dashboards, webhooks, paging — and offers no path by which an operator-side signal becomes prompt content for any agent.
 
-The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. ADR-048 fixed the layering at the schema, producer, and consumer layers simultaneously.
+The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. The fix corrected the layering at the schema, producer, and consumer layers simultaneously.
 
 **What's new:**
 
@@ -30,11 +28,11 @@ The triggering symptom: an agent receiving the same `cluster_partition` paragrap
 - `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript governance signal types (consumed by operator dashboards, webhook subscribers, alerting tools).
 - `@mnemom/agent-integrity-protocol@1.1.0` adds optional `triggering_governance_signal_id` to `IntegritySignal`.
 
-**Cutover:** observer writers redirected (mnemom-platform#246), gateway reader narrowed (mnemom-platform#247). Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
+**Cutover:** observer writers redirected, gateway reader narrowed. Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
 
-**Charter invariant** (`safe-house-hardening/validation-charter.md` §I15): operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted by the harness.
+**Surface-separation invariant:** operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted continuously in CI.
 
-**Amendment 2026-05-07:** ADR-048's original §7 ("Application-owned sovereign-agent composition") was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface, SDK examples, and ratifying ADR couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the Polis-shaped `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
+**Amendment 2026-05-07:** the original "application-owned sovereign-agent composition" design was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface and SDK examples couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the related `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
 
 See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals).
 
@@ -49,7 +47,7 @@ New agents now receive IDs in the `mnm-{uuid_v4}` format (e.g., `mnm-550e8400-e2
 
 The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any practical risk of ID collision at scale. Agent IDs are now server-assigned UUIDs rather than hash-derived values, making them recoverable via API key re-registration if your local config is lost.
 
-- **CLI:** `@mnemom/smoltbot@0.7.0` — `mnemom init` registers new agents with `mnm-*` IDs automatically
+- **CLI:** `@mnemom/mnemom` — `mnemom init` registers new agents with `mnm-*` IDs automatically
 - **API:** `POST /internal/agents` — new service-to-service endpoint (gateway delegates agent creation to mnemom-api, single canonical creation path)
 - **Docs:** New [Agent Identity](/concepts/agent-identity) concept page explains ID formats, assignment, and stability guarantees
 
@@ -90,7 +88,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 - **Version alignment**: `aap_version` default bumped from `"0.1.0"` to `"0.5.0"` across all Mnemom packages
 - **YAML policy support**: The API now accepts policies in `text/yaml` and `application/yaml` content types alongside JSON
 - **Trust Edges API**: `GET`/`POST`/`DELETE /v1/agents/:id/trust-edges` for declaring explicit trust relationships between agents
-- **Fixture consistency**: Test fixture version inconsistencies resolved (`"1.0"` → `"0.5.0"`) across smoltbot observer/gateway
+- **Fixture consistency**: Test fixture version inconsistencies resolved (`"1.0"` → `"0.5.0"`) across the observer and gateway
 - **Backward compatible**: Existing cards with `aap_version: "0.1.0"` continue to work without modification
 - [Upgrading to 0.5.0 — Migration Guide](/guides/upgrading-to-0-5)
 
@@ -106,7 +104,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 - **Three evaluation contexts**: CI/CD static validation, gateway live enforcement, observer post-action analysis
 - **Enforcement modes**: `warn` (log only), `enforce` (block with 403), `off` — controlled independently from alignment enforcement via `X-Policy-Verdict` header
 - **Grace period**: 24-hour default window for newly discovered tools before they become violations
-- **[Policy CLI](/gateway/policy-cli)**: `smoltbot policy init|validate|publish|list|test|evaluate` subcommands with CI-friendly exit codes
+- **[Policy CLI](/gateway/policy-cli)**: `mnemom policy init|validate|publish|list|test|evaluate` subcommands with CI-friendly exit codes
 - **Policy merge**: Org-level + agent-level policies merge with union semantics for mappings and floor semantics for defaults
 
 ### Phase 2: Card Lifecycle & Trust Recovery
@@ -142,7 +140,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Team reputation & risk scoring (E-25)
+## Team reputation & risk scoring
 <sub>February 2026</sub>
 
 **Teams become first-class meta-agents.** Persistent team identity, team alignment cards, accumulated team reputation with a 5-component scoring model, embeddable team badges, roster management with audit trails, ZK proofs for team reputation, and 9 new webhook events.
@@ -161,7 +159,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Mnemom Trust Rating -- Public surfaces & viral distribution (E-07)
+## Mnemom Trust Rating -- Public surfaces & viral distribution
 <sub>February 2026</sub>
 
 **Trust scores escape the dashboard.** Public reputation pages, embeddable badges, a verification endpoint with cryptographic proof chains, an A2A trust extension for inter-agent reputation sharing, a GitHub Action for CI/CD gates, and SDK reputation methods across TypeScript and Python.
@@ -209,7 +207,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## N-Way fleet coherence (E-05)
+## N-Way fleet coherence
 <sub>February 2026</sub>
 
 **Fleet-level value coherence analysis** — extend pairwise coherence checks to true N-agent fleet analysis with aggregate scoring, outlier detection, cluster analysis, and divergence reporting.
@@ -225,7 +223,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Admin impersonate mode (E-03)
+## Admin impersonate mode
 <sub>February 2026</sub>
 
 **See exactly what your customer sees.** Enterprise support can now view the real dashboard from any customer's perspective -- read-only, fully audit-logged, with automatic 1-hour expiry.
@@ -240,7 +238,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Custom conscience values (E-02)
+## Custom conscience values
 <sub>February 2026</sub>
 
 **Per-org alignment policies injected into the AIP conscience prompt.** Enterprise orgs can now define custom conscience values -- "patient safety > efficiency" for healthcare, "never recommend regulatory risk" for fintech -- that apply to every agent integrity check.
@@ -305,14 +303,14 @@ The Agent Integrity Protocol specification ships with built-in support for analy
 - Session windowing and integrity drift detection
 - Python SDK (`pip install agent-integrity-proto`) and TypeScript SDK (`npm install @mnemom/agent-integrity-protocol`)
 
-### Smoltbot v1.0 -- Public launch
+### Mnemom v1.0 — Public launch
 
 Mnemom's AI gateway and CLI tool for zero-configuration agent transparency infrastructure.
 
 - Cloudflare Workers-based gateway with automatic agent identification
 - Observer Worker for AP-Trace generation and AAP verification
 - AIP Engine for real-time thinking block analysis
-- CLI: `smoltbot init --provider anthropic` for full-stack setup
+- CLI: `mnemom init --provider anthropic` for full-stack setup
 - API key hashing (never stored in plaintext), raw log deletion within 60 seconds
 
 ### aip-otel-exporter v0.1.0 -- OpenTelemetry integration
