@@ -7,10 +7,10 @@ icon: "list-tree"
 
 ## The canonical set
 
-Every Mnemom response carries a tightly-scoped header surface. The Mnemom-namespaced set is **six headers**, plus an optional API-version header and an AAP allow-list pair. Anything else under `X-Mnemom-*` or `X-AIP-*` was retired in the [ADR-042 amendment 2026-05-08](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — see the [migration guide](/migration/smoltbot-to-mnemom-headers).
+Every Mnemom response carries a tightly-scoped header surface. The Mnemom-namespaced set is **six headers**, plus an optional API-version header and an AAP allow-list pair. Anything else under `X-Mnemom-*` or `X-AIP-*` was retired clean-break on 2026-05-08 — see [What was retired](#what-was-retired) below.
 
 <Note>
-**Migrating from legacy headers?** 20 deprecated headers (`X-Safe-House-*`, most `X-AIP-*`, `X-Mnemom-Autonomy-Verdict`, all `x-smoltbot-*`) were retired clean-break in [ADR-042 amendment 2026-05-08](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md). See [What was retired](#what-was-retired) below for the legacy → canonical mapping, or the [migration guide](/migration/smoltbot-to-mnemom-headers) for the full cheat sheet.
+**Migrating from legacy headers?** Deprecated headers (`X-Safe-House-*`, most `X-AIP-*`, `X-Mnemom-Autonomy-Verdict`) were retired clean-break on 2026-05-08. See [What was retired](#what-was-retired) below for the legacy → canonical mapping.
 
 There is **no dual-emit window** and **no `Sunset` header** on the legacy names — they stopped emitting on the 2026-05-08 ship.
 </Note>
@@ -209,8 +209,6 @@ Anything else under `X-Mnemom-*` or `X-AIP-*` on inbound is deleted. If you're t
 - `X-AIP-Action` / `X-AIP-Proceed` / `X-AIP-Synthetic` / `X-AIP-Source` / `X-AIP-Analysis-Scope` / `X-AIP-Reason` / `X-AIP-Nudge-Count` / `X-AIP-Enforcement` → fold into `X-Mnemom-Verdict.integrity`.
 - `X-AIP-Certificate-Id` / `X-AIP-Chain-Hash` → fetch via the integrity-checkpoints REST surface using `X-AIP-Checkpoint-Id`.
 
-The `x-smoltbot-*` namespace was also retired in the same amendment (Q7) — see the [migration guide](/migration/smoltbot-to-mnemom-headers).
-
 ### Common renames at a glance
 
 For upgraders, the high-traffic renames customers were most likely to have hard-coded:
@@ -222,14 +220,10 @@ For upgraders, the high-traffic renames customers were most likely to have hard-
 | `X-Safe-House-Verdict` | `X-Mnemom-Verdict.front` (sub-field of the structured verdict) | Parse `X-Mnemom-Verdict` per the [grammar above](#x-mnemom-verdict-structured-per-checkpoint-state) |
 | `X-Safe-House-Advisory` | `X-Mnemom-Advisory` (canonical name; same JSON shape) | See [`X-Mnemom-Advisory`](#x-mnemom-advisory-operator-actionable-advisory-entries) |
 | `X-AIP-Verdict` | Retained as the **raw** AAP value; `X-Mnemom-Verdict.integrity` is the canonical rollup | Both are present when AIP runs |
-| `x-smoltbot-*` (any) | `X-Mnemom-*` equivalent | See the [migration guide](/migration/smoltbot-to-mnemom-headers) |
 
-There is **no dual-emit window** and **no `Sunset` header** on the legacy names. The retirement is clean-break per the amendment's Q7+Q8 ratification.
+There is **no dual-emit window** and **no `Sunset` header** on the legacy names. The retirement is clean-break.
 
 ## See also
 
 - [Errors](/api-reference/errors) — canonical status-code + error-code contract, including Safe House verdict-to-status mapping and retry semantics.
-- [Migration: smoltbot → Mnemom headers](/migration/smoltbot-to-mnemom-headers) — the customer-facing migration cheat sheet.
 - [Webhook contract](/concepts/webhook-contract) — the seven invariants every webhook event carries.
-- [ADR-042: Header rationalization](https://github.com/mnemom/scale/blob/main/decisions/ADR-042-header-rationalization.md) — the architectural decision and Q1+Q7+Q8 amendment.
-- [Charter §"Headers — the simplified set"](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) — the authoritative spec.
