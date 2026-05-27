@@ -54,6 +54,27 @@ curl -X POST https://api.mnemom.ai/v1/tools/import \
   }'
 ```
 
+### Connector YAML
+
+When a connector ships a tool manifest rather than an OpenAPI spec, send it with `format: "connector_yaml"`. The manifest is a top-level `connector` name plus a `tools[]` array; each entry carries `name`, `class`, `domain`, and an optional `description`, `display_name`, and `schema`:
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/tools/import \
+  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "format": "connector_yaml",
+    "source": "inline",
+    "content": "connector: github\ntools:\n  - name: github_create_issue\n    class: internal_write\n    domain: engineering\n    description: Create a GitHub issue\n  - name: github_close_issue\n    class: internal_write\n    domain: engineering\n",
+    "infer_class_domain": true
+  }'
+```
+
+- **`connector`** — top-level connector name, recorded as `source_connector` on every tool in the manifest.
+- **`name`** — the tool name; follows the `<connector>_<verb>_<noun>` pattern.
+- **`class` + `domain`** — if the manifest declares them, they seed the preview; with `infer_class_domain: true` the LLM still proposes its own and surfaces disagreements in `conflicts[]`. Omit them and the inference fills them in.
+- **`schema`** — optional JSON Schema for the tool's parameters.
+
 ## The response
 
 ```json
