@@ -15,11 +15,11 @@ A protection card has four top-level sections. The complete schema is at [/speci
 
 ### `mode`
 
-Top-level action policy for Safe House on this agent. Shares the four-mode enum (`off | observe | nudge | enforce`) with the alignment card's two master switches (`autonomy_mode` and `integrity_mode`) — same words, same semantics, same UI picker per ADR-039.
+Top-level action policy for Safe House on this agent. Shares the four-mode enum (`off | observe | nudge | enforce`) with the alignment card's two master switches (`autonomy_mode` and `integrity_mode`) — same words, same semantics, same UI picker.
 
 - **`off`** — detection skipped entirely (cost / latency / non-applicability cases). No telemetry.
 - **`observe`** — all detectors run, signals are logged asynchronously to the trace + reputation pipeline, no action is taken on the agent's request.
-- **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header per [ADR-042](/api-reference/headers)) but the request proceeds. The model sees the advisory as part of its context.
+- **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header — see the [Headers reference](/api-reference/headers)) but the request proceeds. The model sees the advisory as part of its context.
 - **`enforce`** — detectors run synchronously; matches block the request (quarantine ≥ quarantine threshold, hard block ≥ block threshold).
 
 `enforce` is implicitly synchronous — to block a request, the gateway must wait for the verdict. There is no separate `enforce_sync` mode.
@@ -110,7 +110,7 @@ A protection-card exemption waives a specific threshold or surface for a specifi
 #   expires_at: "2026-07-17T00:00:00Z"
 ```
 
-Exemptions replace the pre-UC boolean `org_card_exempt` flag — which waived the whole card at once — with section-specific, audit-logged, time-bounded grants.
+Exemptions replace the legacy boolean `org_card_exempt` flag — which waived the whole card at once — with section-specific, audit-logged, time-bounded grants.
 
 ## How the protection card is used
 
@@ -142,7 +142,7 @@ The website agent detail → Security tab shows both raw agent-scope and canonic
 
 ## Modes across both cards
 
-All three master switches — the alignment card's `autonomy_mode` and `integrity_mode`, and the protection card's `mode` — share the same four-mode enum and the same UI picker per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md):
+All three master switches — the alignment card's `autonomy_mode` and `integrity_mode`, and the protection card's `mode` — share the same four-mode enum and the same UI picker:
 
 | Value | Alignment (`integrity_mode`) | Protection (`mode`) |
 |-------|------------------------------|----------------------|
@@ -155,10 +155,10 @@ A well-run fleet has both dimensions aligned across all agents. The [fleet coher
 
 ## Migration from legacy Safe House config
 
-Pre-UC, Safe House read a JSON `sh_configs` row keyed by agent_id. The UC-3 migration script composed every existing `sh_configs` row into a protection-card YAML and wrote the canonical version.
+Previously, Safe House read a JSON `sh_configs` row keyed by agent_id. The automatic migration composed every existing `sh_configs` row into a protection-card YAML and wrote the canonical version.
 
 - Legacy endpoint `GET/PUT /v1/agents/:id/cfd/config` is **removed**. Use `GET/PUT /v1/agents/:id/protection-card`.
-- The internal `SafeHouseConfig` TypeScript type that Safe House detectors consume is stable (per ADR-008 Edge 4); the UC work swapped the fetch source, not the type. If you're embedding Safe House detectors, your integration did not need to change.
+- The internal `SafeHouseConfig` TypeScript type that Safe House detectors consume is stable; the consolidation swapped the fetch source, not the type. If you're embedding Safe House detectors, your integration did not need to change.
 
 ## See also
 

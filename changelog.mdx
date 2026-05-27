@@ -9,12 +9,12 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
-## Governance signals — operator-actionable observation surface (ADR-048)
+## Governance signals — operator-actionable observation surface
 <sub>May 2026 (amended 2026-05-07)</sub>
 
 Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Fleet-shaped governance signals are operator content. The platform serves them to operators only — humans, dashboards, webhooks, paging — and offers no path by which an operator-side signal becomes prompt content for any agent.
 
-The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. ADR-048 fixed the layering at the schema, producer, and consumer layers simultaneously.
+The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. The fix corrected the layering at the schema, producer, and consumer layers simultaneously.
 
 **What's new:**
 
@@ -28,11 +28,11 @@ The triggering symptom: an agent receiving the same `cluster_partition` paragrap
 - `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript governance signal types (consumed by operator dashboards, webhook subscribers, alerting tools).
 - `@mnemom/agent-integrity-protocol@1.1.0` adds optional `triggering_governance_signal_id` to `IntegritySignal`.
 
-**Cutover:** observer writers redirected (mnemom-platform#246), gateway reader narrowed (mnemom-platform#247). Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
+**Cutover:** observer writers redirected, gateway reader narrowed. Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
 
-**Charter invariant** (`safe-house-hardening/validation-charter.md` §I15): operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted by the harness.
+**Surface-separation invariant:** operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted continuously in CI.
 
-**Amendment 2026-05-07:** ADR-048's original §7 ("Application-owned sovereign-agent composition") was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface, SDK examples, and ratifying ADR couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the Polis-shaped `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
+**Amendment 2026-05-07:** the original "application-owned sovereign-agent composition" design was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface and SDK examples couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the related `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
 
 See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals).
 
@@ -140,7 +140,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Team reputation & risk scoring (E-25)
+## Team reputation & risk scoring
 <sub>February 2026</sub>
 
 **Teams become first-class meta-agents.** Persistent team identity, team alignment cards, accumulated team reputation with a 5-component scoring model, embeddable team badges, roster management with audit trails, ZK proofs for team reputation, and 9 new webhook events.
@@ -159,7 +159,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Mnemom Trust Rating -- Public surfaces & viral distribution (E-07)
+## Mnemom Trust Rating -- Public surfaces & viral distribution
 <sub>February 2026</sub>
 
 **Trust scores escape the dashboard.** Public reputation pages, embeddable badges, a verification endpoint with cryptographic proof chains, an A2A trust extension for inter-agent reputation sharing, a GitHub Action for CI/CD gates, and SDK reputation methods across TypeScript and Python.
@@ -207,7 +207,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## N-Way fleet coherence (E-05)
+## N-Way fleet coherence
 <sub>February 2026</sub>
 
 **Fleet-level value coherence analysis** — extend pairwise coherence checks to true N-agent fleet analysis with aggregate scoring, outlier detection, cluster analysis, and divergence reporting.
@@ -223,7 +223,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Admin impersonate mode (E-03)
+## Admin impersonate mode
 <sub>February 2026</sub>
 
 **See exactly what your customer sees.** Enterprise support can now view the real dashboard from any customer's perspective -- read-only, fully audit-logged, with automatic 1-hour expiry.
@@ -238,7 +238,7 @@ The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any
 
 ---
 
-## Custom conscience values (E-02)
+## Custom conscience values
 <sub>February 2026</sub>
 
 **Per-org alignment policies injected into the AIP conscience prompt.** Enterprise orgs can now define custom conscience values -- "patient safety > efficiency" for healthcare, "never recommend regulatory risk" for fintech -- that apply to every agent integrity check.

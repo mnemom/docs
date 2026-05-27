@@ -59,7 +59,7 @@ Separating them means:
 2. **Different approvers.** Platform admins may need to approve alignment changes; org admins may manage protection tuning.
 3. **Honest audit trails.** You can ask "what did the agent commit to?" separately from "how hard were we watching?"
 
-Prior to UC (see ADR-007 → ADR-008), these concerns were tangled: an AAP alignment card lived alongside a CLPI policy YAML and a Safe House JSON config. The unified model collapses the alignment side of the triangle (AAP card + CLPI policy + `agents.aip_enforcement_mode` + org conscience values all absorbed into one `alignment-card.yaml`) and elevates the protection side to a proper card (`protection-card.yaml` replaces the ad-hoc Safe House config).
+Before the unified-cards model, these concerns were tangled: an AAP alignment card lived alongside a CLPI policy YAML and a Safe House JSON config. The unified model collapses the alignment side of the triangle (AAP card + CLPI policy + `agents.aip_enforcement_mode` + org conscience values all absorbed into one `alignment-card.yaml`) and elevates the protection side to a proper card (`protection-card.yaml` replaces the ad-hoc Safe House config).
 
 ## Three scopes
 
@@ -94,7 +94,7 @@ Exemptions are:
 - Time-bounded (default 90-day expiry) and audit-logged.
 - Required fields: `reason`, `granted_by`, `granted_at`.
 
-This replaces the pre-UC boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
+This replaces the legacy boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
 
 ## How the cards are used
 
@@ -157,11 +157,11 @@ Both cards use the `observe` / `nudge` / `enforce` vocabulary, but apply it to d
 
 A fleet is most coherent when both cards use matching modes across all agents. The [v2 fleet coherence scorer](/concepts/fleet-coherence) checks `integrity_mode` uniformity as a structural invariant (`integrity_uniform`).
 
-## Migration from the pre-UC format
+## Migration from the legacy format
 
 For early adopters who have cards in the legacy format (separate AAP card + CLPI policy + `sh_configs` JSON):
 
-- The mnemom-api migration pipeline composed all existing data into unified cards during UC-3 rollout (2026-04-15). No customer action was required.
+- The mnemom-api migration pipeline composed all existing data into unified cards during the 2026-04-15 rollout. No customer action was required.
 - Legacy endpoints (`/v1/agents/:id/card` old shape, `/v1/agents/:id/cfd/config`, `/v1/agents/:id/policy`) are removed. Use the unified endpoints (`/v1/agents/:id/alignment-card`, `/v1/agents/:id/protection-card`).
 - The CLI no longer ships a `policy` command; use `card evaluate` instead.
 

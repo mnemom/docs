@@ -18,10 +18,10 @@ Four detector axes share this surface:
 | `sideband.fault_line` | Fault-line analysis | A specific value dimension splits the team — some agents declare it, others miss it, others list it as a conflict. |
 | `sideband.fleet` | Fleet patterns | The team partitions into incompatible clusters, the worst pair drops below threshold, or outliers emerge under cluster topology. |
 
-All four write to [`governance_signals`](/concepts/governance-signals) (per [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md)) — the operator-actionable observation surface. Surfaced via UI dashboard, webhook (`governance.signal.fired`), REST, and CLI. **Not** auto-injected into agent prompts; that architectural mis-layering is what ADR-048 corrected. See [governance signals](/concepts/governance-signals) for the full layering and operator workflow.
+All four write to [`governance_signals`](/concepts/governance-signals) — the operator-actionable observation surface. Surfaced via UI dashboard, webhook (`governance.signal.fired`), REST, and CLI. **Not** auto-injected into agent prompts; keeping them on the operator surface is a deliberate layering decision. See [governance signals](/concepts/governance-signals) for the full layering and operator workflow.
 
 <Note>
-**Cutover note (2026-05-07):** Detection logic on this page (cadence, fire conditions, fan-out fields) is unchanged. Only the *delivery surface* moved: from `pending_advisories` (which the gateway injected into agent prompts) to `governance_signals` (operator-facing). Pre-cutover `pending_advisories` rows with `source LIKE 'sideband.%'` will TTL out within 24 hours of the gateway-reader narrowing in mnemom-platform#247.
+**Cutover note (2026-05-07):** Detection logic on this page (cadence, fire conditions, fan-out fields) is unchanged. Only the *delivery surface* moved: from `pending_advisories` (which the gateway injected into agent prompts) to `governance_signals` (operator-facing). Pre-cutover `pending_advisories` rows with `source LIKE 'sideband.%'` will TTL out within 24 hours of the gateway-reader narrowing.
 </Note>
 
 ## Why sideband
@@ -36,7 +36,7 @@ The runtime gateway can't see those patterns — it sees one request, one agent,
 
 ## The two-turn dance
 
-Per [ADR-040](https://github.com/mnemom/scale/blob/main/decisions/ADR-040-same-turn-enforcement.md): runtime checkpoints intervene same-turn under `enforce`; sideband checkpoints intervene cross-turn via the advisory carryover.
+Runtime checkpoints intervene same-turn under `enforce`; sideband checkpoints intervene cross-turn via the advisory carryover.
 
 ```
 turn N: agent works as usual; observer's cron sweep detects something
@@ -48,7 +48,7 @@ turn N+1: gateway reads pending_advisories at the start of the request
           → row marked status = consumed
 ```
 
-The advisory text follows a stable wrapper: `[Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]`. The bracket wrapper is what enables Safe House's [I10 invariant](https://github.com/mnemom/safe-house-hardening/blob/main/validation-charter.md) (user-visible-explanation 100%) to recognize an injection happened — the gateway suffix-injects its own marker if the wrapper is missing.
+The advisory text follows a stable wrapper: `[Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]`. The bracket wrapper is what enables Safe House's user-visible-explanation guarantee to recognize an injection happened — the gateway suffix-injects its own marker if the wrapper is missing.
 
 ## How the detectors are wired
 
@@ -112,7 +112,7 @@ An agent that is a member of N teams may receive up to N advisories on a single 
 
 ## Webhook events
 
-Each sideband firing emits a `<source>.fired` webhook event so external subscribers (SIEM, ticketing, alerting) can react. Per [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md):
+Each sideband firing emits a `<source>.fired` webhook event so external subscribers (SIEM, ticketing, alerting) can react:
 
 - `sideband.coherence.fired`
 - `sideband.fault_line.fired`
@@ -131,7 +131,7 @@ The `sideband_sweep_log` table UPSERTs `(team_id, axis, day)` keys per sweep, in
 
 ## Sideband and the AEGIS Protection Network
 
-Sideband findings, where indicative of cross-tenant patterns, feed the [AEGIS L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator). The operator-actionable-only posture of sideband findings is preserved: AEGIS consumes the signal for aggregation; it does not auto-inject sideband observations into agent prompts. This boundary is the architectural correction ADR-048 made: sideband observation is a signal to operators (and, in aggregate, to the network), never a runtime instruction to the agent.
+Sideband findings, where indicative of cross-tenant patterns, feed the [AEGIS L1 cross-tenant aggregator](/concepts/protection-network#l1--cross-tenant-aggregator). The operator-actionable-only posture of sideband findings is preserved: AEGIS consumes the signal for aggregation; it does not auto-inject sideband observations into agent prompts. This boundary is a deliberate architectural choice: sideband observation is a signal to operators (and, in aggregate, to the network), never a runtime instruction to the agent.
 
 ## See also
 
@@ -139,7 +139,7 @@ Sideband findings, where indicative of cross-tenant patterns, feed the [AEGIS L1
 - [Mnemom default postures](/concepts/mnemom-default-postures) — Standard / High-Compliance / Low-Latency rationales
 - [Posture vs. Cards](/concepts/posture-vs-cards) — why these are parallel artifact types
 - [Drift Detection](/concepts/drift-detection) — the per-agent timescale, complementary to per-team sideband
-- [Fleet Coherence](/concepts/fleet-coherence) — dimensional team coherence scoring (ADR-025)
+- [Fleet Coherence](/concepts/fleet-coherence) — dimensional team coherence scoring
 - [Tuning sideband detection via Trust Posture](/guides/sideband-detection) — the customer-facing how-to
 - [Pending advisories schema](/specifications/pending-advisories-schema) — wire format and source taxonomy
 - [Compliance attestation foundation](/guides/compliance-attestation-foundation) — how Posture versioning + sweep logs feed control mappings

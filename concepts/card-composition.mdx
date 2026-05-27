@@ -13,7 +13,7 @@ Every Mnemom agent has [two cards](/concepts/agent-cards) — alignment and prot
 
 ## Why composition exists
 
-Pre-UC, card merging happened per request. The gateway would fetch an agent card, an org template, and a CLPI policy, then run `mergeOrgAndAgentCard()` and `mergePolicies()` on every inbound call. That cost real latency, scattered merge logic across services, and made it hard to answer "what does this agent's effective card actually look like?"
+Previously, card merging happened per request. The gateway would fetch an agent card, an org template, and a CLPI policy, then run `mergeOrgAndAgentCard()` and `mergePolicies()` on every inbound call. That cost real latency, scattered merge logic across services, and made it hard to answer "what does this agent's effective card actually look like?"
 
 Composition moves the merge to **storage time**. When an agent's scope-level card, org template, platform policy, or exemption list changes, a background job (`compose_agent_card`, `compose_protection_card`) computes the **canonical** card — the fully-merged, fully-resolved, ready-to-serve document — and writes it to `canonical_agent_cards` or `canonical_protection_cards`.
 
@@ -63,7 +63,7 @@ Composition metadata (`_composition`) on the canonical card records which scopes
 
 ## Exemptions
 
-An **exemption** waives a specific org- or platform-scope field for a specific agent, with explicit justification and expiry. Exemptions replace the pre-UC boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
+An **exemption** waives a specific org- or platform-scope field for a specific agent, with explicit justification and expiry. Exemptions replace the legacy boolean `org_card_exempt` flag, which was an all-or-nothing escape hatch.
 
 ### Structure
 
@@ -235,7 +235,7 @@ curl https://api.mnemom.ai/v1/agents/{id}/alignment-card?include_composition=tru
 
 ### Observer
 
-Every gateway + observer card read emits a structured log entry with `card_source: canonical_hit` (or `canonical_miss_fallback` in the rare case the canonical row is missing and the composer is still catching up). The UC-14 gate review criterion is that the fallback rate is zero on production traffic.
+Every gateway + observer card read emits a structured log entry with `card_source: canonical_hit` (or `canonical_miss_fallback` in the rare case the canonical row is missing and the composer is still catching up). The production criterion is that the fallback rate is zero on production traffic.
 
 ## Trust Posture is a parallel cascade, not nested
 

@@ -303,7 +303,7 @@ Each agent in your fleet can have its own enforcement mode, controlling how the 
 | **nudge** | Inject feedback into the agent's next request so it can self-correct. |
 | **enforce** | Hard block (403) for non-streaming requests. Falls back to nudge for streaming. |
 
-Set enforcement mode per agent by updating the alignment card's top-level `integrity_mode` / `autonomy_mode` fields. Per [ADR-039](https://github.com/mnemom/scale/blob/main/decisions/ADR-039-unified-two-card-schema.md), these are master switches on the alignment card; the legacy per-agent `/enforcement` endpoint was retired 2026-05-14. The pattern is the standard alignment-card read-modify-write flow — see [Card Management](/guides/card-management).
+Set enforcement mode per agent by updating the alignment card's top-level `integrity_mode` / `autonomy_mode` fields. These are master switches on the alignment card; the legacy per-agent `/enforcement` endpoint was retired 2026-05-14. The pattern is the standard alignment-card read-modify-write flow — see [Card Management](/guides/card-management).
 
 The simplest fleet-scale loop (CLI):
 
@@ -361,7 +361,7 @@ The response includes the `agent_hash` (the gateway-computed identity) and `card
 To customize the card post-registration, publish a [unified alignment card](/concepts/agent-cards) with `PUT /v1/agents/{agent_id}/alignment-card` — see the [card management guide](/guides/card-management) for the full flow. Policy (capability mappings + enforcement rules) is now embedded in the alignment card's `capabilities` and `enforcement` sections; there is no separate `policy_yaml` field.
 
 <Note>
-`DELETE /v1/agents/:id` is a GDPR Art. 17 deletion per [ADR-021](https://github.com/mnemom/scale/blob/main/decisions/ADR-021-gdpr-cascade.md). The API responds `202 Accepted` immediately with a `deletion_request_id`; the server then cascades through traces, checkpoints, drift alerts, reclassifications, and other agent-owned records asynchronously. Poll `/v1/agents/{id}/deletion-status` or subscribe to the deletion webhook to know when the cascade completes.
+`DELETE /v1/agents/:id` is a GDPR Art. 17 deletion. The API responds `202 Accepted` immediately with a `deletion_request_id`; the server then cascades through traces, checkpoints, drift alerts, reclassifications, and other agent-owned records asynchronously. Poll `/v1/agents/{id}/deletion-status` or subscribe to the deletion webhook to know when the cascade completes.
 </Note>
 
 ## Next steps

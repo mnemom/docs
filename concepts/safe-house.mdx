@@ -30,7 +30,7 @@ Safe House is `off` by default for all agents. Enabling it in `observe` mode fir
 
 ## Modes
 
-Safe House uses the canonical four-mode enum shared with the [Protection Card](/concepts/protection-card) and the [Alignment Card](/concepts/alignment-cards) master switches per ADR-039. Same words, same semantics, same UI picker.
+Safe House uses the canonical four-mode enum shared with the [Protection Card](/concepts/protection-card) and the [Alignment Card](/concepts/alignment-cards) master switches. Same words, same semantics, same UI picker.
 
 <CardGroup cols={2}>
   <Card title="Off" icon="circle-xmark">
@@ -48,7 +48,7 @@ Safe House uses the canonical four-mode enum shared with the [Protection Card](/
 </CardGroup>
 
 <Note>
-**Vocabulary canonicalization (ADR-039).** Earlier releases of this page documented `disabled / simulate / observe / enforce`. The canonical post-ADR-039 vocabulary is `off / observe / nudge / enforce` — the same enum used by the [Protection Card](/concepts/protection-card), the Alignment Card master switches, and the cross-tenant AEGIS [Managed Rules](/concepts/managed-rules). The legacy `simulate` mode has been merged into `observe` (full evaluation, no blocking); `disabled` has been renamed `off`. The new mode is `nudge` (advisory injection without blocking) between `observe` and `enforce`.
+**Vocabulary canonicalization.** Earlier releases of this page documented `disabled / simulate / observe / enforce`. The canonical vocabulary is `off / observe / nudge / enforce` — the same enum used by the [Protection Card](/concepts/protection-card), the Alignment Card master switches, and the cross-tenant AEGIS [Managed Rules](/concepts/managed-rules). The legacy `simulate` mode has been merged into `observe` (full evaluation, no blocking); `disabled` has been renamed `off`. The new mode is `nudge` (advisory injection without blocking) between `observe` and `enforce`.
 </Note>
 
 ## Three-layer detection
@@ -116,7 +116,7 @@ Any inbound message containing a canary pattern triggers an automatic `block` ve
 
 ## Source trust
 
-Per ADR-037, `trusted_sources` on the protection card is a typed allowlist with three buckets. A match on any bucket short-circuits the detector pipeline for that message — no detector cycles spent, but every skip emits a low-priority `sh_trusted_source_skip` audit trace so reviewers can see exactly what was waved through.
+`trusted_sources` on the protection card is a typed allowlist with three buckets. A match on any bucket short-circuits the detector pipeline for that message — no detector cycles spent, but every skip emits a low-priority `sh_trusted_source_skip` audit trace so reviewers can see exactly what was waved through.
 
 ```json
 {
@@ -134,7 +134,7 @@ Per ADR-037, `trusted_sources` on the protection card is a typed allowlist with 
 | `agent_ids` | Mnemom agent IDs in `mnm-*` format. No wildcards. | None — agent IDs are scoped per-tenant by construction. |
 | `ip_ranges` | IPv4 or IPv6 CIDR. | `0.0.0.0/0`, `::/0`, and public DNS resolver ranges (`8.8.8.0/24`, `1.1.1.0/24`, `9.9.9.0/24`) cannot be allowlisted. |
 
-Trust is **binary** — a match means "skip detection." Earlier designs that exposed a graduated `risk_multiplier` were withdrawn during the ADR-037 schema unification; tuning sensitivity is the job of `thresholds.{warn, quarantine, block}`, not per-source weights.
+Trust is **binary** — a match means "skip detection." Earlier designs that exposed a graduated `risk_multiplier` were withdrawn during the schema unification; tuning sensitivity is the job of `thresholds.{warn, quarantine, block}`, not per-source weights.
 
 Composition across scopes follows the same intersection-then-union rule as the rest of the card: the platform list is the compliance ceiling (downstream cannot widen trust), and org + agent take the union within that ceiling.
 

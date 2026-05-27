@@ -7,7 +7,7 @@ icon: "database"
 
 # Governance signals schema
 
-This page documents the platform schema for [governance signals](/concepts/governance-signals), the operator-actionable observation surface introduced in [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md).
+This page documents the platform schema for [governance signals](/concepts/governance-signals), the operator-actionable observation surface.
 
 ## Tables
 
@@ -20,7 +20,7 @@ The single row per open observation. The platform writes via the `governance_sig
 | `id` | `text` PK | `gs-{12-hex}` (mirrors `pa-` convention from `pending_advisories`). |
 | `scope` | `text` CHECK | `platform | org | team | agent`. |
 | `scope_id` | `text` | platform_id / org_id / team_id (uuid::text) / agent_id. |
-| `source` | `text` CHECK | `sideband.drift | sideband.coherence | sideband.fault_line | sideband.fleet`. Future `protection.*` / `posture.*` via [ADR-048 amendment](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md#section-8). |
+| `source` | `text` CHECK | `sideband.drift | sideband.coherence | sideband.fault_line | sideband.fleet`. Future `protection.*` / `posture.*` land additively. |
 | `pattern_type` | `text` | Free-form per source (e.g., `cluster_partition`, `pairwise_governance_floor`). |
 | `severity` | `text` CHECK | `info | warn | high | critical`. |
 | `detected_at` | `timestamptz` | Default `now()`; refreshed on coalescing upsert. |
@@ -33,7 +33,7 @@ The single row per open observation. The platform writes via the `governance_sig
 | `status` | `text` CHECK | `open | acknowledged | resolved | dismissed | expired`. |
 | `acknowledged_by` | `uuid` FK → `auth.users.id` | |
 | `acknowledged_at` | `timestamptz` | |
-| `acknowledged_actor_role` | `text` CHECK | `platform_admin | org_owner | org_admin | team_admin | member | system` (mirrors [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md) actor_role). |
+| `acknowledged_actor_role` | `text` CHECK | `platform_admin | org_owner | org_admin | team_admin | member | system` (mirrors the audit actor_role). |
 | `resolution_status` | `text` CHECK | `action_taken | wont_fix | duplicate | false_positive | self_resolved`. |
 | `action_taken` | `text` | Operator-authored note. |
 | `resolved_by` | `uuid`, `resolved_at` `timestamptz` | |
@@ -47,7 +47,7 @@ The single row per open observation. The platform writes via the `governance_sig
 ```sql
 -- Write-time idempotency: repeated cron emissions of the same open
 -- signal coalesce. The architectural fix to the duplicate-paragraph
--- symptom that motivated ADR-048.
+-- symptom that motivated the redesign.
 CREATE UNIQUE INDEX governance_signals_open_dedup
   ON governance_signals (scope, scope_id, source, pattern_type)
   WHERE status = 'open';
@@ -92,7 +92,7 @@ CREATE INDEX governance_signals_agent_ids_gin
 
 ## RLS
 
-Service-role bypass model: the API boundary applies authz in TypeScript per [ADR-046](https://github.com/mnemom/scale/blob/main/decisions/ADR-046-audit-actor-model.md), and PostgREST goes through the service role. RLS is enabled on all three tables with **no user-facing policies** — this is fail-closed against accidental exposure (a future PostgREST exposure can't leak governance signals across orgs).
+Service-role bypass model: the API boundary applies authz in TypeScript, and PostgREST goes through the service role. RLS is enabled on all three tables with **no user-facing policies** — this is fail-closed against accidental exposure (a future PostgREST exposure can't leak governance signals across orgs).
 
 Future tightening to user-driven RLS UPDATE policies is a follow-up once a shared cross-type `org_members.user_id` (TEXT) ↔ `auth.uid()` (UUID) policy helper is in place.
 
@@ -121,7 +121,7 @@ governance_signal_emit(
 
 ### `governance_signal_acknowledge` / `_resolve` / `_dismiss`
 
-Operator state transitions. Each captures `acknowledged_actor_role` per ADR-046 and is `SECURITY DEFINER` so the API can invoke after applying RBAC in TypeScript.
+Operator state transitions. Each captures `acknowledged_actor_role` and is `SECURITY DEFINER` so the API can invoke after applying RBAC in TypeScript.
 
 ```sql
 governance_signal_acknowledge(p_id, p_actor, p_actor_role, p_action_taken DEFAULT NULL)
@@ -165,9 +165,9 @@ All HMAC-SHA256 signed (`X-Mnemom-Signature: sha256=…`) following the AAP webh
 
 ## Naming convention discipline
 
-`source` is closed, hierarchical, append-only — mirrors [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) for `pending_advisories.source`. Adding a new value requires:
+`source` is closed, hierarchical, append-only — mirrors the `pending_advisories.source` taxonomy. Adding a new value requires:
 
-1. ADR-048 amendment.
+1. A schema amendment.
 2. Migration extending the CHECK constraint with ASSERT-after-DDL guard.
 3. Producer code (typically observer).
 4. Consumer-tolerance discipline (gateway / UI / CLI / SDKs).
@@ -178,6 +178,4 @@ Removing a source is forbidden. Deprecation is the only valid path.
 ## Related
 
 - [Governance signals concept](/concepts/governance-signals).
-- [Pending Advisories Schema](/specifications/pending-advisories-schema) — narrowed to `runtime.*` + `manual.*` per ADR-048 §1.
-- [ADR-048](https://github.com/mnemom/scale/blob/main/decisions/ADR-048-governance-signals-layering.md).
-- [ADR-047](https://github.com/mnemom/scale/blob/main/decisions/ADR-047-pending-advisories-source-taxonomy.md) — narrowed at amendment time by ADR-048 §8.
+- [Pending Advisories Schema](/specifications/pending-advisories-schema) — narrowed to `runtime.*` + `manual.*`.
