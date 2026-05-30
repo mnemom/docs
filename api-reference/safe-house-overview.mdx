@@ -15,55 +15,67 @@ Base URL: `https://api.mnemom.ai`
 
 ## Configuration
 
-Control how Safe House behaves — globally for the org, per-agent, or in bulk.
+Safe House behavior is configured through the **protection card** — a per-agent manifest of mode, score thresholds, screened surfaces, and trusted sources, composed across platform → org → agent scopes. Control it globally for the org (via the org protection template), per-agent, or in bulk.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/v1/safe-house/config` | Retrieve org-level Safe House defaults (thresholds, enforcement mode, enabled threat types) |
-| `PUT` | `/v1/safe-house/config` | Update org-level defaults — applies to all agents that don't have a per-agent override |
-| `GET` | `/v1/agents/:id/safe-house/config` | Retrieve per-agent Safe House config (shows effective config after inheritance from org) |
-| `PUT` | `/v1/agents/:id/safe-house/config` | Update per-agent config — overrides org defaults for the specified fields only |
-| `POST` | `/v1/safe-house/config/bulk-apply` | Apply a config patch to multiple agents at once |
+| `GET` | `/v1/protection/org/:org_id` | Retrieve the org-scope protection manifest — defaults inherited by all agents in the org |
+| `PUT` | `/v1/protection/org/:org_id` | Replace the org-scope protection manifest |
+| `GET` | `/v1/protection/agent/:agent_id` | Retrieve the agent-scope protection manifest (this layer only) |
+| `GET` | `/v1/protection/agent/:agent_id/effective` | Retrieve the composed, effective config after inheritance from org/platform |
+| `PUT` | `/v1/protection/agent/:agent_id` | Replace the agent-scope protection manifest |
+| `PATCH` | `/v1/protection/agent/:agent_id/thresholds` | Patch just the agent's score thresholds (`warn` / `quarantine` / `block`) |
+| `POST` | `/v1/safe-house/config/bulk-apply` | Apply a config object to multiple agents at once |
 
-**Retrieve org-level config:**
+The granular sub-resource paths (`/mode`, `/thresholds`, `/screen_surfaces`, `/trusted_sources`) accept `PUT` or `PATCH` and exist at every scope (`/protection/agent/:id`, `/protection/org/:id`, `/protection/team/:id`, `/protection/platform/:id`).
+
+**Retrieve the org-scope manifest:**
 
 ```bash
-curl https://api.mnemom.ai/v1/safe-house/config \
+curl https://api.mnemom.ai/v1/protection/org/org-7f3a9b2c \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ```json
 {
-  "enforcement_mode": "quarantine",
+  "card_version": "protection/2026-04-26",
+  "agent_id": "*",
+  "mode": "enforce",
   "thresholds": {
-    "bec_fraud":          { "warn": 0.45, "block": 0.80 },
-    "prompt_injection":   { "warn": 0.40, "block": 0.75 },
-    "indirect_injection": { "warn": 0.50, "block": 0.85 },
-    "social_engineering": { "warn": 0.50, "block": 0.80 },
-    "agent_spoofing":     { "warn": 0.45, "block": 0.75 },
-    "hijack_attempt":     { "warn": 0.55, "block": 0.85 },
-    "data_exfiltration":  { "warn": 0.45, "block": 0.80 },
-    "privilege_escalation":{ "warn": 0.45, "block": 0.80 }
+    "warn": 0.60,
+    "quarantine": 0.80,
+    "block": 0.95
   },
-  "session_risk_escalation_threshold": 0.70,
-  "canary_auto_create": false
+  "screen_surfaces": {
+    "incoming": true,
+    "outgoing": true,
+    "tool_calls": true,
+    "tool_responses": true
+  },
+  "trusted_sources": {
+    "domains": [],
+    "agent_ids": [],
+    "ip_ranges": []
+  }
 }
 ```
 
-**Update a single agent's config:**
+**Update a single agent's thresholds:**
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/mnm-550e8400-e29b-41d4-a716-446655440000/safe-house/config \
+curl -X PATCH https://api.mnemom.ai/v1/protection/agent/mnm-550e8400-e29b-41d4-a716-446655440000/thresholds \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "thresholds": {
-      "bec_fraud": { "warn": 0.50, "block": 0.88 }
-    }
+    "warn": 0.50,
+    "quarantine": 0.70,
+    "block": 0.88
   }'
 ```
 
-**Bulk-apply a config patch:**
+To replace the whole agent-scope manifest, `PUT /v1/protection/agent/:agent_id` with a full [protection card](/concepts/protection-card).
+
+**Bulk-apply a config to many agents:**
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/safe-house/config/bulk-apply \
@@ -71,8 +83,8 @@ curl -X POST https://api.mnemom.ai/v1/safe-house/config/bulk-apply \
   -H "Content-Type: application/json" \
   -d '{
     "agent_ids": ["mnm-550e8400-e29b-41d4-a716-446655440000", "mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b"],
-    "patch": {
-      "enforcement_mode": "block"
+    "config": {
+      "mode": "enforce"
     }
   }'
 ```

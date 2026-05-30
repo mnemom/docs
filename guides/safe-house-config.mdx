@@ -202,14 +202,16 @@ The `--strict` flag also checks that the card composes cleanly with the current 
 
 There's no first-class rollback endpoint. To revert:
 
-1. Fetch a historical version:
+1. Fetch the amendment history to find the prior shape:
 
    ```bash
    curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-     "https://api.mnemom.ai/v1/agents/{agent_id}/protection-card/history?limit=10"
+     "https://api.mnemom.ai/v1/agents/{agent_id}/card-amendments"
    ```
 
-2. Pick the version you want, publish it as a new PUT.
+   Each entry records the `field_changed`, `old_value`, `new_value`, `reason`, `triggered_by`, and `created_at` — so you can reconstruct any past field value.
+
+2. Reconstruct the card you want from the amendment history, then publish it as a new `PUT /v1/protection/agent/{agent_id}`.
 
 All publishes are amendments — the history is preserved. A "rollback" is just another amendment referencing the prior shape.
 
