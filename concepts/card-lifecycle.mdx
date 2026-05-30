@@ -39,11 +39,13 @@ When you update an alignment card (via CLI, API, or dashboard), the system does 
 
 | Field | Description |
 |---|---|
-| `previous_version` | The `card_id` of the version being replaced |
-| `new_version` | The `card_id` of the updated version |
-| `changed_fields` | List of fields that were modified (e.g., `autonomy.bounded_actions` in the [unified card](/specifications/alignment-card-schema); equivalently `autonomy_envelope.bounded_actions` at the AAP protocol level) |
-| `timestamp` | When the amendment was created |
+| `amendment_id` | Unique ID of the amendment record |
+| `agent_id` | The agent whose card was amended |
+| `field_changed` | The card field that was modified (e.g., `autonomy.bounded_actions` in the [unified card](/specifications/alignment-card-schema); equivalently `autonomy_envelope.bounded_actions` at the AAP protocol level) |
+| `old_value` / `new_value` | The field's value before and after the change |
 | `reason` | Human-readable explanation for the change |
+| `triggered_by` | What initiated the amendment — `reclassification`, `policy_change`, or `manual` |
+| `created_at` | When the amendment was created (ISO 8601) |
 
 Amendments can be linked to reclassification requests, proving that a card gap existed at the time of a violation. This linkage is critical for trust recovery -- it provides auditable evidence that the violation was a configuration error, not agent misbehavior.
 
@@ -58,19 +60,18 @@ curl https://api.mnemom.ai/v1/agents/agent_abc123/card-amendments
 **API Response:**
 
 ```json
-{
-  "amendments": [
-    {
-      "amendment_id": "amend-7f3a2b1c",
-      "previous_version": "ac-old-card-id",
-      "new_version": "ac-new-card-id",
-      "changed_fields": ["autonomy_envelope.bounded_actions"],
-      "timestamp": "2026-02-15T10:30:00Z",
-      "reason": "Added web_fetch capability after enabling browser MCP server",
-      "linked_reclassification_id": "reclass-9e4d5f6a"
-    }
-  ]
-}
+[
+  {
+    "amendment_id": "amend-7f3a2b1c",
+    "agent_id": "agent_abc123",
+    "field_changed": "autonomy_envelope.bounded_actions",
+    "old_value": ["mcp__browser__navigate"],
+    "new_value": ["mcp__browser__navigate", "mcp__browser__web_fetch"],
+    "reason": "Added web_fetch capability after enabling browser MCP server",
+    "triggered_by": "reclassification",
+    "created_at": "2026-02-15T10:30:00Z"
+  }
+]
 ```
 
 <Tip>
