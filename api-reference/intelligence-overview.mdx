@@ -495,42 +495,60 @@ All error responses follow the standard envelope:
 
 ## SDK usage
 
+<Note>
+The Intelligence endpoints are not yet wrapped by the `@mnemom/sdk` client (which currently covers the `agents` and `catalog` namespaces). Call them directly over HTTP until SDK helpers ship.
+</Note>
+
 <CodeGroup>
 
 ```typescript TypeScript
-import { MnemomClient } from '@mnemom/sdk';
-
-const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+const API_BASE = 'https://api.mnemom.ai';
+const headers = {
+  Authorization: `Bearer ${process.env.MNEMOM_API_KEY}`,
+  'Content-Type': 'application/json',
+};
 
 // Analyze fault lines
-const analysis = await client.intelligence.analyzeFaultLines({
-  team_id: 'team-abc123',
-});
+const analysis = await fetch(`${API_BASE}/v1/teams/fault-lines`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({ team_id: 'team-abc123' }),
+}).then((r) => r.json());
 console.log(`Fleet score: ${analysis.fleet_score}`);
 console.log(`Fault lines: ${analysis.summary.total}`);
 
 // Forecast risks
-const forecast = await client.intelligence.forecast({
-  team_id: 'team-abc123',
-  fault_line_analysis_id: analysis.analysis_id,
-});
+const forecast = await fetch(`${API_BASE}/v1/teams/forecast`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    team_id: 'team-abc123',
+    fault_line_analysis_id: analysis.analysis_id,
+  }),
+}).then((r) => r.json());
 console.log(`Risk level: ${forecast.overall_risk_level}`);
 
 // Generate policy recommendation
-const recommendation = await client.intelligence.recommendPolicy({
-  team_id: 'team-abc123',
-});
+const recommendation = await fetch(`${API_BASE}/v1/teams/recommend-policy`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({ team_id: 'team-abc123' }),
+}).then((r) => r.json());
 console.log(`Confidence: ${recommendation.confidence}`);
 console.log(`Fault lines resolved: ${recommendation.forecast_summary.fault_lines_resolved}`);
 
 // Create a transaction with guardrails
-const txn = await client.transactions.create({
-  agent_id: 'mnm-550e8400-e29b-41d4-a716-446655440000',
-  description: 'Process customer refund',
-  action_type: 'financial_operation',
-  tools: ['mcp__payment__refund', 'mcp__db__update_order'],
-  duration_hours: 1,
-});
+const txn = await fetch(`${API_BASE}/v1/transactions`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    agent_id: 'mnm-550e8400-e29b-41d4-a716-446655440000',
+    description: 'Process customer refund',
+    action_type: 'financial_operation',
+    tools: ['mcp__payment__refund', 'mcp__db__update_order'],
+    duration_hours: 1,
+  }),
+}).then((r) => r.json());
 console.log(`Transaction: ${txn.transaction_id}, expires: ${txn.expires_at}`);
 ```
 

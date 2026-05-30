@@ -252,19 +252,28 @@ All error responses follow the standard envelope:
 
 ## SDK usage
 
+<Note>
+Policy evaluation is not yet wrapped by the `@mnemom/sdk` client (which currently covers the `agents` and `catalog` namespaces). Call `/v1/policies/evaluate` directly over HTTP until an SDK helper ships.
+</Note>
+
 <CodeGroup>
 
 ```typescript TypeScript
-import { MnemomClient } from '@mnemom/sdk';
-
-const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+const API_BASE = 'https://api.mnemom.ai';
 
 // Evaluate tools against the agent's resolved policy
-const result = await client.policies.evaluate({
-  agent_id: 'mnm-550e8400-e29b-41d4-a716-446655440000',
-  tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
-  context: 'gateway',
-});
+const result = await fetch(`${API_BASE}/v1/policies/evaluate`, {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${process.env.MNEMOM_API_KEY}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    agent_id: 'mnm-550e8400-e29b-41d4-a716-446655440000',
+    tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
+    context: 'gateway',
+  }),
+}).then((r) => r.json());
 
 console.log(result.verdict);                // "fail"
 console.log(result.violations);             // [{ tool: "mcp__filesystem__delete", ... }]
