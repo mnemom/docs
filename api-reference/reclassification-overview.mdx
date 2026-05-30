@@ -348,28 +348,44 @@ All error responses follow the standard envelope:
 
 ## SDK usage
 
+<Note>
+Reclassification, score recomputation, and compliance export are not yet wrapped by the `@mnemom/sdk` client (which currently covers the `agents` and `catalog` namespaces). Call these endpoints directly over HTTP until SDK helpers ship.
+</Note>
+
 <CodeGroup>
 
 ```typescript TypeScript
-import { MnemomClient } from '@mnemom/sdk';
-
-const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
+const API_BASE = 'https://api.mnemom.ai';
+const headers = {
+  Authorization: `Bearer ${process.env.MNEMOM_API_KEY}`,
+  'Content-Type': 'application/json',
+};
+const agentId = 'mnm-550e8400-e29b-41d4-a716-446655440000';
 
 // Reclassify a checkpoint violation
-const reclassification = await client.agents.reclassify('mnm-550e8400-e29b-41d4-a716-446655440000', {
-  checkpoint_id: 'ic-abc12345',
-  reason: 'Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions',
-  card_amendment_id: 'amend-xyz789',
-});
+const reclassification = await fetch(`${API_BASE}/v1/agents/${agentId}/reclassify`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    checkpoint_id: 'ic-abc12345',
+    reason: 'Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions',
+    card_amendment_id: 'amend-xyz789',
+  }),
+}).then((r) => r.json());
 console.log(`Reclassified: ${reclassification.reclassification_id}`);
 
 // Trigger score recomputation
-const result = await client.reputation.recompute('mnm-550e8400-e29b-41d4-a716-446655440000');
+const result = await fetch(`${API_BASE}/v1/reputation/${agentId}/recompute`, {
+  method: 'POST',
+  headers,
+}).then((r) => r.json());
 console.log(`Score: ${result.score_before} → ${result.score_after}`);
 console.log(`Grade: ${result.grade_before} → ${result.grade_after}`);
 
 // Export compliance record
-const exportData = await client.agents.complianceExport('mnm-550e8400-e29b-41d4-a716-446655440000');
+const exportData = await fetch(`${API_BASE}/v1/agents/${agentId}/compliance-export`, {
+  headers,
+}).then((r) => r.json());
 console.log(`Chain valid: ${exportData.integrity_chain_valid}`);
 console.log(`Violations: ${exportData.violations.length}`);
 console.log(`Reclassifications: ${exportData.reclassifications.length}`);
