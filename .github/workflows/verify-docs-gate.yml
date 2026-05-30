@@ -25,15 +25,16 @@ name: Verify docs gate (Engine A)
 # checkout as its oracle (MNEMOM_API_DIR), wired below. `api-examples` still
 # wraps the live-prod walker and stays advisory until that's addressed.
 #
-# ── Activation: requires cross-repo read secrets ──────────────────────────────
-# Reading the PRIVATE mnemom-test / mnemom-platform / mnemom-api repos needs
-# tokens (mirror the DOCS_READ_TOKEN convention mnemom-test uses to read this
-# repo). UNTIL `MNEMOM_TEST_READ_TOKEN` is configured, this workflow SKIPS
-# cleanly (posts an "inactive" notice, exits 0) — it never blocks a PR or shows
-# a confusing red. Configure these repo/org secrets to activate:
-#   MNEMOM_TEST_READ_TOKEN      → read mnemom/mnemom-test (the runner)
-#   MNEMOM_PLATFORM_READ_TOKEN  → read mnemom/mnemom-platform (sdk oracle source)
-#   MNEMOM_API_READ_TOKEN       → read mnemom/mnemom-api (api-coverage committed-spec oracle)
+# ── Activation: org-owned mnemom-docs GitHub App ──────────────────────────────
+# Reading the PRIVATE mnemom-test / mnemom-platform / mnemom-api repos uses the
+# org-owned `mnemom-docs` GitHub App (Contents: Read-only, installed on those
+# repos) to mint a short-lived, repo-scoped token per run via
+# actions/create-github-app-token — no long-lived PAT stored in this public repo.
+# UNTIL the App key is configured, this workflow SKIPS cleanly (posts an
+# "inactive" notice, exits 0) — it never blocks a PR or shows a confusing red.
+# Configure to activate:
+#   vars.APP_ID            → the mnemom-docs App id
+#   secrets.APP_PRIVATE_KEY → the mnemom-docs App private key (PEM)
 
 on:
   pull_request:
@@ -57,20 +58,34 @@ jobs:
 
     # Activation flag — true only when the cross-repo read token is configured.
     # Every functional step gates on this so a missing secret SKIPS (not fails).
+    # Activation flag — true only when the mnemom-docs GitHub App private key is
+    # configured. A missing key SKIPS cleanly (never fails/blocks a PR).
     env:
-      GATE_ACTIVE: ${{ secrets.MNEMOM_TEST_READ_TOKEN != '' }}
+      GATE_ACTIVE: ${{ secrets.APP_PRIVATE_KEY != '' }}
 
     steps:
-      - name: Gate inactive notice (no read token configured)
+      - name: Gate inactive notice (App credentials not configured)
         if: env.GATE_ACTIVE != 'true'
         run: |
           {
             echo "## docs surface — Engine A gate: INACTIVE"
             echo ""
-            echo "Skipped: \`MNEMOM_TEST_READ_TOKEN\` is not configured, so the runner repo"
-            echo "cannot be checked out. This is a clean skip — the gate never blocks a PR"
-            echo "until activated. See the workflow header for the secrets to set."
+            echo "Skipped: the \`mnemom-docs\` GitHub App key (\`APP_PRIVATE_KEY\`) is not"
+            echo "configured, so the private oracle repos cannot be checked out. This is a"
+            echo "clean skip — the gate never blocks a PR until activated. See the header."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Short-lived, read-only, repo-scoped token from the org-owned mnemom-docs
+      # GitHub App (replaces long-lived per-repo PATs).
+      - name: Mint cross-repo read token (GitHub App)
+        if: env.GATE_ACTIVE == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: mnemom
+          repositories: mnemom-test,mnemom-platform,mnemom-api
 
       - name: Checkout docs (the PR — pages under test)
         if: env.GATE_ACTIVE == 'true'
@@ -85,7 +100,7 @@ jobs:
           repository: mnemom/mnemom-test
           ref: main
           path: mnemom-test
-          token: ${{ secrets.MNEMOM_TEST_READ_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: "Checkout mnemom-platform (oracle: SDK source for the sdk layer)"
         if: env.GATE_ACTIVE == 'true'
@@ -94,7 +109,7 @@ jobs:
           repository: mnemom/mnemom-platform
           ref: main
           path: mnemom-platform
-          token: ${{ secrets.MNEMOM_PLATFORM_READ_TOKEN || secrets.MNEMOM_TEST_READ_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: "Checkout mnemom-api (oracle: committed spec for api-coverage)"
         if: env.GATE_ACTIVE == 'true'
@@ -103,7 +118,7 @@ jobs:
           repository: mnemom/mnemom-api
           ref: main
           path: mnemom-api
-          token: ${{ secrets.MNEMOM_API_READ_TOKEN || secrets.MNEMOM_TEST_READ_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Node 20
         if: env.GATE_ACTIVE == 'true'
