@@ -422,16 +422,16 @@ A coverage percentage below 100% means some card actions have no backing capabil
 ### Using coverage in CI/CD
 
 ```bash
-# Evaluate a card and fail if coverage is below threshold
+# Evaluate a card and fail if any card action is unmapped (sub-100% coverage)
 mnemom card evaluate \
   card.yaml \
   --tools mcp__browser__navigate,mcp__filesystem__read_file \
-  --min-coverage 90
+  --strict
 
-# Exit code 1 if coverage < 90%
+# Exit code 1 on warnings (any unmapped action) as well as failures
 ```
 
-This integrates naturally into pre-deploy gates: a card change that reduces coverage below the threshold blocks the merge. See [CI/CD policy gates](/guides/ci-cd-policy-gates) for the full pipeline template.
+`card evaluate` always prints the coverage percentage and lists unmapped actions. Coverage gating is binary: without `--strict` only hard policy violations exit non-zero; with `--strict` any unmapped action (i.e. coverage below 100%) is treated as a warning that also exits `1`. This integrates naturally into pre-deploy gates: a card change that introduces an unmapped action blocks the merge. See [CI/CD policy gates](/guides/ci-cd-policy-gates) for the full pipeline template.
 
 ## Putting it together
 

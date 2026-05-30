@@ -305,17 +305,23 @@ Each agent in your fleet can have its own enforcement mode, controlling how the 
 
 Set enforcement mode per agent by updating the alignment card's top-level `integrity_mode` / `autonomy_mode` fields. These are master switches on the alignment card; the legacy per-agent `/enforcement` endpoint was retired 2026-05-14. The pattern is the standard alignment-card read-modify-write flow — see [Card Management](/guides/card-management).
 
-The simplest fleet-scale loop (CLI):
+`mnemom card edit --agent "$agent"` opens that agent's alignment card in `$EDITOR` for an interactive change — fine for a one-off, but there is no `--set` flag for non-interactive field edits. To flip the master switches across a fleet, script the read-modify-write flow with `card show` + `card publish` (or the API PUT). For example, using `yq` to patch the YAML in place:
 
 ```bash
 # Production agents → enforce
 for agent in shopping.agent checkout.agent; do
-  mnemom card edit --agent "$agent" --set integrity_mode=enforce --set autonomy_mode=enforce
+  mnemom card show --agent "$agent" \
+    | yq '.integrity_mode = "enforce" | .autonomy_mode = "enforce"' \
+    > "/tmp/$agent.card.yaml"
+  mnemom card publish "/tmp/$agent.card.yaml" --agent "$agent"
 done
 
 # Staging agents → observe
 for agent in staging.recommender staging.support; do
-  mnemom card edit --agent "$agent" --set integrity_mode=observe --set autonomy_mode=observe
+  mnemom card show --agent "$agent" \
+    | yq '.integrity_mode = "observe" | .autonomy_mode = "observe"' \
+    > "/tmp/$agent.card.yaml"
+  mnemom card publish "/tmp/$agent.card.yaml" --agent "$agent"
 done
 ```
 

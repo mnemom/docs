@@ -111,7 +111,7 @@ jobs:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
       - name: Evaluate card
-        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --format json
+        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --strict
 ```
 
 This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM_API_KEY` is read from GitHub Secrets and exposed as an environment variable.
@@ -151,46 +151,22 @@ Both `card validate` and `card evaluate` use standard exit codes that CI systems
 
 No special configuration is needed. If the command exits with `1`, the pipeline step fails, and downstream steps (like deployment) are skipped.
 
-### JSON output for CI
+### Gating in CI
 
-Use `--format json` to get machine-readable output for programmatic parsing in complex pipelines:
+`card evaluate` prints a human-readable report (verdict, violations, warnings, and coverage metrics) and signals the result through its exit code, which is what CI gates on:
 
 ```bash
-mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__delete --agent my-agent --format json
+mnemom card evaluate card.yaml \
+  --tools mcp__browser__navigate,mcp__filesystem__delete \
+  --agent my-agent \
+  --strict
 ```
 
-The JSON output includes the verdict, any violations, warnings, and coverage metrics:
+The report lists each violation and warning, then a coverage summary (card actions, mapped, unmapped, and coverage percentage). Without `--strict` only hard policy violations exit `1`; with `--strict` any warning — including an unmapped tool action (sub-100% coverage) — also exits `1`, so the pipeline step fails.
 
-```json
-{
-  "verdict": "fail",
-  "violations": [
-    {
-      "tool": "mcp__filesystem__delete",
-      "rule": "forbidden",
-      "reason": "File deletion not permitted for support agents",
-      "severity": "critical"
-    }
-  ],
-  "warnings": [
-    {
-      "tool": "mcp__custom__export",
-      "rule": "unmapped",
-      "reason": "Tool not covered by any capability mapping"
-    }
-  ],
-  "coverage": {
-    "coverage_pct": 85,
-    "mapped_actions": 5,
-    "total_actions": 6,
-    "unmapped": ["data_export"]
-  }
-}
-```
-
-<Tip>
-  Pipe the JSON output to `jq` for extracting specific fields in downstream pipeline steps. For example, `mnemom card evaluate card.yaml --tools mcp__browser__navigate --agent my-agent --format json | jq '.coverage.coverage_pct'` extracts just the coverage percentage.
-</Tip>
+<Note>
+  `card evaluate` does not emit machine-readable JSON today. CI pipelines should gate on the exit code (`0` = pass, `1` = fail) rather than parsing stdout.
+</Note>
 
 ---
 
@@ -261,7 +237,7 @@ If your organization enforces minimum trust scores, add the `mnemom/reputation-c
 
 ### Monitor and iterate
 
-Review pipeline failures in your CI dashboard. Use `--format json` output to integrate with alerting tools like Slack, PagerDuty, or Datadog.
+Review pipeline failures in your CI dashboard. Gate downstream steps on the `card evaluate` exit code (`0` = pass, `1` = fail under `--strict`) and route failed jobs to alerting tools like Slack, PagerDuty, or Datadog.
 
 </Steps>
 
@@ -272,7 +248,7 @@ Review pipeline failures in your CI dashboard. Use `--format json` output to int
 - **Run validation on every PR that touches card files.** Static validation is fast and catches the most common mistakes before human review begins.
 - **Run evaluation on main branch merges (pre-deploy).** Evaluation confirms the card's policy works against your agent's tools, not just schema correctness.
 - **Store card.yaml in version control alongside application code.** This gives you diff visibility, rollback capability, and a clear audit trail for every policy change.
-- **Use `--format json` for programmatic parsing in complex pipelines.** JSON output integrates cleanly with `jq`, custom scripts, and downstream CI steps.
+- **Gate on the exit code, not stdout.** `card evaluate` prints a human-readable report and signals pass/fail through its exit code (`0`/`1`); add `--strict` to fail on warnings such as unmapped tool actions. There is no JSON output mode today.
 - **Set up notifications for evaluation failures.** Route CI failures to Slack, email, or your incident management tool so the team responds quickly.
 - **Keep validation fast by running it first.** Since static validation needs no API call, it should always be the first gate. If it fails, there is no reason to run the slower evaluation step.
 

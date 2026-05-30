@@ -222,15 +222,24 @@ Note the agent's `integrity_mode: observe` was silently overridden to `enforce` 
 ### CLI
 
 ```bash
-mnemom card show --with-composition      # show canonical card + _composition metadata
-mnemom card show --raw                   # show agent-scope row without composition
-mnemom card trace --value transparency   # which scope contributed this value
+mnemom card show                         # canonical (composed) alignment card (YAML)
 ```
+
+`mnemom card show` always renders the canonical composed card. The `_composition` metadata block, the raw agent-scope row, and per-field scope provenance are not surfaced by the CLI today — use the API below.
 
 ### API
 
 ```bash
-curl https://api.mnemom.ai/v1/agents/{id}/alignment-card?include_composition=true
+# Canonical card with the _composition metadata block attached
+curl "https://api.mnemom.ai/v1/agents/{id}/alignment-card?include_composition=true"
+
+# Five-row sources envelope (Platform / Org / Teams / Agent / Composed) —
+# the agent-scope raw row without composition
+curl "https://api.mnemom.ai/v1/agents/{id}/alignment-card?include=sources"
+
+# Per-field scope provenance (which scope contributed each value),
+# always populated on the /effective sub-resource
+curl "https://api.mnemom.ai/v1/alignment/agent/{id}/effective"
 ```
 
 ### Observer
