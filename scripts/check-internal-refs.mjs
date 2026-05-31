@@ -43,17 +43,17 @@ const RULES = [
 // scrubbed at the source (mnemom-api) under MNE-139 and these entries retire on
 // the next deploy + re-sync. Fingerprint = `${location}::${matchedToken}`.
 const SPEC_ALLOWLIST = new Set([
-  "tag:Network.description::AEGIS-12", // MNE-139 — scrub in mnemom-api tag desc
-  "tag:Recipes.description::AEGIS-6", // MNE-139
-  "tag:Trust.description::AEGIS-13", // MNE-139
-  "DELETE /agents/{agent_id}.description::github.com/mnemom/scale", // MNE-139 — ADR-021 link → private repo
-  "schema:UnifiedAlignmentCard.description::UC-4", // MNE-139
-  "schema:UnifiedProtectionCard.description::UC-4", // MNE-139
-  "schema:AgentExemption.description::UC-4", // MNE-139
-  "schema:AgentExemption.status.description::UC-4", // MNE-139
+  "$.tags.Network.description::AEGIS-12", // MNE-139 — scrubbed at source in mnemom-api#720
+  "$.tags.Recipes.description::AEGIS-6", // MNE-139 — mnemom-api#720
+  "$.tags.Trust.description::AEGIS-13", // MNE-139 — mnemom-api#720
+  "$.paths./agents/{agent_id}.delete.description::github.com/mnemom/scale", // MNE-139 — ADR-021 private-repo link, mnemom-api#720
+  "$.components.securitySchemes.ArenaCandidateTokenAuth.description::op://", // MNE-139 — 1Password path, mnemom-api#720
+  "$.components.schemas.UnifiedAlignmentCard.description::UC-4", // MNE-139 — mnemom-api#720
+  "$.components.schemas.UnifiedProtectionCard.description::UC-4", // MNE-139 — mnemom-api#720
+  "$.components.schemas.AgentExemption.description::UC-4", // MNE-139 — mnemom-api#720
+  "$.components.schemas.AgentExemption.properties.status.description::UC-4", // MNE-139 — mnemom-api#720
 ]);
 
-const METHODS = ["get", "put", "post", "delete", "patch"];
 const findings = []; // {surface, loc, label, token}
 const allowlistHits = new Set();
 
@@ -93,32 +93,27 @@ if (!SELFTEST) {
   }
 }
 
-// ---- 2. OpenAPI committed slice (prose fields only) ----
-function scanSpec(spec) {
-  scan("info.title", spec.info?.title, "spec");
-  scan("info.description", spec.info?.description, "spec");
-  for (const t of spec.tags || []) {
-    scan(`tag:${t.name}.name`, t.name, "spec");
-    scan(`tag:${t.name}.description`, t.description, "spec");
+// ---- 2. OpenAPI committed slice — recursive walk of every PROSE value ----
+// Scans the string value of any `description`/`summary`/`title` key (+ tag
+// `name`) ANYWHERE in the spec — operations, tags, AND all of components
+// (schemas, securitySchemes, parameters, responses…). It deliberately does NOT
+// scan path keys, operationIds, schema/property names, enum or example values:
+// those carry tokens like the live `/safe-house/cbd/` path and would
+// false-positive. Locations are JSON-path-ish, name-keyed for arrays (stable
+// across reordering) so SPEC_ALLOWLIST fingerprints don't churn.
+const PROSE_KEYS = new Set(["description", "summary", "title"]);
+function scanSpec(node, loc) {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    node.forEach((v, i) => scanSpec(v, `${loc}.${(v && typeof v === "object" && (v.name || v.tab)) || i}`));
+    return;
   }
-  for (const [path, item] of Object.entries(spec.paths || {})) {
-    for (const m of METHODS) {
-      const op = item[m];
-      if (!op) continue;
-      const b = `${m.toUpperCase()} ${path}`;
-      scan(`${b}.summary`, op.summary, "spec");
-      scan(`${b}.description`, op.description, "spec");
-      for (const pr of op.parameters || []) scan(`${b} param:${pr.name}.description`, pr.description, "spec");
-      if (op.requestBody) scan(`${b}.requestBody.description`, op.requestBody.description, "spec");
-      for (const [code, r] of Object.entries(op.responses || {})) scan(`${b}.responses[${code}].description`, r?.description, "spec");
-    }
-  }
-  for (const [name, sch] of Object.entries(spec.components?.schemas || {})) {
-    scan(`schema:${name}.description`, sch?.description, "spec");
-    for (const [pn, pp] of Object.entries(sch?.properties || {})) scan(`schema:${name}.${pn}.description`, pp?.description, "spec");
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === "string" && PROSE_KEYS.has(k)) scan(`${loc}.${k}`, v, "spec");
+    else if (v && typeof v === "object") scanSpec(v, `${loc}.${k}`);
   }
 }
-if (!SELFTEST && existsSync(SPEC)) scanSpec(JSON.parse(readFileSync(SPEC, "utf8")));
+if (!SELFTEST && existsSync(SPEC)) scanSpec(JSON.parse(readFileSync(SPEC, "utf8")), "$");
 
 // ---- self-test ----
 if (SELFTEST) {
@@ -141,8 +136,15 @@ if (SELFTEST) {
     console.log(`  ${ok ? "✓" : "✗"} ${name}${ok ? "" : ` (expected hit=${shouldHit}, got ${hit})`}`);
     if (ok) pass++;
   }
-  console.log(`\nself-test: ${pass}/${cases.length} passed`);
-  process.exit(pass === cases.length ? 0 : 1);
+  // recursive-walk: a leak buried in a nested component (securityScheme) must be caught
+  findings.length = 0;
+  scanSpec({ components: { securitySchemes: { Foo: { description: "token at op://vault/secret" } } } }, "$");
+  const walkOk = findings.some((f) => f.label.includes("1Password"));
+  console.log(`  ${walkOk ? "✓" : "✗"} recursive walk catches op:// in components.securitySchemes`);
+  const total = cases.length + 1;
+  if (walkOk) pass++;
+  console.log(`\nself-test: ${pass}/${total} passed`);
+  process.exit(pass === total ? 0 : 1);
 }
 
 // ---- report ----
