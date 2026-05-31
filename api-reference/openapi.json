@@ -7256,12 +7256,12 @@
     "/agents/{agent_id}/claim": {
       "post": {
         "operationId": "claimAgent",
-        "summary": "Claim agent with hash proof",
+        "summary": "Claim an agent into an organization",
+        "description": "Binds an unclaimed (or legacy hash-claimed) agent to the authenticated caller and an organization. Requires authentication — the caller proves possession of the agent via `hash_proof`, and the agent's `org_id` is set to the resolved org (the authz + listing boundary, ADR-062). Supply `org_id` to claim into a specific org the caller is a member of (role floor: member); omit it to claim into the caller's personal org. Idempotent: re-claiming an agent the caller already owns returns 200 with the resolved org.",
         "tags": [
           "Agents"
         ],
         "security": [
-          {},
           {
             "BearerAuth": []
           },
@@ -7289,11 +7289,12 @@
                 "properties": {
                   "hash_proof": {
                     "type": "string",
-                    "description": "SHA-256 hash of agent API key"
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Agent possession proof: the full 64-hex SHA-256 digest of `${apiKey}|${agentName}` (or `${apiKey}` for an unnamed singleton agent)."
                   },
-                  "email": {
+                  "org_id": {
                     "type": "string",
-                    "format": "email"
+                    "description": "Optional. The organization to claim the agent into (e.g. `org-...` or `pers-...`). The caller must be a member of this org (role floor: member). If omitted, the agent is claimed into the caller's personal org."
                   }
                 }
               }
@@ -7302,17 +7303,27 @@
         },
         "responses": {
           "200": {
-            "description": "Agent claimed",
+            "description": "Agent claimed into the resolved organization",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": [
+                    "claimed",
+                    "agent_id",
+                    "org_id",
+                    "claimed_at"
+                  ],
                   "properties": {
                     "claimed": {
                       "type": "boolean"
                     },
                     "agent_id": {
                       "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string",
+                      "description": "The organization the agent was claimed into (echoes the resolved org — the supplied `org_id`, or the caller's personal org when omitted)."
                     },
                     "claimed_at": {
                       "type": "string",
@@ -7335,11 +7346,11 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -7765,7 +7776,7 @@
       "get": {
         "operationId": "listAgentExemptions",
         "summary": "List active exemptions for an agent",
-        "description": "Exemptions relax an org-level template floor for a single agent (replaces the old coarse `org_card_exempt` boolean). Only non-expired, status=active entries are returned. Any org member (owner/admin/member/viewer/auditor) may read. See ADR-008 (UC-4).",
+        "description": "Exemptions relax an org-level template floor for a single agent (replaces the old coarse `org_card_exempt` boolean). Only non-expired, status=active entries are returned. Any org member (owner/admin/member/viewer/auditor) may read. See ADR-008.",
         "tags": [
           "Agents"
         ],
@@ -10556,7 +10567,7 @@
     "/alignment/agent/{agent_id}": {
       "get": {
         "operationId": "getAlignmentByAgent",
-        "summary": "Get the agent-scope alignment manifest (this layer only).",
+        "summary": "Get this layer's alignment manifest",
         "description": "Returns the agent-scope alignment spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. Agents may also pass `?include=sources` (see ADR-053) for the four-scope envelope consumed by the dashboard editor. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Alignment"
@@ -10672,7 +10683,7 @@
       },
       "put": {
         "operationId": "putAlignmentByAgent",
-        "summary": "Publish or replace the agent-scope alignment manifest.",
+        "summary": "Publish or replace the alignment manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedAlignmentCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Honors an optional `If-Match` for optimistic concurrency (stale → 412). Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Alignment"
@@ -10798,7 +10809,7 @@
     "/alignment/agent/{agent_id}/audit": {
       "put": {
         "operationId": "putAlignmentAuditByAgent",
-        "summary": "Replace the `audit` primitive on the agent-scope alignment spec.",
+        "summary": "Replace audit settings",
         "description": "PUT replaces the entire `audit` block (trace format, retention window, query endpoint). The current spec at the agent scope is read; the new `audit` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -11120,7 +11131,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAuditByAgent",
-        "summary": "Merge-patch the `audit` primitive on the agent-scope alignment spec.",
+        "summary": "Update audit settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `audit` block (trace format, retention window, query endpoint). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -11364,7 +11375,7 @@
     "/alignment/agent/{agent_id}/autonomy": {
       "put": {
         "operationId": "putAlignmentAutonomyByAgent",
-        "summary": "Replace the `autonomy` primitive on the agent-scope alignment spec.",
+        "summary": "Replace autonomy settings",
         "description": "PUT replaces the entire `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). The current spec at the agent scope is read; the new `autonomy` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -11662,7 +11673,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAutonomyByAgent",
-        "summary": "Merge-patch the `autonomy` primitive on the agent-scope alignment spec.",
+        "summary": "Update autonomy settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -11894,7 +11905,7 @@
     "/alignment/agent/{agent_id}/capabilities": {
       "put": {
         "operationId": "putAlignmentCapabilitiesByAgent",
-        "summary": "Replace the `capabilities` primitive on the agent-scope alignment spec.",
+        "summary": "Replace capabilities settings",
         "description": "PUT replaces the entire `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). The current spec at the agent scope is read; the new `capabilities` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -12096,7 +12107,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentCapabilitiesByAgent",
-        "summary": "Merge-patch the `capabilities` primitive on the agent-scope alignment spec.",
+        "summary": "Update capabilities settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -12284,7 +12295,7 @@
     "/alignment/agent/{agent_id}/conscience": {
       "put": {
         "operationId": "putAlignmentConscienceByAgent",
-        "summary": "Replace the `conscience` primitive on the agent-scope alignment spec.",
+        "summary": "Replace conscience settings",
         "description": "PUT replaces the entire `conscience` block (augment-vs-replace + the conscience values list). The current spec at the agent scope is read; the new `conscience` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -12550,7 +12561,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentConscienceByAgent",
-        "summary": "Merge-patch the `conscience` primitive on the agent-scope alignment spec.",
+        "summary": "Update conscience settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `conscience` block (augment-vs-replace + the conscience values list). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -12766,7 +12777,7 @@
     "/alignment/agent/{agent_id}/effective": {
       "get": {
         "operationId": "getAlignmentEffectiveByAgent",
-        "summary": "Get the composed effective alignment at the agent scope, with per-key provenance.",
+        "summary": "Get effective (composed) alignment with provenance",
         "description": "Returns the composed canonical alignment card (platform → org → team → agent cascade applied) with `_composition.field_provenance` always populated. The provenance map carries per-key `{layer, layer_id?, kind?}` entries showing which authoring scope contributed each leaf. Caller-aware redaction: layer labels (`platform` / `org` / `team` / `agent` / `derived`) are always visible; `layer_id` is only revealed to callers who can read that scope. cards-as-primitive Phase 4 W2.2.",
         "tags": [
           "Alignment"
@@ -12839,7 +12850,7 @@
     "/alignment/agent/{agent_id}/enforcement": {
       "put": {
         "operationId": "putAlignmentEnforcementByAgent",
-        "summary": "Replace the `enforcement` primitive on the agent-scope alignment spec.",
+        "summary": "Replace enforcement settings",
         "description": "PUT replaces the entire `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). The current spec at the agent scope is read; the new `enforcement` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -13121,7 +13132,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentEnforcementByAgent",
-        "summary": "Merge-patch the `enforcement` primitive on the agent-scope alignment spec.",
+        "summary": "Update enforcement settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -13349,7 +13360,7 @@
     "/alignment/agent/{agent_id}/explain": {
       "post": {
         "operationId": "explainAlignmentByAgent",
-        "summary": "Explain the policy evaluation for an agent's alignment card.",
+        "summary": "Explain policy evaluation for the alignment card",
         "description": "Calls the policy engine in dry-run mode against the agent's composed alignment card and returns a structured trace + care-framed remediations. Optional `enrich: true` runs an LLM pass over the structured remediations to produce long-form prose; off by default. Read-style POST — no state mutation, no Idempotency-Key.",
         "tags": [
           "Alignment"
@@ -13503,7 +13514,7 @@
     "/alignment/agent/{agent_id}/modes": {
       "put": {
         "operationId": "putAlignmentModesByAgent",
-        "summary": "Replace the `modes` primitive on the agent-scope alignment spec.",
+        "summary": "Replace modes settings",
         "description": "PUT replaces the entire `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). The current spec at the agent scope is read; the new `modes` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -13789,7 +13800,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentModesByAgent",
-        "summary": "Merge-patch the `modes` primitive on the agent-scope alignment spec.",
+        "summary": "Update modes settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -14015,7 +14026,7 @@
     "/alignment/agent/{agent_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeAlignmentByAgent",
-        "summary": "Dry-run the composer for the agent alignment scope.",
+        "summary": "Preview composed alignment (dry run)",
         "description": "Composes the cascade against a hypothetical body at the agent layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Alignment"
@@ -14108,7 +14119,7 @@
     "/alignment/agent/{agent_id}/principal": {
       "put": {
         "operationId": "putAlignmentPrincipalByAgent",
-        "summary": "Replace the `principal` primitive on the agent-scope alignment spec.",
+        "summary": "Replace principal settings",
         "description": "PUT replaces the entire `principal` block (who-the-agent-is identity block). The current spec at the agent scope is read; the new `principal` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -14414,7 +14425,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentPrincipalByAgent",
-        "summary": "Merge-patch the `principal` primitive on the agent-scope alignment spec.",
+        "summary": "Update principal settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `principal` block (who-the-agent-is identity block). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -14650,7 +14661,7 @@
     "/alignment/agent/{agent_id}/simulate": {
       "post": {
         "operationId": "simulateAlignmentByAgent",
-        "summary": "Dry-run gateway + observer evaluation against the agent's alignment card.",
+        "summary": "Simulate gateway evaluation against the alignment card",
         "description": "Pure-sync simulation: calls @mnemom/policy-engine twice (once with `context: \"gateway\"`, once with `context: \"observer\"`) using `dryRun: true` against the agent's current composed alignment card. Returns `{allowed, conditions, suggestions, gateway_decision, observer_assessment}`. Never crosses worker boundaries — no real gateway / observer state change.",
         "tags": [
           "Alignment"
@@ -14843,7 +14854,7 @@
     "/alignment/agent/{agent_id}/values": {
       "put": {
         "operationId": "putAlignmentValuesByAgent",
-        "summary": "Replace the `values` primitive on the agent-scope alignment spec.",
+        "summary": "Replace values settings",
         "description": "PUT replaces the entire `values` block (declared catalog entries + definitions / hierarchy / conflicts). The current spec at the agent scope is read; the new `values` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Alignment"
@@ -15141,7 +15152,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentValuesByAgent",
-        "summary": "Merge-patch the `values` primitive on the agent-scope alignment spec.",
+        "summary": "Update values settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `values` block (declared catalog entries + definitions / hierarchy / conflicts). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -15374,7 +15385,7 @@
     "/alignment/org/{org_id}": {
       "get": {
         "operationId": "getAlignmentByOrg",
-        "summary": "Get the org-scope alignment manifest (this layer only).",
+        "summary": "Get this layer's alignment manifest",
         "description": "Returns the org-scope alignment spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Alignment"
@@ -15478,7 +15489,7 @@
       },
       "put": {
         "operationId": "putAlignmentByOrg",
-        "summary": "Publish or replace the org-scope alignment manifest.",
+        "summary": "Publish or replace the alignment manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedAlignmentCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Alignment"
@@ -15589,7 +15600,7 @@
       },
       "delete": {
         "operationId": "deleteAlignmentByOrg",
-        "summary": "Clear the org-scope alignment layer.",
+        "summary": "Clear this alignment layer",
         "description": "Removes the org-scope alignment authoring; downstream scopes fall through to the next layer up in the cascade.",
         "tags": [
           "Alignment"
@@ -15635,7 +15646,7 @@
     "/alignment/org/{org_id}/audit": {
       "put": {
         "operationId": "putAlignmentAuditByOrg",
-        "summary": "Replace the `audit` primitive on the org-scope alignment spec.",
+        "summary": "Replace audit settings",
         "description": "PUT replaces the entire `audit` block (trace format, retention window, query endpoint). The current spec at the org scope is read; the new `audit` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -15947,7 +15958,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAuditByOrg",
-        "summary": "Merge-patch the `audit` primitive on the org-scope alignment spec.",
+        "summary": "Update audit settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `audit` block (trace format, retention window, query endpoint). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -16181,7 +16192,7 @@
     "/alignment/org/{org_id}/autonomy": {
       "put": {
         "operationId": "putAlignmentAutonomyByOrg",
-        "summary": "Replace the `autonomy` primitive on the org-scope alignment spec.",
+        "summary": "Replace autonomy settings",
         "description": "PUT replaces the entire `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). The current spec at the org scope is read; the new `autonomy` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -16469,7 +16480,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAutonomyByOrg",
-        "summary": "Merge-patch the `autonomy` primitive on the org-scope alignment spec.",
+        "summary": "Update autonomy settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -16691,7 +16702,7 @@
     "/alignment/org/{org_id}/capabilities": {
       "put": {
         "operationId": "putAlignmentCapabilitiesByOrg",
-        "summary": "Replace the `capabilities` primitive on the org-scope alignment spec.",
+        "summary": "Replace capabilities settings",
         "description": "PUT replaces the entire `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). The current spec at the org scope is read; the new `capabilities` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -16883,7 +16894,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentCapabilitiesByOrg",
-        "summary": "Merge-patch the `capabilities` primitive on the org-scope alignment spec.",
+        "summary": "Update capabilities settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -17061,7 +17072,7 @@
     "/alignment/org/{org_id}/conscience": {
       "put": {
         "operationId": "putAlignmentConscienceByOrg",
-        "summary": "Replace the `conscience` primitive on the org-scope alignment spec.",
+        "summary": "Replace conscience settings",
         "description": "PUT replaces the entire `conscience` block (augment-vs-replace + the conscience values list). The current spec at the org scope is read; the new `conscience` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -17317,7 +17328,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentConscienceByOrg",
-        "summary": "Merge-patch the `conscience` primitive on the org-scope alignment spec.",
+        "summary": "Update conscience settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `conscience` block (augment-vs-replace + the conscience values list). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -17523,7 +17534,7 @@
     "/alignment/org/{org_id}/enforcement": {
       "put": {
         "operationId": "putAlignmentEnforcementByOrg",
-        "summary": "Replace the `enforcement` primitive on the org-scope alignment spec.",
+        "summary": "Replace enforcement settings",
         "description": "PUT replaces the entire `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). The current spec at the org scope is read; the new `enforcement` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -17795,7 +17806,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentEnforcementByOrg",
-        "summary": "Merge-patch the `enforcement` primitive on the org-scope alignment spec.",
+        "summary": "Update enforcement settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -18013,7 +18024,7 @@
     "/alignment/org/{org_id}/modes": {
       "put": {
         "operationId": "putAlignmentModesByOrg",
-        "summary": "Replace the `modes` primitive on the org-scope alignment spec.",
+        "summary": "Replace modes settings",
         "description": "PUT replaces the entire `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). The current spec at the org scope is read; the new `modes` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -18289,7 +18300,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentModesByOrg",
-        "summary": "Merge-patch the `modes` primitive on the org-scope alignment spec.",
+        "summary": "Update modes settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -18505,7 +18516,7 @@
     "/alignment/org/{org_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeAlignmentByOrg",
-        "summary": "Dry-run the composer for the org alignment scope.",
+        "summary": "Preview composed alignment (dry run)",
         "description": "Composes the cascade against a hypothetical body at the org layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Alignment"
@@ -18601,7 +18612,7 @@
     "/alignment/org/{org_id}/principal": {
       "put": {
         "operationId": "putAlignmentPrincipalByOrg",
-        "summary": "Replace the `principal` primitive on the org-scope alignment spec.",
+        "summary": "Replace principal settings",
         "description": "PUT replaces the entire `principal` block (who-the-agent-is identity block). The current spec at the org scope is read; the new `principal` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -18897,7 +18908,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentPrincipalByOrg",
-        "summary": "Merge-patch the `principal` primitive on the org-scope alignment spec.",
+        "summary": "Update principal settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `principal` block (who-the-agent-is identity block). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -19123,7 +19134,7 @@
     "/alignment/org/{org_id}/values": {
       "put": {
         "operationId": "putAlignmentValuesByOrg",
-        "summary": "Replace the `values` primitive on the org-scope alignment spec.",
+        "summary": "Replace values settings",
         "description": "PUT replaces the entire `values` block (declared catalog entries + definitions / hierarchy / conflicts). The current spec at the org scope is read; the new `values` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -19411,7 +19422,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentValuesByOrg",
-        "summary": "Merge-patch the `values` primitive on the org-scope alignment spec.",
+        "summary": "Update values settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `values` block (declared catalog entries + definitions / hierarchy / conflicts). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -19634,7 +19645,7 @@
     "/alignment/platform/{scope_id}": {
       "get": {
         "operationId": "getAlignmentByPlatform",
-        "summary": "Get the platform-scope alignment manifest (this layer only).",
+        "summary": "Get this layer's alignment manifest",
         "description": "Returns the platform-scope alignment spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Alignment"
@@ -19747,7 +19758,7 @@
       },
       "put": {
         "operationId": "putAlignmentByPlatform",
-        "summary": "Publish or replace the platform-scope alignment manifest.",
+        "summary": "Publish or replace the alignment manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedAlignmentCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Alignment"
@@ -19869,7 +19880,7 @@
     "/alignment/platform/{scope_id}/audit": {
       "put": {
         "operationId": "putAlignmentAuditByPlatform",
-        "summary": "Replace the `audit` primitive on the platform-scope alignment spec.",
+        "summary": "Replace audit settings",
         "description": "PUT replaces the entire `audit` block (trace format, retention window, query endpoint). The current spec at the platform scope is read; the new `audit` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -20190,7 +20201,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAuditByPlatform",
-        "summary": "Merge-patch the `audit` primitive on the platform-scope alignment spec.",
+        "summary": "Update audit settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `audit` block (trace format, retention window, query endpoint). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -20433,7 +20444,7 @@
     "/alignment/platform/{scope_id}/autonomy": {
       "put": {
         "operationId": "putAlignmentAutonomyByPlatform",
-        "summary": "Replace the `autonomy` primitive on the platform-scope alignment spec.",
+        "summary": "Replace autonomy settings",
         "description": "PUT replaces the entire `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). The current spec at the platform scope is read; the new `autonomy` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -20730,7 +20741,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAutonomyByPlatform",
-        "summary": "Merge-patch the `autonomy` primitive on the platform-scope alignment spec.",
+        "summary": "Update autonomy settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -20961,7 +20972,7 @@
     "/alignment/platform/{scope_id}/capabilities": {
       "put": {
         "operationId": "putAlignmentCapabilitiesByPlatform",
-        "summary": "Replace the `capabilities` primitive on the platform-scope alignment spec.",
+        "summary": "Replace capabilities settings",
         "description": "PUT replaces the entire `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). The current spec at the platform scope is read; the new `capabilities` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -21162,7 +21173,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentCapabilitiesByPlatform",
-        "summary": "Merge-patch the `capabilities` primitive on the platform-scope alignment spec.",
+        "summary": "Update capabilities settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -21349,7 +21360,7 @@
     "/alignment/platform/{scope_id}/conscience": {
       "put": {
         "operationId": "putAlignmentConscienceByPlatform",
-        "summary": "Replace the `conscience` primitive on the platform-scope alignment spec.",
+        "summary": "Replace conscience settings",
         "description": "PUT replaces the entire `conscience` block (augment-vs-replace + the conscience values list). The current spec at the platform scope is read; the new `conscience` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -21614,7 +21625,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentConscienceByPlatform",
-        "summary": "Merge-patch the `conscience` primitive on the platform-scope alignment spec.",
+        "summary": "Update conscience settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `conscience` block (augment-vs-replace + the conscience values list). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -21829,7 +21840,7 @@
     "/alignment/platform/{scope_id}/enforcement": {
       "put": {
         "operationId": "putAlignmentEnforcementByPlatform",
-        "summary": "Replace the `enforcement` primitive on the platform-scope alignment spec.",
+        "summary": "Replace enforcement settings",
         "description": "PUT replaces the entire `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). The current spec at the platform scope is read; the new `enforcement` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -22110,7 +22121,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentEnforcementByPlatform",
-        "summary": "Merge-patch the `enforcement` primitive on the platform-scope alignment spec.",
+        "summary": "Update enforcement settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -22337,7 +22348,7 @@
     "/alignment/platform/{scope_id}/modes": {
       "put": {
         "operationId": "putAlignmentModesByPlatform",
-        "summary": "Replace the `modes` primitive on the platform-scope alignment spec.",
+        "summary": "Replace modes settings",
         "description": "PUT replaces the entire `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). The current spec at the platform scope is read; the new `modes` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -22622,7 +22633,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentModesByPlatform",
-        "summary": "Merge-patch the `modes` primitive on the platform-scope alignment spec.",
+        "summary": "Update modes settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -22847,7 +22858,7 @@
     "/alignment/platform/{scope_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeAlignmentByPlatform",
-        "summary": "Dry-run the composer for the platform alignment scope.",
+        "summary": "Preview composed alignment (dry run)",
         "description": "Composes the cascade against a hypothetical body at the platform layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Alignment"
@@ -22949,7 +22960,7 @@
     "/alignment/platform/{scope_id}/principal": {
       "put": {
         "operationId": "putAlignmentPrincipalByPlatform",
-        "summary": "Replace the `principal` primitive on the platform-scope alignment spec.",
+        "summary": "Replace principal settings",
         "description": "PUT replaces the entire `principal` block (who-the-agent-is identity block). The current spec at the platform scope is read; the new `principal` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -23254,7 +23265,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentPrincipalByPlatform",
-        "summary": "Merge-patch the `principal` primitive on the platform-scope alignment spec.",
+        "summary": "Update principal settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `principal` block (who-the-agent-is identity block). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -23489,7 +23500,7 @@
     "/alignment/platform/{scope_id}/values": {
       "put": {
         "operationId": "putAlignmentValuesByPlatform",
-        "summary": "Replace the `values` primitive on the platform-scope alignment spec.",
+        "summary": "Replace values settings",
         "description": "PUT replaces the entire `values` block (declared catalog entries + definitions / hierarchy / conflicts). The current spec at the platform scope is read; the new `values` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -23786,7 +23797,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentValuesByPlatform",
-        "summary": "Merge-patch the `values` primitive on the platform-scope alignment spec.",
+        "summary": "Update values settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `values` block (declared catalog entries + definitions / hierarchy / conflicts). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -24018,7 +24029,7 @@
     "/alignment/scaffold": {
       "post": {
         "operationId": "scaffoldAlignment",
-        "summary": "Scaffold a starting-point alignment manifest from a natural-language description.",
+        "summary": "Scaffold alignment from a description",
         "description": "Calls an LLM (Claude Haiku by default; opt into Sonnet via `model: \"sonnet\"`) with the catalog and tools-registry context, returns a YAML manifest scaffold + care-framed reasoning prose + suggested catalog entries + coverage gaps. Never auto-commits — the caller reviews and edits before PUT. Cached by (model + scope + description + hints) hash; 24-hour TTL.",
         "tags": [
           "Alignment"
@@ -24187,7 +24198,7 @@
     "/alignment/team/{team_id}": {
       "get": {
         "operationId": "getAlignmentByTeam",
-        "summary": "Get the team-scope alignment manifest (this layer only).",
+        "summary": "Get this layer's alignment manifest",
         "description": "Returns the team-scope alignment spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Alignment"
@@ -24291,7 +24302,7 @@
       },
       "put": {
         "operationId": "putAlignmentByTeam",
-        "summary": "Publish or replace the team-scope alignment manifest.",
+        "summary": "Publish or replace the alignment manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedAlignmentCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Alignment"
@@ -24402,7 +24413,7 @@
       },
       "delete": {
         "operationId": "deleteAlignmentByTeam",
-        "summary": "Clear the team-scope alignment layer.",
+        "summary": "Clear this alignment layer",
         "description": "Removes the team-scope alignment authoring; downstream scopes fall through to the next layer up in the cascade.",
         "tags": [
           "Alignment"
@@ -24448,7 +24459,7 @@
     "/alignment/team/{team_id}/audit": {
       "put": {
         "operationId": "putAlignmentAuditByTeam",
-        "summary": "Replace the `audit` primitive on the team-scope alignment spec.",
+        "summary": "Replace audit settings",
         "description": "PUT replaces the entire `audit` block (trace format, retention window, query endpoint). The current spec at the team scope is read; the new `audit` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -24760,7 +24771,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAuditByTeam",
-        "summary": "Merge-patch the `audit` primitive on the team-scope alignment spec.",
+        "summary": "Update audit settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `audit` block (trace format, retention window, query endpoint). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -24994,7 +25005,7 @@
     "/alignment/team/{team_id}/autonomy": {
       "put": {
         "operationId": "putAlignmentAutonomyByTeam",
-        "summary": "Replace the `autonomy` primitive on the team-scope alignment spec.",
+        "summary": "Replace autonomy settings",
         "description": "PUT replaces the entire `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). The current spec at the team scope is read; the new `autonomy` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -25282,7 +25293,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentAutonomyByTeam",
-        "summary": "Merge-patch the `autonomy` primitive on the team-scope alignment spec.",
+        "summary": "Update autonomy settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `autonomy` block (bounded_actions[] + forbidden_actions[] + escalation_triggers[] + max_autonomous_value). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -25504,7 +25515,7 @@
     "/alignment/team/{team_id}/capabilities": {
       "put": {
         "operationId": "putAlignmentCapabilitiesByTeam",
-        "summary": "Replace the `capabilities` primitive on the team-scope alignment spec.",
+        "summary": "Replace capabilities settings",
         "description": "PUT replaces the entire `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). The current spec at the team scope is read; the new `capabilities` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -25696,7 +25707,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentCapabilitiesByTeam",
-        "summary": "Merge-patch the `capabilities` primitive on the team-scope alignment spec.",
+        "summary": "Update capabilities settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `capabilities` block (the keyed-map of `{capability_name -> CardCapability}` tool grants). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -25874,7 +25885,7 @@
     "/alignment/team/{team_id}/conscience": {
       "put": {
         "operationId": "putAlignmentConscienceByTeam",
-        "summary": "Replace the `conscience` primitive on the team-scope alignment spec.",
+        "summary": "Replace conscience settings",
         "description": "PUT replaces the entire `conscience` block (augment-vs-replace + the conscience values list). The current spec at the team scope is read; the new `conscience` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -26130,7 +26141,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentConscienceByTeam",
-        "summary": "Merge-patch the `conscience` primitive on the team-scope alignment spec.",
+        "summary": "Update conscience settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `conscience` block (augment-vs-replace + the conscience values list). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -26336,7 +26347,7 @@
     "/alignment/team/{team_id}/enforcement": {
       "put": {
         "operationId": "putAlignmentEnforcementByTeam",
-        "summary": "Replace the `enforcement` primitive on the team-scope alignment spec.",
+        "summary": "Replace enforcement settings",
         "description": "PUT replaces the entire `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). The current spec at the team scope is read; the new `enforcement` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -26608,7 +26619,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentEnforcementByTeam",
-        "summary": "Merge-patch the `enforcement` primitive on the team-scope alignment spec.",
+        "summary": "Update enforcement settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `enforcement` block (fine-grained tool-use policy (forbidden patterns, unmapped severity, grace window)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -26826,7 +26837,7 @@
     "/alignment/team/{team_id}/modes": {
       "put": {
         "operationId": "putAlignmentModesByTeam",
-        "summary": "Replace the `modes` primitive on the team-scope alignment spec.",
+        "summary": "Replace modes settings",
         "description": "PUT replaces the entire `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). The current spec at the team scope is read; the new `modes` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -27102,7 +27113,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentModesByTeam",
-        "summary": "Merge-patch the `modes` primitive on the team-scope alignment spec.",
+        "summary": "Update modes settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `modes` block (the two top-level master switches `autonomy_mode` + `integrity_mode`). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -27318,7 +27329,7 @@
     "/alignment/team/{team_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeAlignmentByTeam",
-        "summary": "Dry-run the composer for the team alignment scope.",
+        "summary": "Preview composed alignment (dry run)",
         "description": "Composes the cascade against a hypothetical body at the team layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Alignment"
@@ -27414,7 +27425,7 @@
     "/alignment/team/{team_id}/principal": {
       "put": {
         "operationId": "putAlignmentPrincipalByTeam",
-        "summary": "Replace the `principal` primitive on the team-scope alignment spec.",
+        "summary": "Replace principal settings",
         "description": "PUT replaces the entire `principal` block (who-the-agent-is identity block). The current spec at the team scope is read; the new `principal` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -27710,7 +27721,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentPrincipalByTeam",
-        "summary": "Merge-patch the `principal` primitive on the team-scope alignment spec.",
+        "summary": "Update principal settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `principal` block (who-the-agent-is identity block). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -27936,7 +27947,7 @@
     "/alignment/team/{team_id}/values": {
       "put": {
         "operationId": "putAlignmentValuesByTeam",
-        "summary": "Replace the `values` primitive on the team-scope alignment spec.",
+        "summary": "Replace values settings",
         "description": "PUT replaces the entire `values` block (declared catalog entries + definitions / hierarchy / conflicts). The current spec at the team scope is read; the new `values` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Alignment"
@@ -28224,7 +28235,7 @@
       },
       "patch": {
         "operationId": "patchAlignmentValuesByTeam",
-        "summary": "Merge-patch the `values` primitive on the team-scope alignment spec.",
+        "summary": "Update values settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `values` block (declared catalog entries + definitions / hierarchy / conflicts). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Alignment"
@@ -42374,7 +42385,7 @@
     "/protection/agent/{agent_id}": {
       "get": {
         "operationId": "getProtectionByAgent",
-        "summary": "Get the agent-scope protection manifest (this layer only).",
+        "summary": "Get this layer's protection manifest",
         "description": "Returns the agent-scope protection spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. Agents may also pass `?include=sources` (see ADR-053) for the four-scope envelope consumed by the dashboard editor. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Protection"
@@ -42490,7 +42501,7 @@
       },
       "put": {
         "operationId": "putProtectionByAgent",
-        "summary": "Publish or replace the agent-scope protection manifest.",
+        "summary": "Publish or replace the protection manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Honors an optional `If-Match` for optimistic concurrency (stale → 412). Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Protection"
@@ -42616,7 +42627,7 @@
     "/protection/agent/{agent_id}/effective": {
       "get": {
         "operationId": "getProtectionEffectiveByAgent",
-        "summary": "Get the composed effective protection at the agent scope, with per-key provenance.",
+        "summary": "Get effective (composed) protection with provenance",
         "description": "Returns the composed canonical protection card (platform → org → team → agent cascade applied) with `_composition.field_provenance` always populated. The provenance map carries per-key `{layer, layer_id?, kind?}` entries showing which authoring scope contributed each leaf. Caller-aware redaction: layer labels (`platform` / `org` / `team` / `agent` / `derived`) are always visible; `layer_id` is only revealed to callers who can read that scope. cards-as-primitive Phase 4 W2.2.",
         "tags": [
           "Protection"
@@ -42689,7 +42700,7 @@
     "/protection/agent/{agent_id}/explain": {
       "post": {
         "operationId": "explainProtectionByAgent",
-        "summary": "Explain the policy evaluation for an agent's protection card.",
+        "summary": "Explain policy evaluation for the protection card",
         "description": "Calls the policy engine in dry-run mode against the agent's composed protection card and returns a structured trace + care-framed remediations. Optional `enrich: true` runs an LLM pass over the structured remediations to produce long-form prose; off by default. Read-style POST — no state mutation, no Idempotency-Key.",
         "tags": [
           "Protection"
@@ -42843,7 +42854,7 @@
     "/protection/agent/{agent_id}/mode": {
       "put": {
         "operationId": "putProtectionModeByAgent",
-        "summary": "Replace the `mode` primitive on the agent-scope protection spec.",
+        "summary": "Replace mode settings",
         "description": "PUT replaces the entire `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). The current spec at the agent scope is read; the new `mode` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Protection"
@@ -43057,7 +43068,7 @@
       },
       "patch": {
         "operationId": "patchProtectionModeByAgent",
-        "summary": "Merge-patch the `mode` primitive on the agent-scope protection spec.",
+        "summary": "Update mode settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -43251,7 +43262,7 @@
     "/protection/agent/{agent_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeProtectionByAgent",
-        "summary": "Dry-run the composer for the agent protection scope.",
+        "summary": "Preview composed protection (dry run)",
         "description": "Composes the cascade against a hypothetical body at the agent layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Protection"
@@ -43344,7 +43355,7 @@
     "/protection/agent/{agent_id}/screen_surfaces": {
       "put": {
         "operationId": "putProtectionScreensurfacesByAgent",
-        "summary": "Replace the `screen_surfaces` primitive on the agent-scope protection spec.",
+        "summary": "Replace screen surfaces settings",
         "description": "PUT replaces the entire `screen_surfaces` block (which traffic surfaces the protection card inspects). The current spec at the agent scope is read; the new `screen_surfaces` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Protection"
@@ -43614,7 +43625,7 @@
       },
       "patch": {
         "operationId": "patchProtectionScreensurfacesByAgent",
-        "summary": "Merge-patch the `screen_surfaces` primitive on the agent-scope protection spec.",
+        "summary": "Update screen surfaces settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `screen_surfaces` block (which traffic surfaces the protection card inspects). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -43830,7 +43841,7 @@
     "/protection/agent/{agent_id}/simulate": {
       "post": {
         "operationId": "simulateProtectionByAgent",
-        "summary": "Dry-run gateway + observer evaluation against the agent's protection card.",
+        "summary": "Simulate gateway evaluation against the protection card",
         "description": "Pure-sync simulation: calls @mnemom/policy-engine twice (once with `context: \"gateway\"`, once with `context: \"observer\"`) using `dryRun: true` against the agent's current composed alignment card. Returns `{allowed, conditions, suggestions, gateway_decision, observer_assessment}`. Never crosses worker boundaries — no real gateway / observer state change.",
         "tags": [
           "Protection"
@@ -44023,7 +44034,7 @@
     "/protection/agent/{agent_id}/thresholds": {
       "put": {
         "operationId": "putProtectionThresholdsByAgent",
-        "summary": "Replace the `thresholds` primitive on the agent-scope protection spec.",
+        "summary": "Replace thresholds settings",
         "description": "PUT replaces the entire `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). The current spec at the agent scope is read; the new `thresholds` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Protection"
@@ -44301,7 +44312,7 @@
       },
       "patch": {
         "operationId": "patchProtectionThresholdsByAgent",
-        "summary": "Merge-patch the `thresholds` primitive on the agent-scope protection spec.",
+        "summary": "Update thresholds settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -44522,7 +44533,7 @@
     "/protection/agent/{agent_id}/trusted_sources": {
       "put": {
         "operationId": "putProtectionTrustedsourcesByAgent",
-        "summary": "Replace the `trusted_sources` primitive on the agent-scope protection spec.",
+        "summary": "Replace trusted sources settings",
         "description": "PUT replaces the entire `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). The current spec at the agent scope is read; the new `trusted_sources` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Sync recompose — the response carries the new canonical ETag + version.",
         "tags": [
           "Protection"
@@ -44812,7 +44823,7 @@
       },
       "patch": {
         "operationId": "patchProtectionTrustedsourcesByAgent",
-        "summary": "Merge-patch the `trusted_sources` primitive on the agent-scope protection spec.",
+        "summary": "Update trusted sources settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -45039,7 +45050,7 @@
     "/protection/org/{org_id}": {
       "get": {
         "operationId": "getProtectionByOrg",
-        "summary": "Get the org-scope protection manifest (this layer only).",
+        "summary": "Get this layer's protection manifest",
         "description": "Returns the org-scope protection spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Protection"
@@ -45143,7 +45154,7 @@
       },
       "put": {
         "operationId": "putProtectionByOrg",
-        "summary": "Publish or replace the org-scope protection manifest.",
+        "summary": "Publish or replace the protection manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Protection"
@@ -45254,7 +45265,7 @@
       },
       "delete": {
         "operationId": "deleteProtectionByOrg",
-        "summary": "Clear the org-scope protection layer.",
+        "summary": "Clear this protection layer",
         "description": "Removes the org-scope protection authoring; downstream scopes fall through to the next layer up in the cascade.",
         "tags": [
           "Protection"
@@ -45300,7 +45311,7 @@
     "/protection/org/{org_id}/mode": {
       "put": {
         "operationId": "putProtectionModeByOrg",
-        "summary": "Replace the `mode` primitive on the org-scope protection spec.",
+        "summary": "Replace mode settings",
         "description": "PUT replaces the entire `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). The current spec at the org scope is read; the new `mode` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -45504,7 +45515,7 @@
       },
       "patch": {
         "operationId": "patchProtectionModeByOrg",
-        "summary": "Merge-patch the `mode` primitive on the org-scope protection spec.",
+        "summary": "Update mode settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -45688,7 +45699,7 @@
     "/protection/org/{org_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeProtectionByOrg",
-        "summary": "Dry-run the composer for the org protection scope.",
+        "summary": "Preview composed protection (dry run)",
         "description": "Composes the cascade against a hypothetical body at the org layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Protection"
@@ -45784,7 +45795,7 @@
     "/protection/org/{org_id}/screen_surfaces": {
       "put": {
         "operationId": "putProtectionScreensurfacesByOrg",
-        "summary": "Replace the `screen_surfaces` primitive on the org-scope protection spec.",
+        "summary": "Replace screen surfaces settings",
         "description": "PUT replaces the entire `screen_surfaces` block (which traffic surfaces the protection card inspects). The current spec at the org scope is read; the new `screen_surfaces` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -46044,7 +46055,7 @@
       },
       "patch": {
         "operationId": "patchProtectionScreensurfacesByOrg",
-        "summary": "Merge-patch the `screen_surfaces` primitive on the org-scope protection spec.",
+        "summary": "Update screen surfaces settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `screen_surfaces` block (which traffic surfaces the protection card inspects). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -46250,7 +46261,7 @@
     "/protection/org/{org_id}/thresholds": {
       "put": {
         "operationId": "putProtectionThresholdsByOrg",
-        "summary": "Replace the `thresholds` primitive on the org-scope protection spec.",
+        "summary": "Replace thresholds settings",
         "description": "PUT replaces the entire `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). The current spec at the org scope is read; the new `thresholds` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -46518,7 +46529,7 @@
       },
       "patch": {
         "operationId": "patchProtectionThresholdsByOrg",
-        "summary": "Merge-patch the `thresholds` primitive on the org-scope protection spec.",
+        "summary": "Update thresholds settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -46729,7 +46740,7 @@
     "/protection/org/{org_id}/trusted_sources": {
       "put": {
         "operationId": "putProtectionTrustedsourcesByOrg",
-        "summary": "Replace the `trusted_sources` primitive on the org-scope protection spec.",
+        "summary": "Replace trusted sources settings",
         "description": "PUT replaces the entire `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). The current spec at the org scope is read; the new `trusted_sources` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -47009,7 +47020,7 @@
       },
       "patch": {
         "operationId": "patchProtectionTrustedsourcesByOrg",
-        "summary": "Merge-patch the `trusted_sources` primitive on the org-scope protection spec.",
+        "summary": "Update trusted sources settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -47226,7 +47237,7 @@
     "/protection/platform/{scope_id}": {
       "get": {
         "operationId": "getProtectionByPlatform",
-        "summary": "Get the platform-scope protection manifest (this layer only).",
+        "summary": "Get this layer's protection manifest",
         "description": "Returns the platform-scope protection spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Protection"
@@ -47339,7 +47350,7 @@
       },
       "put": {
         "operationId": "putProtectionByPlatform",
-        "summary": "Publish or replace the platform-scope protection manifest.",
+        "summary": "Publish or replace the protection manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Protection"
@@ -47461,7 +47472,7 @@
     "/protection/platform/{scope_id}/mode": {
       "put": {
         "operationId": "putProtectionModeByPlatform",
-        "summary": "Replace the `mode` primitive on the platform-scope protection spec.",
+        "summary": "Replace mode settings",
         "description": "PUT replaces the entire `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). The current spec at the platform scope is read; the new `mode` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -47674,7 +47685,7 @@
       },
       "patch": {
         "operationId": "patchProtectionModeByPlatform",
-        "summary": "Merge-patch the `mode` primitive on the platform-scope protection spec.",
+        "summary": "Update mode settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -47867,7 +47878,7 @@
     "/protection/platform/{scope_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeProtectionByPlatform",
-        "summary": "Dry-run the composer for the platform protection scope.",
+        "summary": "Preview composed protection (dry run)",
         "description": "Composes the cascade against a hypothetical body at the platform layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Protection"
@@ -47969,7 +47980,7 @@
     "/protection/platform/{scope_id}/screen_surfaces": {
       "put": {
         "operationId": "putProtectionScreensurfacesByPlatform",
-        "summary": "Replace the `screen_surfaces` primitive on the platform-scope protection spec.",
+        "summary": "Replace screen surfaces settings",
         "description": "PUT replaces the entire `screen_surfaces` block (which traffic surfaces the protection card inspects). The current spec at the platform scope is read; the new `screen_surfaces` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -48238,7 +48249,7 @@
       },
       "patch": {
         "operationId": "patchProtectionScreensurfacesByPlatform",
-        "summary": "Merge-patch the `screen_surfaces` primitive on the platform-scope protection spec.",
+        "summary": "Update screen surfaces settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `screen_surfaces` block (which traffic surfaces the protection card inspects). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -48453,7 +48464,7 @@
     "/protection/platform/{scope_id}/thresholds": {
       "put": {
         "operationId": "putProtectionThresholdsByPlatform",
-        "summary": "Replace the `thresholds` primitive on the platform-scope protection spec.",
+        "summary": "Replace thresholds settings",
         "description": "PUT replaces the entire `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). The current spec at the platform scope is read; the new `thresholds` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -48730,7 +48741,7 @@
       },
       "patch": {
         "operationId": "patchProtectionThresholdsByPlatform",
-        "summary": "Merge-patch the `thresholds` primitive on the platform-scope protection spec.",
+        "summary": "Update thresholds settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -48950,7 +48961,7 @@
     "/protection/platform/{scope_id}/trusted_sources": {
       "put": {
         "operationId": "putProtectionTrustedsourcesByPlatform",
-        "summary": "Replace the `trusted_sources` primitive on the platform-scope protection spec.",
+        "summary": "Replace trusted sources settings",
         "description": "PUT replaces the entire `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). The current spec at the platform scope is read; the new `trusted_sources` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -49239,7 +49250,7 @@
       },
       "patch": {
         "operationId": "patchProtectionTrustedsourcesByPlatform",
-        "summary": "Merge-patch the `trusted_sources` primitive on the platform-scope protection spec.",
+        "summary": "Update trusted sources settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -49465,7 +49476,7 @@
     "/protection/scaffold": {
       "post": {
         "operationId": "scaffoldProtection",
-        "summary": "Scaffold a starting-point protection manifest from a natural-language description.",
+        "summary": "Scaffold protection from a description",
         "description": "Calls an LLM (Claude Haiku by default; opt into Sonnet via `model: \"sonnet\"`) with the catalog and tools-registry context, returns a YAML manifest scaffold + care-framed reasoning prose + suggested catalog entries + coverage gaps. Never auto-commits — the caller reviews and edits before PUT. Cached by (model + scope + description + hints) hash; 24-hour TTL.",
         "tags": [
           "Protection"
@@ -49634,7 +49645,7 @@
     "/protection/team/{team_id}": {
       "get": {
         "operationId": "getProtectionByTeam",
-        "summary": "Get the team-scope protection manifest (this layer only).",
+        "summary": "Get this layer's protection manifest",
         "description": "Returns the team-scope protection spec as authored. Response is content-negotiated — YAML by default, or JSON with `Accept: application/json`. Pass `?include_composition=true` to include the `_composition` metadata block describing which scopes were merged. ETag is computed from `content_hash` (cards-as-primitive Phase 1); `If-None-Match` returns 304. For the composed view across scopes, use the `/effective` sub-resource (Wave 2).",
         "tags": [
           "Protection"
@@ -49738,7 +49749,7 @@
       },
       "put": {
         "operationId": "putProtectionByTeam",
-        "summary": "Publish or replace the team-scope protection manifest.",
+        "summary": "Publish or replace the protection manifest",
         "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Protection"
@@ -49849,7 +49860,7 @@
       },
       "delete": {
         "operationId": "deleteProtectionByTeam",
-        "summary": "Clear the team-scope protection layer.",
+        "summary": "Clear this protection layer",
         "description": "Removes the team-scope protection authoring; downstream scopes fall through to the next layer up in the cascade.",
         "tags": [
           "Protection"
@@ -49895,7 +49906,7 @@
     "/protection/team/{team_id}/mode": {
       "put": {
         "operationId": "putProtectionModeByTeam",
-        "summary": "Replace the `mode` primitive on the team-scope protection spec.",
+        "summary": "Replace mode settings",
         "description": "PUT replaces the entire `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). The current spec at the team scope is read; the new `mode` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -50099,7 +50110,7 @@
       },
       "patch": {
         "operationId": "patchProtectionModeByTeam",
-        "summary": "Merge-patch the `mode` primitive on the team-scope protection spec.",
+        "summary": "Update mode settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `mode` block (the protection master switch (`off` / `observe` / `nudge` / `enforce`)). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -50283,7 +50294,7 @@
     "/protection/team/{team_id}/preview-compose": {
       "post": {
         "operationId": "previewComposeProtectionByTeam",
-        "summary": "Dry-run the composer for the team protection scope.",
+        "summary": "Preview composed protection (dry run)",
         "description": "Composes the cascade against a hypothetical body at the team layer and returns conflicts + the composed view. No DB writes. Used by the dashboard editor for live conflict markers.",
         "tags": [
           "Protection"
@@ -50379,7 +50390,7 @@
     "/protection/team/{team_id}/screen_surfaces": {
       "put": {
         "operationId": "putProtectionScreensurfacesByTeam",
-        "summary": "Replace the `screen_surfaces` primitive on the team-scope protection spec.",
+        "summary": "Replace screen surfaces settings",
         "description": "PUT replaces the entire `screen_surfaces` block (which traffic surfaces the protection card inspects). The current spec at the team scope is read; the new `screen_surfaces` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -50639,7 +50650,7 @@
       },
       "patch": {
         "operationId": "patchProtectionScreensurfacesByTeam",
-        "summary": "Merge-patch the `screen_surfaces` primitive on the team-scope protection spec.",
+        "summary": "Update screen surfaces settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `screen_surfaces` block (which traffic surfaces the protection card inspects). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -50845,7 +50856,7 @@
     "/protection/team/{team_id}/thresholds": {
       "put": {
         "operationId": "putProtectionThresholdsByTeam",
-        "summary": "Replace the `thresholds` primitive on the team-scope protection spec.",
+        "summary": "Replace thresholds settings",
         "description": "PUT replaces the entire `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). The current spec at the team scope is read; the new `thresholds` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -51113,7 +51124,7 @@
       },
       "patch": {
         "operationId": "patchProtectionThresholdsByTeam",
-        "summary": "Merge-patch the `thresholds` primitive on the team-scope protection spec.",
+        "summary": "Update thresholds settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `thresholds` block (warn / quarantine / block trip points (warn ≤ quarantine ≤ block, ∈ [0, 1])). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -51324,7 +51335,7 @@
     "/protection/team/{team_id}/trusted_sources": {
       "put": {
         "operationId": "putProtectionTrustedsourcesByTeam",
-        "summary": "Replace the `trusted_sources` primitive on the team-scope protection spec.",
+        "summary": "Replace trusted sources settings",
         "description": "PUT replaces the entire `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). The current spec at the team scope is read; the new `trusted_sources` is spliced in; the merged spec is validated; recompose is triggered. Requires `Idempotency-Key` and `If-Match`. Async fan-out — the response carries `agents_flagged_for_recompose`.",
         "tags": [
           "Protection"
@@ -51604,7 +51615,7 @@
       },
       "patch": {
         "operationId": "patchProtectionTrustedsourcesByTeam",
-        "summary": "Merge-patch the `trusted_sources` primitive on the team-scope protection spec.",
+        "summary": "Update trusted sources settings",
         "description": "PATCH applies RFC 7396 JSON Merge Patch to the `trusted_sources` block (domain / agent / IP-range allow-list bypassing screening). `null` deletes a key; missing keeps; present replaces. Arrays are replaced wholesale (not item-merged). Requires `Idempotency-Key` and `If-Match`.",
         "tags": [
           "Protection"
@@ -51909,8 +51920,8 @@
     "/recipes/{recipeId}/report": {
       "post": {
         "operationId": "reportRecipeFnFp",
-        "summary": "Customer FN/FP report against an existing recipe (AEGIS-6)",
-        "description": "Files a false-negative ('fn') or false-positive ('fp') report against an existing detection_recipes id. The customer is recorded as the 'created' identity on the recipe_review_actions chain; the candidate lands in `pending` state and awaits review (AEGIS-4 admin queue or AEGIS-5 auto-mode). Requires customer-session auth (JWT cookie / bearer) OR an API key. **Idempotency-Key header is REQUIRED** — the body hash is folded into the reservation so a customer can re-submit with corrected details without 422'ing (per `feedback_idempotency_key_body_hash`).",
+        "summary": "Report a false-positive or false-negative against a protection recipe",
+        "description": "Files a false-negative ('fn') or false-positive ('fp') report against an existing detection_recipes id. The customer is recorded as the 'created' identity on the recipe_review_actions chain; the candidate lands in `pending` state and awaits review. Requires customer-session auth (JWT cookie / bearer) OR an API key. **Idempotency-Key header is REQUIRED** — the body hash is folded into the reservation so a customer can re-submit with corrected details without 422'ing.",
         "tags": [
           "Recipes"
         ],
