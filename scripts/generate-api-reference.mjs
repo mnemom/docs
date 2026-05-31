@@ -35,7 +35,20 @@ const HELD = new Set([
   "POST /safe-house/patterns", // MNE-122
   "GET /safe-house/cbd/evaluations", // MNE-128 — codename in path, blocked until /outbound/ alias
   "GET /safe-house/cbd/evaluations/{evaluation_id}", // MNE-128
+  "POST /recipes/{recipeId}/report", // MNE-130 — spec summary leaks internal ticket "(AEGIS-6)"; re-add after spec fix
 ]);
+
+// API Reference tab group order (core product first; legacy/housekeeping last;
+// "Blog" forced last). Groups not listed keep their relative order after these.
+const GROUP_ORDER = [
+  "API Reference", "Auth", "Agents", "Alignment", "Protection", "Postures", "Unified cards",
+  "Enforcement", "Governance", "Risk", "Drift", "Integrity", "Checkpoints", "Verification",
+  "Reputation", "Team Reputation", "Teams", "Organizations", "Licensing", "Billing",
+  "Tools", "Catalog", "Notifications", "Webhook Notifications", "AIP Webhooks",
+  "Transparency", "Attestation", "A2A", "Recipes", "Sideband", "Traces", "Analyze",
+  "Reclassification", "Intelligence", "Policy", "On-Chain", "Transactions",
+  "Conscience Values", "Agent Containment", "Agent Runtime", "Safe House", "Trust & Network (AEGIS)",
+];
 
 // Not part of the programmatic product API — the web app / website surface.
 // (CookieAuth-only endpoints are excluded structurally below.)
@@ -184,6 +197,30 @@ for (const [name, ops] of Object.entries(byGroup)) {
     }
   }
 }
+
+// De-dup: a page referenced in more than one group is kept only in its first
+// occurrence (in final group order), fixing pre-existing double-listings.
+const orderIdx = (name) => {
+  const i = GROUP_ORDER.indexOf(name);
+  return i === -1 ? GROUP_ORDER.length : i;
+};
+tab.groups.sort((a, b) => orderIdx(a.group) - orderIdx(b.group) || (a.group === "Blog" ? 1 : b.group === "Blog" ? -1 : 0));
+const seenPages = new Set();
+let deduped = 0;
+const prune = (pages) =>
+  pages.filter((p) => {
+    if (typeof p === "object") {
+      p.pages = prune(p.pages || []);
+      return p.pages.length > 0;
+    }
+    if (seenPages.has(p)) {
+      deduped++;
+      return false;
+    }
+    seenPages.add(p);
+    return true;
+  });
+for (const g of tab.groups) g.pages = prune(g.pages || []);
 
 if (!DRY) writeFileSync(DOCS_JSON, JSON.stringify(docs, null, 2) + "\n");
 
