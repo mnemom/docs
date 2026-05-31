@@ -173,7 +173,49 @@ Claim is **idempotent for the same owner**: re-claiming an agent you already own
 Don't know your org IDs? List them with `GET /v1/orgs` (or `mnemom org list`). `GET /v1/me/context` returns your active org plus your full membership list. The claimable subset is echoed in `details.claimable_orgs` when you try to claim into an org you're not a member of.
 </Note>
 
-{/* TODO(spec): insert verified curl + SDK + CLI claim examples here once gatekeeper's OpenAPI spec for the org_id contract merges and matrix posts the SDK/CLI shapes. Held until then so doc-examples spec-validation stays green. */}
+<CodeGroup>
+```bash cURL
+# Two different keys are involved:
+#   • the AGENT's provider key (Anthropic/OpenAI/Gemini) → derives hash_proof (proves possession)
+#   • YOUR Mnemom api-key → authenticates you as the claimer (you become the owner)
+# hash_proof = SHA256(providerApiKey + '|' + agentName), full 64-char lowercase hex.
+HASH_PROOF=$(printf '%s|%s' "$AGENT_PROVIDER_KEY" "my-agent" | shasum -a 256 | awk '{print $1}')
+
+# org_id is optional — omit it to land in your personal org.
+curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/claim \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "content-type: application/json" \
+  -d "{ \"hash_proof\": \"$HASH_PROOF\", \"org_id\": \"org-acme\" }"
+# → 200 { "claimed": true, "agent_id": "mnm-…", "org_id": "org-acme", "claimed_at": "…" }
+```
+
+```typescript TypeScript
+import { Mnemom } from "@mnemom/sdk";
+
+const mnemom = new Mnemom({ apiKey: process.env.MNEMOM_API_KEY });
+
+const result = await mnemom.agents.claim(agentId, {
+  hashProof,          // SHA256(providerApiKey + '|' + agentName), 64-char hex
+  orgId: "org-acme",  // optional — omit to land in your personal org
+});
+// result: { claimed: true, agentId: "mnm-…", orgId: "org-acme", claimedAt: "…" }
+// Re-home later by re-claiming with a different orgId.
+```
+
+```bash CLI
+# Discover the orgs you can claim into:
+mnemom org list
+
+# Claim a gateway-provisioned agent into an org. Claim by its mnm-id — an
+# unclaimed agent isn't in your fleet yet, so it can't be resolved by name.
+# --org takes a slug or org_id; omit --org to land in your personal org.
+# Pass --name (the x-mnemom-agent name) so the CLI computes the *named* proof
+# SHA256(key|name); drop --name only for an unnamed singleton agent. Or pass a
+# precomputed --hash-proof <64hex> instead of --key/--name.
+mnemom agents claim <mnm-id> --org acme --key "$AGENT_PROVIDER_KEY" --name my-agent
+# ✓ Claimed mnm-…. Landed in: Acme Corp (acme)
+```
+</CodeGroup>
 
 ### When the API key rotates
 
