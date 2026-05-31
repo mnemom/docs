@@ -30,10 +30,13 @@ API compares it against the stored proof and never sees your raw key.
 
 ## Choosing the org
 
-- **Pass `org_id`** to place the agent in a specific org. You must hold a member
-  role on it (`owner`, `admin`, or `member`). Claiming into an org you don't
-  belong to is rejected with `403 not_a_member`, and `details.claimable_orgs`
-  lists the orgs you *can* claim into as `{ org_id, slug, name }` objects.
+- **Pass `org_id`** (an `org-…` or `pers-…` id) to place the agent in a specific
+  org. You must hold a member role on it (`owner`, `admin`, or `member`).
+  Claiming into an org you don't belong to is rejected with
+  `403 agent_org_not_member`; the error `details` carry `requested_org_id` and
+  `claimable_orgs` — the orgs you *can* claim into, as
+  `{ org_id, name, is_personal }` objects. An **unknown** `org_id` returns
+  `400` instead.
 - **Omit `org_id`** and the agent lands in your **personal org**. This default
   is the smallest-blast-radius choice: a personal org contains only you, so an
   accidental claim can never over-share the agent to a team. To place the agent
@@ -66,5 +69,5 @@ always safe, so claim is **idempotent for the same owner** (`200`, never `409`):
   org. Claim is therefore also how you *move* an agent you own between your orgs.
 
 An agent already owned by a *different* principal is **not** adoptable: that
-returns `403`. Holding a valid `hash_proof` lets you claim an *unowned* agent;
-it never lets you take over one that already has an owner.
+returns `403 agent_cross_tenant`. Holding a valid `hash_proof` lets you claim an
+*unowned* agent; it never lets you take over one that already has an owner.
