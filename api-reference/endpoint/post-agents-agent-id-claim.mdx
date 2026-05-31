@@ -13,6 +13,10 @@ real org.
 gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
 ```
 
+<Warning>
+**Breaking change: claim now requires authentication.** Earlier, claim accepted a body-only `hash_proof` with no authenticated caller. It now requires an authenticated principal (session or API key) — that principal becomes the agent's owner. An unauthenticated request returns `401`. If you previously called claim anonymously, add authentication. (Self-register via [`POST /v1/agents`](/api-reference/endpoint/post-agents) was already authenticated and is unaffected.)
+</Warning>
+
 <Note>
 **Which one do you need?** One question decides it: *are you the agent, or adopting a pre-existing one?* If your own key **is** the agent's identity, you're self-registering — use [`POST /v1/agents`](/api-reference/endpoint/post-agents), which does ownership and org placement in that one authenticated call (no separate claim step). Use `claim` to **adopt** an agent that already exists with an identity not derived from your key — typically one the gateway auto-provisioned into the Mnemom Sandbox before an authenticated owner existed. These answer different questions; neither is legacy. See [Agent identity](/concepts/agent-identity#registration).
 </Note>
@@ -50,11 +54,16 @@ Claim is an **authenticated** call — the principal you authenticate as becomes
 the agent's owner. An unauthenticated request returns `401`. (This is what
 distinguishes adoption from self-register: there must be an owner to assign.)
 
-## Idempotency and ownership
+## Idempotency, re-home, and ownership
 
-Claim is **idempotent for the same owner**: re-claiming an agent you already own
-returns `200` — the original `claimed_at` is preserved, and you can pass a new
-`org_id` to re-home it. There is **no `409`** on this endpoint.
+Think of claim as a **declarative assertion**: *"this agent is mine, and it
+lives in the org I name."* Repeating that assertion as the rightful owner is
+always safe, so claim is **idempotent for the same owner** (`200`, never `409`):
+
+- **Re-claim with the same (or no) `org_id`** → no-op success. The original
+  `claimed_at` is preserved.
+- **Re-claim with a *new* `org_id`** → the agent is **re-homed** (moved) to that
+  org. Claim is therefore also how you *move* an agent you own between your orgs.
 
 An agent already owned by a *different* principal is **not** adoptable: that
 returns `403`. Holding a valid `hash_proof` lets you claim an *unowned* agent;

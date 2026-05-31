@@ -9,6 +9,25 @@ Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, an
 
 ---
 
+## Claim-to-org — adopt a gateway-provisioned agent into your org
+<sub>May 2026</sub>
+
+`POST /v1/agents/{id}/claim` is now the first-class way to **adopt** a pre-existing agent (one the gateway auto-provisioned into the **Mnemom Sandbox** holding org) into an org you belong to. Mnemom now has two coherent paths to own an agent, decided by one question — *are you the agent, or adopting a pre-existing one?*: **self-register** with `POST /v1/agents` (your key is the identity), or **claim/adopt** with `POST /v1/agents/{id}/claim`.
+
+**What's new:**
+
+- `claim` accepts an optional `org_id`. Provide it to place the agent in a specific org (you must be a member — `owner`, `admin`, or `member`); omit it and the agent lands in your **personal org** (the safe, smallest-audience default). The `200` response reports the resolved `org_id`.
+- **Re-home:** re-claiming an agent you own with a new `org_id` moves it; the call is idempotent for the same owner (`200`, no `409`).
+- Teaching errors: claiming into an org you're not in returns `403 not_a_member` with `details.claimable_orgs` (`{org_id, slug, name}`). Discover your orgs with `GET /v1/orgs` / `GET /v1/me/context` / `mnemom org list`.
+
+<Warning>
+**Breaking change:** `claim` now **requires authentication** — the authenticated principal becomes the agent's owner. The previous anonymous (body-only `hash_proof`) claim path is removed; an unauthenticated call returns `401`. Add a session or API-key credential if you previously claimed anonymously. Self-register (`POST /v1/agents`) was always authenticated and is unaffected.
+</Warning>
+
+See [Agent identity](/concepts/agent-identity#registration) and the [claim endpoint reference](/api-reference/endpoint/post-agents-agent-id-claim).
+
+---
+
 ## Governance signals — operator-actionable observation surface
 <sub>May 2026 (amended 2026-05-07)</sub>
 
