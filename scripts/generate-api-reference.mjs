@@ -35,8 +35,13 @@ const HELD = new Set([
   "POST /safe-house/patterns", // MNE-122
   "GET /safe-house/cbd/evaluations", // MNE-128 — codename in path, blocked until /outbound/ alias
   "GET /safe-house/cbd/evaluations/{evaluation_id}", // MNE-128
-  "POST /recipes/{recipeId}/report", // MNE-130 — spec summary leaks internal ticket "(AEGIS-6)"; re-add after spec fix
+  // MNE-137: recipes/{recipeId}/report un-held — its summary was scrubbed of "(AEGIS-6)" (mnemom-api#711, deployed).
 ]);
+
+// A page is a generated stub (safe to refresh its title from the spec) iff it has
+// ONLY title + openapi frontmatter and no body. Hand-written pages (e.g. the
+// GDPR-erasure narratives) have a body and are never overwritten.
+const STUB_RE = /^---\ntitle: .*\nopenapi: "[^"]*"\n---\s*$/;
 
 // API Reference tab group order (core product first; legacy/housekeeping last;
 // "Blog" forced last). Groups not listed keep their relative order after these.
@@ -129,13 +134,35 @@ for (const [path, item] of Object.entries(spec.paths || {})) {
   }
 }
 
-// Write pages.
+// Write new pages.
 let written = 0;
 for (const o of toGen) {
   const file = join(ENDPOINT_DIR, `${o.slug}.mdx`);
   const body = `---\ntitle: ${JSON.stringify(o.title)}\nopenapi: ${JSON.stringify(`${o.method.toUpperCase()} ${o.path}`)}\n---\n`;
   if (!DRY && !existsSync(file)) writeFileSync(file, body);
   written++;
+}
+
+// Refresh existing generated stubs whose title drifted from the current spec
+// summary (e.g. after a sync). Hand-written pages (non-stub) are left untouched.
+let refreshed = 0;
+for (const [path, item] of Object.entries(spec.paths || {})) {
+  for (const m of METHODS) {
+    const op = item[m];
+    if (!op) continue;
+    const key = `${m.toUpperCase()} ${path}`;
+    if (HELD.has(key)) continue;
+    const file = join(ENDPOINT_DIR, `${slug(m, path)}.mdx`);
+    if (!existsSync(file)) continue;
+    const cur = readFileSync(file, "utf8");
+    if (!STUB_RE.test(cur)) continue; // hand-written page — never overwrite
+    const title = (op.summary || "").trim() || op.operationId || key;
+    const body = `---\ntitle: ${JSON.stringify(title)}\nopenapi: ${JSON.stringify(`${m.toUpperCase()} ${path}`)}\n---\n`;
+    if (cur !== body) {
+      if (!DRY) writeFileSync(file, body);
+      refreshed++;
+    }
+  }
 }
 
 // ---- Navigation ----
@@ -230,7 +257,9 @@ const groupCounts = Object.entries(byGroup)
   .sort();
 process.stderr.write(
   `generate-api-reference${DRY ? " [dry-run]" : ""}:\n` +
-    `  pages ${DRY ? "would write" : "written"}: ${written}\n` +
+    `  pages ${DRY ? "would write" : "written"}: ${written}\n`+
+    `  titles refreshed: ${refreshed}\n`+
+    `` +
     `  nav pages added: ${added}\n` +
     `  groups touched (${groupCounts.length}):\n    ${groupCounts.join("\n    ")}\n` +
     `  EXCLUDED — deprecated:${excluded.deprecated.length} dashboard-session:${excluded["dashboard-session"].length} non-api:${excluded["non-api"].length} held:${excluded.held.length}\n` +
