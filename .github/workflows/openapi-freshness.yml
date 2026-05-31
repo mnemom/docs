@@ -1,0 +1,37 @@
+name: OpenAPI freshness
+
+# The committed api-reference/openapi.json is a snapshot of the deployed
+# customer-facing slice (GET https://api.mnemom.ai/openapi.json). This gate
+# re-syncs it and fails if the committed copy has drifted from the deployed
+# surface — the signal to run `node scripts/sync-openapi.mjs` and open a refresh
+# PR (which then regenerates pages via scripts/generate-api-reference.mjs).
+#
+# It does NOT auto-commit — a human reviews the spec delta + regenerates.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC
+  pull_request:
+    paths:
+      - "api-reference/openapi.json"
+      - "scripts/sync-openapi.mjs"
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Re-sync committed slice from deployed surface
+        run: node scripts/sync-openapi.mjs
+      - name: Assert committed copy matches deployed surface
+        run: |
+          if ! git diff --exit-code api-reference/openapi.json; then
+            echo "::error::api-reference/openapi.json is stale vs the deployed customer slice."
+            echo "Run 'node scripts/sync-openapi.mjs && node scripts/generate-api-reference.mjs' and open a refresh PR."
+            exit 1
+          fi
+          echo "✓ committed OpenAPI slice matches the deployed surface"
