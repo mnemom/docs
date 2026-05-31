@@ -102,7 +102,7 @@ let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifica
 let dryRun = false;
 let includeWrites = false;
 let verbose = false;
-let stagingBase = env.MNEMOM_STAGING_BASE_URL ?? "https://api.staging.mnemom.ai/v1";
+let stagingBase = env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1";
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--scope") scope = args[++i];
