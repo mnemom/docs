@@ -137,11 +137,20 @@ The handler stores `agent_hash = hash_proof.slice(0, 16)`, binds the agent to yo
 
 The first gateway call against the same key + name will then find this row directly (matching `agent_hash`) and use the card you attached.
 
-### Claiming a gateway-provisioned agent into your org
+### Self-register vs. claim: which one do you need?
 
-The two paths above diverge on *when you authenticate*. Path 2 authenticates at create time, so ownership and org placement happen immediately. Path 1 (and any agent that reached Mnemom by gateway traffic before its operator had an account) provisions the agent **unclaimed, in the Mnemom Sandbox holding org** — there is no authenticated owner yet.
+There is one question that picks the path — and only one:
 
-`POST /v1/agents/{id}/claim` is how that agent gets an owner and a real org. It is the canonical second half of the gateway-first lifecycle:
+> **Are you the agent, or are you adopting a pre-existing one?**
+
+- **You are the agent → self-register with [`POST /v1/agents`](/api-reference/endpoint/post-agents)** (Path 2 above). Your provider key *is* the agent's identity. You create (or idempotently re-fetch) an agent you run yourself; it's owned by you and placed in your org in one authenticated call. No holding pen, no separate claim step — you authenticated up front and the identity derives from your key.
+- **You are adopting a pre-existing agent → claim it with `POST /v1/agents/{id}/claim`.** The agent already exists with an identity that *isn't* derived from your key — typically because gateway first-traffic auto-provisioned it (Path 1) into the **Mnemom Sandbox** holding org before any authenticated owner existed. You prove possession of its key and place it in your org. This is first-class, not legacy.
+
+These are not old-vs-new ways to do the same thing; they answer different questions. The rest of this section covers claim (adoption).
+
+#### Claiming a gateway-provisioned agent into your org
+
+A gateway-provisioned agent sits **unclaimed, in the Mnemom Sandbox holding org** — there is no authenticated owner yet. `POST /v1/agents/{id}/claim` is how that agent gets an owner and a real org. It is the canonical second half of the gateway-first lifecycle:
 
 ```
 gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
