@@ -9,7 +9,7 @@
  *
  * Run manually (not in CI). Requires:
  *   MNEMOM_STAGING_TOKEN     — staging-scoped service-account or PAT
- *   MNEMOM_STAGING_BASE_URL  — optional; default https://api.staging.mnemom.ai/v1
+ *   MNEMOM_STAGING_BASE_URL  — optional; default https://api-staging.mnemom.ai/v1
  *
  * Behavior:
  *   - `GET /v1/auth/me` to discover the user's default org_id.
@@ -51,7 +51,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const token = env.MNEMOM_STAGING_TOKEN;
-const base = (env.MNEMOM_STAGING_BASE_URL ?? "https://api.staging.mnemom.ai/v1").replace(/\/$/, "");
+const base = (env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1").replace(/\/$/, "");
 if (!token) {
   console.error("MNEMOM_STAGING_TOKEN is required");
   exit(2);
