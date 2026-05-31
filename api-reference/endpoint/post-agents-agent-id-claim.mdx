@@ -26,9 +26,10 @@ API compares it against the stored proof and never sees your raw key.
 
 ## Choosing the org
 
-- **Pass `org_id`** to place the agent in a specific org. You must be a member
-  of that org. Claiming into an org you don't belong to is rejected with `403`,
-  and the response lists the orgs you *can* claim into.
+- **Pass `org_id`** to place the agent in a specific org. You must hold a member
+  role on it (`owner`, `admin`, or `member`). Claiming into an org you don't
+  belong to is rejected with `403 not_a_member`, and `details.claimable_orgs`
+  lists the orgs you *can* claim into as `{ org_id, slug, name }` objects.
 - **Omit `org_id`** and the agent lands in your **personal org**. This default
   is the smallest-blast-radius choice: a personal org contains only you, so an
   accidental claim can never over-share the agent to a team. To place the agent
@@ -43,8 +44,18 @@ To discover which orgs you can claim into, use
 active org plus your full membership list — the same set echoed in the `403`
 body.
 
-## Idempotency
+## Authentication
 
-Claim is a one-time state transition (unclaimed → claimed). Claiming an agent
-that has already been claimed returns `409`; a replay never silently re-places
-or re-owns the agent.
+Claim is an **authenticated** call — the principal you authenticate as becomes
+the agent's owner. An unauthenticated request returns `401`. (This is what
+distinguishes adoption from self-register: there must be an owner to assign.)
+
+## Idempotency and ownership
+
+Claim is **idempotent for the same owner**: re-claiming an agent you already own
+returns `200` — the original `claimed_at` is preserved, and you can pass a new
+`org_id` to re-home it. There is **no `409`** on this endpoint.
+
+An agent already owned by a *different* principal is **not** adoptable: that
+returns `403`. Holding a valid `hash_proof` lets you claim an *unowned* agent;
+it never lets you take over one that already has an owner.

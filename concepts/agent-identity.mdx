@@ -156,9 +156,9 @@ A gateway-provisioned agent sits **unclaimed, in the Mnemom Sandbox holding org*
 gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
 ```
 
-To claim, you prove possession of the agent's key (the same `hash_proof` you'd compute for Path 2) and, optionally, name the org to place it in:
+Claim is an **authenticated** call — the principal you authenticate as *becomes the agent's owner*. (Unauthenticated → `401`.) You then prove possession of the agent's key (the same `hash_proof` you'd compute for Path 2) and, optionally, name the org to place it in:
 
-- **Choose an org** — pass `org_id`. You must be a member; claiming into an org you don't belong to is rejected with `403` and the list of orgs you *can* claim into.
+- **Choose an org** — pass `org_id`. You must be a member (`owner`, `admin`, or `member`); claiming into an org you don't belong to is rejected with `403 not_a_member` and `details.claimable_orgs` — the orgs you *can* claim into, as `{ org_id, slug, name }` objects.
 - **Omit `org_id`** — the agent lands in your **personal org**. This default is deliberately the smallest-blast-radius choice: a personal org contains only you, so an accidental claim can never over-share the agent to a team. To place the agent in a shared/company org, you must name it explicitly.
 
 The response reports the **resolved** org so you always know where the agent landed:
@@ -167,10 +167,10 @@ The response reports the **resolved** org so you always know where the agent lan
 200 { "claimed": true, "agent_id": "mnm-…", "org_id": "<resolved>", "claimed_at": "…" }
 ```
 
-Claim is a one-time transition: an already-claimed agent returns `409`.
+Claim is **idempotent for the same owner**: re-claiming an agent you already own returns `200` (the original `claimed_at` is preserved; pass a new `org_id` to re-home it). An agent already owned by *someone else* is **not** adoptable — that returns `403` (holding the proof lets you claim an unowned agent, never steal an owned one). There is no `409` on claim.
 
 <Note>
-Don't know your org IDs? List them with `GET /v1/orgs` (or `mnemom org list`). `GET /v1/me/context` returns your active org plus your full membership list. The same set is echoed in the `403` body when you try to claim into an org you're not a member of.
+Don't know your org IDs? List them with `GET /v1/orgs` (or `mnemom org list`). `GET /v1/me/context` returns your active org plus your full membership list. The same set is echoed in `details.claimable_orgs` when you try to claim into an org you're not a member of.
 </Note>
 
 {/* TODO(spec): insert verified curl + SDK + CLI claim examples here once gatekeeper's OpenAPI spec for the org_id contract merges and matrix posts the SDK/CLI shapes. Held until then so doc-examples spec-validation stays green. */}
