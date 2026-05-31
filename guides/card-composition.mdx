@@ -24,7 +24,7 @@ Each scope can only edit its own layer. An agent owner cannot override an `forbi
 ```bash
 # CLI
 curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  https://api.mnemom.ai/v1/orgs/{org_id}/alignment-template
+  https://api.mnemom.ai/v1/alignment/org/{org_id}
 ```
 
 Or visit `/dashboard/orgs/{id}/templates` in the website for a YAML-first editor.
@@ -34,7 +34,7 @@ Or visit `/dashboard/orgs/{id}/templates` in the website for a YAML-first editor
 Publishing a new org template triggers `mark_agents_for_recompose(org_id)`, which sets `needs_recompose = true` on every agent in the org. The background composer then regenerates each canonical card.
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/alignment-template \
+curl -X PUT https://api.mnemom.ai/v1/alignment/org/{org_id} \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: text/yaml" \
   -H "Idempotency-Key: <uuid>" \
@@ -116,7 +116,7 @@ trusted_sources:
 ```
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/orgs/{org_id}/protection-template \
+curl -X PUT https://api.mnemom.ai/v1/protection/org/{org_id} \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: text/yaml" \
   --data-binary @org-protection-template.yaml
@@ -179,18 +179,20 @@ Deleting an exemption triggers an immediate `compose_agent_card(agent_id)` call 
 ### Via CLI
 
 ```bash
-mnemom card show --with-composition
+mnemom card show
 ```
 
-Output includes the full composed card plus `_composition` metadata showing which scopes contributed which fields and which exemptions were honored.
+`mnemom card show` renders the full composed card. The `_composition` metadata block — which scopes contributed which fields and which exemptions were honored — is not surfaced by the CLI today; use the API below to retrieve it.
 
 ### Via API
 
 ```bash
 curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Accept: text/yaml" \
-  "https://api.mnemom.ai/v1/agents/{agent_id}/alignment-card?include_composition=true"
+  "https://api.mnemom.ai/v1/alignment/agent/{agent_id}?include_composition=true"
 ```
+
+The response includes the composed card plus `_composition` metadata showing which scopes contributed which fields and which exemptions were honored.
 
 ### Sample output
 
@@ -265,7 +267,7 @@ The production criterion requires zero fallback events on production — indicat
 
 You want to add `external_http` as forbidden for every agent in an org:
 
-1. `PUT /v1/orgs/{org_id}/alignment-template` with `autonomy.forbidden_actions` including the new entry.
+1. `PUT /v1/alignment/org/{org_id}` with `autonomy.forbidden_actions` including the new entry.
 2. Wait for recompose to complete (`needs_recompose=false` on all agents).
 3. Verify one agent's canonical card shows the new entry in `autonomy.forbidden_actions`.
 4. Agents that legitimately need `external_http` get individual exemptions.
