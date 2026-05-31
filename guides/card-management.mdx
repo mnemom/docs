@@ -445,9 +445,17 @@ The card panel updates immediately after saving. You can also confirm via CLI wi
 
 ## Publishing via API
 
-Update your agent's alignment card directly with a `PUT` request to `/v1/alignment/agent/{agent_id}`. The body is the [unified alignment card](/specifications/alignment-card-schema) in YAML (canonical) or JSON. Publishing triggers composition — the server regenerates the agent's canonical card against platform + org scopes before the response returns.
+Update your agent's alignment card directly with a `PUT` request to `/v1/alignment/agent/{agent_id}` — the canonical Resources × Scope × Verb URL. The body is the [unified alignment card](/specifications/alignment-card-schema) in YAML (canonical) or JSON. Publishing triggers composition — the server regenerates the agent's canonical card against platform + org scopes before the response returns.
+
+<Info>
+The older `/v1/agents/{agent_id}/alignment-card` URL still works but only `308`-redirects here (sunset `2027-01-15`). Use the canonical `/v1/alignment/agent/{agent_id}` directly.
+</Info>
 
 Authenticate with either an API key or a Bearer JWT. Send `Idempotency-Key` so retries are safe to replay.
+
+<Note>
+**Who can publish.** Publishing is authorized by **organization membership**, not by who originally claimed the agent. Any member of the organization that governs the agent — role `owner`, `admin`, or `member` — can publish its cards, so teammates can manage shared agents without re-claiming them. You never pass an organization id: the server derives it from the agent. A caller who is not a member of the agent's org receives `403 Forbidden` with code `agent_org_forbidden`, naming both the org and the agent.
+</Note>
 
 <CodeGroup>
 ```bash API Key (YAML)
