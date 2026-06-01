@@ -1,16 +1,19 @@
-# Regression gate for the docs internal-reference scrub (mnemom/docs#157).
-# Fails the build if a customer-facing *.mdx reintroduces an internal
-# reference: a private-repo link (404s for customers), a retired codename,
-# an internal agent name, a 1Password path, internal tooling paths, or an
-# internal tracker ref. #157 brought the tree to zero of these; this keeps
-# it that way.
+# Regression gate for the docs internal-reference scrub (mnemom/docs#157, MNE-57).
+# Fails the build if a customer-facing surface reintroduces an internal reference:
+# a private-repo link (404s for customers), a retired codename, an internal agent
+# name, a 1Password path, internal tooling paths, or an internal tracker ref.
 #
-# Allowed (intentional, do NOT add to the block patterns):
-#   - The `smolt-{8hex}` agent-ID format (e.g. smolt-1a2b3c4d). The
-#     `\bsmoltbot\b` rule is the codename only and does not match the ID.
+# Scans BOTH surfaces a customer actually sees (MNE-139):
+#   1. *.mdx — hand-written pages.
+#   2. api-reference/openapi.json — the committed customer slice's PROSE
+#      (summary/description/tag text). The generated api-reference pages render
+#      their description from the spec, not from .mdx, so a .mdx-only scan was
+#      blind to description-level leaks.
 #
-# To scope a genuine legacy-surface exception, narrow the offending rule's
-# regex or exclude the specific file below — and say why in a comment.
+# All rules + the (shrinking) grandfathered allowlist live in one place:
+#   scripts/check-internal-refs.mjs  (run with --self-test for its assertions)
+# ADR-NNN citations are allowed in OpenAPI descriptions (public decision records)
+# but still banned in hand-written .mdx prose — see the rule's `mdxOnly` flag.
 
 name: Internal-reference gate
 
@@ -26,41 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Scan customer-facing *.mdx for internal references
-        run: |
-          set -uo pipefail
-          # label::ERE-pattern  (matched case-insensitively against *.mdx)
-          rules=(
-            'private-repo link (404s for customers)::github\.com/mnemom/(scale|safe-house-hardening|safe-house-aegis|deploy)'
-            'retired codename smoltbot::\bsmoltbot\b'
-            'retired codename XFD/CBD/CFD::\b(xfd|cbd|cfd)\b'
-            'internal codename polis::(\bpolis\b|polis_yaml)'
-            'internal agent name::\b(solon|themis|cassandra|blackbeard|wintermute)\b'
-            '1Password path::op://'
-            'internal tooling path::(emps\.|packages/core)'
-            'internal tracker ref (UC-N / mnemom-platform#N / ADR-NNN)::(UC-[0-9]|mnemom-platform#[0-9]|ADR-[0-9]{3})'
-          )
-          fail=0
-          for entry in "${rules[@]}"; do
-            label="${entry%%::*}"
-            pattern="${entry#*::}"
-            matches=$(grep -rInE -i \
-              --include='*.mdx' \
-              --exclude-dir=node_modules --exclude-dir=.git \
-              -e "$pattern" . 2>/dev/null || true)
-            if [ -n "$matches" ]; then
-              echo "::error::Internal reference leak — ${label}"
-              echo "$matches"
-              echo ""
-              fail=1
-            fi
-          done
-          if [ "$fail" -ne 0 ]; then
-            echo "FAIL: customer-facing docs must not contain internal references."
-            echo "They leak internal architecture/codenames or 404 for customers."
-            echo "If a reference is an intentional legacy surface, scope an exception"
-            echo "in .github/workflows/internal-reference-gate.yml (see the rules array)."
-            exit 1
-          fi
-          echo "✓ No internal references in customer-facing *.mdx."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Self-test the scanner
+        run: node scripts/check-internal-refs.mjs --self-test
+      - name: Scan *.mdx + OpenAPI prose for internal references
+        run: node scripts/check-internal-refs.mjs

@@ -33,21 +33,21 @@ Fired when a new row is inserted into the iocs table. The public STIX feed at GE
 
 ### `recipe.candidate.created`
 
-Fired when a new candidate row lands in sideband_analyses with the AEGIS-discipline `writer_identity`. Sources include customer FN/FP reports (AEGIS-6), internal observation (AEGIS-11 seeding), arena-bypass candidate writes (AEGIS-7 Phase 2), researcher submissions, and manual-admin proposals. The candidate is in `pending` state and awaits review through the AEGIS-4 admin queue (or AEGIS-5 auto-mode policy when the source qualifies).
+Fired when a new detection-recipe candidate is recorded for review. Candidates come from several sources — customer false-positive/false-negative reports, internal observation, researcher submissions, and manual admin proposals. A new candidate starts in `pending` state and awaits review before it can be promoted (or is auto-promoted when the source qualifies).
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.candidate.created.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.candidate.created.example.json)
 
 ### `recipe.promoted`
 
-Fired at two lifecycle moments: (1) the promoter handler signs + dual-writes a composed envelope to KV (`sh:aegis-recipes:v1`) + R2 (`composed-recipe-set/latest` + dated audit object) with INDEPENDENT Ed25519 chains — initial promotion; and (2) the escalation cron flips a row from `status='observe'` to `status='active'` after its 24h soak passes the FP threshold — observe-to-active transition. The optional `transition` field disambiguates the two emissions. Carries the ids of both signing keys so subscribers can correlate with the gateway's served envelope.
+Fired at two lifecycle moments, disambiguated by the optional `transition` field: (1) **initial promotion** — a newly composed, signed recipe set is published; and (2) **observe-to-active** — a recipe that has passed its 24-hour observation soak within false-positive thresholds transitions from `observe` to `active`. Carries the ids of both signing keys so subscribers can correlate the event with the gateway's served, signed envelope.
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.promoted.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.promoted.example.json)
 
 ### `recipe.retired`
 
-Fired when a detection_recipes row is archived. Three reasons cover the lifecycle: `zero_hits_window` (AEGIS-14 nightly retirement sweep — no hits in the configured window with the recipe older than the window), `fp_rate_exceeded` (AEGIS-14 nightly — cumulative FP rate above threshold with minimum-evaluations guard), and `observe_soak_fp` (AEGIS-11 escalation cron — FP rate at or above threshold during the 24h observe soak, auto-rollback before the rule ever serves in `enforce`).
+Fired when a detection recipe is archived. Three reasons cover the lifecycle: `zero_hits_window` (nightly retirement sweep — no hits in the configured window and the recipe is older than that window), `fp_rate_exceeded` (nightly — cumulative false-positive rate above threshold, with a minimum-evaluations guard), and `observe_soak_fp` (false-positive rate at or above threshold during the 24-hour observe soak — auto-rollback before the rule ever serves in `enforce`).
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.retired.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/recipe.retired.example.json)
