@@ -38,21 +38,12 @@ const RULES = [
   { label: "internal decision-record ref (ADR-NNN)", re: /ADR-[0-9]{3}/i, mdxOnly: true },
 ];
 
-// Grandfathered live leaks in the committed slice (synced from the deployed spec).
-// The gate is blocking NOW to stop NEW description leaks; these known ones are
-// scrubbed at the source (mnemom-api) under MNE-139 and these entries retire on
-// the next deploy + re-sync. Fingerprint = `${location}::${matchedToken}`.
-const SPEC_ALLOWLIST = new Set([
-  "$.tags.Network.description::AEGIS-12", // MNE-139 — scrubbed at source in mnemom-api#720
-  "$.tags.Recipes.description::AEGIS-6", // MNE-139 — mnemom-api#720
-  "$.tags.Trust.description::AEGIS-13", // MNE-139 — mnemom-api#720
-  "$.paths./agents/{agent_id}.delete.description::github.com/mnemom/scale", // MNE-139 — ADR-021 private-repo link, mnemom-api#720
-  "$.components.securitySchemes.ArenaCandidateTokenAuth.description::op://", // MNE-139 — 1Password path, mnemom-api#720
-  "$.components.schemas.UnifiedAlignmentCard.description::UC-4", // MNE-139 — mnemom-api#720
-  "$.components.schemas.UnifiedProtectionCard.description::UC-4", // MNE-139 — mnemom-api#720
-  "$.components.schemas.AgentExemption.description::UC-4", // MNE-139 — mnemom-api#720
-  "$.components.schemas.AgentExemption.properties.status.description::UC-4", // MNE-139 — mnemom-api#720
-]);
+// Grandfather list for live leaks in the committed slice (synced from the deployed
+// spec). Empty: the MNE-139 grandfathered set (9 entries) was scrubbed at the
+// source (mnemom-api#720), deployed, and re-synced — so the gate is now blocking
+// with NO exceptions. Add an entry only to ratchet in a gate on a non-clean tree:
+// `${location}::${matchedToken}` + a comment + a ticket to scrub at source.
+const SPEC_ALLOWLIST = new Set([]);
 
 const findings = []; // {surface, loc, label, token}
 const allowlistHits = new Set();
