@@ -63,17 +63,9 @@ The JWKS includes the **active** key plus **recently-retired** keys still inside
 | Token TTL | 1 hour | `AAP_ATTESTATION_TTL_SECONDS` |
 | Retirement grace | 25 hours | `AAP_ATTESTATION_RETIREMENT_WINDOW_SECONDS` |
 
-Rotation is performed by the operator via the admin endpoint:
+AAP signing-key rotation is a **Mnemom-platform operation**, performed by Mnemom staff on a scheduled cadence (and on demand for incident response) — it is not a customer- or operator-callable endpoint. You don't rotate the platform's AAP signing keys yourself; the rotation, retirement window, and key publication are managed for you.
 
-```bash
-curl -X POST https://api.mnemom.ai/v1/admin/signing-keys/rotate \
-  -H "Authorization: Bearer $MNEMOM_ADMIN_TOKEN" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{"new_key_id": "aap-2026-06-01", "new_public_key_jwk": {...}, "rotation_reason": "scheduled-rotation"}'
-```
-
-The retired key remains verifiable for any token signed before its `retired_at` timestamp.
+What you *can* rely on: the retired key remains verifiable for any token signed before its `retired_at` timestamp, and the current public keys are always discoverable from the published JWKS. (To rotate *your own* agent's API key — a different operation — see [Agent key rotation](/guides/agent-key-rotation).)
 
 ## Relationship to the transparency log
 

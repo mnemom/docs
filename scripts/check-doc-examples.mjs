@@ -61,6 +61,32 @@ import {
   templatePathMatchesSegments,
 } from "./lib/doc-examples-extract.mjs";
 
+// ── Staff / internal surface (ADR-054) ─────────────────────────────────────
+//
+// The served customer-facing openapi.json deliberately EXCLUDES staff/internal
+// endpoints (`buildCustomerFacingSpec` in mnemom-api `openapi/customer-facing.ts`).
+// So a doc that shows a curl against a staff path will never match the customer
+// spec — that's by design, not drift. Skip those examples instead of failing
+// (and instead of papering over them with per-path KNOWN_DRIFT entries that go
+// stale every time the staff surface shifts). Mirror of
+// `mnemom-api openapi/customer-facing.ts::{STAFF_PREFIXES,STAFF_PATHS}`; keep in
+// sync when a new internal namespace is added there. Note: doc paths are
+// normalized with the `/v1` base stripped, so `/internal/` already covers the
+// `/v1/internal/` variant.
+const STAFF_PREFIXES = ["/admin/", "/arena/", "/internal/", "/v1/internal/", "/sonar/", "/rb2b/"];
+const STAFF_PATHS = new Set([
+  "/auth/send-email-hook",
+  "/billing/webhooks/stripe",
+  "/contact/notify",
+  "/on-chain/anchor-root",
+  "/on-chain/publish-scores",
+  "/health",
+]);
+function isStaffPath(normalizedPath) {
+  if (STAFF_PATHS.has(normalizedPath)) return true;
+  return STAFF_PREFIXES.some((pre) => normalizedPath.startsWith(pre));
+}
+
 // ── CLI parsing ──────────────────────────────────────────────────────────
 const args = argv.slice(2);
 // Default scope = all customer-facing tabs from docs.json plus the
@@ -396,6 +422,7 @@ const responseFailures = [];
 const knownResponseDrift = [];
 const responseParseWarns = [];
 const passes = [];
+const staffSkipped = [];
 let totalCurls = 0;
 let totalBodies = 0;
 let bodiesValidated = 0;
@@ -424,6 +451,13 @@ for (const file of files) {
         continue;
       }
       const normalizedPath = "/" + norm.segments.join("/");
+      if (isStaffPath(normalizedPath)) {
+        // Staff/internal endpoint — intentionally absent from the served
+        // customer spec (ADR-054). Validating it against that spec is a
+        // category error, not drift; skip (logged below, not silent).
+        staffSkipped.push({ file, line: block.line, method, path: normalizedPath });
+        continue;
+      }
       const matched = matchSpecPathLocal(norm.segments);
       if (!matched) {
         const allow = knownDriftEntry(file, method, norm.segments);
@@ -610,6 +644,12 @@ function formatAjvError(e) {
 const fileCount = files.length;
 console.log(`Scanned ${fileCount} MDX file(s) across [${scope}].`);
 console.log(`Extracted ${totalCurls} curl invocation(s) targeting api.mnemom.ai/v1/*.`);
+if (staffSkipped.length) {
+  console.log(
+    `Skipped ${staffSkipped.length} staff/internal-path example(s) (excluded from the customer spec by design, ADR-054): ` +
+      staffSkipped.map((s) => `${s.method} ${s.path} (${s.file}:${s.line})`).join(", "),
+  );
+}
 if (checkBodies) {
   console.log(`Body validation: ${bodiesValidated} body(ies) validated against requestBody schemas (${totalBodies - bodiesValidated} skipped: no schema, parse-error, or compile-error).`);
 }
