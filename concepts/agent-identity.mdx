@@ -111,6 +111,10 @@ curl https://gateway.mnemom.ai/anthropic/v1/messages \
 
 The agent's `mnm-*` ID is returned in the `x-mnemom-agent` response header and persisted on the server. Subsequent calls with the same key + name resolve to the same agent.
 
+<Note>
+A gateway-provisioned agent starts **unclaimed**, in a system holding org (the **Mnemom Sandbox**). It works — the gateway evaluates it — but it has no owner and is not in *your* org yet. To take ownership and place it in your org, **claim** it (prove you hold its key, choose the org). See [Claiming a gateway-provisioned agent](#claiming-a-gateway-provisioned-agent-into-your-org) below. This is the second half of the gateway-first path, not a legacy step.
+</Note>
+
 ### Path 2: programmatic pre-registration via `POST /v1/agents`
 
 When you need to attach an alignment card or policy before the agent's first call — common for fleet provisioning, CI pipelines, or pre-flight role definition — use the CRUD endpoint.
@@ -129,9 +133,89 @@ curl -X POST https://api.mnemom.ai/v1/agents \
   }"
 ```
 
-The handler stores `agent_hash = hash_proof.slice(0, 16)` and binds the agent to your authenticated principal in the same call. No separate claim or link step is required — the legacy `POST /v1/agents/{id}/claim` and `POST /v1/agents/{id}/link` endpoints exist only for agents created before the unified `POST /v1/agents` endpoint shipped.
+The handler stores `agent_hash = hash_proof.slice(0, 16)`, binds the agent to your authenticated principal, and places it in your org — registration, ownership, and org placement in one authenticated call. No separate claim step is needed on this path, because you authenticated up front.
 
 The first gateway call against the same key + name will then find this row directly (matching `agent_hash`) and use the card you attached.
+
+### Self-register vs. claim: which one do you need?
+
+There is one question that picks the path — and only one:
+
+> **Are you the agent, or are you adopting a pre-existing one?**
+
+- **You are the agent → self-register with [`POST /v1/agents`](/api-reference/endpoint/post-agents)** (Path 2 above). Your provider key *is* the agent's identity. You create an agent you run yourself; it's owned by you and placed in your org in one authenticated call. No holding pen, no separate claim step — you authenticated up front and the identity derives from your key. (Create doesn't adopt: if an agent with that key+name already exists, this returns `409` — adopting an existing agent is what claim, below, is for.)
+- **You are adopting a pre-existing agent → claim it with `POST /v1/agents/{id}/claim`.** The agent already exists with an identity that *isn't* derived from your key — typically because gateway first-traffic auto-provisioned it (Path 1) into the **Mnemom Sandbox** holding org before any authenticated owner existed. You prove possession of its key and place it in your org. This is first-class, not legacy.
+
+These are not old-vs-new ways to do the same thing; they answer different questions. The rest of this section covers claim (adoption).
+
+#### Claiming a gateway-provisioned agent into your org
+
+A gateway-provisioned agent sits **unclaimed, in the Mnemom Sandbox holding org** — there is no authenticated owner yet. `POST /v1/agents/{id}/claim` is how that agent gets an owner and a real org. It is the canonical second half of the gateway-first lifecycle:
+
+```
+gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
+```
+
+Claim is an **authenticated** call — the principal you authenticate as *becomes the agent's owner*. (Unauthenticated → `401`.) You then prove possession of the agent's key (the same `hash_proof` you'd compute for Path 2) and, optionally, name the org to place it in:
+
+- **Choose an org** — pass `org_id` (an `org-…` or `pers-…` id). You must be a member (`owner`, `admin`, or `member`); claiming into an org you don't belong to is rejected with `403 agent_org_not_member`, whose `details` carry `requested_org_id` and `claimable_orgs` — the orgs you *can* claim into, as `{ org_id, name, is_personal }` objects. An unknown `org_id` returns `400`.
+- **Omit `org_id`** — the agent lands in your **personal org**. This default is deliberately the smallest-blast-radius choice: a personal org contains only you, so an accidental claim can never over-share the agent to a team. To place the agent in a shared/company org, you must name it explicitly.
+
+The response reports the **resolved** org so you always know where the agent landed:
+
+```
+200 { "claimed": true, "agent_id": "mnm-…", "org_id": "<resolved>", "claimed_at": "…" }
+```
+
+Claim is **idempotent for the same owner**: re-claiming an agent you already own returns `200` (the original `claimed_at` is preserved; pass a new `org_id` to re-home it). An agent already owned by *someone else* is **not** adoptable — that returns `403` (holding the proof lets you claim an unowned agent, never steal an owned one). There is no `409` on claim.
+
+<Note>
+Don't know your org IDs? List them with `GET /v1/orgs` (or `mnemom org list`). `GET /v1/me/context` returns your active org plus your full membership list. The claimable subset is echoed in `details.claimable_orgs` when you try to claim into an org you're not a member of.
+</Note>
+
+<CodeGroup>
+```bash cURL
+# Two different keys are involved:
+#   • the AGENT's provider key (Anthropic/OpenAI/Gemini) → derives hash_proof (proves possession)
+#   • YOUR Mnemom api-key → authenticates you as the claimer (you become the owner)
+# hash_proof = SHA256(providerApiKey + '|' + agentName), full 64-char lowercase hex.
+HASH_PROOF=$(printf '%s|%s' "$AGENT_PROVIDER_KEY" "my-agent" | shasum -a 256 | awk '{print $1}')
+
+# org_id is optional — omit it to land in your personal org.
+curl -X POST https://api.mnemom.ai/v1/agents/$AGENT_ID/claim \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "content-type: application/json" \
+  -d "{ \"hash_proof\": \"$HASH_PROOF\", \"org_id\": \"org-acme\" }"
+# → 200 { "claimed": true, "agent_id": "mnm-…", "org_id": "org-acme", "claimed_at": "…" }
+```
+
+```typescript TypeScript
+import { Mnemom } from "@mnemom/sdk";
+
+const mnemom = new Mnemom({ apiKey: process.env.MNEMOM_API_KEY });
+
+const result = await mnemom.agents.claim(agentId, {
+  hashProof,          // SHA256(providerApiKey + '|' + agentName), 64-char hex
+  orgId: "org-acme",  // optional — omit to land in your personal org
+});
+// result: { claimed: true, agentId: "mnm-…", orgId: "org-acme", claimedAt: "…" }
+// Re-home later by re-claiming with a different orgId.
+```
+
+```bash CLI
+# Discover the orgs you can claim into:
+mnemom org list
+
+# Claim a gateway-provisioned agent into an org. Claim by its mnm-id — an
+# unclaimed agent isn't in your fleet yet, so it can't be resolved by name.
+# --org takes a slug or org_id; omit --org to land in your personal org.
+# Pass --name (the x-mnemom-agent name) so the CLI computes the *named* proof
+# SHA256(key|name); drop --name only for an unnamed singleton agent. Or pass a
+# precomputed --hash-proof <64hex> instead of --key/--name.
+mnemom agents claim <mnm-id> --org acme --key "$AGENT_PROVIDER_KEY" --name my-agent
+# ✓ Claimed mnm-…. Landed in: Acme Corp (acme)
+```
+</CodeGroup>
 
 ### When the API key rotates
 

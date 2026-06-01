@@ -1,8 +1,73 @@
 ---
-title: "Claim agent with hash proof (legacy)"
+title: "Claim an agent into an org"
 openapi: "POST /agents/{agent_id}/claim"
 ---
 
+Claim an agent: prove you hold its provider API key, take ownership, and place
+it in one of your orgs. This is the canonical second half of the **gateway-first
+lifecycle** — an agent provisioned by its first gateway traffic starts unclaimed
+in the **Mnemom Sandbox** holding org, and `claim` is how it gets an owner and a
+real org.
+
+```
+gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
+```
+
 <Warning>
-**Legacy endpoint.** Kept only for agents that pre-date [`POST /v1/agents`](/api-reference/endpoint/post-agents). The modern flow registers, claims, and links in a single authenticated `POST /v1/agents` call — there is no separate claim step. New code should not use this endpoint. See the [Registration section in Agent identity](/concepts/agent-identity#registration) for the canonical flow.
+**Breaking change: claim now requires authentication.** Earlier, claim accepted a body-only `hash_proof` with no authenticated caller. It now requires an authenticated principal (session or API key) — that principal becomes the agent's owner. An unauthenticated request returns `401`. If you previously called claim anonymously, add authentication. (Self-register via [`POST /v1/agents`](/api-reference/endpoint/post-agents) was already authenticated and is unaffected.)
 </Warning>
+
+<Note>
+**Which one do you need?** One question decides it: *are you the agent, or adopting a pre-existing one?* If your own key **is** the agent's identity, you're self-registering — use [`POST /v1/agents`](/api-reference/endpoint/post-agents), which does ownership and org placement in that one authenticated call (no separate claim step). Use `claim` to **adopt** an agent that already exists with an identity not derived from your key — typically one the gateway auto-provisioned into the Mnemom Sandbox before an authenticated owner existed. These answer different questions; neither is legacy. See [Agent identity](/concepts/agent-identity#registration).
+</Note>
+
+## Proving possession
+
+`hash_proof` is the full 64-character hex `SHA256(apiKey + '|' + agentName)`
+(or `SHA256(apiKey)` for an unnamed singleton agent) — the same value used at
+registration. It proves you hold the provider key without transmitting it; the
+API compares it against the stored proof and never sees your raw key.
+
+## Choosing the org
+
+- **Pass `org_id`** (an `org-…` or `pers-…` id) to place the agent in a specific
+  org. You must hold a member role on it (`owner`, `admin`, or `member`).
+  Claiming into an org you don't belong to is rejected with
+  `403 agent_org_not_member`; the error `details` carry `requested_org_id` and
+  `claimable_orgs` — the orgs you *can* claim into, as
+  `{ org_id, name, is_personal }` objects. An **unknown** `org_id` returns
+  `400` instead.
+- **Omit `org_id`** and the agent lands in your **personal org**. This default
+  is the smallest-blast-radius choice: a personal org contains only you, so an
+  accidental claim can never over-share the agent to a team. To place the agent
+  in a shared or company org, name it explicitly with `org_id`.
+
+The `200` response always reports the **resolved** `org_id`, so you know exactly
+where the agent landed regardless of which path you took.
+
+To discover which orgs you can claim into, use
+[`GET /v1/orgs`](/api-reference/endpoint/get-orgs) (or `mnemom org list`).
+[`GET /v1/me/context`](/api-reference/endpoint/get-me-context) returns your
+active org plus your full membership list — the same set echoed in the `403`
+body.
+
+## Authentication
+
+Claim is an **authenticated** call — the principal you authenticate as becomes
+the agent's owner. An unauthenticated request returns `401`. (This is what
+distinguishes adoption from self-register: there must be an owner to assign.)
+
+## Idempotency, re-home, and ownership
+
+Think of claim as a **declarative assertion**: *"this agent is mine, and it
+lives in the org I name."* Repeating that assertion as the rightful owner is
+always safe, so claim is **idempotent for the same owner** (`200`, never `409`):
+
+- **Re-claim with the same (or no) `org_id`** → no-op success. The original
+  `claimed_at` is preserved.
+- **Re-claim with a *new* `org_id`** → the agent is **re-homed** (moved) to that
+  org. Claim is therefore also how you *move* an agent you own between your orgs.
+
+An agent already owned by a *different* principal is **not** adoptable: that
+returns `403 agent_cross_tenant`. Holding a valid `hash_proof` lets you claim an
+*unowned* agent; it never lets you take over one that already has an owner.
