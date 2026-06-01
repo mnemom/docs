@@ -33,8 +33,7 @@ const METHODS = ["get", "post", "put", "patch", "delete"]; // also = display ord
 const HELD = new Set([
   "POST /safe-house/ingest-pattern", // MNE-122 — customer pattern contribution, post-GA security review
   "POST /safe-house/patterns", // MNE-122
-  "GET /safe-house/cbd/evaluations", // MNE-128 — codename in path, blocked until /outbound/ alias
-  "GET /safe-house/cbd/evaluations/{evaluation_id}", // MNE-128
+  // MNE-128: cbd evaluations un-held — superseded by the /safe-house/outbound/ alias (mnemom-api#721); cbd ops are now deprecated-excluded.
   // MNE-137: recipes/{recipeId}/report un-held — its summary was scrubbed of "(AEGIS-6)" (mnemom-api#711, deployed).
 ]);
 
