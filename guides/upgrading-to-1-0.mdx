@@ -12,7 +12,7 @@ On 2026-04-13 both protocol SDKs — [`@mnemom/agent-alignment-protocol`](https:
 The migration itself is small. There are no schema changes, no endpoint removals, and no signature changes on the customer-facing surface. Upgrading from 0.5.x is a version-string bump plus a rebuild.
 
 <Info>
-  **Backward compatible.** Existing alignment cards with `aap_version: "0.5.0"` or `"0.1.0"` continue to work unchanged. The 1.0.0 server accepts every 0.x card shape. Update at your own pace.
+  **Backward compatible.** Existing 0.x alignment cards continue to work unchanged. The 1.0.0 server accepts every 0.x card shape. Update at your own pace.
 </Info>
 
 ## The 1.0.0 stability commitment
@@ -33,7 +33,7 @@ The 1.x line will receive bug fixes and strictness improvements. New *card-forma
 | AAP PyPI package | `agent-alignment-protocol==0.5.0` | `agent-alignment-protocol==1.0.0` |
 | AIP npm package | `@mnemom/agent-integrity-protocol@0.4.x–0.8.0` | `@mnemom/agent-integrity-protocol@1.0.0` |
 | AIP PyPI package | `agent-integrity-proto==0.4.x–0.8.0` | `agent-integrity-proto==1.0.0` |
-| `aap_version` emitted on new cards | `"0.5.0"` | `"1.0.0"` |
+| Protocol version emitted on new cards | `"0.5.0"` | `"1.0.0"` |
 | Python `__version__` (AAP) / `AIP_VERSION` | `"0.5.0"` / `"0.4.x"` | `"1.0.0"` / `"1.0.0"` |
 | Breaking-change policy | 0.x semantics — breaking changes at minor bumps | Locked — breaking changes require 2.0 |
 
@@ -118,15 +118,15 @@ Migrate your existing alignment cards to the **unified / ADR-039 shape** so they
     ```
   </Tab>
   <Tab title="Via YAML / JSON file">
-    If you version-control your card as a local file, migrate it to the unified shape. A version-number bump alone (`aap_version: "1.0.0"`) still fails `mnemom card validate` — the platform expects the **unified / ADR-039 field structure**. Make these changes:
+    If you version-control your card as a local file, a version-number bump alone still fails `mnemom card validate` — the platform expects the **unified / ADR-039 field structure**, which differs from the 0.x card layout. Update your file to the unified shape:
 
-    1. Replace `aap_version: "..."` with `card_version: "unified/2026-04-15"`.
+    1. Set `card_version: "unified/2026-04-15"` at the top level, replacing the old protocol-version field.
     2. Add top-level `autonomy_mode: observe` and `integrity_mode: observe` (or `enforce`).
-    3. Rename `autonomy_envelope:` → `autonomy:`.
-    4. Rename `audit_commitment:` → `audit:` and add `query_endpoint: https://api.mnemom.ai/v1/traces`.
+    3. Move your bounded/forbidden actions and escalation triggers under an `autonomy:` block.
+    4. Move your audit settings under an `audit:` block, and add `query_endpoint: https://api.mnemom.ai/v1/traces`.
     5. Add `principal.identifier` if `principal.type` is not `unspecified`.
 
-    Then validate and publish:
+    The [Card Management worked example](/guides/card-management) shows a complete unified card you can copy and map your existing values into. Then validate and publish:
 
     ```bash
     mnemom card validate alignment-card.yaml
@@ -267,7 +267,7 @@ Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version`
     No. The 1.0.0 server accepts every 0.x card shape, and no endpoint signatures changed. 1.0.0 is a commitment that future breaking changes will require a 2.0 bump, not a redesign of the current surface.
   </Accordion>
   <Accordion title="Do I need to update all my agents at once?">
-    No. Cards with different `aap_version` values coexist without issues. Roll the update at whatever cadence suits you.
+    No. Cards on different protocol versions coexist without issues. Roll the update at whatever cadence suits you.
   </Accordion>
   <Accordion title="What if I'm still on AIP 0.7.x with `WindowManager`?">
     AIP 0.8.0 (shipped the same day as 1.0.0 as the pre-1.0 audit) removed `WindowManager` and `createWindowState` from public exports. Switch to `createClient()`, which manages window state internally, before jumping to 1.0.0.
