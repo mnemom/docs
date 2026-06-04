@@ -1,6 +1,6 @@
 # Spec — Onboarding docs nits: CLI 404 redirect, Python package name, llms.txt onboarding entry, signup form alignment
 
-- **Status:** Draft
+- **Status:** Implemented
 - **Branch:** feature-issue-192-adw-e6a00177-fix-onboarding-docs-nits
 - **Location:** `docs.json`, `introduction.mdx`, `protocols/overview.mdx`, `for-agents/index.mdx`, `quickstart/overview.mdx`, `agents.txt`
 - **Related docs:** `AGENTS.md` (working conventions), `.mnemom/capability.yaml` (verbs), `scripts/check-redirects.mjs`, `scripts/check-doc-examples.mjs`, `api-reference/endpoint/post-auth-sign-up.mdx`, `concepts/personal-organization.mdx`, prior ADW plans in `specs/adw/`
