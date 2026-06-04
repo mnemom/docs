@@ -12,7 +12,7 @@ On 2026-04-13 both protocol SDKs — [`@mnemom/agent-alignment-protocol`](https:
 The migration itself is small. There are no schema changes, no endpoint removals, and no signature changes on the customer-facing surface. Upgrading from 0.5.x is a version-string bump plus a rebuild.
 
 <Info>
-  **Backward compatible.** Existing alignment cards with `aap_version: "0.5.0"` or `"0.1.0"` continue to work unchanged. The 1.0.0 server accepts every 0.x card shape. Update at your own pace.
+  **Backward compatible.** Existing 0.x alignment cards continue to work unchanged. The 1.0.0 server accepts every 0.x card shape. Update at your own pace.
 </Info>
 
 ## The 1.0.0 stability commitment
@@ -33,7 +33,7 @@ The 1.x line will receive bug fixes and strictness improvements. New *card-forma
 | AAP PyPI package | `agent-alignment-protocol==0.5.0` | `agent-alignment-protocol==1.0.0` |
 | AIP npm package | `@mnemom/agent-integrity-protocol@0.4.x–0.8.0` | `@mnemom/agent-integrity-protocol@1.0.0` |
 | AIP PyPI package | `agent-integrity-proto==0.4.x–0.8.0` | `agent-integrity-proto==1.0.0` |
-| `aap_version` emitted on new cards | `"0.5.0"` | `"1.0.0"` |
+| Protocol version emitted on new cards | `"0.5.0"` | `"1.0.0"` |
 | Python `__version__` (AAP) / `AIP_VERSION` | `"0.5.0"` / `"0.4.x"` | `"1.0.0"` / `"1.0.0"` |
 | Breaking-change policy | 0.x semantics — breaking changes at minor bumps | Locked — breaking changes require 2.0 |
 
@@ -80,11 +80,11 @@ Install the 1.0.0 releases. Both protocols shipped on the same day with coordina
   </Tab>
 </Tabs>
 
-After updating, any new alignment card created via the SDK defaults to `aap_version: "1.0.0"`.
+After updating, any new alignment card created via the SDK carries the updated internal protocol version.
 
 ### Update your alignment cards
 
-Set `aap_version` to `"1.0.0"` on your existing cards. You can leave them on `"0.5.0"` — the server accepts both — but updating keeps reports consistent.
+Migrate your existing alignment cards to the **unified card shape** so they pass `mnemom card validate` and can be published. Choose the approach that matches how you manage your cards:
 
 <Tabs>
   <Tab title="Via API">
@@ -118,19 +118,22 @@ Set `aap_version` to `"1.0.0"` on your existing cards. You can leave them on `"0
     ```
   </Tab>
   <Tab title="Via YAML / JSON file">
-    If you version-control your card as a local file, update the `aap_version` field and republish:
+    If you version-control your card as a local file, a version-number bump alone still fails `mnemom card validate` — the platform expects the **unified field structure**, which differs from the 0.x card layout. Update your file to the unified shape:
+
+    1. Set `card_version: "unified/2026-04-15"` at the top level, replacing the old protocol-version field.
+    2. Add top-level `autonomy_mode: observe` and `integrity_mode: observe` (or `enforce`).
+    3. Move your bounded/forbidden actions and escalation triggers under an `autonomy:` block.
+    4. Move your audit settings under an `audit:` block, and add `query_endpoint: https://api.mnemom.ai/v1/traces`.
+    5. Add `principal.identifier` if `principal.type` is not `unspecified`.
+
+    The [Card Management worked example](/guides/card-management) shows a complete unified card you can copy and map your existing values into. Then validate and publish:
 
     ```bash
-    # JSON
-    sed -i '' 's/"aap_version": "0.5.0"/"aap_version": "1.0.0"/' alignment-card.json
-
-    # YAML
-    sed -i '' 's/aap_version: "0.5.0"/aap_version: "1.0.0"/' alignment-card.yaml
-
-    # Validate and publish
     mnemom card validate alignment-card.yaml
-    mnemom card publish alignment-card.yaml
+    mnemom card publish alignment-card.yaml --agent my-agent
     ```
+
+    See [Alignment Card Schema](/specifications/alignment-card-schema) for the full unified field reference, or [Card Management](/guides/card-management) for a complete worked example you can copy.
   </Tab>
 </Tabs>
 
@@ -185,12 +188,12 @@ curl -i https://api.mnemom.ai/v1/alignment/agent/$AGENT_ID \
 
 See [API versioning](/guides/api-versioning) for how to pin to a specific date. The 1.0.0 SDKs pin to `2026-04-13` by default.
 
-**Card contents.** Fetch a card you just wrote and confirm `aap_version`:
+**Card contents.** Fetch a card you just wrote and confirm `card_version`:
 
 ```bash
 curl https://api.mnemom.ai/v1/alignment/agent/$AGENT_ID \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" | jq '.aap_version'
-# → "1.0.0"
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" | jq '.card_version'
+# → "unified/2026-04-15"
 ```
 
 </Steps>
@@ -241,7 +244,7 @@ Install `@mnemom/agent-alignment-protocol@1.0.0` and `@mnemom/agent-integrity-pr
 
 ### Update alignment cards
 
-Set `aap_version` to `"1.0.0"` on every agent card, via API, CLI, or dashboard.
+Migrate every alignment card to the unified shape — use the Via YAML / JSON file tab in the previous step, or publish via API using `card_version: "unified/2026-04-15"`.
 
 ### Rebuild and redeploy
 
@@ -253,7 +256,7 @@ Send `X-Mnemom-Version: 2026-04-13` on every production request. The 1.0.0 SDKs 
 
 ### Verify
 
-Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version` on a live response, and confirm `aap_version` on a freshly-written card.
+Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version` on a live response, and confirm `card_version` on a freshly-written card.
 
 </Steps>
 
@@ -264,7 +267,7 @@ Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version`
     No. The 1.0.0 server accepts every 0.x card shape, and no endpoint signatures changed. 1.0.0 is a commitment that future breaking changes will require a 2.0 bump, not a redesign of the current surface.
   </Accordion>
   <Accordion title="Do I need to update all my agents at once?">
-    No. Cards with different `aap_version` values coexist without issues. Roll the update at whatever cadence suits you.
+    No. Cards on different protocol versions coexist without issues. Roll the update at whatever cadence suits you.
   </Accordion>
   <Accordion title="What if I'm still on AIP 0.7.x with `WindowManager`?">
     AIP 0.8.0 (shipped the same day as 1.0.0 as the pre-1.0 audit) removed `WindowManager` and `createWindowState` from public exports. Switch to `createClient()`, which manages window state internally, before jumping to 1.0.0.
