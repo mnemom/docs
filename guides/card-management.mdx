@@ -12,9 +12,9 @@ icon: "id-card-clip"
 Customizing your card is how you make alignment verification meaningful. A card that accurately reflects your agent's real values and tools produces useful integrity scores. A generic card produces noise.
 
 <Note>
-**Two paths to card management.** The JSON/YAML templates on this page are the AAP 1.0 **protocol-level** surface — the minimum shape every AAP implementation must accept. For authoring Mnemom agent cards in production, the preferred path is the [unified card model](/concepts/agent-cards), which adds first-class `conscience`, `integrity`, `capabilities`, and `enforcement` sections plus three-scope composition. See [Alignment Card Schema](/specifications/alignment-card-schema) for the normative unified shape, and use `mnemom card edit` or the dashboard YAML editor rather than hand-crafting JSON.
+**Templates use the unified / ADR-039 shape.** The JSON/YAML templates on this page use the **unified card format** — the shape `mnemom card validate` and `PUT /v1/alignment/agent/{id}` both expect. A card copied verbatim from any template below will validate and publish without modification. See [Alignment Card Schema](/specifications/alignment-card-schema) for the full normative spec.
 
-The AAP templates below remain accurate for protocol-level interop with external agents (A2A, MCP). They are not going anywhere — they're just the narrower of two surfaces.
+For protocol-level interop with external agents (A2A, MCP), the **AAP 1.0 card** (which uses `autonomy_envelope`/`audit_commitment`) is specified at [/concepts/alignment-cards](/concepts/alignment-cards) — a separate, still-stable surface that is not submitted to `mnemom card validate`.
 </Note>
 
 ## Creating a card
@@ -23,20 +23,24 @@ An alignment card is a structured document that follows the [AAP specification](
 
 ### Start from the template
 
-Every card requires five blocks: identity, principal, values, autonomy envelope, and audit commitment.
+Every card requires five blocks: identity, principal, values, autonomy, and audit — plus two top-level master switches (`autonomy_mode` and `integrity_mode`) that control action-policing and values verification independently.
 
 <Tabs>
   <Tab title="JSON">
 ```json
 {
-  "aap_version": "1.0.0",
+  "card_version": "unified/2026-04-15",
   "card_id": "ac-YOUR_CARD_ID",
   "agent_id": "YOUR_AGENT_ID",
   "issued_at": "2026-02-21T00:00:00Z",
   "expires_at": "2026-08-21T00:00:00Z",
 
+  "autonomy_mode": "observe",
+  "integrity_mode": "observe",
+
   "principal": {
     "type": "human",
+    "identifier": "you@example.com",
     "relationship": "delegated_authority",
     "escalation_contact": "mailto:you@example.com"
   },
@@ -46,16 +50,17 @@ Every card requires five blocks: identity, principal, values, autonomy envelope,
     "hierarchy": "lexicographic"
   },
 
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": [],
     "escalation_triggers": [],
     "forbidden_actions": []
   },
 
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 90,
     "queryable": true,
+    "query_endpoint": "https://api.mnemom.ai/v1/traces",
     "tamper_evidence": "append_only"
   }
 }
@@ -63,14 +68,18 @@ Every card requires five blocks: identity, principal, values, autonomy envelope,
   </Tab>
   <Tab title="YAML">
 ```yaml
-aap_version: "1.0.0"
+card_version: "unified/2026-04-15"
 card_id: ac-YOUR_CARD_ID
 agent_id: YOUR_AGENT_ID
 issued_at: "2026-02-21T00:00:00Z"
 expires_at: "2026-08-21T00:00:00Z"
 
+autonomy_mode: observe
+integrity_mode: observe
+
 principal:
   type: human
+  identifier: you@example.com
   relationship: delegated_authority
   escalation_contact: mailto:you@example.com
 
@@ -78,15 +87,16 @@ values:
   declared: []
   hierarchy: lexicographic
 
-autonomy_envelope:
+autonomy:
   bounded_actions: []
   escalation_triggers: []
   forbidden_actions: []
 
-audit_commitment:
+audit:
   trace_format: ap-trace-v1
   retention_days: 90
   queryable: true
+  query_endpoint: https://api.mnemom.ai/v1/traces
   tamper_evidence: append_only
 ```
   </Tab>
@@ -129,13 +139,13 @@ For custom values, add a `definitions` entry:
   Only declare values your agent actually applies. Declaring `fairness` but never referencing it in decisions produces verification warnings.
 </Tip>
 
-### Define autonomy envelope
+### Define the autonomy block
 
 List the actions your agent actually takes as `bounded_actions`. These should match your agent's real tools and capabilities:
 
 ```json
 {
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": ["inference", "read", "write", "edit", "web_fetch", "web_search"],
     "escalation_triggers": [
       {
@@ -164,10 +174,11 @@ Declare how your agent logs decisions and whether external parties can query tra
 
 ```json
 {
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 365,
     "queryable": true,
+    "query_endpoint": "https://api.mnemom.ai/v1/traces",
     "tamper_evidence": "append_only"
   }
 }
@@ -179,14 +190,18 @@ Declare how your agent logs decisions and whether external parties can query tra
   <Tab title="JSON">
 ```json
 {
-  "aap_version": "1.0.0",
+  "card_version": "unified/2026-04-15",
   "card_id": "ac-cs-agent-001-v1",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
   "issued_at": "2026-02-21T00:00:00Z",
   "expires_at": "2026-08-21T00:00:00Z",
 
+  "autonomy_mode": "enforce",
+  "integrity_mode": "enforce",
+
   "principal": {
     "type": "human",
+    "identifier": "support-team@example.com",
     "relationship": "delegated_authority",
     "escalation_contact": "mailto:support-team@example.com"
   },
@@ -210,7 +225,7 @@ Declare how your agent logs decisions and whether external parties can query tra
     "hierarchy": "lexicographic"
   },
 
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": [
       "inference",
       "read",
@@ -248,10 +263,11 @@ Declare how your agent logs decisions and whether external parties can query tra
     ]
   },
 
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 365,
     "queryable": true,
+    "query_endpoint": "https://api.mnemom.ai/v1/traces",
     "tamper_evidence": "append_only"
   }
 }
@@ -260,14 +276,18 @@ Declare how your agent logs decisions and whether external parties can query tra
   <Tab title="YAML">
 ```yaml
 # Customer support agent alignment card
-aap_version: "1.0.0"
+card_version: "unified/2026-04-15"
 card_id: ac-cs-agent-001-v1
 agent_id: mnm-550e8400-e29b-41d4-a716-446655440000
 issued_at: "2026-02-21T00:00:00Z"
 expires_at: "2026-08-21T00:00:00Z"
 
+autonomy_mode: enforce
+integrity_mode: enforce
+
 principal:
   type: human
+  identifier: support-team@example.com
   relationship: delegated_authority
   escalation_contact: mailto:support-team@example.com
 
@@ -288,7 +308,7 @@ values:
     - data_harvesting
   hierarchy: lexicographic
 
-autonomy_envelope:
+autonomy:
   bounded_actions:
     - inference
     - read
@@ -318,10 +338,11 @@ autonomy_envelope:
     - share_customer_data_externally
     - make_legal_commitments
 
-audit_commitment:
+audit:
   trace_format: ap-trace-v1
   retention_days: 365
   queryable: true
+  query_endpoint: https://api.mnemom.ai/v1/traces
   tamper_evidence: append_only
 ```
   </Tab>
@@ -389,7 +410,7 @@ Confirm the card is active:
 mnemom card show --agent my-agent
 ```
 
-The output is displayed as structured YAML showing principal, values, autonomy, capabilities, enforcement, and audit commitment.
+The output is displayed as structured YAML showing principal, values, autonomy, capabilities, enforcement, and audit.
 
 ### CI integration
 
@@ -573,7 +594,7 @@ Reference table of all validation checks performed during `mnemom card validate`
 | Check | Rule | Severity |
 |---|---|---|
 | Valid JSON/YAML | Must parse without errors | Error |
-| Required blocks | `principal`, `values`, `autonomy_envelope`, `audit_commitment` must be present | Error |
+| Required blocks | `principal`, `values`, `autonomy`, `audit` must be present | Error |
 | Non-empty values | `values.declared` must have at least one entry | Error |
 | Custom definitions | Every non-standard value must have a `definitions` entry | Warning |
 | Bounded actions | Must list at least one action | Error |

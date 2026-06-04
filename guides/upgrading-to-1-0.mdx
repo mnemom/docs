@@ -118,19 +118,22 @@ Set `aap_version` to `"1.0.0"` on your existing cards. You can leave them on `"0
     ```
   </Tab>
   <Tab title="Via YAML / JSON file">
-    If you version-control your card as a local file, update the `aap_version` field and republish:
+    If you version-control your card as a local file, migrate it to the unified shape. A version-number bump alone (`aap_version: "1.0.0"`) still fails `mnemom card validate` — the platform expects the **unified / ADR-039 field structure**. Make these changes:
+
+    1. Replace `aap_version: "..."` with `card_version: "unified/2026-04-15"`.
+    2. Add top-level `autonomy_mode: observe` and `integrity_mode: observe` (or `enforce`).
+    3. Rename `autonomy_envelope:` → `autonomy:`.
+    4. Rename `audit_commitment:` → `audit:` and add `query_endpoint: https://api.mnemom.ai/v1/traces`.
+    5. Add `principal.identifier` if `principal.type` is not `unspecified`.
+
+    Then validate and publish:
 
     ```bash
-    # JSON
-    sed -i '' 's/"aap_version": "0.5.0"/"aap_version": "1.0.0"/' alignment-card.json
-
-    # YAML
-    sed -i '' 's/aap_version: "0.5.0"/aap_version: "1.0.0"/' alignment-card.yaml
-
-    # Validate and publish
     mnemom card validate alignment-card.yaml
-    mnemom card publish alignment-card.yaml
+    mnemom card publish alignment-card.yaml --agent my-agent
     ```
+
+    See [Alignment Card Schema](/specifications/alignment-card-schema) for the full unified field reference, or [Card Management](/guides/card-management) for a complete worked example you can copy.
   </Tab>
 </Tabs>
 
@@ -185,12 +188,12 @@ curl -i https://api.mnemom.ai/v1/alignment/agent/$AGENT_ID \
 
 See [API versioning](/guides/api-versioning) for how to pin to a specific date. The 1.0.0 SDKs pin to `2026-04-13` by default.
 
-**Card contents.** Fetch a card you just wrote and confirm `aap_version`:
+**Card contents.** Fetch a card you just wrote and confirm `card_version`:
 
 ```bash
 curl https://api.mnemom.ai/v1/alignment/agent/$AGENT_ID \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" | jq '.aap_version'
-# → "1.0.0"
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" | jq '.card_version'
+# → "unified/2026-04-15"
 ```
 
 </Steps>
@@ -253,7 +256,7 @@ Send `X-Mnemom-Version: 2026-04-13` on every production request. The 1.0.0 SDKs 
 
 ### Verify
 
-Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version` on a live response, and confirm `aap_version` on a freshly-written card.
+Read back `AIP_VERSION` / `aap.__version__` at runtime, check `X-Mnemom-Version` on a live response, and confirm `card_version` on a freshly-written card.
 
 </Steps>
 
