@@ -366,6 +366,41 @@ There are three ways to update your agent's alignment card:
 
 See the [Card Management guide](/guides/card-management) for detailed walkthroughs of each method.
 
+### Minimal card file
+
+Save this as `alignment-card.yaml`, fill in your `agent_id`, and publish it with the CLI:
+
+```yaml
+card_version: "unified/2026-04-15"
+agent_id: $AGENT_ID
+
+autonomy_mode: observe
+integrity_mode: observe
+
+values:
+  declared: [transparency, honesty, harm_prevention]
+  hierarchy: lexicographic
+
+autonomy:
+  bounded_actions: [inference, read, write]
+  escalation_triggers: []
+  forbidden_actions: []
+
+audit:
+  trace_format: ap-trace-v1
+  retention_days: 90
+  queryable: true
+  query_endpoint: https://api.mnemom.ai/v1/traces
+  tamper_evidence: append_only
+```
+
+```bash
+mnemom card validate alignment-card.yaml
+mnemom card publish alignment-card.yaml --agent $AGENT_ID
+```
+
+Start with `autonomy_mode: observe` and `integrity_mode: observe` — this logs policy results without blocking, giving you a picture of real traffic before tightening to `nudge` or `enforce`. See [Alignment Card Schema](/specifications/alignment-card-schema) for all fields.
+
 ### Validation
 
 Cards are validated against AAP spec requirements on publish. The validation checks required blocks, value definitions, bounded actions, escalation trigger evaluability, and expiry dates.

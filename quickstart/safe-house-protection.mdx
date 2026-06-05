@@ -48,6 +48,35 @@ curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
 
 The full protection-card grammar is at [/specifications/protection-card-schema](/specifications/protection-card-schema); the canonical card the composer returns also includes `card_id`, `_composition`, and any platform / org defaults that flow into the agent's effective card.
 
+**CLI alternative.** Save the card as `protection.card.yaml` and publish with one command — no curl required:
+
+```yaml
+card_version: protection/2026-04-26
+agent_id: $AGENT_ID
+
+mode: observe
+
+thresholds:
+  warn: 0.55
+  quarantine: 0.75
+  block: 0.90
+
+screen_surfaces:
+  incoming: true
+  outgoing: false
+  tool_calls: false
+  tool_responses: false
+
+trusted_sources:
+  domains: []
+  agent_ids: []
+  ip_ranges: []
+```
+
+```bash
+mnemom protection publish protection.card.yaml
+```
+
 ## Step 2 — Send a test threat message
 
 Send a BEC (business email compromise) style message through the gateway and check the response headers. This will not block anything in observe mode — but it will log a detection.
