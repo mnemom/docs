@@ -90,13 +90,18 @@ API keys are hashed on our servers and cannot be retrieved after creation. Store
 
 ## Error format
 
-All error responses return a JSON body with a human-readable `error` field:
+All error responses return a JSON body with a structured `error` object containing a stable `code` and a human-readable `message`:
 
 ```json
 {
-  "error": "Human-readable error message"
+  "error": {
+    "code": "error_code",
+    "message": "Human-readable error message"
+  }
 }
 ```
+
+Branch on `error.code`, not `error.message` — codes are stable contract; messages may evolve. Some errors include an additional `details` object with structured per-code data. See [Errors](/api-reference/errors) for the full code taxonomy, retry semantics, and the Safe House verdict-to-status mapping.
 
 ### Common HTTP status codes
 
@@ -134,15 +139,14 @@ When any tier is exceeded, the API returns HTTP `429` with these headers:
 
 ```json
 {
-  "error": "Rate limit exceeded",
-  "type": "rate_limit_error",
-  "tier": "ip",
-  "limit": 100,
-  "retry_after": 42
+  "error": {
+    "code": "rate_limited",
+    "message": "Rate limit exceeded"
+  }
 }
 ```
 
-The `tier` field indicates which limit was hit (`ip`, `agent`, or `org`). Rate limit windows are 1 minute.
+The `tier` that was hit (`ip`, `agent`, or `org`) and the window details are in the response headers listed above. Rate limit windows are 1 minute.
 
 ## Endpoint documentation
 

@@ -172,6 +172,39 @@ Safe House is the per-customer perimeter. [AEGIS](/concepts/aegis) is the cross-
 
 See [Protection Network](/concepts/protection-network) for the five-layer L0-L5 model AEGIS adds on top of Safe House, and [Managed Rules](/concepts/managed-rules) for the signed rule pipeline AEGIS pushes to the Safe House gateway.
 
+## Publish your protection card
+
+Safe House is configured via the agent's **protection card** — a YAML file you author and push to the platform. Save this as `protection.card.yaml`, fill in your `agent_id`, and publish:
+
+```yaml
+card_version: protection/2026-04-26
+agent_id: $AGENT_ID
+
+mode: observe
+
+thresholds:
+  warn: 0.60
+  quarantine: 0.80
+  block: 0.95
+
+screen_surfaces:
+  incoming: true
+  outgoing: false
+  tool_calls: false
+  tool_responses: false
+
+trusted_sources:
+  domains: []
+  agent_ids: []
+  ip_ranges: []
+```
+
+```bash
+mnemom protection publish protection.card.yaml
+```
+
+Start with `mode: observe` — full detection, no blocking — then move to `nudge` or `enforce` once you have a picture of your threat landscape. See [Protection Card Schema](/specifications/protection-card-schema) for all fields and composition rules.
+
 ## See also
 
 - [AEGIS](/concepts/aegis) — the cross-tenant protection layer above Safe House
