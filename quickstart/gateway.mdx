@@ -39,11 +39,11 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
   </Step>
 
   <Step title="Make an API call">
-    Use the gateway URL instead of the provider's direct URL. Include the `x-mnemom-agent` header to name your agent -- it will be auto-created on first call. No registration step needed.
+    Use the gateway URL instead of the provider's direct URL. Include the `x-mnemom-agent` header to name your agent — it will be auto-created on first call in the Mnemom Sandbox with no owner. Before the read commands (`mnemom status`, `logs`, `integrity`, `card show`) can resolve it, you must claim the agent to your account (next step). Use `-i` to print response headers so you can capture the `X-Mnemom-Agent` id you'll need for the claim.
 
     ```bash
     # Instead of https://api.anthropic.com/v1/messages
-    curl https://gateway.mnemom.ai/anthropic/v1/messages \
+    curl -i https://gateway.mnemom.ai/anthropic/v1/messages \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -H "x-mnemom-agent: my-agent" \
       -H "anthropic-version: 2023-06-01" \
@@ -95,6 +95,27 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     See the [Headers reference](/api-reference/headers) for the full canonical set + per-language parsers, and the [Errors reference](/api-reference/errors) for the verdict-to-status mapping (when `enforced` becomes a 422 quarantine or 403 block).
   </Step>
 
+  <Step title="Claim your agent">
+    The gateway created your agent in the shared Mnemom Sandbox (no owner). Claiming it proves you hold the provider key and moves it into your account so all read commands can resolve it.
+
+    Copy the `X-Mnemom-Agent` value from the response headers above, then run:
+
+    ```bash
+    mnemom agents claim mnm-a1b2c3d4e5f6 --name my-agent --key $ANTHROPIC_API_KEY
+    ```
+
+    Replace `mnm-a1b2c3d4e5f6` with the actual id from your `X-Mnemom-Agent` header.
+
+    - `--name` **must** match the `x-mnemom-agent` value you sent in the gateway call, or claim returns `403 invalid_hash_proof`.
+    - The key is hashed locally (SHA-256) and never sent to Mnemom.
+    - The agent lands in your personal org by default; pass `--org <slug>` to claim into a shared org.
+    - The operation is idempotent — safe to run more than once.
+
+    <Note>
+      A `503` response means your personal org is still being provisioned. Wait a few seconds and retry. For `403` cross-tenant or not-a-member errors, see the [Agent claim flow guide](/guides/agent-claim-flow).
+    </Note>
+  </Step>
+
   <Step title="Check status">
     Verify the gateway is reachable and your agent is connected:
 
@@ -135,7 +156,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     ```
 
     ```text Output
-    Agent: agent-a1b2c3d4
+    Agent: mnm-a1b2c3d4e5f6
     Checkpoints: 12
     Verdicts:
       clear: 11
@@ -188,7 +209,7 @@ curl https://gateway.mnemom.ai/anthropic/v1/messages \
   }'
 ```
 
-Each named agent gets its own trace history, integrity scores, and drift detection -- even though they share an API key. Agents are auto-created on first API call -- no registration step is needed.
+Each named agent gets its own trace history, integrity scores, and drift detection -- even though they share an API key. Agents are auto-created on first API call; claim once (see the claim step above) to bind the agent to your account.
 
 <Tip>
 You can also create agents programmatically via the [Agent CRUD API](/api-reference/endpoint/post-agents) if you want to pre-create agents with metadata before they make their first request.
