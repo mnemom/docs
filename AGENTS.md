@@ -14,7 +14,7 @@ Key fact for agents: Mintlify ships agent-readability features by
 default — `Accept: text/markdown` content negotiation, `<path>.md`
 URLs, auto-generated `/llms.txt` + `/llms-full.txt`, and discovery
 headers (`Link rel="llms-txt"`, `X-Llms-Txt`). This is named
-publicly as commitment #8 on https://www.mnemom.ai/for-agents and
+publicly as commitment #8 on https://www.mnemom.ai/for-agents/ and
 verified nightly by the watchdog.
 
 ## Stack
@@ -98,6 +98,6 @@ agents.txt                 # Mirror of /for-agents agent pitch (also at root)
 - **Live site**: https://docs.mnemom.ai
 - **Auto-generated indexes**: https://docs.mnemom.ai/llms.txt and
   /llms-full.txt
-- **Marketing site companion**: https://www.mnemom.ai/for-agents
+- **Marketing site companion**: https://www.mnemom.ai/for-agents/
   (which depends on this site staying agent-friendly — commitment #8).
 - **Mintlify config docs**: https://www.mintlify.com/docs
