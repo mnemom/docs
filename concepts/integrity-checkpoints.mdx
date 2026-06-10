@@ -396,6 +396,16 @@ Integrity checkpoints and AP-Traces are complementary:
 
 When both protocols are active, they enrich each other. The integrity verdict is stored in the AP-Trace's context metadata, and `boundary_violation` verdicts automatically set `escalation.required = true` in the corresponding trace.
 
+## Unclaimed agents and canonical cards
+
+**AIP requires a canonical alignment card.** Gateway-auto-provisioned agents that have not been claimed receive only a legacy alignment-card row — no canonical card is composed for them. Without a canonical card, the AIP pipeline does not run:
+
+- `GET /v1/agents/{id}/checkpoints` returns an empty list. This is expected and correct for this provisioning tier, not a gap to investigate.
+- `X-Mnemom-Verdict` and `X-AIP-Verdict` still appear on every response, but their values reflect the gateway's fail-open defaults (`clear`/`pass`) — not the result of integrity analysis.
+- AP-Traces are best-effort only: the observer writes them when Cloudflare metadata survives, but this is not guaranteed.
+
+The full integrity pipeline — checkpoints, analytical verdicts, guaranteed AP-Traces — starts when the agent is claimed and a canonical card is composed. See [integrity during the unclaimed phase](/guides/agent-claim-flow#between-steps-integrity-during-the-unclaimed-phase) for the complete picture.
+
 ## Error handling
 
 AIP defaults to **fail-open**: if the analysis LLM is unreachable or errors, a synthetic `clear` checkpoint is generated and the agent proceeds. This prioritizes availability.

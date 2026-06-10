@@ -32,6 +32,10 @@ There is **no dual-emit window** and **no `Sunset` header** on the legacy names 
 | `X-AIP-Verdict` | When AIP analysis ran | Raw AAP verdict for SDK clients (`pass \| boundary_violation \| ambiguous \| clear \| skipped \| pending \| disabled \| error`). The structured `X-Mnemom-Verdict.integrity` is the canonical rollup; `X-AIP-Verdict` is the raw value SDK clients use to fetch the full attestation via `Checkpoint-Id`. |
 | `X-AIP-Checkpoint-Id` | When AIP analysis stored a checkpoint | Pointer to the integrity checkpoint row. Use this to fetch the full attestation chain via the [integrity checkpoints REST surface](/api-reference/endpoint/get-agents-agent-id-checkpoints-checkpoint-id). |
 
+<Note>
+**Unclaimed agents: verdict headers are fail-open, not analytical.** Gateway-auto-provisioned agents that have not been claimed have no canonical alignment card. `X-Mnemom-Verdict` and `X-AIP-Verdict` are still emitted on every request, but their values (`pass`/`clear`) come from the gateway's fail-open path — AIP analysis did not run. `X-AIP-Checkpoint-Id` will not be present. This is expected behavior. The full integrity pipeline starts after claim. See [integrity during the unclaimed phase](/guides/agent-claim-flow#between-steps-integrity-during-the-unclaimed-phase).
+</Note>
+
 Plus standards: `Content-Type`, `Cache-Control`, CORS headers, and `Idempotent-Replay: true` on cached idempotency replays.
 
 ## `X-Mnemom-Verdict` — structured per-checkpoint state
