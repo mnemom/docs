@@ -80,6 +80,22 @@ Record the `mnm-*` ID — you'll need it to claim.
 
 ---
 
+## Between steps: integrity during the unclaimed phase
+
+**This is expected behavior, not a bug.** Gateway-provisioned agents receive only a legacy alignment-card row at auto-provisioning time. No canonical alignment card is composed for them. Canonical cards are the prerequisite for the full integrity pipeline, so several downstream behaviors do not apply until after claim:
+
+**No durable checkpoints.** `GET /v1/agents/{id}/checkpoints` returns an empty list for unclaimed agents. This is expected and correct — checkpoints require a canonical alignment card. An empty checkpoint list is not a gap to investigate; it is the normal state for this provisioning tier.
+
+**Verdict headers are fail-open, not analytical.** The gateway still returns `X-Mnemom-Verdict` and `X-AIP-Verdict` headers on every request, but their values (`clear` / `pass`) come from the fail-open path — there is no canonical card to analyze against. These headers are not evidence that integrity analysis ran.
+
+**AP-Traces are best-effort.** The observer writes AP-Traces when Cloudflare metadata survives to the observer layer, but this is not guaranteed for unclaimed agents.
+
+**Enforcement mode is `observe`.** There is no owner to authorize a more active mode; nothing is blocked or nudged.
+
+**How to get full integrity coverage.** Claim the agent (Step 2 below). Once a canonical alignment card is composed — which happens as part of completing claim/onboarding — durable checkpoints begin, verdict headers reflect real analysis, and AP-Traces are guaranteed. The full integrity pipeline starts from claim.
+
+---
+
 ## Step 2 — Owner claims the agent
 
 Authenticated as the owner — a Bearer JWT (from `mnemom login`), an `mnm_*` API key (`X-Mnemom-Api-Key`), or a session cookie — call the claim endpoint. Standard auth is all it takes; there is no special claim-only scheme. You prove you hold the agent's provider key by sending `hash_proof`; the principal you authenticate as becomes the agent's owner.
@@ -158,6 +174,7 @@ Once the agent is claimed:
 1. **Ownership is set.** `claimed_by` is your user/org; every subsequent policy and billing decision flows through your account.
 2. **The agent is in your org.** It appears in `GET /v1/agents` results for that org.
 3. **If `alignment_card.publish: true`**, the agent becomes discoverable in the Trust Directory at `/directory`.
+4. **The integrity pipeline starts from this point.** A canonical alignment card is composed for the agent; durable checkpoints begin accumulating, verdict headers reflect real analysis, and AP-Traces are guaranteed. See [Between steps: integrity during the unclaimed phase](#between-steps-integrity-during-the-unclaimed-phase) for what was and was not recorded before claim.
 
 Revoking ownership ([`DELETE /v1/agents/{id}`](/api-reference/endpoint/delete-agents-agent-id)) is an owner-side operation.
 
