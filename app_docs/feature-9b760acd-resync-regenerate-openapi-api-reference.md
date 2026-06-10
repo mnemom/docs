@@ -18,11 +18,30 @@ This task verified that the committed `api-reference/openapi.json` is current wi
 
 ### Files Modified
 
-No files were modified. The verification confirmed the committed spec is already in sync with the deployed API.
+No files were modified. Both scripts were executed against the live API and confirmed the committed spec is already in sync.
+
+**sync-openapi.mjs output (run 2026-06-10):**
+```
+sync-openapi: wrote api-reference/openapi.json (380 paths, 498 ops)
+git diff api-reference/openapi.json → (empty — no delta)
+```
+
+**generate-api-reference.mjs output (run 2026-06-10):**
+```
+generate-api-reference:
+  pages written: 0
+  titles refreshed: 0
+  nav pages added: 0
+  groups touched (0):
+  EXCLUDED — deprecated:18 dashboard-session:2 non-api:2 held:2
+  flagged: none
+```
 
 ### Key Changes
 
-- `api-reference/openapi.json`: Verified current at 380 paths / 498 operations — no update required
+- `api-reference/openapi.json`: Verified current at 380 paths / 498 operations — no update required; `git diff` empty after sync confirms committed copy matches live API
+- `api-reference/endpoint/`: No new stubs written, no titles refreshed — generation is fully idempotent against the current spec
+- `docs.json`: No navigation changes — 0 nav pages added
 - `scripts/sync-openapi.mjs`: Fetches the customer-only OpenAPI slice from `api.mnemom.ai`, applies a staff-path leakage guard (rejects `/admin`, `/arena`, `/internal`, `/sonar`, `/rb2b` prefixes), and writes the result to `api-reference/openapi.json`
 - `scripts/generate-api-reference.mjs`: Projects the committed spec into per-operation Mintlify stub pages and updates `docs.json` navigation — idempotent (skips hand-written pages with a body)
 - CI enforces freshness via `.github/workflows/openapi-freshness.yml`, which re-runs `sync-openapi.mjs` and fails on `git diff --exit-code` if the committed copy drifts from the deployed surface
