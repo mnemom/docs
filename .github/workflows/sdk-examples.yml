@@ -1,0 +1,400 @@
+name: SDK Examples vs Published Packages
+
+# Acceptance-criterion-2 gate for issue #223 (esc-008, dispatcher-authored;
+# precedent: sdk-quickstart-trace.yml from #222 / PR #233). The drift-detection
+# doc snippets must match the SDKs users actually install — this workflow
+# compiles/checks the documented code blocks against the PUBLISHED packages:
+#
+#   npm  @mnemom/agent-alignment-protocol@1.3.0   (issue-verified version)
+#   npm  @mnemom/agent-integrity-protocol@1.2.0   (issue-verified version)
+#   pip  agent-alignment-protocol==1.3.0          (matches the npm 1.3.0 era)
+#   pip  agent-integrity-proto==1.2.0             (issue-verified version)
+#
+# Versions are pinned for determinism; bump them deliberately, together with
+# a re-verification of the affected pages, when the docs move to a new SDK
+# release (npm aap 2.0.0 keeps the same detectDrift signature but has not
+# been audited against every snippet here).
+#
+# What runs (no secrets, no network beyond the public registries):
+#   typescript-examples — extracts every ```typescript block exercising
+#     detectDrift / detectIntegrityDrift from the drift-detection pages and
+#     compiles it with tsc against the real published .d.ts. Doc-context
+#     helpers the prose explains (fetchTraces, sessionCheckpoints, ...) are
+#     auto-declared `any` from pass-1 "Cannot find name" errors only — SDK
+#     imports, call shapes, and alert fields are never stubbed.
+#   python-examples — extracts the matching ```python blocks and checks them
+#     against the installed published packages: imports exist, every call to
+#     an imported function/class binds against its real inspect.signature,
+#     methods called on instances of imported classes exist, and attribute
+#     access on detect_drift / detect_integrity_drift alerts matches the real
+#     alert model fields.
+#
+# A red run means a documented snippet does not work against the published
+# packages — exactly the regression issue #223 reports. Fail-closed: zero
+# extracted blocks also fails (extractor or docs moved).
+#
+# Triggers:
+#   - pull_request to main when a drift-detection page or this workflow changes
+#   - schedule daily (catches a new SDK publish drifting under pinned docs
+#     only after a deliberate pin bump — and accidental doc reverts meanwhile)
+#   - workflow_dispatch (manual)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "concepts/drift-detection.mdx"
+      - "guides/multi-agent-setup.mdx"
+      - "protocols/aap/quickstart.mdx"
+      - "protocols/aip/quickstart.mdx"
+      - "quickstart/sdk-direct.mdx"
+      - "es/quickstart/sdk-direct.mdx"
+      - "fr/quickstart/sdk-direct.mdx"
+      - ".github/workflows/sdk-examples.yml"
+  schedule:
+    - cron: "30 7 * * *" # daily, staggered from the other doc checks
+  workflow_dispatch:
+
+env:
+  AAP_NPM_VERSION: "1.3.0"
+  AIP_NPM_VERSION: "1.2.0"
+  AAP_PIP_VERSION: "1.3.0"
+  AIP_PIP_VERSION: "1.2.0"
+
+jobs:
+  typescript-examples:
+    name: Compile TS drift snippets vs published npm packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      - name: Install published SDKs + TypeScript (pinned)
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdk-ts"
+          cd "$RUNNER_TEMP/sdk-ts"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund \
+            "@mnemom/agent-alignment-protocol@${AAP_NPM_VERSION}" \
+            "@mnemom/agent-integrity-protocol@${AIP_NPM_VERSION}" \
+            "typescript@5.6"
+
+      - name: Write snippet extractor
+        run: |
+          cat > "$RUNNER_TEMP/extract-ts.mjs" <<'EXTRACT_EOF'
+          // Extract ```typescript drift-detection blocks from the doc pages into
+          // .ts files so tsc can compile them against the PUBLISHED npm packages.
+          //
+          // Pass 1 (--collect-stubs) reads tsc output and declares every
+          // "Cannot find name" identifier as `any` in _stubs.d.ts (doc-context
+          // helpers the prose explains); pass 2 must then be clean. SDK symbols
+          // come from the real package type declarations, so a wrong import
+          // surfaces as TS2305 and a wrong call/field as TS2554/TS2339 —
+          // never silently stubbed.
+          import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+          import { join } from "node:path";
+
+          const PAGES = [
+            "concepts/drift-detection.mdx",
+            "guides/multi-agent-setup.mdx",
+            "protocols/aap/quickstart.mdx",
+            "protocols/aip/quickstart.mdx",
+            "quickstart/sdk-direct.mdx",
+            "es/quickstart/sdk-direct.mdx",
+            "fr/quickstart/sdk-direct.mdx",
+          ];
+          const TOKEN = /\bdetectDrift\b|\bdetectIntegrityDrift\b/;
+          const FENCE = /^([ \t]*)```(?:typescript|ts)\b[^\n]*\n([\s\S]*?)^\1```[ \t]*$/gm;
+
+          const outDir = process.argv[2];
+          const mode = process.argv[3]; // "extract" | "collect-stubs"
+
+          if (mode === "extract") {
+            mkdirSync(outDir, { recursive: true });
+            let n = 0;
+            for (const page of PAGES) {
+              let text;
+              try {
+                text = readFileSync(page, "utf8");
+              } catch {
+                console.log(`::notice::${page} not found in this checkout; skipped`);
+                continue;
+              }
+              for (const m of text.matchAll(FENCE)) {
+                const indent = m[1];
+                let body = m[2];
+                if (indent) body = body.replace(new RegExp("^" + indent, "gm"), "");
+                if (!TOKEN.test(body)) continue;
+                const line = text.slice(0, m.index).split("\n").length;
+                const name = `snippet-${String(n).padStart(2, "0")}.ts`;
+                writeFileSync(join(outDir, name), `// source: ${page}:${line}\n${body}`);
+                console.log(`extracted ${name} <- ${page}:${line}`);
+                n += 1;
+              }
+            }
+            if (n === 0) {
+              console.error("FAIL — found no typescript drift-detection blocks; extractor or docs moved");
+              process.exit(1);
+            }
+            console.log(`extracted ${n} typescript drift-detection block(s)`);
+          } else if (mode === "collect-stubs") {
+            const tscOut = readFileSync(0, "utf8"); // tsc pass-1 output on stdin
+            const names = new Set();
+            for (const m of tscOut.matchAll(/error TS2(?:304|552|580|582|583): Cannot find name '([A-Za-z_$][\w$]*)'/g)) {
+              names.add(m[1]);
+            }
+            const stubs = [...names].sort().map((n) => `declare const ${n}: any;`).join("\n");
+            writeFileSync(join(outDir, "_stubs.d.ts"), stubs + "\n");
+            console.log(`stubbed ${names.size} doc-context identifier(s): ${[...names].sort().join(", ") || "(none)"}`);
+          } else {
+            console.error("usage: extract-ts.mjs <outDir> extract|collect-stubs");
+            process.exit(2);
+          }
+          EXTRACT_EOF
+
+      - name: Extract typescript drift-detection blocks
+        run: node "$RUNNER_TEMP/extract-ts.mjs" "$RUNNER_TEMP/sdk-ts/snippets" extract
+
+      - name: Compile snippets against the published packages (two-pass)
+        run: |
+          cd "$RUNNER_TEMP/sdk-ts"
+          cat > tsconfig.json <<'TSCONFIG_EOF'
+          {
+            "compilerOptions": {
+              "noEmit": true,
+              "target": "es2022",
+              "module": "esnext",
+              "moduleResolution": "bundler",
+              "lib": ["es2022", "dom"],
+              "skipLibCheck": true,
+              "types": []
+            },
+            "include": ["snippets/**/*.ts"]
+          }
+          TSCONFIG_EOF
+          # Pass 1: collect doc-context identifiers ("Cannot find name") to stub.
+          npx tsc -p tsconfig.json > pass1.txt 2>&1 || true
+          node "$RUNNER_TEMP/extract-ts.mjs" "$RUNNER_TEMP/sdk-ts/snippets" collect-stubs < pass1.txt
+          # Pass 2: must be clean — remaining errors are real doc/SDK mismatches.
+          if ! npx tsc -p tsconfig.json; then
+            echo ""
+            echo "FAIL — documented TypeScript snippets do not compile against the published packages (see errors above; '// source:' header in each snippet maps back to the doc page)."
+            exit 1
+          fi
+          echo "PASS — every checked TypeScript snippet compiles against the published package APIs"
+
+  python-examples:
+    name: Check Python drift snippets vs published pip packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install published SDKs (pinned)
+        run: |
+          python -m pip install --quiet \
+            "agent-alignment-protocol==${AAP_PIP_VERSION}" \
+            "agent-integrity-proto==${AIP_PIP_VERSION}"
+
+      - name: Check python snippets against the published packages
+        run: |
+          cat > "$RUNNER_TEMP/check_python.py" <<'CHECK_EOF'
+          """Verify Python drift-detection doc snippets against the published SDKs.
+
+          Extracts ```python fenced blocks that exercise detect_drift /
+          detect_integrity_drift from the drift-detection doc pages and checks
+          them against the INSTALLED published packages:
+
+            1. the block parses (ast.parse);
+            2. every `from aap/aip import X` name actually exists in the package;
+            3. every call to an imported function/class binds against its real
+               inspect.signature (positional arity + keyword names);
+            4. method calls on instances of imported classes exist on the class;
+            5. attribute access on alert objects produced by detect_drift /
+               detect_integrity_drift matches the real alert model fields.
+
+          Exits 1 with per-file findings on any mismatch. No network, no secrets.
+          """
+
+          import ast
+          import dataclasses
+          import inspect
+          import re
+          import sys
+
+          import aap
+          import aip
+
+          PAGES = [
+              "concepts/drift-detection.mdx",
+              "guides/multi-agent-setup.mdx",
+              "protocols/aap/quickstart.mdx",
+              "protocols/aip/quickstart.mdx",
+              "quickstart/sdk-direct.mdx",
+              "es/quickstart/sdk-direct.mdx",
+              "fr/quickstart/sdk-direct.mdx",
+          ]
+          MODULES = {"aap": aap, "aip": aip}
+          TOKEN = re.compile(r"\bdetect_drift\b|\bdetect_integrity_drift\b")
+          FENCE = re.compile(r"^([ \t]*)```python\b[^\n]*\n(.*?)^\1```[ \t]*$", re.M | re.S)
+
+          # Known alert-producing calls: (module, fn) -> (shape, alert class).
+          # "list": `alerts = fn(...)` + `for alert in alerts:` binds alert.
+          # "tuple2": `state, alert = fn(...)` binds alert (2nd element).
+          ALERT_RETURNS = {
+              ("aap", "detect_drift"): ("list", aap.DriftAlert),
+              ("aip", "detect_integrity_drift"): ("tuple2", aip.IntegrityDriftAlert),
+          }
+
+
+          def model_fields(cls):
+              if dataclasses.is_dataclass(cls):
+                  return {f.name for f in dataclasses.fields(cls)}
+              mf = getattr(cls, "model_fields", None)
+              if mf:
+                  return set(mf.keys())
+              return {a for a in dir(cls) if not a.startswith("_")}
+
+
+          def check_block(path, fence_line, code, findings):
+              try:
+                  tree = ast.parse(code)
+              except SyntaxError as e:
+                  findings.append(f"{path}:{fence_line + e.lineno}: snippet does not parse: {e.msg}")
+                  return
+
+              imported = {}  # local name -> (module name, object)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and node.module in MODULES:
+                      mod = MODULES[node.module]
+                      for alias in node.names:
+                          if not hasattr(mod, alias.name):
+                              findings.append(
+                                  f"{path}:{fence_line + node.lineno}: `from {node.module} import "
+                                  f"{alias.name}` — `{alias.name}` is not exported by the published "
+                                  f"{node.module} package"
+                              )
+                          else:
+                              imported[alias.asname or alias.name] = (node.module, getattr(mod, alias.name))
+
+              instance_of = {}  # variable name -> imported class object
+              alert_vars = {}  # variable name -> alert class
+              list_alert_vars = {}  # variable name (list of alerts) -> alert class
+
+              def returns_of(call):
+                  if isinstance(call.func, ast.Name) and call.func.id in imported:
+                      modname, obj = imported[call.func.id]
+                      return ALERT_RETURNS.get((modname, getattr(obj, "__name__", "")))
+                  return None
+
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                          and node.func.id in imported:
+                      modname, obj = imported[node.func.id]
+                      if not callable(obj):
+                          continue
+                      if any(isinstance(a, ast.Starred) for a in node.args) or \
+                              any(k.arg is None for k in node.keywords):
+                          continue  # *args/**kwargs in the snippet: can't bind statically
+                      try:
+                          sig = inspect.signature(obj)
+                      except (TypeError, ValueError):
+                          continue
+                      try:
+                          sig.bind(*[object()] * len(node.args),
+                                   **{k.arg: object() for k in node.keywords})
+                      except TypeError as e:
+                          findings.append(
+                              f"{path}:{fence_line + node.lineno}: `{node.func.id}{str(sig)}` "
+                              f"in the published {modname} package does not accept this call: {e}"
+                          )
+                  if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                      ret = returns_of(node.value)
+                      tgt = node.targets[0]
+                      if isinstance(tgt, ast.Name):
+                          if isinstance(node.value.func, ast.Name) and node.value.func.id in imported:
+                              _, obj = imported[node.value.func.id]
+                              if inspect.isclass(obj):
+                                  instance_of[tgt.id] = obj
+                          if ret and ret[0] == "list":
+                              list_alert_vars[tgt.id] = ret[1]
+                      elif isinstance(tgt, ast.Tuple) and ret and ret[0] == "tuple2" \
+                              and len(tgt.elts) == 2 and isinstance(tgt.elts[1], ast.Name):
+                          alert_vars[tgt.elts[1].id] = ret[1]
+                  if isinstance(node, ast.For) and isinstance(node.target, ast.Name) \
+                          and isinstance(node.iter, ast.Name) and node.iter.id in list_alert_vars:
+                      alert_vars[node.target.id] = list_alert_vars[node.iter.id]
+
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                          and isinstance(node.func.value, ast.Name) \
+                          and node.func.value.id in instance_of:
+                      cls = instance_of[node.func.value.id]
+                      if not hasattr(cls, node.func.attr):
+                          findings.append(
+                              f"{path}:{fence_line + node.lineno}: `{node.func.value.id}."
+                              f"{node.func.attr}(...)` — published {cls.__module__}.{cls.__name__} "
+                              f"has no method `{node.func.attr}`"
+                          )
+                  if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                          and node.value.id in alert_vars:
+                      cls = alert_vars[node.value.id]
+                      if node.attr not in model_fields(cls):
+                          findings.append(
+                              f"{path}:{fence_line + node.lineno}: `{node.value.id}.{node.attr}` — "
+                              f"published {cls.__module__}.{cls.__name__} has no field `{node.attr}` "
+                              f"(fields: {sorted(model_fields(cls))})"
+                          )
+
+
+          def main():
+              findings = []
+              blocks = 0
+              for path in PAGES:
+                  try:
+                      text = open(path, encoding="utf-8").read()
+                  except FileNotFoundError:
+                      print(f"::notice::{path} not found in this checkout; skipped")
+                      continue
+                  for m in FENCE.finditer(text):
+                      indent, body = m.group(1), m.group(2)
+                      if indent:
+                          body = re.sub(r"(?m)^" + re.escape(indent), "", body)
+                      if not TOKEN.search(body):
+                          continue
+                      blocks += 1
+                      fence_line = text.count("\n", 0, m.start()) + 1
+                      check_block(path, fence_line, body, findings)
+              print(f"checked {blocks} python drift-detection block(s) across {len(PAGES)} page(s)")
+              if findings:
+                  print(f"\nFAIL — {len(findings)} mismatch(es) vs the published packages:")
+                  for f in findings:
+                      print(f"  {f}")
+                  return 1
+              if blocks == 0:
+                  print("FAIL — found no python drift-detection blocks; extractor or docs moved")
+                  return 1
+              print("PASS — every checked snippet matches the published package APIs")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          CHECK_EOF
+          python "$RUNNER_TEMP/check_python.py"
