@@ -7,7 +7,7 @@ icon: "server"
 
 # Déploiement auto-hébergé
 
-Exécutez la Mnemom Gateway sur votre propre infrastructure pour un contrôle complet de la résidence des données. Toutes les traces, points de contrôle d'intégrité et données d'agent restent au sein de votre réseau. La passerelle auto-hébergée est un adaptateur Node.js qui exécute le même code que le service géré Cloudflare Workers — comportement identique, votre infrastructure.
+Exécutez la Mnemom Gateway sur votre propre infrastructure pour un contrôle complet de la résidence des données. Le contenu des prompts et des réponses reste au sein de votre infrastructure — consultez [Résidence des données](#résidence-des-données) pour les limites exactes du trafic. La passerelle auto-hébergée est un adaptateur Node.js qui exécute le même code que le service géré Cloudflare Workers — comportement identique, votre infrastructure.
 
 <Note>
 Le déploiement auto-hébergé nécessite une **licence Enterprise**. [Contactez-nous](https://mnemom.ai/contact) pour obtenir une clé de licence. Enterprise inclut le mode d'analyse hybride, l'intégration SSO/SAML et un support dédié.
@@ -67,15 +67,25 @@ Le moyen le plus rapide de faire fonctionner une passerelle auto-hébergée. Inc
     ```bash
     # Required
     POSTGRES_PASSWORD=<strong-password>
-    SUPABASE_URL=http://postgres:5432
-    SUPABASE_KEY=<your-supabase-service-role-key>
+    REDIS_PASSWORD=<strong-password>
+    SUPABASE_URL=https://<your-project-ref>.supabase.co
+    SUPABASE_SECRET_KEY=<your-supabase-service-role-key>
+    SUPABASE_JWT_SECRET=<your-supabase-jwt-secret>
+    INTERNAL_API_KEY=<strong-random-string>
     MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
     ANTHROPIC_API_KEY=<your-anthropic-api-key>
 
     # Optional: additional providers
     OPENAI_API_KEY=<your-openai-key>
     GEMINI_API_KEY=<your-gemini-key>
+
+    # Optional: heartbeat override (for EU/air-gapped deployments)
+    # HEARTBEAT_URL=https://api.mnemom.ai/v1/deployments/heartbeat
     ```
+
+    <Note>
+    Si votre `.env.example` affiche `SMOLTBOT_ROLE`, renommez-le en `MNEMOM_ROLE` — le fichier contient un nom de marque obsolète, mais le point d'entrée lit `MNEMOM_ROLE`.
+    </Note>
   </Step>
 
   <Step title="Démarrer la stack">
@@ -83,12 +93,11 @@ Le moyen le plus rapide de faire fonctionner une passerelle auto-hébergée. Inc
     docker compose up -d
     ```
 
-    Cela démarre cinq services dans l'ordre :
+    Cela démarre quatre services dans l'ordre :
     1. **PostgreSQL** — base de données avec vérification de santé
     2. **Redis** — couche de cache avec persistance
-    3. **Migrate** — applique le schéma de base de données (s'exécute une fois, puis se termine)
-    4. **Gateway** — proxy HTTP sur le port 8787
-    5. **Observer** — planificateur en arrière-plan pour le traitement des traces
+    3. **Gateway** — proxy HTTP sur le port 8787 (applique les migrations de base de données au démarrage)
+    4. **Observer** — planificateur en arrière-plan pour le traitement des traces
   </Step>
 
   <Step title="Vérifier la santé">
@@ -100,11 +109,11 @@ Le moyen le plus rapide de faire fonctionner une passerelle auto-hébergée. Inc
 
     ```json Expected response
     {
-      "status": "ready",
+      "status": "ok",
       "checks": {
-        "redis": { "status": "ok" },
-        "supabase": { "status": "ok" },
-        "license": { "status": "valid" }
+        "redis": { "ok": true },
+        "supabase": { "ok": true },
+        "license": { "ok": true }
       }
     }
     ```
@@ -167,7 +176,9 @@ Pour les déploiements en production avec auto-scaling, haute disponibilité et 
     ```bash
     kubectl create secret generic mnemom-secrets \
       --from-literal=SUPABASE_URL=<your-supabase-url> \
-      --from-literal=SUPABASE_KEY=<your-service-role-key> \
+      --from-literal=SUPABASE_SECRET_KEY=<your-service-role-key> \
+      --from-literal=SUPABASE_JWT_SECRET=<your-supabase-jwt-secret> \
+      --from-literal=INTERNAL_API_KEY=<strong-random-string> \
       --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
       --from-literal=MNEMOM_LICENSE_JWT=<your-license-jwt> \
       --from-literal=REDIS_URL=<your-redis-url> \
@@ -255,14 +266,31 @@ PostgreSQL (Supabase or self-managed)
 
 ---
 
+## Résidence des données
+
+Le contenu des prompts et des réponses ne quitte jamais votre infrastructure. Le trafic suivant franchit les limites réseau :
+
+| Trafic | Destination | Comment le maintenir dans votre région |
+|---|---|---|
+| **Appels aux fournisseurs LLM** | APIs Anthropic / OpenAI / Gemini (port 443) | Routez via un proxy API avec VPC peering ou utilisez le point de terminaison régional du fournisseur |
+| **Heartbeat** | `https://api.mnemom.ai/v1/deployments/heartbeat` | Définissez `HEARTBEAT_URL` sur un endpoint interne ou un relais régional |
+| **Création d'agents (s2s)** | `https://api.mnemom.ai/v1/agents` (envoie uniquement `agent_hash` + préfixe de clé API — aucun contenu de prompt) | Contactez [support@mnemom.ai](mailto:support@mnemom.ai) pour les options air-gapped |
+
+Les traces, points de contrôle d'intégrité et tout le contenu des prompts/réponses restent dans votre base de données et ne sont jamais envoyés au cloud Mnemom.
+
+---
+
 ## Référence de configuration
 
 ### Requis
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_URL` | URL du projet Supabase ou point de terminaison REST PostgreSQL |
-| `SUPABASE_KEY` | Clé de rôle de service Supabase |
+| `SUPABASE_URL` | URL du projet Supabase (`https://<ref>.supabase.co`) ou point de terminaison PostgREST auto-hébergé |
+| `SUPABASE_SECRET_KEY` | Clé de rôle de service Supabase |
+| `SUPABASE_JWT_SECRET` | Secret JWT pour la vérification des tokens d'authentification Supabase (l'observer échoue sans cela) |
+| `REDIS_PASSWORD` | Mot de passe pour l'instance Redis (requis lorsque Redis est utilisé) |
+| `INTERNAL_API_KEY` | Secret interne service-à-service pour les appels de création d'agents |
 | `MNEMOM_LICENSE_JWT` | JWT de licence Enterprise depuis [mnemom.ai/dashboard](https://mnemom.ai/dashboard) |
 | `ANTHROPIC_API_KEY` | Clé API Anthropic (requise pour l'analyse AIP) |
 
@@ -293,6 +321,7 @@ En mode hybride, seuls les blocs de réflexion/raisonnement sont envoyés pour a
 | `HOST` | `0.0.0.0` | Adresse de liaison HTTP |
 | `MNEMOM_ROLE` | `all` | `gateway` (HTTP uniquement), `scheduler` (cron uniquement) ou `all` (les deux) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. JSON structuré vers stdout. |
+| `HEARTBEAT_URL` | `https://api.mnemom.ai/v1/deployments/heartbeat` | Remplace le point de terminaison heartbeat. Définissez-le sur un endpoint interne pour les déploiements UE ou air-gapped. |
 
 ---
 
@@ -338,7 +367,7 @@ docker compose build
 docker compose up -d
 ```
 
-Les migrations s'exécutent automatiquement via le service `migrate`.
+Les migrations s'exécutent automatiquement au démarrage de la passerelle.
 
 ### Helm
 
