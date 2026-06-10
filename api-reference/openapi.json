@@ -545,58 +545,8 @@
           }
         }
       },
-      "PublicAgent": {
-        "type": "object",
-        "description": "Limited, public projection of an agent returned by `GET /agents/{agent_id}` to unauthenticated or non-owner callers. This exact field set is the strict-isolation contract: owner-only PII (`email`, `user_id`, `agent_hash`, `billing_account_id`) and operational fields are never present here.",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "claimed": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_seen": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "active",
-              "offline"
-            ]
-          },
-          "avatar_url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uri"
-          }
-        },
-        "required": [
-          "id",
-          "claimed",
-          "created_at",
-          "status"
-        ]
-      },
       "Agent": {
         "type": "object",
-        "description": "Full agent view returned to the authenticated owner of the agent.",
         "properties": {
           "id": {
             "type": "string"
@@ -6695,19 +6645,11 @@
         ],
         "responses": {
           "200": {
-            "description": "Agent details. Unauthenticated callers and non-owners receive the limited `PublicAgent` projection (id, name, claimed, created_at, last_seen, status, avatar_url). Authenticated owners receive the full `Agent` response.",
+            "description": "Agent details. Private agents return a limited response to non-owners.",
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PublicAgent"
-                    },
-                    {
-                      "$ref": "#/components/schemas/Agent"
-                    }
-                  ],
-                  "description": "Returns `PublicAgent` for unauthenticated or non-owner callers; returns `Agent` for the authenticated owner."
+                  "$ref": "#/components/schemas/Agent"
                 }
               }
             }
