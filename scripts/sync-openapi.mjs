@@ -38,6 +38,12 @@ if (leaked.length) {
   process.exit(2);
 }
 
+if (spec.components?.schemas) {
+  spec.components.schemas = Object.fromEntries(
+    Object.entries(spec.components.schemas).sort(([a], [b]) => a.localeCompare(b))
+  );
+}
+
 writeFileSync(OUT, JSON.stringify(spec, null, 2) + "\n");
 const ops = Object.values(spec.paths || {}).reduce(
   (n, item) => n + ["get", "put", "post", "delete", "patch"].filter((m) => item[m]).length,
