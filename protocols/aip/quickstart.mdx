@@ -175,15 +175,16 @@ Monitor for behavioral drift across a session:
 from aip import detect_integrity_drift, WindowManager
 
 manager = WindowManager(max_size=10)
+state = None
 
-# Add checkpoints as they're produced
+# Process checkpoints as they're produced
 for checkpoint in checkpoints:
     manager.add(checkpoint)
-
-# Check for drift
-alerts = detect_integrity_drift(manager.get_state())
-for alert in alerts:
-    print(f"Drift: {alert.drift_direction} (similarity: {alert.integrity_similarity})")
+    state, alert = detect_integrity_drift(
+        state, checkpoint, manager.get_checkpoints()
+    )
+    if alert:
+        print(f"Drift: {alert.drift_direction} (similarity: {alert.integrity_similarity})")
 ```
 
 ## Next steps
