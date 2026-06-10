@@ -45,7 +45,7 @@ const STUB_RE = /^---\ntitle: .*\nopenapi: "[^"]*"\n---\s*$/;
 // API Reference tab group order (core product first; legacy/housekeeping last;
 // "Blog" forced last). Groups not listed keep their relative order after these.
 const GROUP_ORDER = [
-  "API Reference", "Auth", "Agents", "Alignment", "Protection", "Postures", "Unified cards",
+  "API Reference", "Auth", "OAuth", "Agents", "Alignment", "Protection", "Postures", "Unified cards",
   "Enforcement", "Governance", "Risk", "Drift", "Integrity", "Checkpoints", "Verification",
   "Reputation", "Team Reputation", "Teams", "Organizations", "Licensing", "Billing",
   "Tools", "Catalog", "Notifications", "Webhook Notifications", "AIP Webhooks",
