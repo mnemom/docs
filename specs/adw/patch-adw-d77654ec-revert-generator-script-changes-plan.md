@@ -50,7 +50,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 ## Verification
 Execute every command to validate the patch is complete with zero regressions.
 
-- `git diff origin/main HEAD --name-only` — must list only `api-reference/openapi.json` (no script, no docs.json, no .mdx stubs)
+- `git diff origin/main HEAD --name-only` — must include `api-reference/openapi.json`; may also include `specs/adw/*.md` ADW pipeline metadata files added by the shipper (these are not generated outputs and are acceptable under the scope guard); must NOT list `scripts/generate-api-reference.mjs`, `docs.json`, or any `api-reference/endpoint/*.mdx` stubs
 - `git diff origin/main HEAD -- scripts/generate-api-reference.mjs` — must produce empty output (script is identical to origin/main)
 - `git status` — confirm working tree is clean
 
