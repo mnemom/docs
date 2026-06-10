@@ -102,12 +102,7 @@ import { detectDrift } from '@mnemom/agent-alignment-protocol';
 const traces = await fetchTraces({ agentId: 'my-agent', days: 30 });
 const card = await fetchAlignmentCard({ agentId: 'my-agent' });
 
-const alerts = detectDrift({
-  traces,
-  card,
-  similarityThreshold: 0.30,
-  sustainedThreshold: 3,
-});
+const alerts = detectDrift(card, traces, 0.30, 3);
 
 for (const alert of alerts) {
   console.log(`Drift: ${alert.driftDirection}`);
@@ -194,34 +189,38 @@ The direction is inferred from the dominant `ConcernCategory` across the non-cle
 from aip import detect_integrity_drift, WindowManager
 
 manager = WindowManager(max_size=10)
+state = None
 
-# Add checkpoints as they're produced during a session
+# Process checkpoints as they're produced during a session
 for checkpoint in session_checkpoints:
     manager.add(checkpoint)
-
-# Check for drift
-alerts = detect_integrity_drift(manager.get_state())
-for alert in alerts:
-    print(f"Integrity drift: {alert.drift_direction}")
-    print(f"  Similarity: {alert.integrity_similarity}")
-    print(f"  Sustained checks: {alert.sustained_checks}")
-    print(f"  Severity: {alert.severity}")
+    state, alert = detect_integrity_drift(
+        state, checkpoint, manager.get_checkpoints()
+    )
+    if alert:
+        print(f"Integrity drift: {alert.drift_direction}")
+        print(f"  Similarity: {alert.integrity_similarity}")
+        print(f"  Sustained checks: {alert.sustained_checks}")
+        print(f"  Severity: {alert.severity}")
 ```
 
 ```typescript TypeScript
-import { detectIntegrityDrift, WindowManager } from '@mnemom/agent-integrity-protocol';
+import { detectIntegrityDrift, createDriftState } from '@mnemom/agent-integrity-protocol';
 
-const manager = new WindowManager({ maxSize: 10 });
+const WINDOW_SIZE = 10;
+let driftState = createDriftState();
+const windowCheckpoints = [];
 
 for (const checkpoint of sessionCheckpoints) {
-  manager.add(checkpoint);
-}
-
-const alerts = detectIntegrityDrift(manager.getState());
-for (const alert of alerts) {
-  console.log(`Integrity drift: ${alert.driftDirection}`);
-  console.log(`  Similarity: ${alert.integritySimilarity}`);
-  console.log(`  Sustained: ${alert.sustainedChecks} checks`);
+  windowCheckpoints.push(checkpoint);
+  if (windowCheckpoints.length > WINDOW_SIZE) windowCheckpoints.shift();
+  const { state, alert } = detectIntegrityDrift(driftState, checkpoint, windowCheckpoints);
+  driftState = state;
+  if (alert) {
+    console.log(`Integrity drift: ${alert.driftDirection}`);
+    console.log(`  Similarity: ${alert.integritySimilarity}`);
+    console.log(`  Sustained: ${alert.sustainedChecks} checks`);
+  }
 }
 ```
 </CodeGroup>
