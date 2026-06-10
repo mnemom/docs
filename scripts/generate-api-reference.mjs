@@ -45,7 +45,7 @@ const STUB_RE = /^---\ntitle: .*\nopenapi: "[^"]*"\n---\s*$/;
 // API Reference tab group order (core product first; legacy/housekeeping last;
 // "Blog" forced last). Groups not listed keep their relative order after these.
 const GROUP_ORDER = [
-  "API Reference", "Auth", "OAuth", "Agents", "Alignment", "Protection", "Postures", "Unified cards",
+  "API Reference", "Auth", "Agents", "Alignment", "Protection", "Postures", "Unified cards",
   "Enforcement", "Governance", "Risk", "Drift", "Integrity", "Checkpoints", "Verification",
   "Reputation", "Team Reputation", "Teams", "Organizations", "Licensing", "Billing",
   "Tools", "Catalog", "Notifications", "Webhook Notifications", "AIP Webhooks",
@@ -166,12 +166,7 @@ for (const [path, item] of Object.entries(spec.paths || {})) {
 
 // ---- Navigation ----
 const docs = JSON.parse(readFileSync(DOCS_JSON, "utf8"));
-const navTabs =
-  docs.navigation.tabs ??
-  docs.navigation.languages?.find((l) => l.default)?.tabs ??
-  docs.navigation.languages?.[0]?.tabs ??
-  [];
-const tab = navTabs.find((t) => t.tab === "API Reference");
+const tab = docs.navigation.tabs.find((t) => t.tab === "API Reference");
 const pagePath = (sl) => `api-reference/endpoint/${sl}`;
 const methodRank = (k) => METHODS.indexOf(k.split(" ")[0].toLowerCase());
 const sortOps = (a, b) => (a.path === b.path ? methodRank(a.key) - methodRank(b.key) : a.path < b.path ? -1 : 1);
