@@ -1,0 +1,46 @@
+name: SDK Quickstart Trace Verification
+
+# Regression gate for issue #222. The SDKs match action.name (not action.type)
+# against bounded_actions; the documented happy-path example must verify clean.
+#
+# Checks every AlignmentCard + APTrace pair in the SDK-direct quickstart (en,
+# es, fr) and asserts action.name is in bounded_actions. Exits 1 on any
+# mismatch so the documented verify_trace() call cannot silently return
+# verified=False again.
+#
+# Triggers:
+#   - pull_request to main when the SDK-direct quickstart or this workflow changes
+#   - schedule daily (catches accidental revert or locale drift)
+#   - workflow_dispatch (manual)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "quickstart/sdk-direct.mdx"
+      - "es/quickstart/sdk-direct.mdx"
+      - "fr/quickstart/sdk-direct.mdx"
+      - "scripts/check-sdk-quickstart.mjs"
+      - ".github/workflows/sdk-quickstart-trace.yml"
+  schedule:
+    - cron: "15 7 * * *" # daily, staggered from other doc checks
+  workflow_dispatch:
+
+jobs:
+  check-sdk-quickstart:
+    name: Assert action.name in bounded_actions (en/es/fr)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      - name: Check SDK quickstart trace example
+        run: node scripts/check-sdk-quickstart.mjs
