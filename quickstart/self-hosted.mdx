@@ -7,7 +7,7 @@ icon: "server"
 
 # Self-Hosted deployment
 
-Run the Mnemom Gateway on your own infrastructure for full data residency control. All traces, integrity checkpoints, and agent data stay within your network. The self-hosted gateway is a Node.js adapter that runs the same code as the managed Cloudflare Workers service — identical behavior, your infrastructure.
+Run the Mnemom Gateway on your own infrastructure for full data residency control. Prompt and response content is never sent to Mnemom's cloud, though prompts are forwarded to your configured LLM providers — see [Data residency](#data-residency) for exact traffic boundaries. The self-hosted gateway is a Node.js adapter that runs the same code as the managed Cloudflare Workers service — identical behavior, your infrastructure.
 
 <Note>
 Self-hosted deployment requires an **Enterprise license**. [Contact us](https://mnemom.ai/contact) to obtain a license key. Enterprise includes hybrid analysis mode, SSO/SAML integration, and dedicated support.
@@ -67,15 +67,25 @@ The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis
     ```bash
     # Required
     POSTGRES_PASSWORD=<strong-password>
-    SUPABASE_URL=http://postgres:5432
-    SUPABASE_KEY=<your-supabase-service-role-key>
+    REDIS_PASSWORD=<strong-password>
+    SUPABASE_URL=https://<your-project-ref>.supabase.co
+    SUPABASE_SECRET_KEY=<your-supabase-service-role-key>
+    SUPABASE_JWT_SECRET=<your-supabase-jwt-secret>
+    INTERNAL_API_KEY=<strong-random-string>
     MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
     ANTHROPIC_API_KEY=<your-anthropic-api-key>
 
     # Optional: additional providers
     OPENAI_API_KEY=<your-openai-key>
     GEMINI_API_KEY=<your-gemini-key>
+
+    # Optional: heartbeat override (for EU/air-gapped deployments)
+    # HEARTBEAT_URL=https://api.mnemom.ai/v1/deployments/heartbeat
     ```
+
+    <Note>
+    If your `.env.example` shows `SMOLTBOT_ROLE`, rename it to `MNEMOM_ROLE` — the file carries a stale branding name but the entrypoint reads `MNEMOM_ROLE`.
+    </Note>
   </Step>
 
   <Step title="Start the stack">
@@ -83,12 +93,11 @@ The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis
     docker compose up -d
     ```
 
-    This starts five services in order:
+    This starts four services in order:
     1. **PostgreSQL** — database with health check
     2. **Redis** — caching layer with persistence
-    3. **Migrate** — applies database schema (runs once, then exits)
-    4. **Gateway** — HTTP proxy on port 8787
-    5. **Observer** — background scheduler for trace processing
+    3. **Gateway** — HTTP proxy on port 8787 (applies database migrations on startup)
+    4. **Observer** — background scheduler for trace processing
   </Step>
 
   <Step title="Verify health">
@@ -100,11 +109,11 @@ The fastest way to get a self-hosted gateway running. Includes PostgreSQL, Redis
 
     ```json Expected response
     {
-      "status": "ready",
+      "status": "ok",
       "checks": {
-        "redis": { "status": "ok" },
-        "supabase": { "status": "ok" },
-        "license": { "status": "valid" }
+        "redis": { "ok": true },
+        "supabase": { "ok": true },
+        "license": { "ok": true }
       }
     }
     ```
@@ -167,7 +176,9 @@ For production deployments with auto-scaling, high availability, and monitoring.
     ```bash
     kubectl create secret generic mnemom-secrets \
       --from-literal=SUPABASE_URL=<your-supabase-url> \
-      --from-literal=SUPABASE_KEY=<your-service-role-key> \
+      --from-literal=SUPABASE_SECRET_KEY=<your-service-role-key> \
+      --from-literal=SUPABASE_JWT_SECRET=<your-supabase-jwt-secret> \
+      --from-literal=INTERNAL_API_KEY=<strong-random-string> \
       --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
       --from-literal=MNEMOM_LICENSE_JWT=<your-license-jwt> \
       --from-literal=REDIS_URL=<your-redis-url> \
@@ -255,14 +266,31 @@ PostgreSQL (Supabase or self-managed)
 
 ---
 
+## Data residency
+
+Prompt and response content is never sent to Mnemom's cloud. However, prompts are forwarded to your configured LLM providers — see the table below for exact traffic boundaries.
+
+| Traffic | Destination | How to keep in-region |
+|---|---|---|
+| **LLM provider calls** | Anthropic / OpenAI / Gemini APIs (port 443) | Route through a VPC-peered API proxy or use a provider's regional endpoint |
+| **Heartbeat** | `https://api.mnemom.ai/v1/deployments/heartbeat` | Set `HEARTBEAT_URL` to an internal endpoint or regional relay |
+| **Agent creation (s2s)** | `https://api.mnemom.ai/v1/agents` (sends `agent_hash` + API-key prefix only — no prompt content) | Contact [support@mnemom.ai](mailto:support@mnemom.ai) for air-gapped options |
+
+Traces, integrity checkpoints, and all prompt/response content remain in your database and are never sent to Mnemom's cloud.
+
+---
+
 ## Configuration reference
 
 ### Required
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_URL` | Supabase project URL or PostgreSQL REST endpoint |
-| `SUPABASE_KEY` | Supabase service-role key |
+| `SUPABASE_URL` | Supabase project URL (`https://<ref>.supabase.co`) or self-hosted PostgREST endpoint |
+| `SUPABASE_SECRET_KEY` | Supabase service-role key |
+| `SUPABASE_JWT_SECRET` | JWT secret for verifying Supabase auth tokens (observer hard-fails without this) |
+| `REDIS_PASSWORD` | Password for the Redis instance (required when Redis is used) |
+| `INTERNAL_API_KEY` | Internal service-to-service secret for agent-creation calls |
 | `MNEMOM_LICENSE_JWT` | Enterprise license JWT from [mnemom.ai/dashboard](https://mnemom.ai/dashboard) |
 | `ANTHROPIC_API_KEY` | Anthropic API key (required for AIP analysis) |
 
@@ -293,6 +321,7 @@ In hybrid mode, only thinking/reasoning blocks are sent for analysis — raw pro
 | `HOST` | `0.0.0.0` | HTTP bind address |
 | `MNEMOM_ROLE` | `all` | `gateway` (HTTP only), `scheduler` (cron only), or `all` (both) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. Structured JSON to stdout. |
+| `HEARTBEAT_URL` | `https://api.mnemom.ai/v1/deployments/heartbeat` | Override the phone-home heartbeat endpoint. Set to an internal relay for EU or air-gapped deployments. |
 
 ---
 
@@ -338,7 +367,7 @@ docker compose build
 docker compose up -d
 ```
 
-Migrations run automatically via the `migrate` service.
+Migrations run automatically as part of the gateway startup.
 
 ### Helm
 
