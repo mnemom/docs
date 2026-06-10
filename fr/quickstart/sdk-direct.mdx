@@ -1,0 +1,471 @@
+---
+title: "Intégration SDK Direct"
+description: "Intégrez la vérification d'alignement, la vérification d'intégrité et la gouvernance des politiques directement dans votre application"
+sidebarTitle: "SDK Direct"
+icon: "code"
+---
+
+# Intégration SDK directe
+
+Utilisez les SDK AAP et AIP pour ajouter la vérification d'alignement et la vérification d'intégrité directement à votre code applicatif. Cela vous donne un contrôle total sur le moment où les traces sont générées, la manière dont les vérifications d'intégrité s'exécutent et ce qui se passe en cas de violations. Pour les fonctionnalités de gouvernance (application des politiques, reclassification des violations, récupération de la confiance), utilisez l'[API Policy](/api-reference/policy-overview) et l'[API Reclassification](/api-reference/reclassification-overview) en complément des SDK.
+
+## Installation
+
+<CodeGroup>
+```bash Python
+pip install agent-alignment-protocol agent-integrity-proto
+```
+
+```bash TypeScript
+npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
+```
+</CodeGroup>
+
+<Steps>
+  <Step title="Définir une carte d'alignement">
+    Une carte d'alignement déclare l'identité de votre agent, ses valeurs, ses limites d'autonomie et ses engagements d'audit. Chaque trace et chaque vérification d'intégrité est vérifiée par rapport à cette carte.
+
+    <CodeGroup>
+    ```python Python
+    from aap import AlignmentCard, Principal, Values, AutonomyEnvelope, AuditCommitment
+
+    card = AlignmentCard(
+        aap_version="1.0.0",
+        card_id="ac-my-agent-001",
+        agent_id="my-agent",
+        issued_at="2026-01-31T12:00:00Z",
+
+        principal=Principal(
+            type="human",
+            relationship="delegated_authority",
+        ),
+
+        values=Values(
+            declared=["principal_benefit", "transparency", "minimal_data"],
+            conflicts_with=["deceptive_marketing", "hidden_fees"],
+        ),
+
+        autonomy_envelope=AutonomyEnvelope(
+            bounded_actions=["search", "compare", "recommend", "add_to_cart"],
+            escalation_triggers=[
+                {"condition": "action_type == \"purchase\"", "action": "escalate",
+                 "reason": "Purchases require approval"},
+                {"condition": "purchase_value > 100", "action": "escalate",
+                 "reason": "Exceeds spending limit"},
+            ],
+            forbidden_actions=["share_credentials", "subscribe_to_services"],
+        ),
+
+        audit_commitment=AuditCommitment(
+            trace_format="ap-trace-v1",
+            retention_days=90,
+            queryable=True,
+        ),
+    )
+
+    card_dict = card.model_dump()
+    ```
+
+    ```typescript TypeScript
+    import type { AlignmentCard } from '@mnemom/agent-alignment-protocol';
+
+    const card: AlignmentCard = {
+      aap_version: '1.0.0',
+      card_id: 'ac-my-agent-001',
+      agent_id: 'my-agent',
+      issued_at: '2026-01-31T12:00:00Z',
+
+      principal: {
+        type: 'human',
+        relationship: 'delegated_authority',
+      },
+
+      values: {
+        declared: ['principal_benefit', 'transparency', 'minimal_data'],
+        conflicts_with: ['deceptive_marketing', 'hidden_fees'],
+      },
+
+      autonomy_envelope: {
+        bounded_actions: ['search', 'compare', 'recommend', 'add_to_cart'],
+        escalation_triggers: [
+          { condition: 'action_type == "purchase"', action: 'escalate',
+            reason: 'Purchases require approval' },
+          { condition: 'purchase_value > 100', action: 'escalate',
+            reason: 'Exceeds spending limit' },
+        ],
+        forbidden_actions: ['share_credentials', 'subscribe_to_services'],
+      },
+
+      audit_commitment: {
+        trace_format: 'ap-trace-v1',
+        retention_days: 90,
+        queryable: true,
+      },
+    };
+    ```
+    </CodeGroup>
+
+    <Tip>
+    La carte d'alignement est le fondement des deux protocoles. Définissez-la une fois et utilisez-la pour la vérification AAP, la vérification d'intégrité AIP et les vérifications de cohérence des valeurs.
+    </Tip>
+  </Step>
+
+  <Step title="Générer des AP-Traces à partir des actions de l'agent">
+    Chaque décision importante prise par votre agent doit produire une AP-Trace. La trace enregistre l'action effectuée, les alternatives envisagées, le raisonnement appliqué et si une escalade a été évaluée.
+
+    <CodeGroup>
+    ```python Python
+    from aap import APTrace, Action, Decision, Alternative, Escalation
+    from datetime import datetime
+    import uuid
+
+    trace = APTrace(
+        trace_id=f"tr-{uuid.uuid4().hex[:12]}",
+        agent_id="my-agent",
+        card_id="ac-my-agent-001",
+        timestamp=datetime.utcnow().isoformat() + "Z",
+
+        action=Action(
+            type="recommend",
+            name="product_recommendation",
+            category="bounded",
+        ),
+
+        decision=Decision(
+            alternatives_considered=[
+                Alternative(option_id="prod-A", description="Widget Pro",
+                           score=0.9, scoring_factors={"relevance": 0.95, "value": 0.85}),
+                Alternative(option_id="prod-B", description="Widget Basic",
+                           score=0.7, scoring_factors={"relevance": 0.80, "value": 0.60}),
+                Alternative(option_id="prod-C", description="Sponsored Widget",
+                           score=0.5, scoring_factors={"relevance": 0.50, "value": 0.40},
+                           flags=["sponsored_content"]),
+            ],
+            selected="prod-A",
+            selection_reasoning="Highest preference match. Sponsored options deprioritized per principal_benefit value.",
+            values_applied=["principal_benefit", "transparency"],
+            confidence=0.9,
+        ),
+
+        escalation=Escalation(
+            evaluated=True,
+            triggers_checked=[
+                {"trigger": "action_type == \"purchase\"", "matched": False},
+            ],
+            required=False,
+            reason="Recommendation only, no purchase action",
+        ),
+    )
+
+    trace_dict = trace.model_dump()
+    ```
+
+    ```typescript TypeScript
+    import type { APTrace } from '@mnemom/agent-alignment-protocol';
+
+    const trace: APTrace = {
+      trace_id: `tr-${crypto.randomUUID().slice(0, 12)}`,
+      agent_id: 'my-agent',
+      card_id: 'ac-my-agent-001',
+      timestamp: new Date().toISOString(),
+
+      action: {
+        type: 'recommend',
+        name: 'product_recommendation',
+        category: 'bounded',
+      },
+
+      decision: {
+        alternatives_considered: [
+          { option_id: 'prod-A', description: 'Widget Pro',
+            score: 0.9, scoring_factors: { relevance: 0.95, value: 0.85 } },
+          { option_id: 'prod-B', description: 'Widget Basic',
+            score: 0.7, scoring_factors: { relevance: 0.80, value: 0.60 } },
+          { option_id: 'prod-C', description: 'Sponsored Widget',
+            score: 0.5, scoring_factors: { relevance: 0.50, value: 0.40 },
+            flags: ['sponsored_content'] },
+        ],
+        selected: 'prod-A',
+        selection_reasoning:
+          'Highest preference match. Sponsored options deprioritized per principal_benefit value.',
+        values_applied: ['principal_benefit', 'transparency'],
+        confidence: 0.9,
+      },
+
+      escalation: {
+        evaluated: true,
+        triggers_checked: [
+          { trigger: 'action_type == "purchase"', matched: false },
+        ],
+        required: false,
+        reason: 'Recommendation only, no purchase action',
+      },
+    };
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Vérifier les traces par rapport à la carte">
+    La vérification contrôle si le comportement de l'agent (enregistré dans la trace) est cohérent avec son alignement déclaré (la carte). Elle renvoie des vérifications structurelles, un score de similarité, ainsi que toute violation ou avertissement.
+
+    <CodeGroup>
+    ```python Python
+    from aap import verify_trace
+
+    result = verify_trace(trace_dict, card_dict)
+
+    print(f"Verified: {result.verified}")
+    print(f"Similarity: {result.similarity_score:.2f}")
+
+    if not result.verified:
+        for violation in result.violations:
+            print(f"VIOLATION [{violation.severity}]: {violation.type}")
+            print(f"  {violation.description}")
+
+    for warning in result.warnings:
+        print(f"WARNING: {warning.type}")
+        print(f"  {warning.description}")
+
+    # Example output for a compliant trace:
+    # Verified: True
+    # Similarity: 0.82
+
+    # Example output for a violation:
+    # Verified: False
+    # Similarity: 0.15
+    # VIOLATION [HIGH]: unbounded_action
+    #   Action 'delete_account' not in bounded_actions
+    ```
+
+    ```typescript TypeScript
+    import { verifyTrace } from '@mnemom/agent-alignment-protocol';
+
+    const result = verifyTrace(trace, card);
+
+    console.log(`Verified: ${result.verified}`);
+    console.log(`Similarity: ${result.similarity_score.toFixed(2)}`);
+
+    if (!result.verified) {
+      for (const violation of result.violations) {
+        console.log(`VIOLATION [${violation.severity}]: ${violation.type}`);
+        console.log(`  ${violation.description}`);
+      }
+    }
+
+    for (const warning of result.warnings) {
+      console.log(`WARNING: ${warning.type}`);
+      console.log(`  ${warning.description}`);
+    }
+    ```
+    </CodeGroup>
+
+    <Note>
+    Le `similarity_score` (de 0.0 à 1.0) mesure à quel point le comportement de la trace est sémantiquement similaire à l'alignement déclaré. Une trace peut passer toutes les vérifications structurelles tout en recevant un avertissement `low_behavioral_similarity` si le score tombe en dessous de 0.50. Consultez la [calibration](/protocols/aap/calibration) pour savoir comment les seuils ont été dérivés.
+    </Note>
+  </Step>
+
+  <Step title="Ajouter des points de contrôle d'intégrité">
+    La vérification d'intégrité AIP analyse les blocs de réflexion du LLM en temps réel pour détecter l'injection de prompt, la dérive des valeurs et la manipulation. Chaque vérification produit un verdict : `clear`, `review_needed` ou `boundary_violation`.
+
+    <Warning>
+    **AIP utilise par défaut le mode fail-open.** Si le LLM d'analyse est inaccessible, les vérifications d'intégrité passeront silencieusement. Pour les déploiements en production gérant des opérations sensibles, définissez `failure_policy: { mode: "fail_closed" }` dans votre configuration AIP.
+    </Warning>
+
+    <CodeGroup>
+    ```python Python
+    from aip import check_integrity, build_signal
+
+    checkpoint = check_integrity(
+        thinking_block="The user wants product recommendations. I should focus on "
+        "finding options that genuinely serve their needs, not sponsored results...",
+        card=card_dict,
+        config={
+            "agent_id": "my-agent",
+            "analysis_llm": {
+                "model": "claude-haiku-4-5-20251001",
+                "base_url": "https://api.anthropic.com",
+                "api_key": "your-anthropic-api-key",
+                "max_tokens": 1024,
+            },
+        },
+    )
+
+    print(f"Verdict: {checkpoint.verdict}")       # "clear"
+    print(f"Concerns: {checkpoint.concerns}")     # []
+
+    # Build signal for your host system
+    signal = build_signal(checkpoint, window_state)
+    print(f"Proceed: {signal.proceed}")           # True
+    print(f"Action: {signal.recommended_action}") # "continue"
+    ```
+
+    ```typescript TypeScript
+    import { checkIntegrity, buildSignal } from '@mnemom/agent-integrity-protocol';
+
+    const checkpoint = await checkIntegrity({
+      thinkingBlock:
+        'The user wants product recommendations. I should focus on ' +
+        'finding options that genuinely serve their needs, not sponsored results...',
+      card,
+      config: {
+        agentId: 'my-agent',
+        analysisLlm: {
+          model: 'claude-haiku-4-5-20251001',
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: 'your-anthropic-api-key',
+          maxTokens: 1024,
+        },
+      },
+    });
+
+    console.log(`Verdict: ${checkpoint.verdict}`);     // "clear"
+    console.log(`Concerns: ${checkpoint.concerns}`);   // []
+
+    const signal = buildSignal(checkpoint, windowState);
+    console.log(`Proceed: ${signal.proceed}`);         // true
+    console.log(`Action: ${signal.recommended_action}`); // "continue"
+    ```
+    </CodeGroup>
+
+    ### Correspondance verdict → action
+
+    | Verdict | Continuer | Action recommandée |
+    |---------|-----------|-------------------|
+    | `clear` | Oui | `continue` |
+    | `review_needed` | Oui | `log_and_continue` |
+    | `boundary_violation` | Non | `pause_for_review` ou `deny_and_escalate` |
+  </Step>
+
+  <Step title="Vérifier la cohérence des valeurs">
+    Avant que votre agent ne collabore avec un autre agent, vérifiez que leurs valeurs sont compatibles. La vérification de cohérence compare les valeurs déclarées et détecte les conflits.
+
+    <CodeGroup>
+    ```python Python
+    from aap import check_coherence
+
+    their_card = {
+        "card_id": "ac-vendor-agent",
+        "values": {
+            "declared": ["customer_satisfaction", "transparency", "upselling"],
+            "conflicts_with": ["price_comparison"],
+        },
+        # ... other fields
+    }
+
+    result = check_coherence(card_dict, their_card)
+
+    print(f"Compatible: {result.compatible}")
+    print(f"Coherence score: {result.score}")
+    print(f"Matched values: {result.value_alignment.matched}")
+    print(f"Conflicts: {[c.description for c in result.value_alignment.conflicts]}")
+
+    if result.proceed:
+        coordinate_with_agent(their_card)
+    else:
+        if result.proposed_resolution:
+            print(f"Suggested resolution: {result.proposed_resolution}")
+        escalate_to_principal(result.value_alignment.conflicts)
+
+    # Example output:
+    # Compatible: False
+    # Coherence score: 0.4
+    # Matched values: ['transparency']
+    # Conflicts: ["Responder's 'upselling' may conflict with initiator's 'principal_benefit'"]
+    ```
+
+    ```typescript TypeScript
+    import { checkCoherence } from '@mnemom/agent-alignment-protocol';
+
+    const theirCard = {
+      card_id: 'ac-vendor-agent',
+      values: {
+        declared: ['customer_satisfaction', 'transparency', 'upselling'],
+        conflicts_with: ['price_comparison'],
+      },
+      // ... other fields
+    };
+
+    const result = checkCoherence(card, theirCard);
+
+    console.log(`Compatible: ${result.compatible}`);
+    console.log(`Coherence score: ${result.score}`);
+    console.log(`Matched values: ${result.value_alignment.matched}`);
+
+    if (!result.proceed) {
+      console.log('Conflicts:', result.value_alignment.conflicts
+        .map(c => c.description));
+    }
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Traçage automatique avec décorateurs (Python)
+
+Le SDK Python AAP fournit des décorateurs pour la génération automatique de traces :
+
+```python
+from aap import trace_decision, TracedResult
+
+@trace_decision(card_path="alignment-card.json")
+def recommend_product(query: str) -> TracedResult:
+    """Return TracedResult for detailed decision metadata."""
+    products = find_products(query)
+    best = products[0]
+
+    return TracedResult(
+        result=best,
+        alternatives=[
+            {"option_id": p["id"], "score": p["score"]}
+            for p in products[:3]
+        ],
+        reasoning=f"Selected {best['name']} with highest score",
+        values_applied=["principal_benefit", "transparency"],
+        confidence=best["score"],
+    )
+```
+
+## Détection de dérive
+
+Surveillez votre agent pour détecter toute dérive comportementale au fil du temps :
+
+<CodeGroup>
+```python Python
+from aap import detect_drift
+
+traces = [trace1, trace2, trace3, ...]  # List of trace dicts
+
+alerts = detect_drift(card_dict, traces)
+
+for alert in alerts:
+    print(f"DRIFT DETECTED for agent {alert.agent_id}")
+    print(f"  Direction: {alert.analysis.drift_direction}")
+    print(f"  Similarity score: {alert.analysis.similarity_score}")
+    print(f"  Sustained for {alert.analysis.sustained_traces} traces")
+```
+
+```typescript TypeScript
+import { detectDrift } from '@mnemom/agent-alignment-protocol';
+
+const alerts = detectDrift(card, traces);
+
+for (const alert of alerts) {
+  console.log(`DRIFT DETECTED for agent ${alert.agent_id}`);
+  console.log(`  Direction: ${alert.analysis.drift_direction}`);
+  console.log(`  Similarity: ${alert.analysis.similarity_score}`);
+  console.log(`  Sustained for ${alert.analysis.sustained_traces} traces`);
+}
+```
+</CodeGroup>
+
+## Prochaines étapes
+
+- [Vue d'ensemble CLPI](/concepts/clpi) -- Couche de gouvernance : application des politiques, récupération de la confiance, ancrage on-chain
+- [API Policy](/api-reference/policy-overview) -- Gestion programmatique des politiques pour les intégrations SDK
+- [API Reclassification](/api-reference/reclassification-overview) -- Reclassification des violations et récupération du score de confiance
+- [Spécification AAP](/protocols/aap/specification) -- Détails complets du protocole pour les implémenteurs
+- [Spécification AIP](/protocols/aip/specification) -- Détails du protocole d'intégrité
+- [Limitations](/protocols/aap/limitations) -- Ce que AAP peut et ne peut pas garantir
+- [Modèle de sécurité](/protocols/aap/security) -- Modèle de menace et surfaces d'attaque
+- [Intégration A2A](/protocols/aap/a2a-integration) -- Ajouter AAP aux flux de travail d'agents A2A
+- [Migration MCP](/protocols/aap/mcp-migration) -- Ajouter le traçage d'alignement aux outils MCP

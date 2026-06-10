@@ -1,0 +1,140 @@
+---
+title: "Conectarse mediante MCP"
+description: "Conecta los servidores Model Context Protocol de Mnemom a Claude Code, Claude Desktop, Cursor y VS Code"
+sidebarTitle: "Clientes MCP"
+icon: "plug"
+keywords: ["MCP", "Model Context Protocol", "Claude", "Cursor", "VS Code"]
+---
+
+# Conectarse mediante MCP
+
+Mnemom opera dos servidores públicos de [Model Context Protocol](https://modelcontextprotocol.io). Ambos usan el transporte streamable-HTTP, por lo que cualquier cliente MCP que admita servidores HTTP remotos puede conectarse.
+
+<Columns cols={2}>
+  <Card title="Plano de control" icon="shield-check">
+    `https://api.mnemom.ai/mcp`
+
+    62 herramientas que reflejan la CLI `mnemom` — Trust Ratings, tarjetas de alineamiento y protección, señales de gobernanza, posturas, equipos, webhooks y claves API. `tools/list` es público; la ejecución de herramientas se autentica exactamente como la [API REST](/api-reference/overview).
+  </Card>
+  <Card title="Búsqueda en la documentación" icon="book-open">
+    `https://docs.mnemom.ai/mcp`
+
+    Solo lectura. Dos herramientas — `search_mnemom_docs` y `query_docs_filesystem` — sobre esta documentación y la especificación OpenAPI. Sin autenticación.
+  </Card>
+</Columns>
+
+<Note>
+  El plano de control se autentica con las mismas credenciales que la API REST: un **Bearer JWT** o una **`X-Mnemom-Api-Key`**. Consulta [Autenticación](/api-reference/headers). El servidor de búsqueda en la documentación no necesita autenticación.
+</Note>
+
+## Autenticación
+
+Define tu token una vez en el entorno, luego refiérelo desde cada configuración de cliente:
+
+```bash
+export MNEMOM_TOKEN="<your Bearer JWT or mnm_… API key>"
+```
+
+El servidor del plano de control transmite el valor tal cual como `Authorization: Bearer <token>`. Para usar una clave API en su lugar, envíala como el encabezado `X-Mnemom-Api-Key`.
+
+## Configuración del cliente
+
+<Tabs>
+  <Tab title="Claude Code">
+    Añade ambos servidores desde la CLI:
+
+    ```bash
+    # Control plane (authenticated)
+    claude mcp add --transport http mnemom https://api.mnemom.ai/mcp \
+      --header "Authorization: Bearer $MNEMOM_TOKEN"
+
+    # Docs search (read-only, no auth)
+    claude mcp add --transport http mnemom-docs https://docs.mnemom.ai/mcp
+    ```
+
+    Lista los servidores registrados con `claude mcp list`.
+  </Tab>
+  <Tab title="Cursor">
+    Añade a `~/.cursor/mcp.json` (global) o `.cursor/mcp.json` (por proyecto):
+
+    ```json
+    {
+      "mcpServers": {
+        "mnemom": {
+          "url": "https://api.mnemom.ai/mcp",
+          "headers": { "Authorization": "Bearer ${MNEMOM_TOKEN}" }
+        },
+        "mnemom-docs": {
+          "url": "https://docs.mnemom.ai/mcp"
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="VS Code">
+    Añade a `.vscode/mcp.json` en tu espacio de trabajo:
+
+    ```json
+    {
+      "servers": {
+        "mnemom": {
+          "type": "http",
+          "url": "https://api.mnemom.ai/mcp",
+          "headers": { "Authorization": "Bearer ${MNEMOM_TOKEN}" }
+        },
+        "mnemom-docs": {
+          "type": "http",
+          "url": "https://docs.mnemom.ai/mcp"
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Claude Desktop">
+    Claude Desktop lanza los servidores MCP como procesos locales, así que
+    enlaza los endpoints remotos con [`mcp-remote`](https://www.npmjs.com/package/mcp-remote).
+    Añade a `claude_desktop_config.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "mnemom": {
+          "command": "npx",
+          "args": [
+            "-y", "mcp-remote", "https://api.mnemom.ai/mcp",
+            "--header", "Authorization: Bearer ${MNEMOM_TOKEN}"
+          ]
+        },
+        "mnemom-docs": {
+          "command": "npx",
+          "args": ["-y", "mcp-remote", "https://docs.mnemom.ai/mcp"]
+        }
+      }
+    }
+    ```
+
+    Reinicia Claude Desktop después de editar la configuración.
+  </Tab>
+</Tabs>
+
+## Verificar la conexión
+
+`tools/list` es público en ambos servidores, así que puedes confirmar la accesibilidad con una llamada JSON-RPC en bruto antes de configurar un cliente:
+
+```bash
+curl -sS -X POST https://api.mnemom.ai/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | jq '.result.tools | length'
+```
+
+Deberías ver el número de herramientas (62 para el plano de control, 2 para la búsqueda en la documentación). La **ejecución** de herramientas en el plano de control aplica la misma autorización que la llamada REST equivalente — un cliente no autenticado puede enumerar las herramientas pero no invocar las privilegiadas.
+
+## Descubrimiento
+
+El servidor del plano de control publica una [tarjeta de servidor MCP](https://www.mnemom.ai/.well-known/mcp/server-card.json) descubrible (con forma `server.json`) en `https://www.mnemom.ai/.well-known/mcp/server-card.json`. Los clientes que resuelven tarjetas de servidor pueden configurarse a partir de esa única URL.
+
+<Card title="Mapa de superficies para agentes" icon="bot" href="https://www.mnemom.ai/for-agents">
+  El conjunto completo de las superficies de Mnemom orientadas a agentes — archivos de descubrimiento, metadatos well-known y ambos endpoints MCP — está catalogado en la página For Agents.
+</Card>

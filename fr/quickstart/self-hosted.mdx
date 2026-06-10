@@ -1,0 +1,397 @@
+---
+title: "Déploiement auto-hébergé"
+description: "Exécutez la Mnemom Gateway sur votre propre infrastructure avec Docker ou Kubernetes"
+sidebarTitle: "Auto-hébergé"
+icon: "server"
+---
+
+# Déploiement auto-hébergé
+
+Exécutez la Mnemom Gateway sur votre propre infrastructure pour un contrôle complet de la résidence des données. Toutes les traces, points de contrôle d'intégrité et données d'agent restent au sein de votre réseau. La passerelle auto-hébergée est un adaptateur Node.js qui exécute le même code que le service géré Cloudflare Workers — comportement identique, votre infrastructure.
+
+<Note>
+Le déploiement auto-hébergé nécessite une **licence Enterprise**. [Contactez-nous](https://mnemom.ai/contact) pour obtenir une clé de licence. Enterprise inclut le mode d'analyse hybride, l'intégration SSO/SAML et un support dédié.
+</Note>
+
+## Options de déploiement
+
+| | **Géré (Cloud)** | **Docker Compose** | **Kubernetes (Helm)** |
+|---|---|---|---|
+| **Idéal pour** | La plupart des équipes | Petites équipes, éval, dev | Production à grande échelle |
+| **Infrastructure** | Aucune (Mnemom héberge) | VM ou serveur unique | Cluster K8s |
+| **Temps de configuration** | Minutes | ~10 minutes | ~30 minutes |
+| **Mise à l'échelle** | Automatique | Manuelle | Auto-scaling HPA |
+| **Résidence des données** | Cloud Mnemom | Votre infrastructure | Votre infrastructure |
+| **Haute disponibilité** | Intégrée | Nœud unique | Multi-réplica, PDB |
+| **Surveillance** | Tableau de bord | Prometheus + logs | Prometheus + ServiceMonitor |
+
+## Prérequis
+
+- Un **JWT de licence Enterprise** depuis [mnemom.ai/dashboard](https://mnemom.ai/dashboard)
+- Une **clé API Anthropic** (requise pour l'analyse d'intégrité AIP)
+- Optionnel : clés API OpenAI et Gemini pour le traçage multi-fournisseur
+
+<Warning>
+**AIP utilise par défaut le mode fail-open.** Si le LLM d'analyse est inaccessible, les vérifications d'intégrité passeront silencieusement. Pour les déploiements en production gérant des opérations sensibles, définissez `failure_policy: { mode: "fail_closed" }` dans votre configuration AIP.
+</Warning>
+
+---
+
+## Démarrage rapide : Docker Compose
+
+Le moyen le plus rapide de faire fonctionner une passerelle auto-hébergée. Inclut PostgreSQL, Redis et les migrations de base de données automatiques.
+
+### Exigences
+
+- Docker 24+ et Docker Compose v2+
+- 2 Go de RAM minimum, 4 Go recommandés
+- 10 Go d'espace disque
+
+<Steps>
+  <Step title="Cloner le dépôt">
+    ```bash
+    git clone https://github.com/mnemom/mnemom-platform.git
+    cd mnemom-platform/deploy/docker
+    ```
+  </Step>
+
+  <Step title="Configurer l'environnement">
+    Copiez le fichier d'environnement d'exemple et renseignez vos identifiants :
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Modifiez `.env` et définissez les valeurs requises :
+
+    ```bash
+    # Required
+    POSTGRES_PASSWORD=<strong-password>
+    SUPABASE_URL=http://postgres:5432
+    SUPABASE_KEY=<your-supabase-service-role-key>
+    MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
+    ANTHROPIC_API_KEY=<your-anthropic-api-key>
+
+    # Optional: additional providers
+    OPENAI_API_KEY=<your-openai-key>
+    GEMINI_API_KEY=<your-gemini-key>
+    ```
+  </Step>
+
+  <Step title="Démarrer la stack">
+    ```bash
+    docker compose up -d
+    ```
+
+    Cela démarre cinq services dans l'ordre :
+    1. **PostgreSQL** — base de données avec vérification de santé
+    2. **Redis** — couche de cache avec persistance
+    3. **Migrate** — applique le schéma de base de données (s'exécute une fois, puis se termine)
+    4. **Gateway** — proxy HTTP sur le port 8787
+    5. **Observer** — planificateur en arrière-plan pour le traitement des traces
+  </Step>
+
+  <Step title="Vérifier la santé">
+    Attendez environ 30 secondes, puis vérifiez la santé de la passerelle :
+
+    ```bash
+    curl http://localhost:8787/health/ready
+    ```
+
+    ```json Expected response
+    {
+      "status": "ready",
+      "checks": {
+        "redis": { "status": "ok" },
+        "supabase": { "status": "ok" },
+        "license": { "status": "valid" }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Connecter un agent">
+    Pointez la CLI mnemom vers votre passerelle auto-hébergée :
+
+    ```bash
+    npm install -g @mnemom/mnemom
+    # Point the CLI at your self-hosted stack, then authenticate
+    export MNEMOM_ENV=local   # resolves API + gateway to http://localhost:8787
+    mnemom login
+    ```
+
+    Effectuez une requête de test :
+
+    ```bash
+    curl http://localhost:8787/anthropic/v1/messages \
+      -H "x-api-key: $ANTHROPIC_API_KEY" \
+      -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
+      -d '{
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
+
+    Vérifiez que l'agent est connecté :
+
+    ```bash
+    mnemom status
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Production : Kubernetes avec Helm
+
+Pour les déploiements en production avec auto-scaling, haute disponibilité et surveillance.
+
+### Exigences
+
+- Kubernetes 1.27+
+- Helm 3.12+
+- `kubectl` configuré pour votre cluster
+
+<Steps>
+  <Step title="Ajouter le chart Helm">
+    ```bash
+    cd mnemom-platform/deploy/helm  # navigate to the helm chart
+    ```
+  </Step>
+
+  <Step title="Créer un Secret Kubernetes">
+    Stockez les identifiants sensibles dans un Secret :
+
+    ```bash
+    kubectl create secret generic mnemom-secrets \
+      --from-literal=SUPABASE_URL=<your-supabase-url> \
+      --from-literal=SUPABASE_KEY=<your-service-role-key> \
+      --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
+      --from-literal=MNEMOM_LICENSE_JWT=<your-license-jwt> \
+      --from-literal=REDIS_URL=<your-redis-url> \
+      --from-literal=DATABASE_URL=<your-postgres-url>
+    ```
+  </Step>
+
+  <Step title="Installer le chart">
+    ```bash
+    helm install mnemom ./mnemom-gateway \
+      --set secrets.existingSecret=mnemom-secrets \
+      --set ingress.enabled=true \
+      --set ingress.hosts[0].host=gateway.yourcompany.com \
+      --set ingress.hosts[0].paths[0].path=/ \
+      --set ingress.hosts[0].paths[0].pathType=Prefix
+    ```
+  </Step>
+
+  <Step title="Vérifier le déploiement">
+    ```bash
+    kubectl get pods -l app.kubernetes.io/name=mnemom-gateway
+    helm test mnemom
+    ```
+  </Step>
+</Steps>
+
+### Ce que déploie le chart
+
+- **Déploiement Gateway** (2 réplicas par défaut) — proxy HTTP avec sondes de liveness, readiness et startup
+- **Déploiement Observer** (1 réplica) — planificateur en arrière-plan pour le traitement des traces
+- **Job de migration** — hook Helm pre-install/pre-upgrade qui applique les migrations de base de données
+- **Service** — ClusterIP sur le port 8787
+- **NetworkPolicy** — deny-all par défaut avec des autorisations explicites pour l'ingress, Redis, PostgreSQL et les API LLM en amont
+- **PodDisruptionBudget** — garantit au moins 1 réplica pendant les mises à jour progressives
+- **Optionnel** : Ingress avec TLS, HPA, ServiceMonitor pour Prometheus
+
+### Mise à l'échelle
+
+Activez le HorizontalPodAutoscaler pour une mise à l'échelle automatique :
+
+```yaml
+# values.yaml
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPU: 70
+  targetMemory: 80
+```
+
+---
+
+## Architecture
+
+En mode auto-hébergé, une couche d'adaptateur Node.js remplace les API spécifiques à Cloudflare tout en exécutant exactement le même code de passerelle :
+
+```
+Your App / Agents
+  │
+  ▼
+Self-Hosted Gateway (Node.js, port 8787)
+  │ ── KV adapter ──▶ Redis (or in-memory)
+  │ ── fetch interceptor ──▶ Anthropic / OpenAI / Gemini (direct)
+  │
+  ├──▶ Observer (cron scheduler)
+  │     ── builds AP-Traces
+  │     ── runs AAP verification
+  │     ── runs AIP integrity checks
+  │
+  ▼
+PostgreSQL (Supabase or self-managed)
+  │
+  ├──▶ CLI (mnemom status / logs)
+  └──▶ Dashboard (mnemom.ai or self-hosted)
+```
+
+**Couche d'adaptation** — zéro modification du code source de la passerelle :
+
+| API Cloudflare | Remplacement auto-hébergé |
+|---|---|
+| KV Namespace | Redis (avec repli en mémoire) |
+| `ctx.waitUntil()` | Collecte de Promise avec drainage après la réponse |
+| Routage d'URL AI Gateway | Intercepteur fetch réécrivant vers les API en amont |
+| `ExecutionContext` | Shim Node.js avec sémantique fire-and-forget |
+
+---
+
+## Référence de configuration
+
+### Requis
+
+| Variable | Description |
+|---|---|
+| `SUPABASE_URL` | URL du projet Supabase ou point de terminaison REST PostgreSQL |
+| `SUPABASE_KEY` | Clé de rôle de service Supabase |
+| `MNEMOM_LICENSE_JWT` | JWT de licence Enterprise depuis [mnemom.ai/dashboard](https://mnemom.ai/dashboard) |
+| `ANTHROPIC_API_KEY` | Clé API Anthropic (requise pour l'analyse AIP) |
+
+### Optionnel : fournisseurs
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | -- | Clé API OpenAI pour le routage multi-fournisseur |
+| `GEMINI_API_KEY` | -- | Clé API Google Gemini pour le routage multi-fournisseur |
+
+### Optionnel : analyse hybride
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `MNEMOM_ANALYZE_URL` | -- | Délègue l'analyse AIP au cloud Mnemom (`https://api.mnemom.ai/v1/analyze`) |
+| `MNEMOM_API_KEY` | -- | Clé API Mnemom avec la portée `analyze` (requise lorsque `MNEMOM_ANALYZE_URL` est défini) |
+
+<Tip>
+En mode hybride, seuls les blocs de réflexion/raisonnement sont envoyés pour analyse — les prompts et réponses bruts ne quittent jamais votre infrastructure.
+</Tip>
+
+### Optionnel : infrastructure
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `REDIS_URL` | -- | URL de connexion Redis. Sans Redis, un adaptateur KV en mémoire est utilisé (nœud unique seulement). |
+| `PORT` | `8787` | Port d'écoute HTTP |
+| `HOST` | `0.0.0.0` | Adresse de liaison HTTP |
+| `MNEMOM_ROLE` | `all` | `gateway` (HTTP uniquement), `scheduler` (cron uniquement) ou `all` (les deux) |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error`. JSON structuré vers stdout. |
+
+---
+
+## Points de terminaison de santé
+
+Trois sondes standard Kubernetes :
+
+| Point de terminaison | Objectif | Comportement |
+|---|---|---|
+| `/health/live` | Sonde de liveness | Toujours 200 sauf en cas de blocage |
+| `/health/ready` | Sonde de readiness | Vérifie Redis, PostgreSQL et la validité de la licence |
+| `/health/startup` | Sonde de startup | Retourne 503 jusqu'à la fin de l'initialisation |
+
+## Métriques Prometheus
+
+La passerelle expose un point de terminaison `/metrics` avec :
+
+- `gateway_requests_total{provider,status}` — compteur de requêtes
+- `gateway_request_duration_seconds{provider}` — histogramme de latence
+- `gateway_aip_checks_total{verdict}` — compteur de vérifications d'intégrité
+- `gateway_cache_operations_total{operation,result}` — hit/miss de cache
+- Métriques standard `process_*` et `nodejs_*`
+
+Pour Kubernetes, activez le ServiceMonitor dans `values.yaml` :
+
+```yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+```
+
+---
+
+## Mise à niveau
+
+### Docker Compose
+
+```bash
+cd mnemom-platform && git pull
+cd deploy/docker
+docker compose build
+docker compose up -d
+```
+
+Les migrations s'exécutent automatiquement via le service `migrate`.
+
+### Helm
+
+```bash
+helm upgrade mnemom ./deploy/helm/mnemom-gateway \
+  --set secrets.existingSecret=mnemom-secrets
+```
+
+Le job de migration s'exécute comme un hook Helm pre-upgrade.
+
+<Warning>
+Sauvegardez toujours votre base de données avant de mettre à niveau. Pour Docker : `docker compose exec postgres pg_dump -U mnemom mnemom > backup.sql`. Pour Kubernetes : utilisez votre procédure de sauvegarde PostgreSQL standard.
+</Warning>
+
+---
+
+## Dépannage
+
+<AccordionGroup>
+  <Accordion title="La passerelle ne démarre pas — EnvValidationError">
+    Une variable d'environnement requise est manquante. Vérifiez le message d'erreur pour savoir laquelle, puis vérifiez votre fichier `.env` ou votre Secret Kubernetes.
+  </Accordion>
+
+  <Accordion title="Connexion Redis refusée">
+    - Docker Compose : assurez-vous que le service `redis` est sain (`docker compose ps`)
+    - Kubernetes : vérifiez que `REDIS_URL` dans votre Secret pointe vers une instance Redis accessible
+    - Sans Redis, la passerelle se replie sur le KV en mémoire (nœud unique seulement)
+  </Accordion>
+
+  <Accordion title="Échec de validation de la licence">
+    - Vérifiez que `MNEMOM_LICENSE_JWT` est défini et non expiré
+    - Vérifiez `/health/ready` pour l'erreur de licence spécifique
+    - Contactez [support@mnemom.ai](mailto:support@mnemom.ai) pour une réémission de licence
+  </Accordion>
+
+  <Accordion title="Erreurs d'API LLM en amont (401/403)">
+    - Vérifiez que vos clés API sont correctes et disposent de crédits suffisants
+    - La passerelle proxy directement vers les API des fournisseurs — assurez-vous que le HTTPS sortant (port 443) est autorisé
+    - Dans Kubernetes, vérifiez que la NetworkPolicy autorise l'egress vers `0.0.0.0/0:443`
+  </Accordion>
+
+  <Accordion title="Mémoire élevée / OOMKilled">
+    - Augmentez les limites de mémoire du conteneur (512Mi minimum, 1Gi recommandé pour un trafic élevé)
+    - Si vous utilisez le KV en mémoire, passez à Redis pour réduire la pression mémoire
+    - Définissez `NODE_OPTIONS=--max-old-space-size=768` pour un contrôle fin du tas
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Prochaines étapes
+
+- [Vue d'ensemble de la Mnemom Gateway](/gateway/overview) — architecture et composants
+- [Modes d'application](/gateway/enforcement) — observe, nudge et enforce
+- [Guide d'observabilité](/guides/observability) — tableaux de bord et alertes
+- [Modèle de sécurité](/guides/security-trust-model) — limites de confiance et modèle de menace
