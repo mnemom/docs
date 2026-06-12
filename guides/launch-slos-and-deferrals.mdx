@@ -1,0 +1,69 @@
+---
+title: "Launch SLOs & Deferrals"
+description: "Per-scenario SLO commitments for all ten customer-facing launch scenarios (S1–S10), anchored to existing SLIs, plus the explicit deferral list of items intentionally out of launch scope."
+sidebarTitle: "Launch SLOs & Deferrals"
+icon: "bullseye"
+---
+
+# Launch SLOs & deferrals
+
+This page commits one measurable SLO per customer-facing launch scenario (S1–S10) and publishes the explicit list of promises that are **intentionally deferred** beyond launch. Every committed number is anchored to an SLI that already exists — in [`scale/slos.md`](https://github.com/mnemom/docs/blob/main/scale/slos.md) (SLI-1..9) or the component-level catalog at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos). Unmeasured promises are flagged, not invented.
+
+<Note>
+This page defines per-scenario SLOs only. Tier-based contractual uptime targets (SLA), RTO, and RPO are on [SLA & Incident Response](/guides/sla-and-incident-response). The error-budget deploy-gating policy is tracked separately at MNE-376 and is on the deferral list below.
+</Note>
+
+---
+
+## Per-scenario SLOs
+
+> **Sign-off pending** (@wassimwehbi-mnemom): all committed numbers — especially S1 (99.9% / p99 < 100 ms), S9 (≤ 30 min comms target reuse), S10 (5 min erasure p99 reuse), and S2 publish-as-target vs hold. Numbers below reflect the draft; merge is gated on sign-off.
+
+| # | Scenario (customer promise) | Committed SLO | Measurement basis | Measured today? |
+|---|---|---|---|---|
+| **S1** | I get to a working hello-world in minutes | Quickstart path availability **≥ 99.9%** monthly (gateway non-5xx); Mnemom-added latency overhead **p99 < 100 ms** on the first governed call | SLI-1 + SLI-2 (`scale/slos.md`); burn-rate alerts live | **YES** — availability and latency overhead measured. The **< 10-min human time-to-value** half has no prober yet; needs `mnemom_scenario_up` (MNE-357 item 3) |
+| **S2** | My agent onboards itself | Agent-discovery surface availability (llms.txt / llms-full.txt / agents.txt / markdown content-negotiation) **≥ 99.9%** monthly | **Target only — no SLI exists yet.** Measurement window opens when the `mnemom_scenario_up` scenario prober ships (MNE-357 item 3) | **NO — target published; measurement deferred** |
+| **S3** | Protection just works | Safe House screens **100%** of governed calls for agents with a published protection card; **Chat-Always-Completes ≥ 99.99%** (an intervened request still returns 2xx) | "Off-mode fidelity" + "Chat Always Completes" SLOs at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos); gateway availability inherits SLI-1 | **PARTIAL** — prod enforce flip not yet thrown (`RECIPE_MODE=shadow`, MNE-231): enforcement is screen/observe + verdict headers, not blocking. 1-10-60 detect/contain numbers are deferred (see deferral list item 4) |
+| **S4** | Alignment just works | **99%** of integrity checkpoints processed within **5 minutes** (rolling 7-day) | SLI-3 (Observer Lag, `scale/slos.md`); matches trust-page "Trace freshness p95 ≤ 5 min" | **YES** |
+| **S5** | Sign in, create an org/agent, get a key — safely | Control-plane `/v1` availability **≥ 99.9%** (30-day); **p95 ≤ 250 ms** (excl. LLM-proxy endpoints) | "API availability" + "API P95 latency" at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos) | **PARTIAL** — no dedicated signup/auth alert wired yet (MNE-357 item 3) |
+| **S6** | Show my compliance team what my agents did | Every governed decision recallable as an AP-trace within **5 minutes p95** | SLI-3 / trust-page Observer SLO | **YES** for recall. Audit export bundle not independently exercised — excluded from the committed number |
+| **S7** | I can trust the number | Trust-Rating lookups **p99 < 200 ms**, availability **≥ 99.9%** | SLI-4 (`scale/slos.md`) | **PARTIAL** — SLI-4 burn-rate alert documented but no checked-in alerting rule implements it. On-chain anchoring is on the deferral list (item 2) |
+| **S8** | I can buy it | **≥ 99.5%** of billing webhook events delivered and processed within **10 minutes**, driving automatic entitlement updates | SLI-5 (`scale/slos.md`) + trust-page 10-minute webhook SLO; billing webhook-health table (migration 023) | **YES** for webhook delivery. Checkout→entitlement E2E not exercised (trials are comped) — excluded from the committed number |
+| **S9** | When it breaks, we both find out | Public status-page first update **≤ 30 minutes** after SEV-1/SEV-2 declaration | Already committed on [SLA & Incident Response](/guides/sla-and-incident-response); [status.mnemom.ai](https://status.mnemom.ai) is live | **YES** — internal-paging half is MNE-357 O3, not a customer SLO |
+| **S10** | I can run it where my data must live | GDPR Article-17 erasure cascade completes within **5 minutes p99** (tombstone < 1 s) | Already committed on [GDPR Data Subject Rights](/guides/gdpr-data-subject-rights); internal stuck→1 h P1 alert in `scale/slos.md` | **YES** for erasure. Managed EU residency has no SLO — see deferral list item 3. Self-host (Enterprise) is the documented boundary path |
+
+---
+
+## The honest deferral list — explicitly out of launch scope
+
+The following are **not committed** at launch. Each entry names the supported surface and the condition for re-evaluation.
+
+1. **AEGIS cross-tenant adaptive layer (Managed-Rule recipe tier).** The gateway runs `RECIPE_MODE=shadow`; cross-tenant recipes observe, never block. The seven AEGIS SLOs on [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos) open their measurement window at GA. Per-agent protection cards are the supported launch enforcement surface.
+
+2. **On-chain anchoring (Base L2 reputation registry + Merkle anchor).** No SLO. The pipeline is fail-open with no alerting, runbook, reorg handling, or wallet monitoring. The **off-chain Trust Rating is the supported launch surface**; on-chain reads are best-effort verification, not a commitment. See [On-chain verification](/guides/on-chain-verification) for current capability scope.
+
+3. **Managed EU data residency.** The managed cloud is single-region US (Supabase). An EU data boundary requires self-host (Enterprise). A named managed EU region is deferred with no committed date.
+
+4. **Live blocking on production traffic (the S3 enforce flip).** Until MNE-231 lands, protection on production traffic is screening + verdict headers + AIP detection evidence — not synchronous blocking. No 1-10-60 detect/contain numbers are published for the blocking path.
+
+5. **Self-serve checkout end-to-end.** Trials are comped; the checkout→webhook→entitlement path carries no E2E SLO. The webhook-delivery SLO in S8 is the committed slice.
+
+6. **`/.well-known` agent discovery.** `agents.txt` is served at the web root only; `/.well-known` endpoints are deferred.
+
+7. **Localized (EFIGS) documentation.** The marketing site ships EFIGS; docs are English-only at launch.
+
+8. **Per-scenario cost/COGS SLOs.** Objective O9 is deferred to T1.
+
+9. **Risk-engine SLO calibration.** Risk traffic has been dry since 2026-03-09; risk-proof SLIs inherit verdict-path targets as a placeholder (`scale/slos.md` OQ4).
+
+10. **Error-budget deploy-gating policy.** Burn-rate alerts exist; the deploy-freeze policy is tracked at MNE-376 and is not yet in effect.
+
+---
+
+## See also
+
+- [SLA & Incident Response](/guides/sla-and-incident-response) — Tier-based contractual uptime targets, RTO, RPO, and incident communication
+- [GDPR Data Subject Rights](/guides/gdpr-data-subject-rights) — Erasure cascade details (S10)
+- [On-chain verification](/guides/on-chain-verification) — Current scope of the Base L2 anchoring pipeline (deferral item 2)
+- [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos) — Live component-level SLO catalog
+- [status.mnemom.ai](https://status.mnemom.ai) — Real-time operational status (S9)
