@@ -76,9 +76,13 @@ jobs:
   #
   # Comment grammar (free text like "adw fix lint issues" must NOT spawn a run): the
   # comment body must START WITH exactly one recognized command line —
-  #   `adw run` / `adw zte`  → full pipeline
+  #   `adw run` / `adw zte`  → full pipeline, from SCRATCH (--force-fresh): on an issue
+  #                            that already has an open ADW PR, re-implement against that
+  #                            PR's branch under a fresh adw_id rather than resuming at
+  #                            ship — so a code-defect CI failure isn't a dead end (MNE-406)
   #   `adw ship`             → ship-only (merge the existing PR)
-  #   `adw retry`            → full pipeline (re-run from scratch)
+  #   `adw retry`            → full pipeline that RESUMES the open PR at its failed phase
+  #                            (no --force-fresh) — ship-only resume when a PR exists
   #   `adw sync` / `adw rebase` → sync-only (re-sync the PR branch, no merge)
   # Each is matched bare and with a trailing newline (both LF and CRLF, since the
   # GitHub web UI submits CRLF line endings) so a one-line comment and a command
@@ -256,13 +260,15 @@ jobs:
         run: |
           # check_suite resume: the gate verified the resume conditions and
           # recovered the issue; the mode is always ship-only (resume the parked
-          # ship against the existing PR — never a fresh full pipeline).
+          # ship against the existing PR — never a fresh full pipeline, so never
+          # force-fresh either).
           if [ "$EVENT_NAME" = "check_suite" ]; then
             {
               echo "issue=$RESUME_ISSUE"
               echo "adw_id="
               echo "ship_only=true"
               echo "sync_only=false"
+              echo "force_fresh=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -274,26 +280,43 @@ jobs:
           # comment grammar (first token only) wins over labels when both are present;
           # the `if:` guard already rejected free text, so only recognized commands
           # reach here. `cmd` is the first whitespace-delimited word PAIR of the body.
+          #
+          # force_fresh (MNE-406): a FULL run on an issue that already has an open ADW
+          # PR re-runs the pipeline from scratch (fresh adw_id, re-implement against the
+          # existing branch) rather than resuming at ship — the documented `adw run` /
+          # `adw zte` "re-run from scratch" semantics. `adw retry` deliberately OMITS it
+          # so it keeps the ship-only resume behavior. Inert when no open PR exists
+          # (the worker only adopts a branch when one is found). Never set on ship-only
+          # / sync-only (those don't run the full pipeline).
           ship_only=false
           sync_only=false
+          force_fresh=false
           if [ "$EVENT_NAME" = "issue_comment" ]; then
             cmd=$(printf '%s' "$COMMENT_BODY" | head -n1 | awk '{print $1, $2}')
             case "$cmd" in
               "adw ship")            ship_only=true ;;
               "adw sync"|"adw rebase") sync_only=true ;;
-              # "adw run" / "adw zte" / "adw retry" → full pipeline (both false).
+              "adw run"|"adw zte")   force_fresh=true ;;  # re-run from scratch (MNE-406)
+              # "adw retry" → full pipeline that RESUMES (force_fresh stays false).
             esac
           else
             # issues / dispatch: derive the mode from labels (ship wins over sync,
-            # both win over a full adw:zte run).
+            # both win over a full adw:zte run). A full adw:zte LABEL run is force-fresh
+            # too (matches the `adw zte` comment command's from-scratch semantics) — BUT
+            # only when no explicit adw_id was supplied: a workflow_/repository_dispatch
+            # that passes an adw_id is documented as a RESUME of that specific run, so it
+            # keeps resume semantics (force_fresh stays false), mirroring `adw retry`.
             if [ "$HAS_SHIP_LABEL" = "true" ]; then
               ship_only=true
             elif [ "$HAS_SYNC_LABEL" = "true" ]; then
               sync_only=true
+            elif [ -z "$ADW_ID" ]; then
+              force_fresh=true
             fi
           fi
           echo "ship_only=$ship_only" >> "$GITHUB_OUTPUT"
           echo "sync_only=$sync_only" >> "$GITHUB_OUTPUT"
+          echo "force_fresh=$force_fresh" >> "$GITHUB_OUTPUT"
 
       - name: Run the worker
         env:
@@ -308,6 +331,19 @@ jobs:
           # that fallback — do not drop those when editing this workflow.
           ADW_TOKEN_MINTED_AT: ${{ steps.mint.outputs.minted_at }}
           ADW_FALLBACK_TOKEN: ${{ github.token }}
+          # In-run token refresh (MNE-407). The App installation token above lives
+          # ~1h; long runs (aap test suites, multi-phase website work) hit that cliff
+          # almost deterministically, each death costing a full retry cycle. With the
+          # App credentials here, the worker mints a FRESH installation token before
+          # the cliff and hot-swaps it (env + gh auth + the git push credential),
+          # resetting the cliff clock so the run continues past ~1h instead of dying.
+          # The refresh is fail-SAFE: absent these vars (or on any mint failure) the
+          # worker degrades to MNE-393's checkpoint + last-gasp surface unchanged.
+          # ADW_APP_PRIVATE_KEY is the SAME secret the mint step above already reads —
+          # the worker never logs it. The installation id is looked up from the App
+          # JWT when ADW_APP_INSTALLATION_ID is unset, so no extra secret is needed.
+          ADW_APP_ID: ${{ vars.ADW_APP_ID }}
+          ADW_APP_PRIVATE_KEY: ${{ secrets.ADW_APP_PRIVATE_KEY }}
           # work_root = the checkout, so the capability manifest + run state + any
           # worktrees resolve under the repo. cwd is already the repo (origin set).
           MNEMOM_ADW_HOME: ${{ github.workspace }}
@@ -324,6 +360,13 @@ jobs:
           # the check_suite trigger above resumes --ship-only when checks finish.
           # Cross-run resume bound: ADW_MAX_SHIP_RESUMES (worker default 5).
           ADW_EVENT_DRIVEN_SHIP: "true"
+          # Realtime session-event tap (observability) — OFF unless both are set.
+          # The worker mirrors its streamed SDK messages to the fleet event hub
+          # best-effort (never blocks/breaks the run); with either unset the tap is a no-op, so this is
+          # safe to leave unconfigured. Provision the repo/org var + secret to light
+          # it up. See src/mnemom_adw/event_stream.py.
+          ADW_EVENT_INGEST_URL: ${{ vars.ADW_EVENT_INGEST_URL }}
+          ADW_EVENT_INGEST_TOKEN: ${{ secrets.ADW_EVENT_INGEST_TOKEN }}
           # The issue number, adw id, and repo slug reach the worker only as quoted
           # shell vars — never interpolated into the command body (they can carry
           # attacker-controlled input on workflow_dispatch / repository_dispatch).
@@ -333,6 +376,11 @@ jobs:
           # --adw-id's VALUE comes from "$ADW_ID"; this boolean only decides whether the
           # literal --adw-id flag is emitted (a hostile adw_id can never become a flag).
           WANT_ADW_ID: ${{ steps.ctx.outputs.ship_only != 'true' && steps.ctx.outputs.sync_only != 'true' && steps.ctx.outputs.adw_id != '' }}
+          # force-fresh (MNE-406): a full-pipeline `adw run` / `adw zte` re-runs from
+          # scratch (re-implement against the open PR's branch) instead of resuming at
+          # ship. Set only on a full run (the ctx step never emits it for ship/sync), so
+          # ship-only / sync-only can never pass --force-fresh. `adw retry` keeps resume.
+          WANT_FORCE_FRESH: ${{ steps.ctx.outputs.force_fresh == 'true' }}
           # Dry-run is an explicit opt-in (MNE-389): ONLY a workflow_dispatch with
           # dry_run=true passes --dry-run. Labels, comment commands, repository_dispatch,
           # and an unqualified manual dispatch all run LIVE (merge on green) — previously
@@ -351,8 +399,11 @@ jobs:
           [ "$WANT_ADW_ID" = "true" ] && adw_id_flag="--adw-id"
           dry_run_flag=""
           [ "$WANT_DRY_RUN" = "true" ] && dry_run_flag="--dry-run"
+          force_fresh_flag=""
+          [ "$WANT_FORCE_FRESH" = "true" ] && force_fresh_flag="--force-fresh"
           mnemom-adw "$ISSUE" --repo "$GITHUB_REPOSITORY" \
             ${adw_id_flag:+"$adw_id_flag" "$ADW_ID"} \
             ${{ steps.ctx.outputs.ship_only == 'true' && '--ship-only' || '' }} \
             ${{ steps.ctx.outputs.sync_only == 'true' && '--sync-only' || '' }} \
+            ${force_fresh_flag:+"$force_fresh_flag"} \
             ${dry_run_flag:+"$dry_run_flag"}
