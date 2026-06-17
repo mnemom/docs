@@ -43,3 +43,15 @@ grep -rn "agent-integrity-protocolcol" .
 ```
 
 Both commands return zero output after the fix.
+
+### PyPI gate outcome (advisory: double-404 edge case)
+
+Before editing, the implementing agent verified:
+- `agent-integrity-protocol` → PyPI **200** (the canonical name is published; edits are safe)
+- `agent-integrity-proto` → PyPI **404** (the wrong name is not published; no rollback risk)
+
+If a future re-run of this class of fix encounters both names returning 404 (neither name published
+on PyPI), that is an ambiguous state with no ground truth — **abort to human before proceeding**;
+do not fall through to edits based solely on npm-name coherence. If `agent-integrity-protocol`
+returns 200 *and* `agent-integrity-proto` also returns 200, abort: the wrong name is published and
+the rename cannot proceed until PyPI is corrected first.
