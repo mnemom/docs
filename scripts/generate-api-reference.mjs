@@ -17,6 +17,12 @@
 //
 // Usage:  node scripts/generate-api-reference.mjs           (write pages + nav)
 //         node scripts/generate-api-reference.mjs --dry-run (report only)
+//         node scripts/generate-api-reference.mjs --check   (orphan-drift audit;
+//             exit 1 if any endpoint page's openapi: directive resolves to no
+//             spec operation — i.e. it documents an endpoint the committed
+//             contract no longer defines. Advisory: opt-in, not wired into a
+//             required gate. Catches drift the add/refresh passes can't, since
+//             those only project ops that DO exist.)
 
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -27,6 +33,7 @@ const SPEC = join(ROOT, "api-reference", "openapi.json");
 const ENDPOINT_DIR = join(ROOT, "api-reference", "endpoint");
 const DOCS_JSON = join(ROOT, "docs.json");
 const DRY = process.argv.includes("--dry-run");
+const CHECK = process.argv.includes("--check");
 const METHODS = ["get", "post", "put", "patch", "delete"]; // also = display order within a resource
 
 // Endpoints intentionally NOT published (tracked in Linear). Keys are "METHOD /path".
@@ -98,9 +105,38 @@ const spec = JSON.parse(readFileSync(SPEC, "utf8"));
 // Already-projected: by openapi-directive key AND by filename (preserves hand-written pages).
 const existingFiles = new Set(readdirSync(ENDPOINT_DIR).filter((f) => f.endsWith(".mdx")));
 const projectedKeys = new Set();
+const directiveByFile = new Map(); // file -> "METHOD path" (for the orphan audit)
 for (const f of existingFiles) {
   const m = readFileSync(join(ENDPOINT_DIR, f), "utf8").match(/^openapi:\s*"([A-Z]+)\s+([^"]+)"/m);
-  if (m) projectedKeys.add(`${m[1]} ${m[2]}`);
+  if (m) {
+    projectedKeys.add(`${m[1]} ${m[2]}`);
+    directiveByFile.set(f, { method: m[1], path: m[2] });
+  }
+}
+
+// --check: orphan-drift audit. Every endpoint page carrying an openapi: directive
+// must resolve to a real operation in the committed spec. A page whose directive
+// matches no spec op documents an endpoint the contract no longer defines — it
+// renders as a broken/empty reference page (e.g. a stub left behind when an op was
+// removed from the published slice; the add/refresh passes never delete these).
+// Advisory: opt-in flag, exits 1 so a (non-required) CI step can surface it.
+if (CHECK) {
+  const orphans = [];
+  for (const [f, { method, path }] of directiveByFile) {
+    const op = (spec.paths?.[path] || {})[method.toLowerCase()];
+    if (!op) orphans.push(`${f}: ${method} ${path}`);
+  }
+  if (orphans.length) {
+    process.stderr.write(
+      `generate-api-reference --check: ${orphans.length} ORPHAN directive(s) — ` +
+        `endpoint page(s) reference an operation absent from the committed spec:\n  ` +
+        orphans.sort().join("\n  ") +
+        `\nRemove the stale page(s) + their docs.json nav refs, or restore the op upstream.\n`,
+    );
+    process.exit(1);
+  }
+  process.stderr.write(`generate-api-reference --check: ✓ all ${directiveByFile.size} directive pages resolve to a spec op.\n`);
+  process.exit(0);
 }
 
 // Collect ops to generate.
