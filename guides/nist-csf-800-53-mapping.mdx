@@ -1,0 +1,180 @@
+---
+title: "NIST CSF / 800-53 Control Mapping"
+description: "How Mnemom's shipped controls map to the NIST Cybersecurity Framework 2.0 functions and NIST SP 800-53 Rev. 5 control families. Coverage mechanisms named explicitly; gaps stated as gaps."
+sidebarTitle: "NIST CSF / 800-53"
+icon: "shield-check"
+---
+
+# NIST CSF / 800-53 control mapping
+
+Enterprise and public-sector buyers evaluating Mnemom's security posture need a recognizable controls cross-reference alongside the AI-specific frameworks. This appendix maps Mnemom's shipped controls to the **NIST Cybersecurity Framework 2.0** (CSF 2.0) functions and to relevant **NIST SP 800-53 Rev. 5** control families.
+
+The same honesty discipline applied in the [OWASP Agentic Top 10 mapping](/guides/owasp-agentic-top-10) applies here: where a control claim is backed by a concrete shipped mechanism, the mechanism is named. Where coverage is partial or absent, the gap is stated.
+
+> **Source pins.** CSF 2.0 function identifiers (GV, ID, PR, DE, RS, RC) and category codes (e.g., PR.AA, DE.CM) are pinned to the [NIST Cybersecurity Framework 2.0](https://doi.org/10.6028/NIST.CSWP.29) (NIST, February 2024). Control identifiers (e.g., AC-2, AU-9) are pinned to [NIST SP 800-53 Rev. 5](https://doi.org/10.6028/NIST.SP.800-53r5) (September 2020, including December 2020 errata). GV (GOVERN) is a new function added in CSF 2.0; buyers working against CSF 1.1 can skip that section.
+
+---
+
+## Mapping by CSF 2.0 function
+
+### GOVERN (GV) — new in CSF 2.0
+
+Organizational context, risk management strategy, and policy — the preconditions for effective cybersecurity.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **GV.OC** — Organizational Context | [Alignment Card](/concepts/alignment-cards) declares each agent's `principal`, autonomy envelope, and escalation triggers | PL-1 | The `principal` field identifies the accountable human or org; the autonomy envelope bounds what the agent may do |
+| **GV.RM** — Risk Management Strategy | [Trust posture](/concepts/trust-posture) and [risk assessment API](/api-reference/risk-overview) provide per-agent and per-team risk scores with evidence chains | RA-1, RA-3 | Trust posture aggregates alignment, protection, and reputation signals into a unified risk view |
+| **GV.PO** — Policy | [Policy DSL](/specifications/policy-dsl) and [CLPI policy engine](/concepts/clpi) enforce programmatic security policy on agent behavior; rules are version-controlled | PL-1, CM-6 | Policy rule changes are audited |
+| **GV.SC** — Supply Chain Risk | [AEGIS](/concepts/aegis) detects runtime behavior deviation consistent with a compromised dependency or substrate | SA-12 | AEGIS covers the runtime-behavior dimension; build-time package provenance is customer responsibility — see [supply-chain trust](/guides/supply-chain-trust) and the [SA-12 gap note](#sa-12--supply-chain-protection-build-time) |
+
+---
+
+### IDENTIFY (ID)
+
+Understanding the organization's current cybersecurity risk across assets, systems, data, and capabilities.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **ID.AM (inventory)** — Asset Management | Agent registration: alignment cards carry a stable `agent_id`, `principal`, capability declarations, and bounded action scope; [fleet topology](/api-reference/endpoint/get-agents-topology) queries the full agent graph | CM-8, IA-3 | Every agent is inventoried with identity, declared capabilities, and assigned principal at registration time |
+| **ID.AM (configuration history)** — Asset Management | [Posture versioning](/concepts/posture-versioning) and [card amendments](/api-reference/endpoint/get-agents-agent-id-card-amendments) track configuration history with a queryable amendment trail | CM-2, CM-8 | Changes to alignment cards and postures are recorded without data loss |
+| **ID.RA** — Risk Assessment | Risk assessment API (`POST /v1/risk/assess`, `POST /v1/risk/assess/team`) returns per-agent and per-team risk scores; proofs are queryable via `/v1/risk/proofs/{proof_id}` | RA-3 | Risk assessment feeds the [trust posture](/concepts/trust-posture) computation |
+| **ID.RA** — Risk Assessment | [Fault-line analysis](/guides/fault-line-analysis) identifies structural weaknesses in agent-team configuration | RA-3, RA-5 | Intelligence API; available on Enterprise tier |
+| **ID.RA** — Risk Assessment | [Reputation scoring](/concepts/reputation-scores) and [AEGIS threat advisories](/concepts/advisories) surface known-bad actor infrastructure; advisories are STIX-aligned | RA-3, RA-5 | AEGIS aggregates cross-tenant signals; advisories feed the [IOC feed](/guides/ioc-feed-consumption) |
+| **ID.IM** — Improvement | Managed Rules signed-promotion audit chain; AEGIS false-positive telemetry loop | CA-7 | New threat patterns undergo a 24-hour observe soak and dual-control CHECK constraint before GA promotion |
+
+---
+
+### PROTECT (PR)
+
+Safeguards that manage cybersecurity risk — preventing or limiting the impact of a cybersecurity event.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **PR.AA** — Identity Management & Access Control | Three auth patterns: session cookie (AES-256-GCM, HttpOnly/Secure/SameSite=Lax), bearer JWT (JWKS-verified on every request), API key (SHA-256 hash stored — never plaintext) | IA-2, IA-5, AC-3 | The auth layer dual-resolves all three patterns into the same downstream principal |
+| **PR.AA** — Identity Management & Access Control | RBAC: Owner / Admin / Member roles enforced at the API layer via Supabase row-level security; org-scoped API keys inherit the creating role's permissions | AC-2, AC-3, AC-6 | Role-based access is the primary authorization surface |
+| **PR.AA** — Identity Management & Access Control | MFA (TOTP): `POST /v1/auth/mfa/enroll`, `POST /v1/auth/mfa/verify`; aal1 tokens never reach JavaScript | IA-2(1) | MFA step-up uses a short-lived `mnemom_mfa_pending` cookie between sign-in and verification |
+| **PR.AA** — Identity Management & Access Control | SSO (SAML/OIDC): `PUT /v1/orgs/{org_id}/sso`; SSO state is HMAC-signed to prevent CSRF | IA-8 | Federated identity for enterprise customers |
+| **PR.AA** — Identity Management & Access Control | API key rotation: `POST /v1/orgs/{org_id}/api-keys/{key_id}/rotate`; agent re-key: `POST /v1/agents/{agent_id}/rekey` — prior credential is invalidated, no key material is stored | IA-5(1) | Rotation is zero-downtime |
+| **PR.DS** — Data Security | TLS 1.2+ on all endpoints — Mnemom Gateway (Cloudflare Workers edge), Mnemom API (`api.mnemom.ai`), webhook delivery, cross-protocol communication | SC-8, SC-13 | Cloudflare terminates and re-encrypts; certificate management is automatic |
+| **PR.DS** — Data Security | Encryption at rest: Supabase Postgres with encryption at rest covering all persisted protocol artifacts (AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts) | SC-28 | No plaintext storage of any protocol artifact |
+| **PR.DS** — Data Security | Thinking block content is never written to any persistent storage — only its SHA-256 hash is retained in the Integrity Checkpoint | SI-12 | Protects agent reasoning privacy while preserving tamper evidence for audit |
+| **PR.DS** — Data Security | Back-door checkpoint (Safe House): outbound DLP screens for data exfiltration against declared `bounded_actions`; detects bulk-data requests and covert-channel patterns; also enforced independently by the Policy Engine | AC-4, SI-12 | `data_exfiltration` threat type; back-door checkpoint runs after agent turn, before response delivery |
+| **PR.PS** — Platform Security | Alignment Card `bounded_actions` and `forbidden_actions` enforce least-privilege action scopes per agent | AC-6, CM-6 | `bounded_actions` is the primary constraint surface; the Policy Engine enforces before any action reaches an external API |
+| **PR.PS** — Platform Security | CLPI Policy Engine evaluates every agent action against declared Policy DSL rules before execution | AC-3, CM-6 | Policy rules are version-controlled and audited; evaluation is synchronous |
+| **PR.PS** — Platform Security | HMAC-SHA256 authentication on all webhook deliveries (AIP webhooks and org webhooks); replay window recommended ≤ 5 minutes | SC-8, SC-13 | Prevents signal forgery; receivers should reject stale signals |
+
+---
+
+### DETECT (DE)
+
+Identifying cybersecurity events through continuous monitoring and adverse event analysis.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **DE.CM** — Continuous Monitoring | AIP real-time integrity checkpoints: an analysis LLM evaluates agent thinking blocks in the ~2-second window between reasoning and action; produces `clear` / `review_needed` / `boundary_violation` verdicts | SI-4, CA-7 | Anthropic native thinking blocks (confidence 1.0), OpenAI `reasoning_content` (0.9), Google Gemini thinking parts (0.9); models without exposed thinking produce synthetic `clear` verdicts — a documented gap |
+| **DE.CM** — Continuous Monitoring | AAP behavioral drift detection: sustained similarity drop below threshold across agent turns triggers drift alerts | SI-4, CA-7 | Post-hoc; operates 30–60 seconds after the action |
+| **DE.CM** — Continuous Monitoring | AEGIS cross-tenant substrate fingerprinting: behavior deviation consistent with a compromised dependency or substrate is surfaced across tenants | SI-4, CA-7 | Cross-tenant aggregation; per-tenant visibility of substrate-deviation signals |
+| **DE.CM** — Continuous Monitoring | Reputation scoring: per-agent and per-team scores computed from alignment, integrity, drift, and governance history; queryable and comparable | CA-7, RA-3 | Badge and comparison endpoints available; score is a lagging indicator, not a real-time signal |
+| **DE.AE** — Adverse Event Analysis | Safe House L1 pattern matching: 19 regex families across override, jailbreak, and social engineering phrases — synchronous, near-zero latency | SI-3, SI-4 | Covers `prompt_injection`, `indirect_injection`, `social_engineering`, `agent_spoofing`, `bec_fraud` threat types |
+| **DE.AE** — Adverse Event Analysis | Safe House L2 LLM analysis: compound confidence scoring when L1 produces a non-trivial signal or the message touches sensitive action categories; context-sensitive | SI-3, SI-4 | "you are now" in creative writing scores differently than in capability-expansion context — L2 provides the disambiguation |
+| **DE.AE** — Adverse Event Analysis | Safe House L3 session model: cross-turn behavioral trajectory tracking for `hijack_attempt` — topic coherence, escalating action scope, identity drift, pivot-after-trust-building | SI-4, CA-7 | Default 0.7 confidence threshold routes to human review rather than autonomous block; configurable via the [protection card](/concepts/protection-card) |
+| **DE.AE** — Adverse Event Analysis | Canary tripwires: synthetic credentials placed in agent contexts surface infrastructure associated with active injection campaigns via AEGIS cross-tenant campaign detection | SI-4 | Confirmed canary hits promote to Managed Rules |
+| **DE.AE** — Adverse Event Analysis | Governance signals: structured events surfacing alignment drift, integrity violations, and policy violations for operator review; queryable and subscribable | AU-2, CA-7 | Escalation rules and notification destinations configurable per org via `/v1/orgs/{org_id}/governance/escalation-rules` |
+
+---
+
+### RESPOND (RS)
+
+Taking action regarding a detected cybersecurity incident.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **RS.MA** — Incident Management | Four enforcement modes per agent: **Observe** (log only), **Nudge** (warn + log), **Enforce** (block + log), **Sovereign** (synchronous block, no async pass-through) | IR-4 | Mode set per agent via the protection card; Sovereign is the highest-assurance mode for regulated workloads |
+| **RS.MA** — Incident Management | Safe House quarantine: a blocked agent turn is held; operator can release, report, or delete via `/v1/safe-house/quarantine` | IR-4 | Quarantine preserves the full message and evaluation for forensic review |
+| **RS.MA** — Incident Management | Agent containment: pause, resume, kill, reactivate at the org level — `POST /v1/orgs/{org_id}/agents/{agent_id}/pause` and related endpoints | IR-4 | Kill is reversible via reactivate; the agent's audit trail and alignment card history are preserved |
+| **RS.AN** — Incident Analysis | Governance signal workflow: signals include evidence, severity, and affected alignment card fields; operators acknowledge, dismiss, or resolve via the signal API | IR-4, IR-5 | `/v1/governance/signals/{signal_id}/acknowledge` etc. |
+| **RS.AN** — Incident Analysis | AIP concern detail: each Integrity Checkpoint records concern category, severity, description, and a quoted evidence excerpt (max 200 characters) for human review; evidence redaction configurable | IR-4, AU-3 | Evidence excerpt is an intentional tradeoff between reasoning privacy and reviewability |
+| **RS.CO** — Incident Response Reporting | Webhook notifications: org webhooks and AIP webhooks deliver governance events, integrity verdicts, and threat signals to registered endpoints; HMAC-SHA256 authenticated | IR-6 | Replay-delivery, health, and event-replay endpoints available |
+| **RS.CO** — Incident Response Reporting | Responsible disclosure: 48-hour acknowledgment, 7-day fix/mitigation target for reported vulnerabilities via GitHub Security Advisories — not public issues | IR-6, IR-7 | See [SECURITY.md](https://github.com/mnemom/mnemom-platform/security) |
+| **RS.MI** — Incident Mitigation | Policy Engine rule enforcement blocks out-of-scope actions before they reach external APIs | IR-4, AC-3 | Primary mitigation for `privilege_escalation` and tool-misuse scenarios |
+| **RS.MI** — Incident Mitigation | Human escalation triggers: `autonomy_envelope.escalation_triggers` in the Alignment Card declare conditions requiring human review before action; enforced by the gateway | IR-4 | Escalation is policy-declared at card design time |
+
+---
+
+### RECOVER (RC)
+
+Restoring capabilities or services impaired by a cybersecurity incident.
+
+| CSF category | Mnemom mechanism | 800-53 controls | Notes |
+|---|---|---|---|
+| **RC.RP** — Incident Recovery Plan | [Trust recovery guide](/guides/trust-recovery): documented procedure for restoring an agent's trust posture after an integrity incident — covering reputation recovery, card amendment, and operator steps | CP-10, IR-4 | The guide is the recovery playbook; no automated recovery orchestration is shipped |
+| **RC.RP** — Incident Recovery Plan | Agent restore: `POST /v1/agents/{agent_id}/restore` reverses a tombstone; agent re-key: `POST /v1/agents/{agent_id}/rekey` issues new credentials; both preserve the full audit trail | CP-10 | Restore is the paired inverse of tombstone |
+| **RC.IM** — Incident Recovery Improvement | Card amendments: `GET /v1/agents/{agent_id}/card-amendments` surfaces the full history of alignment card changes post-incident for post-mortem review | CM-2, CA-7 | Amendment trail is an append-only record |
+| **RC.IM** — Incident Recovery Improvement | CLPI lifecycle governance: agent lifecycle states (active, paused, tombstoned) are tracked with full history; `POST /v1/reputation/{agent_id}/recompute` triggers fresh reputation computation after recovery actions | CP-10, CA-7 | Reputation recomputation reflects the updated post-incident history |
+
+---
+
+## NIST 800-53 family index
+
+Reverse view: by control family, which Mnemom mechanisms apply. Coverage labels match the convention in the [OWASP Agentic Top 10 mapping](/guides/owasp-agentic-top-10): **Shipped** (concrete mechanism present), **Partial** (some controls covered with documented gaps), **Gap** (family not addressed as a platform control).
+
+| 800-53 family | Status | Shipped mechanism |
+|---|---|---|
+| **AC** — Access Control | **Shipped** | RBAC (Owner/Admin/Member), bearer JWT, API key scoping, `bounded_actions` enforcement, Policy Engine per-action control, outbound data-flow enforcement |
+| **AT** — Awareness and Training | **Gap** | No security awareness or training module is shipped as a platform feature; operator training is the customer's responsibility — see [gap note](#at-1-at-2--awareness-and-training) |
+| **AU** — Audit and Accountability | **Shipped** | AP-Traces (append-only, hash-chained), Integrity Checkpoints, Transparency Log (Merkle tree), Ed25519 verdict signatures, ZK proofs (SP1 STARK), on-chain Merkle anchoring, configurable retention (90+ days recommended), queryable trace API — audit chain is a core Mnemom design goal |
+| **CA** — Assessment, Authorization, and Monitoring | **Partial** | AIP continuous monitoring, AAP drift detection, AEGIS substrate fingerprinting, governance signals shipped. SOC 2 Type II readiness in progress — no Type II report currently available; independent formal assessment is an NDA artifact |
+| **CM** — Configuration Management | **Shipped** | Alignment Card as agent configuration baseline, posture versioning, card amendment history, Policy DSL version control |
+| **CP** — Contingency Planning | **Partial** | Trust recovery guide and agent restore/reactivate document recovery procedures. Database backups are Supabase-managed (vendor-side); no published customer-facing RTO/RPO for data recovery — see [CP-9 gap note](#cp-9--system-backup) |
+| **IA** — Identification and Authentication | **Shipped** | Session cookie (AES-256-GCM), bearer JWT (JWKS-verified), API key (SHA-256 hash stored), MFA (TOTP), SSO (SAML/OIDC), API key rotation, agent re-key |
+| **IR** — Incident Response | **Shipped** | Four enforcement modes, quarantine, agent containment, governance signal workflow, webhook notifications, responsible disclosure (48h ack / 7-day fix target) |
+| **MA** — Maintenance | **Partial** | API key rotation and agent re-keying shipped. Hardware maintenance not applicable (cloud SaaS) |
+| **MP** — Media Protection | **Gap** | Not applicable to a cloud SaaS deployment; Mnemom manages no physical media — see [gap note](#mp--media-protection) |
+| **PE** — Physical and Environmental Protection | **Gap** | Inherited from Cloudflare (gateway) and Supabase (database); Mnemom publishes no physical security attestations — see [gap note](#pe--physical-and-environmental-protection) |
+| **PL** — Planning | **Partial** | Alignment Card principal and autonomy envelope serve as per-agent planning artifacts; no enterprise security plan feature is shipped as a platform control |
+| **RA** — Risk Assessment | **Shipped** | Risk assessment API, fault-line analysis, AEGIS threat advisories, reputation scoring |
+| **SA** — System and Services Acquisition | **Partial** | AEGIS runtime behavior-deviation detection covers the runtime supply-chain dimension; build-time package provenance is customer responsibility — see [gap note](#sa-12--supply-chain-protection-build-time) |
+| **SC** — System and Communications Protection | **Shipped** | TLS 1.2+ on all endpoints, AES-256-GCM session tokens, HMAC-SHA256 webhook authentication, encryption at rest (Supabase Postgres) |
+| **SI** — System and Information Integrity | **Shipped** | Safe House L1/L2/L3 detection (19 pattern families + LLM analysis + session model), AIP integrity checkpoints, thinking block content never persisted, back-door DLP, Managed Rules pattern library |
+
+---
+
+## Gaps and limits
+
+### PE — Physical and environmental protection
+
+Mnemom is a cloud-hosted SaaS. Physical and environmental controls are inherited from Cloudflare (gateway) and Supabase (database). Mnemom publishes no physical security attestations of its own. Refer to Cloudflare's and Supabase's SOC 2 reports for physical-layer coverage.
+
+### CA-2, CA-8 — Security assessments and penetration testing
+
+No automated vulnerability scanning tool is shipped as a documented platform feature. Penetration test summaries from the most recent third-party engagement are available to enterprise customers under NDA via the dashboard's Enterprise contact form. SOC 2 Type II is in progress; no report is currently available — see the [compliance posture page](/guides/compliance) for current status.
+
+### SA-12 — Supply chain protection (build-time)
+
+AEGIS covers the runtime-behavior dimension of supply chain risk: behavior deviation consistent with a compromised dependency or substrate is detected cross-tenant. This does not replace build-time package provenance. For the full picture, pair AEGIS with SLSA/Sigstore package provenance on the customer's build pipeline. See [supply-chain trust](/guides/supply-chain-trust).
+
+### CP-9 — System backup
+
+Database backups are managed by Supabase (Mnemom's database vendor). Mnemom does not publish customer-facing backup retention SLAs or RTO/RPO targets for data recovery. Availability SLOs — uptime, propagation latency, failover — are published at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos); these cover service availability, not data recovery.
+
+### AT-1, AT-2 — Awareness and training
+
+No security awareness or training module is shipped as a platform feature. Security training for Mnemom operators is the customer's responsibility.
+
+### MP — Media protection
+
+Not applicable to a cloud SaaS deployment. Mnemom manages no physical media.
+
+---
+
+## See also
+
+- [Compliance posture](/guides/compliance) — Status across EU AI Act, SOC 2, HIPAA, GDPR, FedRAMP, and other frameworks
+- [EU AI Act compliance](/guides/eu-compliance) — Article 50 transparency obligation mapping (AAP + AIP)
+- [OWASP Agentic Top 10 mapping](/guides/owasp-agentic-top-10) — Safe House threat patterns mapped to ASI01–ASI10
+- [Security & trust model](/guides/security-trust-model) — Authentication, encryption, and full threat model
+- [Safe House threat model](/guides/safe-house-threat-model) — Detection mechanisms and confidence scoring for each threat pattern
+- [Supply-chain trust](/guides/supply-chain-trust) — AEGIS runtime detection paired with build-time provenance
+- [NIST Cybersecurity Framework 2.0](https://doi.org/10.6028/NIST.CSWP.29) — Authoritative framework this mapping references
+- [NIST SP 800-53 Rev. 5](https://doi.org/10.6028/NIST.SP.800-53r5) — Control catalog this mapping references
