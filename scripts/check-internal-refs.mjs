@@ -28,7 +28,10 @@ const SELFTEST = process.argv.includes("--self-test");
 // ADR ref is more likely an accidental internal leak, so it stays banned there).
 const RULES = [
   { label: "private-repo link (404s for customers)", re: /github\.com\/mnemom\/(scale|safe-house-hardening|safe-house-aegis|deploy)/i },
-  { label: "retired codename smoltbot", re: /\bsmoltbot\b/i },
+  // smoltbot was removed (MNE-699): it is a PUBLIC shipped product (npm `smoltbot`,
+  // github.com/mnemom/smoltbot, listed on the org profile) — not a still-internal
+  // codename. Keeping it here false-blocked legit docs PRs that reference the
+  // public product, now that this gate is REQUIRED on docs/main (MNE-629).
   { label: "retired codename XFD/CBD/CFD", re: /\b(xfd|cbd|cfd)\b/i },
   { label: "internal codename polis", re: /\bpolis\b|polis_yaml/i },
   { label: "internal agent name", re: /\b(solon|themis|cassandra|blackbeard|wintermute)\b/i },
@@ -112,8 +115,15 @@ if (SELFTEST) {
     ["catches AEGIS-N in spec summary", "spec", "sum", "Report a thing (AEGIS-6)", true],
     ["catches UC-N in spec desc", "spec", "schema:X.description", "UC-4 unified card", true],
     ["catches private-repo link in spec desc", "spec", "d", "see github.com/mnemom/scale/blob/x", true],
-    ["catches smoltbot in mdx", "mdx", "f:1", "the smoltbot runtime", true],
+    // MNE-699: smoltbot is a PUBLIC product — a legit reference to it must NOT trip
+    // the gate (it false-blocked docs PRs while the gate was required). Both poles:
+    // a smoltbot product reference passes; a genuine internal codename still fails
+    // (see the "catches XFD/CBD/CFD" + "catches op:// 1Password path" cases below).
+    ["allows public product smoltbot in mdx", "mdx", "f:1", "the smoltbot runtime", false],
+    ["allows public smoltbot link/install in mdx", "mdx", "f:1a", "install it: `npm install smoltbot` — see [smoltbot](https://github.com/mnemom/smoltbot)", false],
     ["allows smolt-{hex} agent id", "mdx", "f:2", "agent smolt-1a2b3c4d connected", false],
+    ["catches internal codename CBD in mdx (gate still fires)", "mdx", "f:1b", "the cbd evaluator", true],
+    ["catches op:// 1Password path in mdx (gate still fires)", "mdx", "f:1c", "key at op://vault/item", true],
     ["allows STIX aegis-2026 id in spec", "spec", "ex", "extension-definition--mnemom-aegis-2026-05", false],
     ["allows ADR-NNN in spec (mdxOnly rule)", "spec", "d", "idempotency per ADR-023", false],
     ["catches ADR-NNN in mdx", "mdx", "f:3", "see ADR-023 for details", true],
