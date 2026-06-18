@@ -7,9 +7,11 @@ icon: "list-check"
 
 # OWASP Agentic Top 10 mapping
 
-Safe House enforces eight named threat patterns at the Mnemom gateway. Buyers evaluating agentic security posture against the **OWASP Top 10 for Agentic Applications** (December 2025, ASI01–ASI10) need a published cross-reference to make the shipped enforcement legible. This page provides that cross-reference.
+Safe House enforces eight named threat patterns at the Mnemom gateway. Buyers evaluating agentic security posture against the **[OWASP Top 10 for Agentic Applications](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications/)** (OWASP Gen AI Security Project, released 2025-12-09; ASI01–ASI10) need a published cross-reference to make the shipped enforcement legible. This page provides that cross-reference.
 
-The discipline is the same one applied throughout this documentation: where Safe House covers an OWASP threat class, the coverage mechanism is named. Where coverage is partial or absent, the gap is stated.
+The discipline is the same one applied throughout this documentation: where Safe House covers an OWASP threat class, the coverage mechanism is named. Where coverage is partial or absent, the gap is stated rather than papered over.
+
+> **Source of truth.** The ASI identifiers and titles below are pinned to the official OWASP Gen AI Security Project release ([announcement](https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/), [resource page](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications/)). The full taxonomy: **ASI01** Agent Goal Hijack, **ASI02** Tool Misuse, **ASI03** Identity & Privilege Abuse, **ASI04** Agentic Supply Chain Vulnerabilities, **ASI05** Unexpected Code Execution, **ASI06** Memory & Context Poisoning, **ASI07** Insecure Inter-Agent Communication, **ASI08** Cascading Failures, **ASI09** Human-Agent Trust Exploitation, **ASI10** Rogue Agents.
 
 ---
 
@@ -36,51 +38,59 @@ Each Safe House pattern maps to one or more OWASP ASI entries. A pattern can map
 
 | Safe House pattern | OWASP entry | Coverage level | Enforcement mechanism |
 |---|---|---|---|
-| `prompt_injection` | **ASI01** Prompt Injection | Full — direct variant | L1 regex families (override phrases, role reassignment, jailbreak openers, authority spoofing); L2 compound confidence scoring; L3 session model |
-| `indirect_injection` | **ASI01** Prompt Injection | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
-| `bec_fraud` | **ASI01** Prompt Injection, **ASI05** Agent Impersonation | Full — conjunction detection | Requires co-occurring: financial action term + authority claim + urgency marker + secrecy instruction. Authority framing maps to ASI05 impersonation signal |
-| `social_engineering` | **ASI01** Prompt Injection | Full | Authority + urgency signal pair, absent financial action component. Regulatory threat framing, role authority claims, urgency escalation |
-| `agent_spoofing` | **ASI05** Agent Impersonation | Full | Claims of override authority or elevated permissions arriving as runtime messages; fake admin agent identifiers; credential presentation patterns in message content |
-| `hijack_attempt` | **ASI08** Task Hijacking | Full | L3 session model: topic coherence tracking, escalating action scope, identity drift, pivot detection after trust-building sequence. Threshold: ≥ 0.7 confidence |
-| `data_exfiltration` | **ASI09** Sensitive Data Exfiltration | Full | Back-door checkpoint: external destination patterns vs. declared `bounded_actions`, bulk data request language, covert channel patterns. Also enforced independently by Policy Engine |
-| `privilege_escalation` | **ASI03** Privilege Compromise | Full | Runtime permission claims; requests outside declared `bounded_actions`; attempts to disable safety mechanisms mid-session. Front-door detection + Policy Engine independent check |
+| `prompt_injection` | **ASI01** Agent Goal Hijack | Full — direct variant | L1 regex families (override phrases, role reassignment, jailbreak openers, authority spoofing); L2 compound confidence scoring; L3 session model. Direct injection is the canonical goal-hijack vector |
+| `indirect_injection` | **ASI01** Agent Goal Hijack | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
+| `hijack_attempt` | **ASI01** Agent Goal Hijack | Full — multi-turn variant | L3 session model: topic coherence tracking, escalating action scope, identity drift, pivot detection after a trust-building sequence. Multi-turn redirection of the agent's goal. Threshold: ≥ 0.7 confidence (routes to human review — see [calibration note](#asi01--multi-turn-hijack-human-escalation-at-default-threshold)) |
+| `bec_fraud` | **ASI09** Human-Agent Trust Exploitation, **ASI01** Agent Goal Hijack | Full — conjunction detection | Requires co-occurring: financial action term + authority claim + urgency marker + secrecy instruction. The authority/urgency/secrecy manipulation is trust exploitation; the intent to redirect the agent into an unauthorized action is goal hijack |
+| `social_engineering` | **ASI09** Human-Agent Trust Exploitation | Full | Authority + urgency signal pair, absent the financial-action component. Regulatory threat framing, role-authority claims, urgency escalation — manipulating the agent's trust to change its behavior |
+| `agent_spoofing` | **ASI07** Insecure Inter-Agent Communication, **ASI09** Human-Agent Trust Exploitation | Full — inbound signal | Claims of override authority or elevated permissions arriving as runtime messages; fake admin agent identifiers; credential-presentation patterns in message content. Detects unauthenticated identity/authority claims in the inter-agent message stream |
+| `data_exfiltration` | **ASI02** Tool Misuse | Full — outbound | Back-door checkpoint: external destination patterns vs. declared `bounded_actions`, bulk-data request language, covert-channel patterns. Exfiltration is misuse of connected tools/connectors to route data out. Also enforced independently by Policy Engine |
+| `privilege_escalation` | **ASI03** Identity & Privilege Abuse | Full | Runtime permission claims; requests outside declared `bounded_actions`; attempts to disable safety mechanisms mid-session. Front-door detection + Policy Engine independent check |
 
 ---
 
 ## OWASP-to-coverage mapping
 
-The reverse view — starting from each OWASP entry and tracing what ships in enforcement:
+The reverse view — starting from each OWASP entry and tracing what ships in enforcement. Coverage is asserted only where there is a concrete shipped mechanism to point to; everything else is stated as a gap.
 
 | OWASP entry | Safe House pattern | Additional coverage | Status |
 |---|---|---|---|
-| **ASI01** Prompt Injection | `prompt_injection`, `indirect_injection`, `bec_fraud`, `social_engineering` | — | **Shipped.** Direct injection fully covered. Indirect injection partial — novel payloads with no payload-library similarity may score below block threshold |
-| **ASI02** Malicious Tool Execution | — | Policy Engine: `bounded_actions` enforcement, forbidden-rule Managed Rules, tool capability mappings | **Covered by policy layer, not a Safe House pattern.** Tool execution is constrained before it reaches Safe House's inbound screen |
-| **ASI03** Privilege Compromise | `privilege_escalation` | AAP alignment cards declare autonomy envelope; CLPI policy engine enforces | **Shipped.** Runtime privilege claims blocked at front door. Declared envelope enforced at policy layer |
-| **ASI04** Memory Poisoning | — | — | **Gap.** Persistent memory store attacks are not in the shipped Safe House pattern library. Defense-in-depth via AIP thinking-block analysis and AAP drift detection provides partial observability of downstream effects, but not upstream interception |
-| **ASI05** Agent Impersonation | `agent_spoofing`, `bec_fraud` (authority signal) | — | **Shipped.** Runtime authority claims from inbound messages treated as suspicious by design. Legitimate agent-to-agent authority must be encoded in alignment cards at configuration time |
-| **ASI06** Agentic Supply Chain Compromise | — | AEGIS substrate fingerprinting + L1 cross-tenant aggregator | **Covered at AEGIS layer, not Safe House patterns.** Runtime-behavior deviation consistent with supply-chain compromise is detected cross-tenant. Does not replace package-layer provenance — see [supply-chain trust](/guides/supply-chain-trust) |
-| **ASI07** System-Prompt Leakage | — | Safe House back-door checkpoint: PII patterns, system-prompt content patterns, alignment-card violation screening | **Covered by back-door checkpoint, no named Safe House pattern.** Outbound screening fires on content that matches system-prompt disclosure patterns. Not a discrete `threat_type` — fires under alignment-card violation classification |
-| **ASI08** Task Hijacking | `hijack_attempt` | — | **Shipped.** Session model tracks multi-turn behavioral trajectories. Sudden pivot after N benign turns escalates session risk score. At ≥ 0.7 confidence, routes to human review rather than autonomous block — see calibration note below |
-| **ASI09** Sensitive Data Exfiltration | `data_exfiltration` | Policy Engine: `bounded_actions` independent check | **Shipped.** Back-door checkpoint detects external destination routing and bulk data language. Policy Engine provides a second independent enforcement layer |
-| **ASI10** Excessive Agency | — | Policy Engine: `bounded_actions` declaration and enforcement; CLPI lifecycle governance | **Covered at policy layer, not a Safe House pattern.** Agents declare their authorized action envelope in alignment cards. The Policy Engine enforces declared scope; Safe House screens for escalation attempts. The boundary between ASI03 and ASI10 in practice: ASI10 is the structural over-permissioning risk (card design), ASI03 is the runtime exploitation of it |
+| **ASI01** Agent Goal Hijack | `prompt_injection`, `indirect_injection`, `hijack_attempt` | — | **Shipped.** Direct injection fully covered; multi-turn goal redirection caught by the L3 session model. Indirect injection partial — novel payloads with no payload-library similarity may score below block threshold |
+| **ASI02** Tool Misuse | `data_exfiltration` | Policy Engine: `bounded_actions` enforcement, forbidden-rule Managed Rules, tool-capability mappings | **Partial — policy layer + outbound screen.** Tool execution is constrained by the Policy Engine before it reaches Safe House; Safe House's back-door checkpoint catches data-exfiltration-via-tool. Mnemom does not intercept every unsafe tool invocation at the gateway — declared-scope enforcement is the primary control |
+| **ASI03** Identity & Privilege Abuse | `privilege_escalation` | AAP alignment cards declare the autonomy envelope; CLPI policy engine enforces | **Shipped.** Runtime privilege claims blocked at the front door. Declared envelope enforced at the policy layer |
+| **ASI04** Agentic Supply Chain Vulnerabilities | — | AEGIS substrate fingerprinting + L1 cross-tenant aggregator | **Covered at the AEGIS layer, not a Safe House pattern.** Runtime-behavior deviation consistent with a compromised dependency/substrate is detected cross-tenant. Does not replace build-time package provenance — see [supply-chain trust](/guides/supply-chain-trust) |
+| **ASI05** Unexpected Code Execution | — | Policy Engine: `bounded_actions` constrains which tools/actions an agent may invoke | **Gap (front-door).** Safe House has no pattern that intercepts code-execution payloads. The Policy Engine limits the action surface (an agent can only invoke declared tools), which reduces blast radius, but Mnemom does not sandbox or screen executed code. Pair with an application-layer execution sandbox |
+| **ASI06** Memory & Context Poisoning | — | — | **Gap.** Persistent memory/context store attacks are not in the shipped Safe House pattern library. AIP thinking-block analysis and AAP drift detection give partial observability of downstream effects, but not upstream interception — see [limits](#asi06--memory--context-poisoning) |
+| **ASI07** Insecure Inter-Agent Communication | `agent_spoofing` | — | **Partial.** Safe House treats unauthenticated authority/identity claims arriving as inbound runtime messages as suspicious by design. Legitimate agent-to-agent authority must be encoded in alignment cards at configuration time. This screens the *content* of inter-agent messages; it is not a transport-authentication scheme |
+| **ASI08** Cascading Failures | — | AAP drift detection + CLPI lifecycle governance (observability of degraded agent behavior) | **Gap.** No shipped Safe House pattern targets multi-agent cascading failure. AAP/CLPI provide some observability of an individual agent drifting, but Mnemom does not model or circuit-break failure propagation across an agent fleet. This is an application-architecture concern (timeouts, bulkheads, circuit breakers) |
+| **ASI09** Human-Agent Trust Exploitation | `bec_fraud`, `social_engineering`, `agent_spoofing` | — | **Shipped.** Authority/urgency/secrecy manipulation and impersonated-authority claims from inbound messages are treated as suspicious by design |
+| **ASI10** Rogue Agents | — | AAP alignment cards declare the autonomy envelope; CLPI lifecycle governance; AEGIS reputation | **Covered at the governance layer, not a Safe House pattern.** A "rogue" agent operating outside its declared envelope is constrained by Policy Engine `bounded_actions` enforcement and surfaced by CLPI lifecycle + reputation signals. Safe House screens inbound/outbound message content; it does not by itself decommission a misbehaving agent |
 
 ---
 
 ## Gaps and limits
 
-### ASI04 — Memory Poisoning
+### ASI06 — Memory & Context Poisoning
 
-No shipped Safe House pattern targets memory store attacks. An attacker who can write to an agent's persistent memory — conversation history, vector store, retrieved documents — can influence future turns without a detectable inbound signal. The AIP thinking-block analysis layer provides partial mitigation: if the poisoned memory causes the agent to reason in ways inconsistent with its alignment card, AIP may flag it before the action lands. That is detection of downstream effect, not upstream interception.
+No shipped Safe House pattern targets memory/context store attacks. An attacker who can write to an agent's persistent memory — conversation history, vector store, retrieved documents — can influence future turns without a detectable inbound signal. The AIP thinking-block analysis layer provides partial mitigation: if the poisoned memory causes the agent to reason in ways inconsistent with its alignment card, AIP may flag it before the action lands. That is detection of downstream effect, not upstream interception.
 
-**Recommended defense-in-depth:** treat memory stores as an untrusted input boundary, apply the same L1/L2 screening to memory-retrieved content as to external tool results, and enable AIP to catch reasoning anomalies that poisoned memory produces.
+**Recommended defense-in-depth:** treat memory stores as an untrusted input boundary, apply the same L1/L2 screening to memory-retrieved content as to external tool results, and enable AIP to catch the reasoning anomalies that poisoned memory produces.
 
-### ASI01 indirect injection — novel payloads
+### ASI05 — Unexpected Code Execution
+
+Safe House does not intercept code-execution payloads at the gateway. The Policy Engine's `bounded_actions` enforcement limits which tools an agent may invoke (reducing the surface that can reach an executor), but Mnemom neither sandboxes nor statically screens executed code. For agents that can run code, pair Mnemom with an application-layer execution sandbox and treat the executor as an untrusted boundary.
+
+### ASI08 — Cascading Failures
+
+Mnemom screens per-agent message content and surfaces individual-agent drift (AAP/CLPI), but it does not model failure propagation across a multi-agent fleet. Cascading-failure resilience is an application-architecture responsibility: apply per-agent timeouts, bulkheads, and circuit breakers between agents so one degraded agent cannot fan out.
+
+### ASI01 — indirect injection, novel payloads
 
 Indirect injection via tool results is partially covered. MinHash similarity matching compares tool results against a library of known injection payloads. Sufficiently novel payloads that bear no structural or semantic similarity to known patterns will score below L1 thresholds. L2 analysis provides a second pass, but detection accuracy is bounded by the analysis model's capability.
 
 The arena flywheel closes this gap over time: canary credentials and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns promote to active detection. For high-sensitivity environments, consider adding application-layer validation of tool results before they re-enter the agent context.
 
-### ASI08 — human escalation at default threshold
+### ASI01 — multi-turn hijack, human escalation at default threshold
 
 The `hijack_attempt` pattern routes to human review (not autonomous block) at the default 0.7 confidence threshold. This is intentional — legitimate multi-topic conversations produce similar L3 signals. If your use case can tolerate more aggressive autonomous blocking, lower the `hijack_attempt` threshold in the [protection card](/concepts/protection-card).
 
@@ -90,9 +100,11 @@ The `hijack_attempt` pattern routes to human review (not autonomous block) at th
 
 OWASP guidance recommends pairing runtime substrate controls with application-layer controls. For the gaps above:
 
-- **ASI04 (Memory Poisoning):** Apply Safe House's inbound screening to memory-retrieved content as well as direct inbound messages. This is not the default — configure the SDK to route memory fetches through the Safe House evaluation layer.
-- **ASI06 (Supply Chain):** AEGIS covers the runtime-behavior dimension. Pair with SLSA/Sigstore package provenance for the build-time dimension. See [supply-chain trust](/guides/supply-chain-trust).
-- **ASI10 (Excessive Agency):** Card design is the primary defense. Scope `bounded_actions` as narrowly as the agent's function permits; CLPI enforces declared scope. Safe House screens for runtime escalation attempts (ASI03), but structural over-permissioning is a card design issue.
+- **ASI06 (Memory & Context Poisoning):** Apply Safe House's inbound screening to memory-retrieved content as well as direct inbound messages. This is not the default — configure the SDK to route memory fetches through the Safe House evaluation layer.
+- **ASI05 (Unexpected Code Execution):** Run agent-executed code in an application-layer sandbox; scope `bounded_actions` so the agent can only reach the executor when its function genuinely requires it.
+- **ASI04 (Agentic Supply Chain):** AEGIS covers the runtime-behavior dimension. Pair with SLSA/Sigstore package provenance for the build-time dimension. See [supply-chain trust](/guides/supply-chain-trust).
+- **ASI08 (Cascading Failures):** Add per-agent timeouts, bulkheads, and circuit breakers at the application/orchestration layer so a degraded agent cannot cascade across the fleet.
+- **ASI10 (Rogue Agents):** Card design is the primary defense. Scope `bounded_actions` as narrowly as the agent's function permits; CLPI enforces declared scope and surfaces lifecycle/reputation signals for an agent operating outside its envelope.
 
 ---
 
@@ -100,8 +112,9 @@ OWASP guidance recommends pairing runtime substrate controls with application-la
 
 - [Safe House threat model](/guides/safe-house-threat-model) — Detection mechanisms, confidence scoring, and known limits for each pattern
 - [Protection card](/concepts/protection-card) — Per-agent threshold configuration for each threat type
-- [AEGIS](/concepts/aegis) — Cross-tenant defensive network and the ASI06 supply-chain detection layer
-- [Substrate fingerprint](/concepts/substrate-fingerprint) — ASI06 runtime-behavior detection in detail
+- [AEGIS](/concepts/aegis) — Cross-tenant defensive network and the ASI04 supply-chain detection layer
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — ASI04 runtime-behavior detection in detail
 - [Supply-chain trust](/guides/supply-chain-trust) — Composing AEGIS runtime detection with package-layer provenance
-- [AIP specification](/protocols/aip/specification) — Thinking-block integrity analysis that covers reasoning anomalies downstream of ASI04
+- [AIP specification](/protocols/aip/specification) — Thinking-block integrity analysis that covers reasoning anomalies downstream of ASI06
+- [OWASP Top 10 for Agentic Applications](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications/) — The authoritative source taxonomy this page maps against
 - [Whitepaper](/concepts/whitepaper) — AEGIS-level OWASP mapping table alongside the EU AI Act mapping
