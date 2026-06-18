@@ -186,16 +186,16 @@ The direction is inferred from the dominant `ConcernCategory` across the non-cle
 
 <CodeGroup>
 ```python Python
-from aip import detect_integrity_drift, WindowManager
+from aip import detect_integrity_drift, WindowManager, WindowConfig
 
-manager = WindowManager(max_size=10)
+manager = WindowManager(WindowConfig(max_size=10), session_id="session-1")
 state = None
 
 # Process checkpoints as they're produced during a session
 for checkpoint in session_checkpoints:
-    manager.add(checkpoint)
+    manager.push(checkpoint)
     state, alert = detect_integrity_drift(
-        state, checkpoint, manager.get_checkpoints()
+        state, checkpoint, manager.get_state().checkpoints
     )
     if alert:
         print(f"Integrity drift: {alert.drift_direction}")
