@@ -58,6 +58,9 @@ Composition is not a single blended operation. Each card section has its own mer
 | Protection `thresholds.*` | **Floor + override** (org floor; agent may go stricter, not looser) | Org sets the alert ceiling |
 | Protection `screen_surfaces.*` | **Floor (true wins)** | Any scope can require scanning |
 | Protection `trusted_sources` | **Intersection from platform, union from org + agent** | Platform trust allowlist is the compliance ceiling |
+| Protection `protected_surface.assets` | **Strengthen-only union** across all scopes; identity = `${kind}:${selector}` (normalized). Collision: merge to strictest (severity max; `applies_to` widens if any contributor is global; `source_scope` stamps highest declaring scope). Agent can add; never remove or weaken. | Org is the primary authoring scope; an empty agent still gets the org floor. |
+| Protection `protected_surface.forbidden_operations` | **Strengthen-only union**; identity = normalized `pattern`. Same collision rules. Judge precedence: `forbidden_operation` > `escalation_required` > allow. | Org-owned hard policy. Agent cannot narrow. Safe House L2 is the enforcement point. |
+| Protection `protected_surface.escalation_required` | **Strengthen-only union**; identity = normalized `pattern`. Agent can add escalation requirements; never remove higher-scope entries. | Org-owned. |
 
 Composition metadata (`_composition`) on the canonical card records which scopes contributed which fields, so downstream readers can debug "where did this value come from?"
 
@@ -159,12 +162,30 @@ audit:
 ### Org scope (Acme Corp)
 
 ```yaml
-# orgs.card_template.acme
+# orgs.card_template.acme (alignment)
 integrity_mode: enforce
 values:
   declared: [incident_containment, rollback_safety]
 autonomy:
   forbidden_actions: [send_external_notification]
+```
+
+```yaml
+# orgs.protection_template.acme — protected_surface is org-owned; agent cannot narrow it
+protected_surface:
+  assets:
+    - kind: table
+      selector: customer_records
+      label: "Customer records"
+      reason: "PII — requires escalation for bulk ops"
+  forbidden_operations:
+    - pattern: "exfiltrate:pii"
+      severity: critical
+      reason: "PII exfiltration forbidden"
+  escalation_required:
+    - pattern: "bulk DELETE"
+      applies_to: ["table:customer_records"]
+      reason: "Bulk deletions on customer data require a co-sign"
 ```
 
 ### Agent scope (`mnm-patch-001`)
@@ -216,6 +237,36 @@ _composition:
 ```
 
 Note the agent's `integrity_mode: observe` was silently overridden to `enforce` by the org. The composition metadata makes this traceable — not hidden.
+
+The protection card composes separately. The `protected_surface` entries carry `source_scope` stamped at the highest scope that declared them — so the agent cannot claim provenance of an org rule:
+
+```yaml
+# Canonical protection card (protection scope)
+protected_surface:
+  assets:
+    - kind: table
+      selector: customer_records
+      label: "Customer records"
+      reason: "PII — requires escalation for bulk ops"
+      source_scope: "org:acme"
+  forbidden_operations:
+    - pattern: "TRUNCATE"
+      severity: critical
+      reason: "Irreversible data loss"
+      source_scope: platform
+    - pattern: "exfiltrate:pii"
+      severity: critical
+      reason: "PII exfiltration forbidden"
+      source_scope: platform
+  escalation_required:
+    - pattern: "bulk DELETE"
+      applies_to: ["table:customer_records"]
+      reason: "Bulk deletions on customer data require a co-sign"
+      source_scope: "org:acme"
+_composition:
+  composed_at: "2026-04-17T18:23:41Z"
+  scopes_applied: [platform, "org:acme", "agent:mnm-patch-001"]
+```
 
 ## Debugging composition
 

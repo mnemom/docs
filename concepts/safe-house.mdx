@@ -58,10 +58,18 @@ Safe House uses a layered approach that balances speed with accuracy:
 | Layer | Method | Latency | Purpose |
 |-------|--------|---------|---------|
 | **L1** | Regex and word-list heuristics | &lt;5ms | Fast rejection of obvious attacks; 8 languages |
-| **L2** | Claude Haiku semantic analysis | ~80–100ms | Deep intent understanding, handles obfuscation and novel attacks |
+| **L2** | Claude Haiku semantic analysis | ~80–100ms | Deep intent understanding, handles obfuscation and novel attacks; enforces the org's `protected_surface` (assets, forbidden operations, escalation requirements) from the canonical protection card |
 | **L3** | Session escalation | Stateful | Flags sessions where earlier messages establish suspicious context |
 
 L1 runs first and can short-circuit the pipeline entirely for high-confidence detections. If L1 passes or returns a `warn` score, L2 runs. L3 operates continuously across the session, not per-message.
+
+### L2 and the org's `protected_surface`
+
+L2 reads the agent's **canonical protection card's `protected_surface`** — the org-owned, composed result of platform → org → team → agent — as its source of truth when evaluating whether an action touches a protected asset or matches a forbidden operation:
+
+- **Coverage is workload-independent.** An empty or naive agent still gets the org's `protected_surface` enforced. The org floor does not depend on what the agent declared in its alignment card.
+- **Org-defined, not agent-declared.** The org authors `protected_surface`; the agent cannot narrow it.
+- **Judge precedence.** L2 evaluates the conjunction of action + protected asset + forbidden operation. Precedence: `forbidden_operation` > `escalation_required` > allow. An asset-scoped match is a sharper signal than a global one.
 
 ## Threat categories
 
@@ -159,10 +167,10 @@ Safe House's runtime treatment is configured by **two parallel cascades** of nam
 
 | Artifact | Scope | What it controls | When |
 |---|---|---|---|
-| [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates | Same-turn at the gateway: CLPI (tool calls) + AIP (reasoning) |
-| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources | Same-turn at the gateway: front-door + back-door |
+| [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates. Agent self-declared (with org/platform as floor). | Same-turn at the gateway: CLPI (tool calls) + AIP (reasoning) |
+| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources, and **`protected_surface`** (org-owned assets, forbidden operations, escalation requirements). Org-defined — not agent-authored. | Same-turn at the gateway: front-door + back-door; `protected_surface` read by L2 |
 | [Trust Posture](/concepts/trust-posture) | Per-team | Sideband detector firing rules (coherence, fault-line, fleet) | Async sideband sweep → carryover via `pending_advisories` |
-| Card-cascade composition | Platform → Org → Team → Agent | Strictest-wins fold per-agent | Read by gateway at request time |
+| Card-cascade composition | Platform → Org → Team → Agent | Strictest-wins fold per-agent; `protected_surface` is strengthen-only union with org as primary authoring scope | Read by gateway at request time |
 
 [Trust Posture vs. Cards](/concepts/posture-vs-cards) covers in detail why these are *parallel* artifact types (postures don't fold into cards; cards don't fold into postures) and the two well-defined join points where they cooperate (detector input + carryover bridge).
 
