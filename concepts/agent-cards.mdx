@@ -7,8 +7,8 @@ icon: "id-card-clip"
 
 Every Mnemom agent has **two cards**:
 
-- An **[alignment card](/concepts/alignment-cards)** — who the agent is, what it values, what it's allowed to do, what it must never do, how it's enforced.
-- A **[protection card](/concepts/protection-card)** — how Safe House guards the agent against prompt injection, data exfiltration, canary triggers, and other runtime threats.
+- An **[alignment card](/concepts/alignment-cards)** — who the agent is, what it values, what it's allowed to do, and its self-declared behavioral limits. Agent-owned (with org/platform as the composition floor).
+- A **[protection card](/concepts/protection-card)** — how Safe House guards the agent at runtime, and the org's enforced protection policy. Org-owned.
 
 Both are YAML documents. Both compose from three scopes (platform > org > agent). Both are versioned, auditable, and edit-friendly. This page is the customer-facing orientation to the two-card model — how it fits together and why.
 
@@ -35,7 +35,7 @@ The full normative schema is at [/specifications/alignment-card-schema](/specifi
 
 ### Protection card
 
-The protection card answers *how this agent is defended at runtime*. Its sections:
+The protection card answers *how this agent is defended at runtime* and *what the org has declared as the protected surface*. Its sections:
 
 | Section | What it declares |
 |---------|------------------|
@@ -43,6 +43,7 @@ The protection card answers *how this agent is defended at runtime*. Its section
 | `thresholds` | Per-signal cutoffs (injection, exfiltration, canary, semantic-novelty, etc.) |
 | `screen_surfaces` | Which surfaces Safe House inspects (`incoming`, `outgoing`, `tool_calls`) |
 | `trusted_sources` | Per-scope allowlists for data sources the agent may ingest without full scanning |
+| `protected_surface` | **Org's enforced policy**: `assets` (sealed records, sensitive fields), `forbidden_operations` (categorically blocked actions), `escalation_required` (actions needing elevated authority). Org-owned — not agent-authored. Safe House L2 enforces it independent of what the agent declares. |
 
 The full normative schema is at [/specifications/protection-card-schema](/specifications/protection-card-schema).
 
@@ -50,8 +51,8 @@ The full normative schema is at [/specifications/protection-card-schema](/specif
 
 Alignment and protection are different concerns with different stakeholders:
 
-- **Alignment** is the principal's declaration: what the agent is *supposed to* care about, what it's *allowed to* do, and what it *promises* about logging. Editing the alignment card is an intentional product decision.
-- **Protection** is the operator's defense: what runtime monitoring surfaces the agent exposes, what thresholds trigger a block, what sources are pre-trusted. Editing the protection card is a security posture decision.
+- **Alignment** is the agent's self-declaration (with org/platform as the floor): what it values, what it's *allowed to* do, and what it *promises* about logging. Editing the alignment card is an intentional product decision.
+- **Protection** is the org's enforced policy: runtime monitoring surfaces, threat thresholds, trusted sources, and — critically — the **`protected_surface`** (assets, forbidden operations, escalation requirements). Editing the protection card is a security posture decision made by org admins, not by the agent.
 
 Separating them means:
 
@@ -76,8 +77,9 @@ Composition runs at **storage time**, not per request. When any scope changes, a
 Field-level composition semantics vary by section:
 
 - `values.declared` — **union** across scopes (platform ∪ org ∪ agent)
-- `autonomy.forbidden_actions` — **union** (deny-overrides: agent can never remove a platform or org forbidden action; they can only add more)
+- `autonomy.forbidden_actions` — **union** (deny-overrides: agent can never remove a platform or org forbidden action; they can only add more). This is the agent's behavioral commitment on the alignment card.
 - `autonomy.bounded_actions` — **agent-scoped** (platform/org suggest defaults; agent cards take effect)
+- `protected_surface` (protection card) — **strengthen-only union** across platform → org → team → agent; org is the primary authoring scope. The agent can add entries but never remove or weaken a higher-scope entry. Enforced by Safe House L2 independent of agent self-declaration.
 - `conscience.values` — **union with deduplication by content**; platform/org commitments are inviolable floors
 - `integrity_mode` — **strictest wins** (if org requires `enforce`, agent cannot downgrade to `observe`)
 - `capabilities.*` — **agent-scoped** (capabilities are local to each agent's tooling)
@@ -105,8 +107,8 @@ Every request through the Mnemom gateway:
 1. Fetches the agent's canonical **alignment card** (KV-cached, 5-min TTL; `needs_recompose` bypass on org-template updates).
 2. Maps the unified card to the locked AAP `AlignmentCard` shape for any call to `@mnemom/agent-alignment-protocol`.
 3. Extracts policy from `capabilities` + `enforcement` sections for policy evaluation via `@mnemom/policy-engine`.
-4. Fetches the canonical **protection card** for [Safe House](/concepts/safe-house) detection.
-5. Applies `autonomy.forbidden_actions` as hard deny; applies `integrity_mode` to the checkpoint pipeline.
+4. Fetches the canonical **protection card** for [Safe House](/concepts/safe-house) detection. The card's `protected_surface` (org-owned `assets`, `forbidden_operations`, `escalation_required`) is the source of truth for Safe House L2 enforcement — independent of what the agent declares in its alignment card.
+5. Applies alignment-card `autonomy.forbidden_actions` as a behavioral hard deny; applies `integrity_mode` to the checkpoint pipeline; applies protection-card `protected_surface.forbidden_operations` as the org's hard policy floor via Safe House.
 
 All of this is one canonical-card read per concern, not a lazy per-request merge.
 

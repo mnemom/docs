@@ -1,6 +1,6 @@
 ---
 title: "Organization Card Templates"
-description: "Define alignment card policies that apply to all agents in your organization"
+description: "Define alignment and protection card policies that apply to all agents in your organization"
 sidebarTitle: "Org Card Templates"
 icon: "building"
 ---
@@ -11,7 +11,12 @@ icon: "building"
   Organization card templates require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
 </Info>
 
-Org card templates let you define a base [alignment card](/concepts/alignment-cards) that every agent in your organization inherits. The template is immutable from the agent's perspective -- agents can add to it but cannot remove anything the org defines. This ensures consistent alignment policy across your entire agent fleet.
+Org card templates let you define base policies that every agent in your organization inherits across two separate cards:
+
+- **Alignment card template** — org-level values, behavioral commitments, and audit requirements. Agents can add but cannot remove what the org defines.
+- **Protection card template** — org-level `protected_surface` (assets, forbidden operations, escalation requirements), thresholds, and screen surfaces. The `protected_surface` is the org's **enforced policy**, not the agent's self-declaration. Safe House L2 enforces it independent of what the agent declares in its alignment card. An empty or naive agent still gets the org floor applied.
+
+The alignment card template section below covers the alignment side. The [Protection card template and `protected_surface`](#protection-card-template-and-protected_surface) section below covers the protection side.
 
 ## How it works
 
@@ -88,6 +93,50 @@ When the org template is active, each field in the canonical card is computed ac
 <Warning>
   Composition is always additive from the agent's perspective. Agents can strengthen alignment requirements but never weaken them below the org floor.
 </Warning>
+
+## Protection card template and `protected_surface`
+
+The protection card template is the org's **enforced protection policy**. Where the alignment card template defines what agents declare they will do, the protection card template defines what Safe House *enforces* regardless of agent behavior or instructions.
+
+The `protected_surface` field is the core of the protection card template:
+
+```yaml
+# Example org protection card template
+protected_surface:
+  assets:
+    # What is precious — sealed records, sensitive fields, critical resources.
+    - kind: table
+      selector: customer_pii
+      label: "Customer PII"
+      reason: "Regulated data — any bulk operation requires escalation"
+    - kind: field
+      selector: replica_dsn
+      label: "Replica connection string"
+      reason: "Credential — never expose in agent output"
+  forbidden_operations:
+    # Categorically forbidden — Safe House blocks these regardless of agent instruction.
+    - pattern: "TRUNCATE"
+      severity: critical
+      reason: "Irreversible data loss"
+    - pattern: "exfiltrate:pii"
+      severity: critical
+      reason: "PII exfiltration forbidden"
+  escalation_required:
+    # Actions that need elevated authority before proceeding.
+    - pattern: "bulk DELETE"
+      applies_to: ["table:customer_pii"]
+      reason: "Bulk deletions on regulated data require a co-sign"
+```
+
+Composition rules for `protected_surface`:
+
+| Array | Rule | Agent can… |
+|-------|------|------------|
+| `assets` | Strengthen-only union across platform → org → team → agent | Add assets; never remove or narrow a higher-scope entry |
+| `forbidden_operations` | Strengthen-only union; on pattern collision severity takes the max | Add operations; never remove or weaken a higher-scope entry |
+| `escalation_required` | Strengthen-only union | Add requirements; never remove a higher-scope entry |
+
+Coverage is **workload-independent**: an empty or naive agent still gets the full org `protected_surface` applied. The agent's alignment card `autonomy.forbidden_actions` is its *behavioral commitment*; the protection card's `protected_surface.forbidden_operations` is the org's *hard policy* enforced by Safe House. The two are complementary, not redundant.
 
 ## Agent exemptions
 

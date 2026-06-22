@@ -195,11 +195,17 @@ This block has four components:
 - **bounded_actions**: Actions the agent may take without escalation.
 - **escalation_triggers**: Conditions that require the agent to pause and seek approval. Each trigger specifies a condition, an action (`escalate`, `deny`, or `log`), and a human-readable reason.
 - **max_autonomous_value**: Optional financial ceiling for independent decisions.
-- **forbidden_actions**: Actions the agent must never take, regardless of context.
+- **forbidden_actions**: The agent's self-declared behavioral commitment — actions it promises never to take. These compose via deny-overrides union with platform and org floors; the agent can add entries but cannot remove a higher-scope entry.
 
 <Warning>
   Forbidden actions are the hardest boundary. During [verification](/protocols/aap/specification), taking a forbidden action produces a `FORBIDDEN_ACTION` violation at `CRITICAL` severity. During [integrity checking](/concepts/integrity-checkpoints), intent to take a forbidden action triggers a `boundary_violation` verdict.
 </Warning>
+
+<Note>
+**`autonomy.forbidden_actions` vs. `protected_surface.forbidden_operations`**
+
+`autonomy.forbidden_actions` is the agent's *behavioral commitment* — declared by the agent (with org/platform as the floor). The protection card's `protected_surface.forbidden_operations` is the org's *enforced policy*, authored by the org and applied by Safe House L2 independent of what the agent declares. An empty or naive agent still gets the org's `protected_surface` floor enforced. See [Agent Cards](/concepts/agent-cards) for the two-card model.
+</Note>
 
 ### Audit commitment block
 
@@ -424,9 +430,11 @@ See the [CLI reference](/gateway/cli) for full command documentation.
   Organization card templates require an Enterprise plan.
 </Info>
 
-Organizations can define a base card template that all agents inherit. Agent cards layer on top of the org template -- org values cannot be removed by individual agents, ensuring consistent organizational alignment policy.
+Organizations can define a base alignment card template that all agents inherit. Agent cards layer on top of the org template -- org values cannot be removed by individual agents, ensuring consistent organizational alignment policy.
 
 This is similar to how [custom conscience values](/gateway/conscience-values) work at the org level, but applied to the full alignment card structure rather than just the conscience prompt.
+
+Note that the org's **protection card template** — including `protected_surface` (sealed assets, forbidden operations, escalation requirements) — is separate from the alignment card template. `protected_surface` is org-owned and enforced by Safe House independently of what the agent declares here.
 
 See the [Organization Card Templates guide](/gateway/org-card-templates) for setup and configuration details.
 
