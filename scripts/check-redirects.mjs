@@ -25,6 +25,18 @@
  *   4. Asserts the regression invariant behind the "root lands on
  *      for-agents instead of introduction" bug: a redirect from `/` to
  *      `/introduction` exists, and `introduction` is a navigable page.
+ *   5. Reconciles every non-default locale navigation block (fr/es/…,
+ *      derived generically from `navigation.languages`) against the files
+ *      on disk — only a handful of the 600+ pages are localized, so nothing
+ *      else keeps the localized nav in sync:
+ *        (a) every page listed in a locale's nav block has a content file
+ *            on disk;
+ *        (b) every redirect whose destination lands inside a locale resolves
+ *            to a page navigable *through that locale's nav block* (stricter
+ *            than the file-exists check in step 3); a redirect entering a
+ *            locale with no navigable block fails closed;
+ *        (c) every `<locale>/**` content file on disk is listed in that
+ *            locale's nav block — no orphan localized files.
  *
  * Sibling to `check-doc-examples.mjs` / `check-spec-examples.mjs` and
  * follows the same contract:
@@ -33,8 +45,8 @@
  *   CLI usage.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { argv, exit } from "node:process";
 
@@ -74,24 +86,25 @@ const docsRoot = dirname(resolve(docsPath));
 // ── Collect navigable page slugs ─────────────────────────────────────────
 // Generic walk of the navigation tree: page slugs are the strings inside
 // any `pages` array, at any depth (tabs, dropdowns, anchors, groups, …).
-const pages = new Set();
-function collectPages(node) {
+function collectPagesInto(node, set) {
   if (Array.isArray(node)) {
-    for (const child of node) collectPages(child);
+    for (const child of node) collectPagesInto(child, set);
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (key === "pages" && Array.isArray(value)) {
         for (const p of value) {
-          if (typeof p === "string") pages.add(p);
-          else collectPages(p); // nested group object inside `pages`
+          if (typeof p === "string") set.add(p);
+          else collectPagesInto(p, set); // nested group object inside `pages`
         }
       } else {
-        collectPages(value);
+        collectPagesInto(value, set);
       }
     }
   }
 }
-collectPages(docs.navigation ?? {});
+
+const pages = new Set();
+collectPagesInto(docs.navigation ?? {}, pages);
 
 if (pages.size === 0) {
   console.error("✗ No navigable pages found — is `navigation` present?");
@@ -166,6 +179,115 @@ if (!rootRedirect) {
   console.log('✓ root invariant: "/" → "/introduction" (introduction is navigable)');
 }
 
+// ── Locale navigation completeness ───────────────────────────────────────
+// Only a handful of the 600+ pages are localized (fr/es), and nothing else
+// asserts the localized navigation stays in sync with the files on disk: a
+// renamed/deleted localized page leaves a dangling nav entry, and a new
+// localized file can ship without ever being linked into its nav block.
+// Locales are derived generically from `navigation.languages` (every entry
+// not marked `default`) — never hard-coded.
+const languages = Array.isArray(docs.navigation?.languages)
+  ? docs.navigation.languages
+  : [];
+const localeLangs = languages.filter(
+  (l) => l && typeof l.language === "string" && l.default !== true,
+);
+
+// locale code → set of page slugs declared in that language block
+const localePages = new Map();
+for (const lang of localeLangs) {
+  const localeSet = new Set();
+  collectPagesInto(lang, localeSet);
+  localePages.set(lang.language, localeSet);
+}
+
+// Recursively list every file under `dir` (absolute paths); [] if absent.
+function walkFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, ent.name);
+    if (ent.isDirectory()) out.push(...walkFiles(full));
+    else if (ent.isFile()) out.push(full);
+  }
+  return out;
+}
+
+let localizedPageCount = 0;
+let orphanCount = 0;
+
+// (a) every localized nav entry must have a content file on disk.
+for (const [locale, localeSet] of localePages) {
+  localizedPageCount += localeSet.size;
+  for (const slug of localeSet) {
+    if (fileExists(slug)) {
+      if (verbose) console.log(`✓ ${locale} nav entry: ${slug}`);
+    } else {
+      failures.push(
+        `locale "${locale}" nav entry "${slug}" has no content file on disk ` +
+          `(expected ${slug}.mdx|.md or ${slug}/index.mdx|.md)`,
+      );
+    }
+  }
+}
+
+// (b) every redirect whose DESTINATION lands inside a known locale must
+// resolve to a page navigable through that locale's nav block. Destination
+// prefix is the primary classifier: it matches the acceptance criterion
+// exactly and never misfires on a cross-locale "exit" redirect.
+const localeOfSlug = (slug) => {
+  for (const locale of localePages.keys()) {
+    if (slug === locale || slug.startsWith(`${locale}/`)) return locale;
+  }
+  return null;
+};
+for (const r of redirects) {
+  const destination = r?.destination;
+  if (typeof destination !== "string" || destination === "") continue;
+  if (isExternal(destination) || isWildcard(destination)) continue;
+  const destSlug = toSlug(destination);
+  const locale = localeOfSlug(destSlug);
+  if (locale && !localePages.get(locale).has(destSlug)) {
+    failures.push(
+      `redirect "${r.source}" → "${destination}" targets locale "${locale}" ` +
+        `but "${destSlug}" is not a navigable page in that locale's nav block`,
+    );
+  }
+}
+
+// (b, edge case) a redirect entering a *declared* locale whose nav block is
+// empty must fail closed rather than silently pass. Kept orthogonal to the
+// destination check above so a legitimate cross-locale redirect is never
+// mistaken for a broken localized one.
+for (const r of redirects) {
+  const source = r?.source;
+  if (typeof source !== "string" || source === "") continue;
+  const seg = toSlug(source).split("/")[0];
+  if (localePages.has(seg) && localePages.get(seg).size === 0) {
+    failures.push(
+      `redirect "${source}" enters locale "${seg}" but that locale has no ` +
+        `navigable pages in its language block`,
+    );
+  }
+}
+
+// (c) every localized file on disk must be listed in its locale's nav block.
+for (const [locale, localeSet] of localePages) {
+  for (const full of walkFiles(resolve(docsRoot, locale))) {
+    if (!/\.mdx?$/i.test(full)) continue;
+    const rel = relative(docsRoot, full).replace(/\\/g, "/");
+    const raw = rel.replace(/\.mdx?$/i, "");
+    const collapsed = raw.replace(/\/index$/, "");
+    if (!localeSet.has(raw) && !localeSet.has(collapsed)) {
+      orphanCount++;
+      failures.push(
+        `orphan localized file "${rel}" exists on disk but is not listed in ` +
+          `the "${locale}" navigation block`,
+      );
+    }
+  }
+}
+
 // ── Report ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`\n✗ check-redirects: ${failures.length} problem(s) found:`);
@@ -174,6 +296,8 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `✓ check-redirects: ${redirects.length} redirect(s) OK; root → /introduction verified.`,
+  `✓ check-redirects: ${redirects.length} redirect(s) OK; ` +
+    `root → /introduction verified; ${localePages.size} locale(s) reconciled ` +
+    `(${localizedPageCount} localized pages, ${orphanCount} orphans).`,
 );
 exit(0);
