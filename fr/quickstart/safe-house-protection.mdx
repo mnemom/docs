@@ -7,7 +7,7 @@ icon: "shield-halved"
 
 # Activer la protection Safe House
 
-Ce démarrage rapide vous guide pour activer Safe House sur un agent existant, observer de vraies détections de menaces, passer en mode enforce et gérer les messages mis en quarantaine. Vous aurez besoin d'un agent Mnemom déjà enregistré — si vous n'en avez pas, consultez d'abord la [Vue d'ensemble de la Mnemom Gateway](/gateway/overview).
+Ce démarrage rapide vous guide pour activer Safe House sur un agent existant, observer de vraies détections de menaces, passer en mode enforce et gérer les messages mis en quarantaine. Vous aurez besoin d'un agent Mnemom déjà enregistré — si vous n'en avez pas, consultez d'abord la Vue d'ensemble de la Mnemom Gateway.
 
 ## Prérequis
 
@@ -46,7 +46,7 @@ curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   }'
 ```
 
-La grammaire complète de la carte de protection est sur [/specifications/protection-card-schema](/specifications/protection-card-schema) ; la carte canonique que le composeur renvoie inclut également `card_id`, `_composition` et tous les défauts plateforme / organisation qui se propagent dans la carte effective de l'agent.
+La grammaire complète de la carte de protection est sur `/specifications/protection-card-schema` ; la carte canonique que le composeur renvoie inclut également `card_id`, `_composition` et tous les défauts plateforme / organisation qui se propagent dans la carte effective de l'agent.
 
 **Alternative CLI.** Enregistrez la carte sous `protection.card.yaml` et publiez-la avec une seule commande — pas de curl requis :
 
@@ -99,7 +99,7 @@ curl -X POST https://gateway.mnemom.ai/v1/messages \
   -i
 ```
 
-Recherchez l'état de Safe House dans la réponse. Les anciens en-têtes `X-Safe-House-*` ont été retirés au profit de la structure unifiée à quatre points de contrôle `X-Mnemom-Verdict` (voir la [référence des en-têtes](/api-reference/headers)) :
+Recherchez l'état de Safe House dans la réponse. Les anciens en-têtes `X-Safe-House-*` ont été retirés au profit de la structure unifiée à quatre points de contrôle `X-Mnemom-Verdict` (voir la référence des en-têtes) :
 
 ```
 HTTP/2 200
@@ -111,7 +111,7 @@ content-type: application/json
 ```
 
 <Note>
-En mode observe, `X-Mnemom-Verdict.front` indique `observed` afin que vous puissiez suivre ce qui *se serait* passé en mode enforce — le message atteint quand même l'agent dans tous les cas. L'en-tête `X-Mnemom-Advisory` porte les résultats du détecteur sous forme de tableau JSON ; voir [`/api-reference/headers#x-mnemom-advisory`](/api-reference/headers#x-mnemom-advisory--operator-actionable-advisory-entries).
+En mode observe, `X-Mnemom-Verdict.front` indique `observed` afin que vous puissiez suivre ce qui *se serait* passé en mode enforce — le message atteint quand même l'agent dans tous les cas. L'en-tête `X-Mnemom-Advisory` porte les résultats du détecteur sous forme de tableau JSON ; voir `/api-reference/headers#x-mnemom-advisory`.
 </Note>
 
 ## Étape 3 — Examiner les détections dans l'observatoire
@@ -181,7 +181,7 @@ curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
 ```
 
 <Warning>
-Le mode enforce renvoie **HTTP 422** pour les messages mis en quarantaine et **HTTP 403** pour les messages bloqués selon la [référence des erreurs](/api-reference/errors). L'énumération à 4 modes n'a **aucun `simulate`** — commencez par `observe` (pas de blocage) et progressez par `nudge` (injection d'avis, pas de blocage) avant d'activer `enforce`. Consultez le [concept Safe House](/concepts/safe-house) pour la sémantique complète des modes.
+Le mode enforce renvoie **HTTP 422** pour les messages mis en quarantaine et **HTTP 403** pour les messages bloqués selon la référence des erreurs. L'énumération à 4 modes n'a **aucun `simulate`** — commencez par `observe` (pas de blocage) et progressez par `nudge` (injection d'avis, pas de blocage) avant d'activer `enforce`. Consultez le concept Safe House pour la sémantique complète des modes.
 </Warning>
 
 ## Étape 5 — Voir un message mis en quarantaine
@@ -206,7 +206,7 @@ curl -X POST https://gateway.mnemom.ai/v1/messages \
   -i
 ```
 
-Cette fois, la réponse est un 422 avec un ID de quarantaine (le [contrat canonique des erreurs](/api-reference/errors#422--safe-house-quarantine)) :
+Cette fois, la réponse est un 422 avec un ID de quarantaine (le contrat canonique des erreurs) :
 
 ```
 HTTP/2 422
@@ -282,13 +282,13 @@ Libérer un message mis en quarantaine l'enregistre également comme faux positi
 ## Prochaines étapes
 
 <CardGroup cols={2}>
-  <Card title="Ajouter des identifiants canari" icon="key" href="/concepts/safe-house#canary-credentials">
+  <Card title="Ajouter des identifiants canari" icon="key">
     Plantez de fausses clés API dans le contexte de l'agent. Toute tentative de les utiliser est un indicateur sans faux positif d'une exfiltration réussie.
   </Card>
-  <Card title="Configurer la confiance des sources" icon="circle-check" href="/concepts/safe-house#source-trust">
+  <Card title="Configurer la confiance des sources" icon="circle-check">
     Mettez en liste blanche les sources amont de confiance dans `trusted_sources.{domains, agent_ids, ip_ranges}` pour court-circuiter la détection sur les appelants connus comme sûrs (chaque saut reste journalisé pour audit).
   </Card>
-  <Card title="Activer le DLP sortant" icon="arrow-right-from-bracket" href="/concepts/safe-house#bidirectional-screening">
+  <Card title="Activer le DLP sortant" icon="arrow-right-from-bracket">
     Analysez les réponses de l'agent à la recherche de PII et de secrets avant qu'elles ne soient renvoyées aux appelants.
   </Card>
   <Card title="Consulter l'Observatoire" icon="magnifying-glass" href="https://mnemom.ai/observatory">
@@ -298,6 +298,6 @@ Libérer un message mis en quarantaine l'enregistre également comme faux positi
 
 ## Voir aussi
 
-- [Concept Safe House](/concepts/safe-house) — Explication complète des modes, catégories de menaces et couches de détection
-- [Intégration Safe House Gateway](/gateway/safe-house-overview) — Comment Safe House s'intègre dans le pipeline de requêtes de la passerelle Mnemom
-- [Modes d'application](/gateway/enforcement) — Comment la passerelle gère les violations après qu'elles atteignent l'agent
+- Concept Safe House — Explication complète des modes, catégories de menaces et couches de détection
+- Intégration Safe House Gateway — Comment Safe House s'intègre dans le pipeline de requêtes de la passerelle Mnemom
+- Modes d'application — Comment la passerelle gère les violations après qu'elles atteignent l'agent
