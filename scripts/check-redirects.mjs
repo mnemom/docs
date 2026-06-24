@@ -25,6 +25,17 @@
  *   4. Asserts the regression invariant behind the "root lands on
  *      for-agents instead of introduction" bug: a redirect from `/` to
  *      `/introduction` exists, and `introduction` is a navigable page.
+ *   5. Validates multi-locale parity for every ENFORCED locale — derived
+ *      data-driven from `navigation.languages` (each non-default language;
+ *      currently fr, es), NOT a hard-coded list, so a future locale (e.g.
+ *      `de`) is covered with no edit here. For each enforced locale it
+ *      asserts: (a) every page listed in that locale's navigation has a
+ *      content file on disk; (b) every redirect whose destination is
+ *      locale-prefixed lands on a page navigable within that locale (keyed
+ *      off the destination's own prefix, so a cross-locale hop /fr → /es is
+ *      checked against es); and (c) every `.mdx`/`.md` file under
+ *      `<docsRoot>/<locale>` is listed in that locale's navigation — i.e.
+ *      no orphaned translation that ships but is unreachable.
  *
  * Sibling to `check-doc-examples.mjs` / `check-spec-examples.mjs` and
  * follows the same contract:
@@ -33,8 +44,8 @@
  *   CLI usage.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { argv, exit } from "node:process";
 
@@ -74,29 +85,45 @@ const docsRoot = dirname(resolve(docsPath));
 // ── Collect navigable page slugs ─────────────────────────────────────────
 // Generic walk of the navigation tree: page slugs are the strings inside
 // any `pages` array, at any depth (tabs, dropdowns, anchors, groups, …).
-const pages = new Set();
-function collectPages(node) {
+function collectPagesInto(node, set) {
   if (Array.isArray(node)) {
-    for (const child of node) collectPages(child);
+    for (const child of node) collectPagesInto(child, set);
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (key === "pages" && Array.isArray(value)) {
         for (const p of value) {
-          if (typeof p === "string") pages.add(p);
-          else collectPages(p); // nested group object inside `pages`
+          if (typeof p === "string") set.add(p);
+          else collectPagesInto(p, set); // nested group object inside `pages`
         }
       } else {
-        collectPages(value);
+        collectPagesInto(value, set);
       }
     }
   }
 }
-collectPages(docs.navigation ?? {});
+const pages = new Set();
+collectPagesInto(docs.navigation ?? {}, pages);
 
 if (pages.size === 0) {
   console.error("✗ No navigable pages found — is `navigation` present?");
   exit(1);
 }
+
+// ── Enforced locales (data-driven, NOT a hard-coded fr/es list) ──────────────
+// `navigation.languages` carries one entry per language. The default language
+// (en) is served at the docs root with no path prefix; every OTHER language is
+// an "enforced locale" whose navigation, on-disk files, and redirects must stay
+// in parity. Deriving the set from `navigation.languages` means a future locale
+// (e.g. `de`) is covered automatically — no change to this script (MNE-414).
+const localeNav = new Map(); // locale code → Set<navigable page slug>
+for (const lang of docs.navigation?.languages ?? []) {
+  const code = lang?.language;
+  if (typeof code !== "string" || lang?.default) continue; // skip default (en)
+  const set = new Set();
+  collectPagesInto(lang, set);
+  localeNav.set(code, set);
+}
+const enforcedLocales = [...localeNav.keys()];
 
 // `/foo/bar#sec?x=1` (redirect destination) → `foo/bar` (page slug form)
 const toSlug = (dest) =>
@@ -115,6 +142,11 @@ const fileExists = (slug) =>
     (rel) => existsSync(resolve(docsRoot, rel)),
   );
 const resolves = (slug) => pages.has(slug) || fileExists(slug);
+
+// A slug is navigable within a locale if it (or its `/index` form, served at
+// the bare path) appears in that locale's navigation set.
+const navigableInLocale = (set, slug) =>
+  set.has(slug) || set.has(`${slug}/index`);
 
 // ── Validate redirect destinations ─────────────────────────────────────────
 const redirects = docs.redirects ?? [];
@@ -138,12 +170,79 @@ for (const r of redirects) {
     continue;
   }
   const slug = toSlug(destination);
-  if (resolves(slug)) {
+  const reachable = resolves(slug);
+  if (reachable) {
     if (verbose) console.log(`✓ ${source} → ${destination}`);
   } else {
     failures.push(
       `redirect "${source}" → "${destination}" points at a page that does not exist (resolved slug: "${slug}")`,
     );
+  }
+  // Locale parity (assertion b): when a redirect's DESTINATION is locale-
+  // prefixed it must land on a page that is navigable within THAT locale's nav
+  // set. Keyed off the destination's own prefix, so a cross-locale hop
+  // (/fr → /es/…) is checked against the destination locale (es). If the
+  // destination's first segment is NOT an enforced locale (e.g.
+  // /fr/old → /introduction), skip this check — the general reachability
+  // assertion above already validates such a redirect. Only run when the
+  // destination resolves, to avoid double-reporting an already-missing page.
+  const destLocale = slug.split("/")[0];
+  if (
+    reachable &&
+    localeNav.has(destLocale) &&
+    !navigableInLocale(localeNav.get(destLocale), slug)
+  ) {
+    failures.push(
+      `redirect "${source}" → "${destination}" targets locale "${destLocale}" but "${slug}" is not a navigable page in that locale's navigation`,
+    );
+  }
+}
+
+// ── Locale nav ⇄ file parity (assertions a & c) ──────────────────────────────
+// For every enforced locale: (a) each page in its navigation has a content
+// file on disk, and (c) each content file under `<docsRoot>/<locale>` is
+// reachable from that locale's navigation (no orphaned translation). We walk
+// one tree per enforced-locale code (NOT a hard-coded fr/es pair) so coverage
+// tracks the localeNav Map. Both `.mdx` and `.md` are scanned — consistent
+// with fileExists(), which resolves either — so a stray `<locale>/foo.md`
+// translation is caught too.
+const walkLocaleFiles = (dir, out = []) => {
+  for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === ".git") continue;
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) walkLocaleFiles(p, out);
+    else if (entry.endsWith(".mdx") || entry.endsWith(".md")) out.push(p);
+  }
+  return out;
+};
+// `<docsRoot>/fr/quickstart/overview.mdx` → `fr/quickstart/overview` (slug form)
+const fileToSlug = (rel) =>
+  rel
+    .split(sep)
+    .join("/")
+    .replace(/\.mdx?$/, "");
+
+for (const [locale, navSet] of localeNav) {
+  // (a) nav → file: a navigated locale page with no content file on disk.
+  for (const slug of navSet) {
+    if (!fileExists(slug)) {
+      failures.push(
+        `locale "${locale}" navigation lists "${slug}" but no content file exists for it (expected ${slug}.mdx|.md or ${slug}/index.mdx|.md)`,
+      );
+    }
+  }
+  // (c) file → nav: a locale content file on disk that no navigation lists.
+  const localeDir = resolve(docsRoot, locale);
+  if (existsSync(localeDir)) {
+    for (const file of walkLocaleFiles(localeDir)) {
+      const slug = fileToSlug(relative(docsRoot, file));
+      const collapsed = slug.replace(/\/index$/, "");
+      if (!navSet.has(slug) && !navSet.has(collapsed)) {
+        failures.push(
+          `locale file "${slug}" exists under "${locale}/" but is not listed in the "${locale}" navigation (orphaned translation)`,
+        );
+      }
+    }
   }
 }
 
@@ -173,7 +272,10 @@ if (failures.length > 0) {
   exit(1);
 }
 
+const localeSummary = enforcedLocales.length
+  ? `; locale nav/file parity OK (${enforcedLocales.join(", ")})`
+  : "";
 console.log(
-  `✓ check-redirects: ${redirects.length} redirect(s) OK; root → /introduction verified.`,
+  `✓ check-redirects: ${redirects.length} redirect(s) OK; root → /introduction verified${localeSummary}.`,
 );
 exit(0);
