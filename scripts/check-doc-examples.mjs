@@ -262,6 +262,26 @@ function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
 import { loadSpec } from "./_load-spec.mjs";
 const spec = await loadSpec();
 
+// ── Spec leakage gate (AC2) ───────────────────────────────────────────────
+//
+// Assert the served spec contains NO path from the staff list. The server-side
+// filter (`buildCustomerFacingSpec` in mnemom-api openapi/customer-facing.ts)
+// should strip all staff paths before serving; if one leaks through, catch it
+// here and refuse to proceed. Covers all STAFF_PREFIXES (prefix-based) AND all
+// STAFF_PATHS (exact-path) — both dimensions of the staff surface.
+//
+// Known limitation: sync-openapi.mjs has an equivalent pre-write leakage gate
+// but it is regex-only and covers only prefix-based staff paths (consistent
+// with current practice). This assertion is the stronger gate; it is the
+// canonical check that satisfies AC2.
+const staffLeakedFromSpec = Object.keys(spec.paths || {}).filter(isStaffPath);
+if (staffLeakedFromSpec.length) {
+  process.stderr.write(
+    `check-doc-examples: refusing — staff/internal path(s) present in the served spec (server filter gap, ADR-054): ${staffLeakedFromSpec.join(", ")}\n`,
+  );
+  exit(2);
+}
+
 // ── Ajv + dereferencer ───────────────────────────────────────────────────
 //
 // OpenAPI 3.1.0 uses JSON Schema 2020-12; we use Ajv2020 with strict=false
