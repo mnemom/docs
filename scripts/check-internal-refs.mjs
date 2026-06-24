@@ -3,7 +3,10 @@
 //
 // Single source of truth for the gate. Scans TWO customer-facing surfaces:
 //   1. *.mdx  — hand-written pages, raw text, line by line (faithful to the
-//      original `grep -rInE -i --include='*.mdx'` behavior).
+//      original `grep -rInE -i --include='*.mdx'` behavior). The walk recurses
+//      the whole tree, so localized page trees (fr/, es/, …) are scanned too;
+//      --self-test pins that locale coverage so a refactor can't drop it
+//      (issue-298).
 //   2. api-reference/openapi.json — the committed customer slice's PROSE fields
 //      (summary/description/tag text/param·body·response·schema descriptions).
 //      The generated api-reference pages render their *description* from the spec,
@@ -142,8 +145,30 @@ if (SELFTEST) {
   scanSpec({ components: { securitySchemes: { Foo: { description: "token at op://vault/secret" } } } }, "$");
   const walkOk = findings.some((f) => f.label.includes("1Password"));
   console.log(`  ${walkOk ? "✓" : "✗"} recursive walk catches op:// in components.securitySchemes`);
-  const total = cases.length + 1;
   if (walkOk) pass++;
+
+  // ---- locale-coverage: prove the production walk actually reaches the
+  // localized page trees (issue-298). The non-self-test scan above calls
+  // walkMdx(ROOT), which recurses the whole repo, so locale pages are covered
+  // by construction — these assertions PIN that coverage so a future refactor
+  // of walkMdx can't silently drop a locale tree from the gate. We assert
+  // against the LIVE tree rather than a synthetic fixture: planting a fake leak
+  // under a locale dir would itself trip the gate on the committed tree.
+  //
+  // EXTENDING TO A NEW LOCALE: when a new top-level locale tree is added (e.g.
+  // de/, pt/), add its directory name to LOCALES below — the production walk
+  // already covers it; this just adds the matching coverage assertion.
+  const LOCALES = ["fr", "es"];
+  const rootMdx = new Set(walkMdx(ROOT).map((f) => relative(ROOT, f)));
+  for (const locale of LOCALES) {
+    const dir = join(ROOT, locale);
+    const localeMdx = existsSync(dir) ? walkMdx(dir).map((f) => relative(ROOT, f)) : [];
+    const covered = localeMdx.length > 0 && localeMdx.every((f) => rootMdx.has(f));
+    console.log(`  ${covered ? "✓" : "✗"} gate scans ${locale}/ locale pages (${localeMdx.length} file(s))`);
+    if (covered) pass++;
+  }
+
+  const total = cases.length + 1 + LOCALES.length;
   console.log(`\nself-test: ${pass}/${total} passed`);
   process.exit(pass === total ? 0 : 1);
 }
