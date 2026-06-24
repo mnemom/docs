@@ -15,7 +15,7 @@
 // Exit 1 + report on any non-allowlisted match. `--self-test` runs assertions.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -142,8 +142,30 @@ if (SELFTEST) {
   scanSpec({ components: { securitySchemes: { Foo: { description: "token at op://vault/secret" } } } }, "$");
   const walkOk = findings.some((f) => f.label.includes("1Password"));
   console.log(`  ${walkOk ? "✓" : "✗"} recursive walk catches op:// in components.securitySchemes`);
-  const total = cases.length + 1;
+  let total = cases.length + 1;
   if (walkOk) pass++;
+  // localized-page coverage (issue #297): the .mdx walk recurses from ROOT, so it
+  // must reach the localized trees (fr/, es/). Prove the full-tree walk actually
+  // returns entries under each locale dir — a regression guard against a future
+  // refactor that excludes them. Skip-if-absent: a locale dir with no .mdx is an
+  // elided (not evaluated) assertion, so we increment `total` ONLY inside the
+  // exists branch — a skipped locale contributes 0 to both pass and total, keeping
+  // pass===total semantics exact (MNE-438).
+  const rootMdx = walkMdx(ROOT);
+  for (const locale of ["fr", "es"]) {
+    const localeDir = join(ROOT, locale);
+    // On-disk presence is determined independently of the ROOT-level walk so the
+    // assertion can genuinely fail if the full-tree walk later stops descending
+    // into the locale dir while .mdx pages still live there.
+    if (!existsSync(localeDir) || walkMdx(localeDir).length === 0) {
+      console.log(`  – localized ${locale}/ coverage skipped (no .mdx present)`);
+      continue;
+    }
+    total++;
+    const covered = rootMdx.some((p) => p.startsWith(localeDir + sep));
+    console.log(`  ${covered ? "✓" : "✗"} .mdx walk reaches localized ${locale}/ pages`);
+    if (covered) pass++;
+  }
   console.log(`\nself-test: ${pass}/${total} passed`);
   process.exit(pass === total ? 0 : 1);
 }
