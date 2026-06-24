@@ -48,7 +48,7 @@ See [Passkeys](/guides/passkeys) for browser support, troubleshooting, and the f
 
 Sensitive actions — removing a passkey, rotating an API key, changing SSO enforcement, deleting an organization — require **Authenticator Assurance Level 2 (AAL2)**: a user-verification gesture completed in the current flow, not reused from an older session.
 
-The step-up is presented inline: when an AAL2-protected action is attempted and the current session has not satisfied AAL2 within the freshness window, the dashboard prompts for a passkey gesture (or a TOTP code for password users, or an IdP re-assertion for SSO users). On success, the action proceeds and the AAL2 claim is stamped on the session until the window expires.
+The step-up is presented inline: when an AAL2-protected action is attempted and the current session does not already carry an AAL2 claim, the dashboard prompts for a passkey gesture (or a TOTP code for password users, or an IdP re-assertion for SSO users). Passkey-minted sessions satisfy AAL2 for their lifetime — WebAuthn is inherently multi-factor under NIST SP 800-63B; for password and SSO users the gesture stamps the AAL2 claim on the session. Each WebAuthn step-up challenge is single-use and valid for 60 seconds.
 
 Actions that require AAL2 step-up:
 
@@ -60,7 +60,7 @@ Actions that require AAL2 step-up:
 - Pausing, killing, or resuming an agent via the Containment API
 - Deleting your account
 
-{/* TODO: Alex — confirm the exact AAL2 freshness window (we tentatively use 5 minutes) and whether the window is sliding or fixed after the most recent gesture. Confirm the IdP `acr` values we accept for SSO step-up. */}
+{/* TODO(Wassim/Alex): security posture — the implementation currently enforces AAL2 as a binary session property (no time-boxed freshness window) and does not yet consume IdP `acr` values for SSO step-up. Decide whether to add a time-boxed AAL2 re-auth window and which `acr` values to accept, then update this section accordingly. */}
 
 ---
 
@@ -71,14 +71,14 @@ Dashboard sessions are issued as short-lived Supabase JWTs wrapped in an httpOnl
 | Event | Effect |
 |---|---|
 | Sign-in (any method) | JWT issued with `aal` claim (`aal1` or `aal2`), session row created in `auth_sessions` |
-| AAL2 step-up | Session `aal` upgraded, `aal2_verified_at` stamped |
+| AAL2 step-up | Session `aal` claim upgraded to `aal2` |
 | Token refresh | Old JWT invalidated, new JWT issued with preserved claims |
 | Sign-out | Session row deleted; all JWTs derived from it fail verification |
 | Password reset | All sessions for the user invalidated |
 | Passkey removal | The specific credential invalidated server-side; other sessions are unaffected |
 | Org role change | Affected user's sessions re-issue with new claims on next refresh |
 
-Sessions expire after inactivity {/* TODO: Alex — confirm idle timeout (we tentatively use 24h) and absolute maximum session lifetime (we tentatively use 30d). */} and on explicit revocation. Active sessions are listed in **Settings → Security → Active sessions** with last-seen IP and user agent; each can be revoked individually.
+Sessions expire after **7 days** of inactivity — the idle window is re-upped on every authenticated request — and reach an absolute maximum lifetime of **30 days** from the original sign-in, after which re-authentication is required. Sessions also end on explicit revocation. Active sessions are listed in **Settings → Security → Active sessions** with last-seen IP and user agent; each can be revoked individually.
 
 Server-side, sessions are revalidated on every protected request against the `auth_sessions` table. Stolen JWTs are not replayable past revocation.
 
