@@ -98,7 +98,18 @@ for (const entry of allowlist) {
 }
 
 const LOCALES = ['fr', 'es'];
-const leakMap = new Map(); // key "locale:target" → first occurrence details
+// key "locale:target" → { href, locale, repoint?, files:Set }. `repoint` is set
+// when a same-locale translation of the target exists.
+const leakMap = new Map();
+
+function recordLeak(key, rel, normalized, locale, repoint) {
+  const existing = leakMap.get(key);
+  if (existing) {
+    existing.files.add(rel);
+    return;
+  }
+  leakMap.set(key, { href: normalized, locale, repoint, files: new Set([rel]) });
+}
 
 for (const f of mdxFiles) {
   const rel = relative(root, f);
@@ -111,12 +122,20 @@ for (const f of mdxFiles) {
     const normalized = href.replace(/\/$/, '');
     // Skip links that already target this locale's subtree
     if (normalized.startsWith('/' + locale + '/')) continue;
-    // Check whether a same-locale version of this page exists
-    const localizedPath = '/' + locale + normalized;
-    if (pages.has(localizedPath) || pages.has(localizedPath + '/index')) continue;
     const key = `${locale}:${normalized}`;
-    if (!allowSet.has(key) && !leakMap.has(key)) {
-      leakMap.set(key, { file: rel, href: normalized, locale });
+    // Does a same-locale translation of this target exist?
+    const localizedPath = '/' + locale + normalized;
+    const hasTranslation = pages.has(localizedPath) || pages.has(localizedPath + '/index');
+    if (hasTranslation) {
+      // The translated page exists but the link still points at EN. This is a
+      // leak that must be REPOINTED, not allowlisted — the existence of the
+      // translation is evidence the link should be repointed, not evidence it
+      // already has been. The allowlist deliberately cannot silence this case,
+      // so a stale allowlist entry is surfaced once the translation lands.
+      recordLeak(key, rel, normalized, locale, localizedPath);
+    } else if (!allowSet.has(key)) {
+      // No same-locale translation yet: an EN fallback that must be allowlisted.
+      recordLeak(key, rel, normalized, locale, undefined);
     }
   }
 }
@@ -128,11 +147,18 @@ if (leaks.length === 0) {
 } else {
   console.log(`\n✗ ${leaks.length} cross-locale link(s) not in allowlist:`);
   for (const l of leaks) {
-    console.log(`  [${l.locale}] ${l.file}: ${l.href}`);
+    const file = [...l.files][0];
+    const where = l.files.size > 1 ? ` (referenced in ${l.files.size} files)` : '';
+    if (l.repoint) {
+      console.log(`  [${l.locale}] ${file}: ${l.href} → should repoint to ${l.repoint}${where}`);
+    } else {
+      console.log(`  [${l.locale}] ${file}: ${l.href}${where}`);
+    }
   }
   console.log(
-    '\n  Fix: add these to scripts/locale-link-allowlist.json with a reason,\n' +
-    '  or update the localized page to use the same-locale equivalent.'
+    '\n  Fix: repoint links marked "should repoint" to the same-locale page; for\n' +
+    '  EN fallbacks with no translation yet, add an entry to\n' +
+    '  scripts/locale-link-allowlist.json with a reason.'
   );
 }
 
