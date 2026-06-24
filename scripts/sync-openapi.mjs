@@ -19,6 +19,8 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { isStaffPath } from "./lib/staff-surface.mjs";
+
 const SOURCE = process.env.MNEMOM_OPENAPI_URL || "https://api.mnemom.ai/openapi.json";
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "api-reference", "openapi.json");
 
@@ -30,9 +32,10 @@ if (!res.ok) {
 const spec = await res.json();
 
 // Defensive: the served slice must be customer-only. If a staff path leaks
-// through, fail loudly rather than commit it (matches the leakage gate intent).
-const STAFF = /^\/(admin|arena|internal|sonar|rb2b)\/|^\/v1\/internal\//;
-const leaked = Object.keys(spec.paths || {}).filter((p) => STAFF.test(p));
+// through, fail loudly rather than commit it. Uses isStaffPath from the shared
+// staff-surface module — covers both prefix-based (STAFF_PREFIXES) and
+// exact-path (STAFF_PATHS) staff entries.
+const leaked = Object.keys(spec.paths || {}).filter(isStaffPath);
 if (leaked.length) {
   process.stderr.write(`sync-openapi: refusing — staff paths in served slice: ${leaked.join(", ")}\n`);
   process.exit(2);

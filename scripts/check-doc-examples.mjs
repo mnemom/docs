@@ -68,24 +68,10 @@ import {
 // So a doc that shows a curl against a staff path will never match the customer
 // spec — that's by design, not drift. Skip those examples instead of failing
 // (and instead of papering over them with per-path KNOWN_DRIFT entries that go
-// stale every time the staff surface shifts). Mirror of
-// `mnemom-api openapi/customer-facing.ts::{STAFF_PREFIXES,STAFF_PATHS}`; keep in
-// sync when a new internal namespace is added there. Note: doc paths are
-// normalized with the `/v1` base stripped, so `/internal/` already covers the
-// `/v1/internal/` variant.
-const STAFF_PREFIXES = ["/admin/", "/arena/", "/internal/", "/v1/internal/", "/sonar/", "/rb2b/"];
-const STAFF_PATHS = new Set([
-  "/auth/send-email-hook",
-  "/billing/webhooks/stripe",
-  "/contact/notify",
-  "/on-chain/anchor-root",
-  "/on-chain/publish-scores",
-  "/health",
-]);
-function isStaffPath(normalizedPath) {
-  if (STAFF_PATHS.has(normalizedPath)) return true;
-  return STAFF_PREFIXES.some((pre) => normalizedPath.startsWith(pre));
-}
+// stale every time the staff surface shifts). Single source of truth lives in
+// scripts/lib/staff-surface.mjs; update there to propagate to both this script
+// and sync-openapi.mjs.
+import { isStaffPath } from "./lib/staff-surface.mjs";
 
 // ── CLI parsing ──────────────────────────────────────────────────────────
 const args = argv.slice(2);
@@ -97,17 +83,47 @@ let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifica
 let verbose = false;
 let checkBodies = true;
 let checkResponses = true;
+let selfTest = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--scope") scope = args[++i];
   else if (args[i] === "--verbose") verbose = true;
   else if (args[i] === "--no-bodies") checkBodies = false;
   else if (args[i] === "--no-responses") checkResponses = false;
+  else if (args[i] === "--self-test") selfTest = true;
   else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses]");
+    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses] [--self-test]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${args[i]}`);
     exit(2);
+  }
+}
+
+// ── Self-test mode ───────────────────────────────────────────────────────
+//
+// Synthetic-injects representative staff paths into a mock spec and asserts
+// the leakage gate catches them (both prefix-based and exact-path entries),
+// while a clean customer path passes through. Exits 0 on pass, 1 on fail.
+// Does not fetch the live spec or walk any MDX files.
+if (selfTest) {
+  const syntheticSpec = {
+    paths: {
+      "/agents": {},             // clean customer path — must NOT be caught
+      "/admin/users": {},        // prefix-based staff (STAFF_PREFIXES) — must be caught
+      "/health": {},             // exact-path staff (STAFF_PATHS) — must be caught
+    },
+  };
+  const caught = Object.keys(syntheticSpec.paths).filter(isStaffPath);
+  const mustCatch = ["/admin/users", "/health"];
+  const mustPass = ["/agents"];
+  const allCaught = mustCatch.every((p) => caught.includes(p));
+  const noneCaught = mustPass.every((p) => !caught.includes(p));
+  if (allCaught && noneCaught) {
+    console.log(`--self-test: leakage gate OK — caught ${JSON.stringify(caught)}, passed ${JSON.stringify(mustPass)}`);
+    exit(0);
+  } else {
+    console.error(`--self-test: FAIL — caught=${JSON.stringify(caught)}, expected to catch=${JSON.stringify(mustCatch)}, expected to pass=${JSON.stringify(mustPass)}`);
+    exit(1);
   }
 }
 // ── Known-drift allowlist ────────────────────────────────────────────────
