@@ -124,6 +124,21 @@ All arithmetic in the proving guest uses Q16.16 fixed-point integers — no floa
 
 Proofs are generated asynchronously: the risk score is returned immediately, and the proof follows. Once available, any third party can verify the proof without seeing the input data.
 
+### Proof lifecycle and fail-open behavior
+
+Proof generation is best-effort. The risk score and recommendation are always valid regardless of proof status — an absent or failed proof does not invalidate the assessment.
+
+`proof_status` on the assessment object progresses through four states:
+
+| `proof_status` | Meaning |
+|----------------|---------|
+| `none` | No proof was dispatched. Either the caller is on the Free tier (proofs not included) or the async dispatch did not complete. `proof_id` is `null`. |
+| `pending` | Proof request dispatched to the ZK proving cluster; computation has not yet begun. |
+| `completed` | Proof is available and verified. Retrieve the full receipt via `GET /v1/risk/proofs/:proof_id`. |
+| `failed` | Proof generation failed. The risk score remains valid; the computation could not be proven for this assessment. |
+
+The proof object itself carries a finer-grained `status` field (`pending` → `proving` → `completed` or `failed`) that tracks computation progress inside the proving cluster. That field is distinct from the assessment's `proof_status` — see [Get proof](/api-reference/risk-overview#get-proof) in the API reference.
+
 <Note>
   ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier assessments do not include proofs.
 </Note>
