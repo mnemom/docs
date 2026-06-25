@@ -44,6 +44,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { argv, exit } from "node:process";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -88,12 +89,18 @@ function isStaffPath(normalizedPath) {
 }
 
 // ── CLI parsing ──────────────────────────────────────────────────────────
+const SELFTEST = process.argv.includes("--self-test");
 const args = argv.slice(2);
 // Default scope = all customer-facing tabs from docs.json plus the
-// repo-root MDX files (introduction, changelog). api-reference/ is
-// excluded — those pages are auto-generated from openapi.json by Mintlify
-// and would trivially round-trip.
-let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifications,protocols,gateway,for-agents,migration,pricing";
+// repo-root MDX files (introduction, changelog) and api-reference/endpoint.
+// api-reference/endpoint/ pages are included despite the directory's
+// auto-generated Mintlify display: each page can contain hand-authored curl
+// examples that reference the live API and can drift from the spec. The
+// Mintlify-rendered spec display (path/method schema) trivially round-trips
+// from openapi.json; the hand-written prose and example blocks in
+// api-reference/endpoint/ do not (issue-319).
+const DEFAULT_SCOPE = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifications,protocols,gateway,for-agents,migration,pricing,api-reference/endpoint";
+let scope = DEFAULT_SCOPE;
 let verbose = false;
 let checkBodies = true;
 let checkResponses = true;
@@ -102,8 +109,9 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--verbose") verbose = true;
   else if (args[i] === "--no-bodies") checkBodies = false;
   else if (args[i] === "--no-responses") checkResponses = false;
+  else if (args[i] === "--self-test") { /* handled above */ }
   else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses]");
+    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses] [--self-test]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${args[i]}`);
@@ -255,6 +263,40 @@ function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
       e.keyword === keyword &&
       (!e.schemaPath || e.schemaPath === schemaPath),
   );
+}
+
+// ── Self-test (exit before spec network call) ─────────────────────────────
+//
+// Verifies scope-resolution logic only — no spec loading required.
+// Run with: node scripts/check-doc-examples.mjs --self-test
+if (SELFTEST) {
+  let pass = 0;
+  const total = 2;
+
+  // assertion 1: api-reference/endpoint is in the default scope
+  const endpointFiles = resolveScope(DEFAULT_SCOPE).filter((f) =>
+    f.includes("api-reference/endpoint"),
+  );
+  const endpointOk = endpointFiles.length > 0;
+  console.log(
+    `  ${endpointOk ? "✓" : "✗"} default scope includes api-reference/endpoint (${endpointFiles.length} file(s))`,
+  );
+  if (endpointOk) pass++;
+
+  // assertion 2: at least one reputation endpoint page is in scope.
+  // /(^|-)reputation(-|\.)/ covers both internal positions like
+  // get-reputation-agent-id.mdx AND terminal positions like
+  // get-teams-team-id-reputation.mdx (issue-319 advisory nit).
+  const hasReputation = endpointFiles.some((p) =>
+    /(^|-)reputation(-|\.)/.test(basename(p)),
+  );
+  console.log(
+    `  ${hasReputation ? "✓" : "✗"} api-reference/endpoint scope includes reputation endpoint pages`,
+  );
+  if (hasReputation) pass++;
+
+  console.log(`\nself-test: ${pass}/${total} passed`);
+  exit(pass === total ? 0 : 1);
 }
 
 // ── Load spec ────────────────────────────────────────────────────────────
