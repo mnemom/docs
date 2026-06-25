@@ -1,0 +1,207 @@
+---
+title: "OAuth 2.0 Device Authorization Flow"
+description: "How headless agents authenticate with Mnemom using the OAuth 2.0 device-code grant (RFC 8628) — device-authorization request, user verification, token poll loop, and error handling."
+sidebarTitle: "Device Auth Flow"
+icon: "terminal"
+---
+
+Headless agents — CI runners, containerised workers, server-side pipelines — cannot open a browser to complete the authorization-code + PKCE flow. The **OAuth 2.0 device-authorization grant** ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) is the correct mechanism for these callers: the agent requests a short `user_code`, the human operator approves it in a browser, and the agent polls the token endpoint until it receives an access token. For a full comparison of all supported authentication methods, see [Authentication](/guides/authentication).
+
+## Flow overview
+
+<Steps>
+  <Step title="Request device and user codes">
+    The agent sends `POST /oauth/device_authorization` and receives a `device_code`, `user_code`, `verification_uri`, `expires_in`, and `interval`.
+  </Step>
+  <Step title="Display the code to the operator">
+    The agent displays the `user_code` and `verification_uri` to the human operator — log them to a console, embed in a CLI prompt, or generate a QR code from `verification_uri_complete`.
+  </Step>
+  <Step title="Operator approves in a browser">
+    The operator opens `verification_uri`, enters the `user_code`, and approves access. No action is required from the agent during this step.
+  </Step>
+  <Step title="Agent polls for the access token">
+    The agent polls `POST /oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` at the prescribed interval until it receives an access token or a terminal error.
+  </Step>
+</Steps>
+
+---
+
+## Device-authorization request
+
+```http
+POST /oauth/device_authorization HTTP/1.1
+Host: api.mnemom.ai
+Content-Type: application/x-www-form-urlencoded
+
+client_id=<your_client_id>&scope=api:read%20api:write
+```
+
+<!-- TODO: verify endpoint path against mnemom-api/src/oauth/handlers.ts before merging — RFC 8628 default used here -->
+
+Successful response (HTTP 200):
+
+```json
+{
+  "device_code": "GmRh...opaque",
+  "user_code": "WDJB-MJHT",
+  "verification_uri": "https://mnemom.ai/activate",
+  "verification_uri_complete": "https://mnemom.ai/activate?user_code=WDJB-MJHT",
+  "expires_in": 1800,
+  "interval": 5
+}
+```
+
+<!-- TODO: verify expires_in (1800 s) and interval (5 s) against mnemom-api/src/oauth/device-grant.ts:buildDeviceAuthorizationResponse before merging — RFC 8628 defaults used here -->
+
+| Field | Type | Description |
+|---|---|---|
+| `device_code` | string | Opaque code the agent presents when polling the token endpoint. Keep this secret. |
+| `user_code` | string | Short, human-typeable code the operator enters at `verification_uri`. Display this to your operator. |
+| `verification_uri` | string | URL the operator must visit to approve the request. |
+| `verification_uri_complete` | string | `verification_uri` with `user_code` pre-filled as a query parameter — use this for QR codes or one-click links where possible. |
+| `expires_in` | integer | Seconds until both codes expire. The agent must complete the poll loop before this window closes. |
+| `interval` | integer | Minimum seconds the agent must wait between poll attempts. Do not poll faster than this; the server enforces the limit. |
+
+---
+
+## Poll loop
+
+After the device-authorization request succeeds, poll `POST /oauth/token` at `interval`-second intervals. On each `slow_down` response, permanently increase the interval by 5 seconds for the remainder of the session. Stop when you receive an access token or a terminal error.
+
+<CodeGroup>
+
+```python Python
+import time
+import httpx
+
+CLIENT_ID = "<your_client_id>"
+
+def poll_for_token(device_code: str, interval: int, expires_in: int) -> dict:
+    deadline = time.time() + expires_in
+    while time.time() < deadline:
+        time.sleep(interval)
+        resp = httpx.post(
+            "https://api.mnemom.ai/oauth/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": CLIENT_ID,
+            },
+        )
+        body = resp.json()
+        if resp.status_code == 200:
+            return body  # access_token, token_type, expires_in, [refresh_token]
+        error = body.get("error")
+        if error == "authorization_pending":
+            continue
+        elif error == "slow_down":
+            interval += 5  # back off permanently for this session
+            continue
+        elif error in ("expired_token", "access_denied"):
+            raise RuntimeError(f"Device authorization failed: {error}")
+        else:
+            raise RuntimeError(f"Unexpected error: {error}")
+    raise TimeoutError("Device code expired before authorization was granted")
+```
+
+```typescript TypeScript
+const CLIENT_ID = "<your_client_id>";
+
+async function pollForToken(
+  deviceCode: string,
+  interval: number,
+  expiresIn: number,
+) {
+  const deadline = Date.now() + expiresIn * 1000;
+  let pollInterval = interval;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollInterval * 1000));
+    const resp = await fetch("https://api.mnemom.ai/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deviceCode,
+        client_id: CLIENT_ID,
+      }),
+    });
+    const body = await resp.json();
+    if (resp.ok) return body; // { access_token, token_type, expires_in, refresh_token? }
+    const { error } = body as { error: string };
+    if (error === "authorization_pending") continue;
+    if (error === "slow_down") { pollInterval += 5; continue; }
+    throw new Error(`Device authorization failed: ${error}`);
+  }
+  throw new Error("Device code expired before authorization was granted");
+}
+```
+
+</CodeGroup>
+
+---
+
+## Error codes
+
+The following error codes may be returned by `POST /oauth/token` during the poll loop:
+
+| `error` value | HTTP status | Meaning | Action |
+|---|---|---|---|
+| `authorization_pending` | 400 | The operator has not yet approved the request. | Continue polling after `interval` seconds. |
+| `slow_down` | 400 | The agent is polling too fast. | Increase `interval` by 5 seconds permanently and continue polling. |
+| `expired_token` | 400 | The `device_code` has expired (`expires_in` elapsed). | Start over: request a new `device_code` and prompt the operator again. |
+| `access_denied` | 400 | The operator denied the request or cancelled it. | Abort. Do not retry with the same `device_code`. |
+| `invalid_client` | 401 | The `client_id` is unknown or invalid. | Check your client registration. |
+
+<Warning>
+Never poll faster than the current `interval` value. Each `slow_down` error permanently increases the required interval for that session. Repeated fast polling may result in the session being terminated with `access_denied`.
+</Warning>
+
+---
+
+## Token response
+
+A successful poll returns HTTP 200 with a token response:
+
+```json
+{
+  "access_token": "mnm_act_…",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "mnm_rft_…",
+  "scope": "api:read api:write"
+}
+```
+
+Use the access token as a Bearer token on subsequent API requests:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+The refresh token can be exchanged for a new access token via the standard `refresh_token` grant at `POST /oauth/token` before the access token expires.
+
+---
+
+## TTLs at a glance
+
+| Item | TTL |
+|---|---|
+| `device_code` / `user_code` | `expires_in` seconds from the device-authorization response (typically 1800 s / 30 min) |
+| Access token | 3600 s (1 hour) |
+| Refresh token | Single-use; each exchange issues a new one. |
+
+---
+
+## Client registration
+
+<Note>
+If you do not yet have a `client_id`, register your OAuth client with `POST /oauth/register` (RFC 7591 dynamic client registration) before starting the device flow. Public clients (no client secret) are supported. See the [OAuth register endpoint](/api-reference/endpoint/post-oauth-register).
+</Note>
+
+---
+
+## See also
+
+- [Authentication](/guides/authentication) — full auth method comparison (passkeys, MFA, SSO, API keys)
+- [API Keys](/guides/api-keys) — server-to-server auth without OAuth; simpler for non-delegated agent calls
+- [API reference overview](/api-reference/overview) — auth header formats and rate limits
