@@ -143,6 +143,19 @@ The proof object itself carries a finer-grained `status` field (`pending` → `p
   ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier assessments do not include proofs.
 </Note>
 
+## Authorization model
+
+All Risk API endpoints require authentication. Pass your credentials as either:
+
+- **Bearer token**: `Authorization: Bearer <token>`
+- **API key**: `X-Mnemom-Api-Key: <key>`
+
+### Account-scoped GET endpoints
+
+GET endpoints that retrieve a stored resource by ID — `GET /v1/risk/assessments/:assessment_id`, `GET /v1/risk/team-assessments/:assessment_id`, and `GET /v1/risk/proofs/:proof_id` — are account-scoped. A request with a valid token from a **different account** returns `404` rather than `403`. This prevents leaking resource existence to authenticated callers who do not own the resource.
+
+List endpoints (`GET /v1/risk/history/:agent_id`, `GET /v1/risk/team-history/:team_id`) filter implicitly to the calling account and return an empty list rather than `404` when the requested ID belongs to a different account.
+
 ## See also
 
 - [Reputation Scores](/concepts/reputation-scores) — the input data that feeds risk assessments
