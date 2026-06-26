@@ -272,6 +272,9 @@ jobs:
           # literal naming the recognized verbs; the issue number reaches gh only as a
           # quoted shell var. We deliberately do NOT echo the operator's command back
           # (avoids reflecting attacker-controlled text into the comment).
+          # shellcheck disable=SC2016  # backticks here are literal markdown in the reply
+          # text, NOT command substitution; single-quoting is intentional (no expansion).
+          # (Strict actionlint repos — e.g. polis — fail the sync PR without this. MNE-1349.)
           BODY='[ADW-AGENTS] cli: 🤔 Unrecognized `adw` command. Recognized commands (the verb must be the FIRST token of the first line; trailing notes on that line are allowed): `adw run`, `adw zte`, `adw ship`, `adw retry`, `adw sync`, `adw rebase`. No run was started.'
           gh api "repos/$REPO/issues/$ISSUE/comments" -X POST -f "body=$BODY" \
             2>/dev/null || echo "WARN: could not post unrecognized-command feedback"
