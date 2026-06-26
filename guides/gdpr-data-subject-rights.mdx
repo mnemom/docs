@@ -33,7 +33,7 @@ curl -X DELETE \
 }
 ```
 
-The `status` value reports the deletion's current state from the closed enum `{"tombstoned", "in_progress", "completed", "failed"}`. Initial state after the 202 is `tombstoned` (the agent is immediately inaccessible — all read endpoints return `404`); the deletion-status endpoint below reports progress through the remaining states.
+The `status` value progresses through the cascade phases documented in [Cascade phase breakdown](#cascade-phase-breakdown) below. Initial state after the 202 is `tombstoned` (the agent is immediately inaccessible — all read endpoints return `404`); the deletion-status endpoint below reports progress through the remaining phases.
 
 The agent is immediately inaccessible — all read endpoints return `404` after the request is accepted. Data deletion proceeds asynchronously across all stores.
 
@@ -111,6 +111,31 @@ Mnemom anchors aggregate Merkle roots to Base L2 for tamper-evidence (see [On-Ch
 <Warning>
 Deletion is irreversible. Once a deletion request completes, the agent and all associated data cannot be recovered. Ensure you have exported any needed data before requesting deletion.
 </Warning>
+
+## Cascade phase breakdown
+
+Each deletion request transitions through a fixed sequence of `status` values as the cascade progresses. Use `GET /v1/agents/{agent_id}/deletion-status` to observe the current phase.
+
+| Phase | `status` value | What happens |
+|---|---|---|
+| **Tombstone** | `tombstoned` | Agent immediately inaccessible; all read endpoints return `404`. Deletion cascade queued. |
+| **Phase 1** | `phase_1_complete` | Identity and cards deleted — agent record, alignment cards, protection cards, canonical composed cards, policies, exemptions. |
+| **Phase 2** | `phase_2_complete` | Integrity and reasoning deleted — integrity checkpoints, verdict proofs, enforcement nudges, containment logs. |
+| **Phase 3** | `phase_3_complete` | Reputation and trust deleted — reputation scores, reputation events, trust edges, reputation snapshots. |
+| **Phase 4** | `phase_4_complete` | Detection and analysis deleted — Safe House evaluations, threat training traces, sideband analyses. |
+| **Phase 5** | `phase_5_complete` | Configuration deleted — Safe House configs, policy evaluations, card amendments, tool registrations. |
+| **Phase 6** | `phase_6_complete` | Webhooks deleted — webhook registrations and delivery history. |
+| **Phase 7** | `phase_7_complete` | Cryptographic state deleted — Merkle tree state, score publication records. |
+| **KV cleared** | `kv_cleared` | All cached data cleared across Cloudflare KV namespaces. |
+| **Pseudonymized** | `pseudonymized` | Retained records scrubbed of agent identifiers. See [Retained in pseudonymized form](#retained-in-pseudonymized-form) below. |
+| **Complete** | `complete` | Full cascade complete. All agent-identifiable data removed. |
+| **Failed** | `failed` | Cascade halted at a phase. The `failed_phase` field identifies where. Automatic retries apply. |
+
+### Retained in pseudonymized form
+
+When the status transitions to `pseudonymized`, the records listed under [Pseudonymized (agent identity removed, structure retained)](#pseudonymized-agent-identity-removed-structure-retained) above have had agent identifiers replaced with a one-way hash. The pseudonym is irreversible — no re-identification from retained records is possible.
+
+See [Legal basis for retained data](#legal-basis-for-retained-data) below for the applicable Article 17(3) carve-outs.
 
 ## Verification
 
