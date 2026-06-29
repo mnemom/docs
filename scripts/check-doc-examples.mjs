@@ -13,6 +13,10 @@
  *   3. (T5-1.2) The `-d '{...}'` JSON body, when present, validates against
  *      the spec's `requestBody.content['application/json'].schema` via Ajv
  *      after internal $ref dereferencing.
+ *   4. (T5-1.5) Each curl whose matched operation declares a non-empty
+ *      security requirement carries at least one header matching a
+ *      declared scheme (BearerAuth → Authorization: Bearer, ApiKeyAuth →
+ *      X-Mnemom-Api-Key, AgentAuth → X-Mnemom-Agent-Proof).
  *
  * This is the docs-side of Track 5's doc-as-spec CI, complement to the
  * four-layer leading-teams contract-drift defense built out by Track 4
@@ -41,6 +45,7 @@
  *   --verbose        Also list the calls that passed (audit aid).
  *   --no-bodies      Skip body validation (path+method only — equivalent
  *                    to the T5-1 layer-1 behavior pre-2026-05-14).
+ *   --no-auth        Skip auth-header validation (path+method+body only).
  */
 
 import { readFileSync } from "node:fs";
@@ -110,14 +115,16 @@ let scope = DEFAULT_SCOPE;
 let verbose = false;
 let checkBodies = true;
 let checkResponses = true;
+let checkAuth = true;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--scope") scope = args[++i];
   else if (args[i] === "--verbose") verbose = true;
   else if (args[i] === "--no-bodies") checkBodies = false;
   else if (args[i] === "--no-responses") checkResponses = false;
+  else if (args[i] === "--no-auth") checkAuth = false;
   else if (args[i] === "--self-test") { /* handled above */ }
   else if (args[i] === "--help" || args[i] === "-h") {
-    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses] [--self-test]");
+    console.log("Usage: check-doc-examples.mjs [--scope dir1,dir2] [--verbose] [--no-bodies] [--no-responses] [--no-auth] [--self-test]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${args[i]}`);
@@ -268,6 +275,28 @@ function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
       templatePathMatchesSegments(e.path, segments) &&
       e.keyword === keyword &&
       (!e.schemaPath || e.schemaPath === schemaPath),
+  );
+}
+
+// ── Known auth-drift allowlist (T5-1.5) ──────────────────────────────────
+//
+// Each entry is a (file, method, templated-path) tuple — same shape as
+// KNOWN_DRIFT. A matching entry means the curl is known to carry no header
+// for any of the operation's declared schemes; it is still reported as
+// "known auth drift" but does NOT fail the build. Remove entries as the
+// underlying doc curl examples are corrected to carry the right header.
+const KNOWN_AUTH_DRIFT = [
+  // Empty — all current curl examples carry correct auth or target public
+  // endpoints. Populate only if the first CI run surfaces pre-existing
+  // drift that cannot be fixed in this same PR.
+];
+
+function knownAuthDriftEntry(file, method, segments) {
+  return KNOWN_AUTH_DRIFT.find(
+    (e) =>
+      e.file === file &&
+      e.method === method &&
+      templatePathMatchesSegments(e.path, segments),
   );
 }
 
@@ -448,6 +477,42 @@ function inferResponseStatus(specPath, method) {
   return twoxx ?? null;
 }
 
+// ── Auth-header check helpers (T5-1.5) ───────────────────────────────────
+
+// Returns the effective security requirement for an operation:
+// - operation-level `security` if the field is present (even if [])
+// - spec-level `security` otherwise
+// Returns [] for public endpoints (security: []).
+function effectiveOpSecurity(specPath, method) {
+  const op = spec.paths[specPath]?.[method];
+  if (!op) return [];
+  if (Object.prototype.hasOwnProperty.call(op, "security")) return op.security;
+  return spec.security ?? [];
+}
+
+// Returns true if `headers` (array of raw "-H" strings) carry a header
+// satisfying `schemeName` as defined in `spec.components.securitySchemes`.
+// Handles http/bearer (BearerAuth) and apiKey/header (ApiKeyAuth, AgentAuth).
+function headerSatisfiesScheme(headers, schemeName) {
+  const def = spec.components?.securitySchemes?.[schemeName];
+  if (!def) return false;
+  if (def.type === "http" && def.scheme === "bearer") {
+    return headers.some((h) => /^authorization\s*:\s*bearer\s+\S/i.test(h));
+  }
+  if (def.type === "apiKey" && def.in === "header" && def.name) {
+    const name = def.name.toLowerCase();
+    return headers.some((h) => {
+      const colon = h.indexOf(":");
+      if (colon === -1) return false;
+      return (
+        h.slice(0, colon).trim().toLowerCase() === name &&
+        h.slice(colon + 1).trim().length > 0
+      );
+    });
+  }
+  return false;
+}
+
 // Sentinel string that replaces placeholder values during validation.
 // Any Ajv error whose data == this sentinel is suppressed (the doc author
 // is using a shell-substituted runtime value the static walker can't see;
@@ -508,6 +573,8 @@ const bodyParseWarns = [];
 const responseFailures = [];
 const knownResponseDrift = [];
 const responseParseWarns = [];
+const authFailures = [];
+const knownAuthDrift = [];
 const passes = [];
 const staffSkipped = [];
 let totalCurls = 0;
@@ -515,6 +582,7 @@ let totalBodies = 0;
 let bodiesValidated = 0;
 let totalResponses = 0;
 let responsesValidated = 0;
+let authChecked = 0;
 
 for (const file of files) {
   const source = readFileSync(file, "utf8");
@@ -562,6 +630,53 @@ for (const file of files) {
         continue;
       }
       passes.push({ file, line: block.line, method, path: matched.raw });
+
+      // Auth-header check — T5-1.5.
+      //
+      // Skip when `--no-auth` is set. Also skip if the operation declares
+      // no security requirement (security: [] — public endpoint). For all
+      // other operations, at least one declared scheme must be satisfied.
+      if (checkAuth) {
+        const opSecurity = effectiveOpSecurity(matched.raw, m);
+        // security: [{}] means "public access allowed as an alternative"
+        // (empty object in the OR list = no scheme required). Skip, same as security: [].
+        const hasPublicAlternative = opSecurity.some((obj) => Object.keys(obj).length === 0);
+        if (opSecurity.length > 0 && !hasPublicAlternative) {
+          authChecked++;
+          // Collect distinct scheme names (OR semantics: any one satisfies).
+          const declaredSchemes = [...new Set(opSecurity.flatMap((obj) => Object.keys(obj)))];
+          const satisfied = declaredSchemes.some((sn) =>
+            headerSatisfiesScheme(parsed.headers, sn),
+          );
+          if (!satisfied) {
+            const schemeHints = declaredSchemes.map((sn) => {
+              const def = spec.components?.securitySchemes?.[sn];
+              if (!def) return sn;
+              if (def.type === "http" && def.scheme === "bearer")
+                return `Authorization: Bearer $TOKEN`;
+              if (def.type === "apiKey" && def.in === "header" && def.name)
+                return `${def.name}: $KEY`;
+              return sn;
+            });
+            const allow = knownAuthDriftEntry(file, method, norm.segments);
+            const entry = {
+              file,
+              line: block.line,
+              method,
+              path: matched.raw,
+              declaredSchemes,
+              hint: schemeHints.join(" or "),
+              curl: clip(curl),
+              allowKey: allow
+                ? `${allow.file}|${allow.method}|${allow.path}`
+                : null,
+              owner: allow?.owner,
+            };
+            if (allow) knownAuthDrift.push(entry);
+            else authFailures.push(entry);
+          }
+        }
+      }
 
       // Response-example validation — T5-1.4.
       //
@@ -743,6 +858,9 @@ if (checkBodies) {
 if (checkResponses) {
   console.log(`Response validation: ${responsesValidated} response example(s) validated against responses[code] schemas (${totalResponses - responsesValidated} skipped: no schema, parse-error, or compile-error).`);
 }
+if (checkAuth) {
+  console.log(`Auth validation: ${authChecked} curl(s) with non-public security checked; ${authFailures.length} auth-header failure(s), ${knownAuthDrift.length} known auth-drift.`);
+}
 
 if (verbose) {
   for (const p of passes) {
@@ -814,6 +932,22 @@ if (responseParseWarns.length > 0) {
   }
 }
 
+if (knownAuthDrift.length > 0) {
+  console.log();
+  console.log(`Known auth-header drift (allowlisted; tracked under T5-1.5): ${knownAuthDrift.length}`);
+  const byFile = new Map();
+  for (const f of knownAuthDrift) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path}  [${f.owner ?? "?"}]`);
+    }
+  }
+}
+
 // Detect stale KNOWN_DRIFT entries — present in the allowlist but no
 // longer matched by any extracted example. These should be removed.
 const seenTuples = new Set(knownDrift.map((d) => d.allowKey).filter(Boolean));
@@ -828,17 +962,23 @@ const seenRespTuples = new Set(knownResponseDrift.map((d) => d.allowKey).filter(
 const staleResp = KNOWN_RESPONSE_DRIFT.filter(
   (e) => !seenRespTuples.has(`${e.file}|${e.method}|${e.path}|${e.keyword}|${e.schemaPath ?? ""}`),
 );
+const seenAuthTuples = new Set(knownAuthDrift.map((d) => d.allowKey).filter(Boolean));
+const staleAuth = KNOWN_AUTH_DRIFT.filter(
+  (e) => !seenAuthTuples.has(`${e.file}|${e.method}|${e.path}`),
+);
 
 if (
   failures.length === 0 &&
   bodyFailures.length === 0 &&
   responseFailures.length === 0 &&
+  authFailures.length === 0 &&
   stale.length === 0 &&
   staleBody.length === 0 &&
-  staleResp.length === 0
+  staleResp.length === 0 &&
+  staleAuth.length === 0
 ) {
   console.log();
-  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known path-drift + ${knownBodyDrift.length} known body-drift + ${knownResponseDrift.length} known response-drift allowlisted; ${bodiesValidated} body(ies) + ${responsesValidated} response(s) validated.`);
+  console.log(`✓ ${passes.length} curl example(s) match a documented endpoint; ${knownDrift.length} known path-drift + ${knownBodyDrift.length} known body-drift + ${knownResponseDrift.length} known response-drift allowlisted; ${bodiesValidated} body(ies) + ${responsesValidated} response(s) validated; ${authChecked} auth-header(s) checked; ${knownAuthDrift.length} known auth-drift allowlisted.`);
   exit(0);
 }
 
@@ -947,6 +1087,37 @@ if (staleResp.length > 0) {
   console.log(`⚠ ${staleResp.length} stale KNOWN_RESPONSE_DRIFT entr${staleResp.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
   for (const e of staleResp) {
     console.log(`  - ${e.file}: ${e.method} ${e.path}  resp.${e.keyword}  [${e.owner ?? "?"}]`);
+  }
+}
+
+if (authFailures.length > 0) {
+  console.log();
+  console.log(`❌ ${authFailures.length} NEW auth-header drift finding(s) (T5-1.5):\n`);
+  const byFile = new Map();
+  for (const f of authFailures) {
+    if (!byFile.has(f.file)) byFile.set(f.file, []);
+    byFile.get(f.file).push(f);
+  }
+  for (const [file, list] of byFile) {
+    console.log(`  ${file}`);
+    for (const f of list) {
+      console.log(`    line ${f.line}: ${f.method} ${f.path}`);
+      console.log(`      declared schemes: ${f.declaredSchemes.join(", ")}`);
+      console.log(`      fix: add -H "${f.hint}" to the curl example`);
+      console.log(`      ${f.curl}`);
+    }
+    console.log();
+  }
+  console.log("Auth failures mean a curl example is missing the Authorization");
+  console.log("header required by the operation's declared security scheme.");
+  console.log("Add the appropriate -H flag to the curl in the doc.");
+}
+
+if (staleAuth.length > 0) {
+  console.log();
+  console.log(`⚠ ${staleAuth.length} stale KNOWN_AUTH_DRIFT entr${staleAuth.length === 1 ? "y" : "ies"} — remove from scripts/check-doc-examples.mjs:`);
+  for (const e of staleAuth) {
+    console.log(`  - ${e.file}: ${e.method} ${e.path}  [${e.owner ?? "?"}]`);
   }
 }
 

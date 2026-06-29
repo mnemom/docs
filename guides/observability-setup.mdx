@@ -17,7 +17,8 @@ Both surfaces consume the [transparency log](/concepts/transparency-log) as thei
 ### Connect
 
 ```bash
-curl -N https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
+curl -N -H "Authorization: Bearer $TOKEN" \
+  https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
 ```
 
 The response is `Content-Type: text/event-stream`. Each canonical change emits a frame like:
@@ -33,9 +34,11 @@ data: {"agent_id":"smolt-e2ca60ef","card_kind":"alignment","content_hash":"...",
 The `id` field on each frame is the transparency-log `log_index`. On reconnect, pass it as `Last-Event-ID` (SSE convention) or as the `since` query parameter:
 
 ```bash
-curl -N -H "Last-Event-ID: 4711" https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
+curl -N -H "Authorization: Bearer $TOKEN" \
+  -H "Last-Event-ID: 4711" https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream
 # OR
-curl -N "https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream?since=4711"
+curl -N -H "Authorization: Bearer $TOKEN" \
+  "https://api.mnemom.ai/v1/agents/smolt-e2ca60ef/stream?since=4711"
 ```
 
 Frames are delivered strictly in `log_index ASC` order, so the cursor is monotone.
