@@ -45,9 +45,31 @@ const HELD = new Set([
 ]);
 
 // A page is a generated stub (safe to refresh its title from the spec) iff it has
-// ONLY title + openapi frontmatter and no body. Hand-written pages (e.g. the
-// GDPR-erasure narratives) have a body and are never overwritten.
-const STUB_RE = /^---\ntitle: .*\nopenapi: "[^"]*"\n---\s*$/;
+// ONLY title + optional description + openapi frontmatter and no body.
+// Hand-written pages (e.g. the GDPR-erasure narratives) have a body and are
+// never overwritten. The description: line is optional so the refresh pass
+// picks up the 472 existing stubs that were generated before descriptions were
+// added (migration-safe).
+const STUB_RE = /^---\ntitle: .*\n(?:description: .*\n)?openapi: "[^"]*"\n---\s*$/;
+
+// Derive a ≤160-char plain-text description from an OpenAPI operation.
+// Prefers op.description (prose) over op.summary (already used as title).
+// Falls back to op.summary so pages with only a summary still get a value.
+function descriptionFor(op) {
+  const raw = (op.description || op.summary || "").trim();
+  if (!raw) return "";
+  const plain = raw
+    .replace(/^#+\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+  const first = plain.split(/(?<=[.!?])\s+/)[0] || plain;
+  return first.length <= 160 ? first : first.slice(0, 157) + "...";
+}
 
 // API Reference tab group order (core product first; legacy/housekeeping last;
 // "Blog" forced last). Groups not listed keep their relative order after these.
@@ -165,7 +187,7 @@ for (const [path, item] of Object.entries(spec.paths || {})) {
     const title = (op.summary || "").trim();
     if (!title) flagged.push({ key, tag, flags: "EMPTY_TITLE" });
     if (sec === "none") flagged.push({ key, tag, flags: "public(no-auth)" });
-    toGen.push({ key, method: m, path, tag, group: groupFor(tag), scope: scopeOf(path), slug: sl, title: title || op.operationId || key });
+    toGen.push({ key, method: m, path, tag, group: groupFor(tag), scope: scopeOf(path), slug: sl, title: title || op.operationId || key, op });
   }
 }
 
@@ -173,7 +195,8 @@ for (const [path, item] of Object.entries(spec.paths || {})) {
 let written = 0;
 for (const o of toGen) {
   const file = join(ENDPOINT_DIR, `${o.slug}.mdx`);
-  const body = `---\ntitle: ${JSON.stringify(o.title)}\nopenapi: ${JSON.stringify(`${o.method.toUpperCase()} ${o.path}`)}\n---\n`;
+  const desc = descriptionFor(o.op);
+  const body = `---\ntitle: ${JSON.stringify(o.title)}\n${desc ? `description: ${JSON.stringify(desc)}\n` : ""}openapi: ${JSON.stringify(`${o.method.toUpperCase()} ${o.path}`)}\n---\n`;
   if (!DRY && !existsSync(file)) writeFileSync(file, body);
   written++;
 }
@@ -192,7 +215,8 @@ for (const [path, item] of Object.entries(spec.paths || {})) {
     const cur = readFileSync(file, "utf8");
     if (!STUB_RE.test(cur)) continue; // hand-written page — never overwrite
     const title = (op.summary || "").trim() || op.operationId || key;
-    const body = `---\ntitle: ${JSON.stringify(title)}\nopenapi: ${JSON.stringify(`${m.toUpperCase()} ${path}`)}\n---\n`;
+    const desc = descriptionFor(op);
+    const body = `---\ntitle: ${JSON.stringify(title)}\n${desc ? `description: ${JSON.stringify(desc)}\n` : ""}openapi: ${JSON.stringify(`${m.toUpperCase()} ${path}`)}\n---\n`;
     if (cur !== body) {
       if (!DRY) writeFileSync(file, body);
       refreshed++;
