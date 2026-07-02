@@ -48,3 +48,35 @@ jobs:
       # only, so no `npm ci` is required.
       - name: Validate navigation page existence
         run: npm run check:nav-pages
+
+      # Inverse of check-nav-pages (file→nav): every customer-facing page on
+      # disk must be reachable from docs.json navigation, so a new page nobody
+      # wires in is not silently un-indexed (docs.json seo.indexing='navigable').
+      # Structural exclusions + an allowlist keep it green; Node built-ins only.
+      - name: Validate navigation coverage
+        run: npm run check:nav-coverage
+
+      # --- Advisory reporting gates (always run; never fail the build) ---
+      # Each surfaces docs-health signal on every run without blocking, and can
+      # be promoted to blocking later via its own --strict flag (tracked apart).
+
+      # Per-top-level-dir broken-link % table → the job summary. Offline (local
+      # link resolution only); complements, does not duplicate, mint broken-links.
+      - name: Link-health report (advisory)
+        if: ${{ always() }}
+        continue-on-error: true
+        run: npm run link-health-report
+
+      # Flags MDX references to API paths that are deprecated (WARN) or absent
+      # from the committed spec (unknown). Advisory by default; --strict blocks.
+      - name: API path-reference drift (advisory)
+        if: ${{ always() }}
+        continue-on-error: true
+        run: npm run check:path-references
+
+      # Flags deprecated:true spec ops lacking a changelog mention / replacement
+      # hint. Advisory by default; --strict blocks.
+      - name: Deprecation coverage (advisory)
+        if: ${{ always() }}
+        continue-on-error: true
+        run: npm run check:deprecation-coverage
