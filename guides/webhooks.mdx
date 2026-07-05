@@ -715,7 +715,7 @@ Verify webhook signatures in your endpoint handler to ensure payloads are authen
 
 <CodeGroup>
 ```javascript Node.js
-const crypto = require('crypto');
+import { createHmac, timingSafeEqual } from 'crypto';
 
 function verifyWebhookSignature(req, signingSecret) {
   const timestamp = req.headers['x-webhook-timestamp'];
@@ -730,13 +730,12 @@ function verifyWebhookSignature(req, signingSecret) {
 
   // 2. Compute expected signature
   const signatureInput = `${timestamp}.${rawBody}`;
-  const expected = 'v1=' + crypto
-    .createHmac('sha256', signingSecret)
+  const expected = 'v1=' + createHmac('sha256', signingSecret)
     .update(signatureInput)
     .digest('hex');
 
   // 3. Constant-time comparison
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
     throw new Error('Invalid signature');
   }
 
