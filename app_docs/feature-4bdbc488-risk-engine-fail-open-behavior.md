@@ -10,9 +10,9 @@ This change documents the risk engine's fail-open behavior for ZK proof generati
 
 ## Screenshots
 
-![Proof lifecycle and fail-open behavior section in risk-assessment concepts page](assets/01_proof_lifecycle_section.png)
+_Screenshot (image not committed): Proof lifecycle and fail-open behavior section in the risk-assessment concepts page._
 
-![Updated proof status field description in API reference](assets/02_api_reference_proof_status.png)
+_Screenshot (image not committed): Updated proof status field description in the API reference._
 
 ## What Was Built
 
