@@ -185,6 +185,24 @@ Think of claim as a **declarative assertion**: *"this agent is mine, and it live
 
 There is no `409` on claim. An agent already owned by a *different* principal returns `403 agent_cross_tenant` — `hash_proof` lets you claim an unowned agent; it never lets you take over one that already has an owner.
 
+### Two ways to move an agent between orgs
+
+| | Re-claim (`POST /v1/agents/{id}/claim`) | Move (`POST /v1/agents/{id}/move`) |
+|---|---|---|
+| Authorization basis | **Possession** — you present the agent's `hash_proof` | **Role** — you are an owner/admin of **both** the source and destination org |
+| Needs the agent's key | Yes | No |
+| Org requirement | Member of the destination (role floor: member) | Owner/admin of source **and** destination |
+| Typical use | The agent's operator relocating their own agent | An org admin relocating agents they co-manage (e.g. personal → company org) |
+
+`move` takes `{ "dest_org_id": "org-…" }` plus an `Idempotency-Key` header, and returns `{ moved, agent_id, from_org_id, to_org_id }` (moving to the current org is an idempotent no-op, `moved: false`). Every move is recorded as an `agent.org_moved` governance audit row.
+
+<Warning>
+On either path, the destination org's card template can **floor/cap** the agent's
+composed alignment/protection values — the agent's effective posture may change
+when it changes orgs. The canonical card is recomposed automatically as part of
+the move, and source-org team memberships are closed.
+</Warning>
+
 ---
 
 ## What changes after the claim
