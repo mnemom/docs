@@ -40,42 +40,53 @@ Tombstone records are retained indefinitely as the Article 30 record of processi
 
 ## On-request deletion (early)
 
-Operators may delete Customer Voice data before its scheduled expiry:
+Operators may delete Customer Voice data before its scheduled expiry. These org-scoped operator endpoints authenticate with a bearer token — the same scheme as the [GDPR deletion cascade](/guides/gdpr-data-subject-rights). The request shapes are shown below.
 
-```bash
-# Delete all Customer Voice submissions for an org
-curl -X DELETE \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice
+Delete all Customer Voice submissions for an org:
 
-# Delete a single submission
-curl -X DELETE \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/{submission_id}
+```http
+DELETE /v1/orgs/{org_id}/customer-voice
+Authorization: Bearer $TOKEN
+```
+
+Delete a single submission:
+
+```http
+DELETE /v1/orgs/{org_id}/customer-voice/{submission_id}
+Authorization: Bearer $TOKEN
 ```
 
 Both endpoints return `202 Accepted`. The deletion cascade completes within 5 minutes (p99).
 
 ## Configuring retention
 
-```bash
-# Check the current retention setting for an org
-curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+Retention is managed through the org-scoped Customer Voice settings endpoint, which authenticates with a bearer token.
 
-# Set extended retention (Pro opt-in / Enterprise)
-curl -X PATCH \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"retention_days": 180}' \
-  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+Check the current retention setting for an org:
 
-# Restore standard retention
-curl -X PATCH \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"retention_days": 90}' \
-  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+```http
+GET /v1/orgs/{org_id}/customer-voice/settings
+Authorization: Bearer $TOKEN
+```
+
+Set extended retention (Pro opt-in / Enterprise):
+
+```http
+PATCH /v1/orgs/{org_id}/customer-voice/settings
+Authorization: Bearer $TOKEN
+Content-Type: application/json
+
+{"retention_days": 180}
+```
+
+Restore standard retention:
+
+```http
+PATCH /v1/orgs/{org_id}/customer-voice/settings
+Authorization: Bearer $TOKEN
+Content-Type: application/json
+
+{"retention_days": 90}
 ```
 
 <Warning>
@@ -98,7 +109,7 @@ Every deletion — scheduled or on-request — is recorded in the org governance
 Query the audit log:
 
 ```bash
-curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+curl -H "Authorization: Bearer $TOKEN" \
   "https://api.mnemom.ai/v1/orgs/{org_id}/audit-log?event_type=customer_voice.record_deleted"
 ```
 
