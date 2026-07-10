@@ -1,0 +1,120 @@
+---
+title: "Aletheia Customer Voice — Retention Policy"
+description: "Retention schedule, deletion phases, and audit trail for Aletheia Customer Voice data (90d/180d)"
+sidebarTitle: "Customer Voice Retention"
+icon: "clock-rotate-left"
+---
+
+This page documents the retention schedule and deletion policy for data collected by Aletheia Customer Voice. The baseline schedule — 90 days standard, 180 days extended — applies across all plan tiers as defined in the Customer Voice data governance policy.
+
+<Note>
+This document describes the technical retention implementation. It does not constitute legal advice. Consult qualified legal counsel for your specific obligations under GDPR or other applicable data-protection regulations.
+</Note>
+
+## Retention periods
+
+| Data category | Standard retention | Extended retention |
+|---|---|---|
+| Feedback responses | 90 days | 180 days |
+| Session identifiers | 90 days | 180 days |
+| Agent context snapshots | 90 days | 180 days |
+| Submission metadata | 90 days | 180 days |
+| **Deletion audit records** | Indefinite | Indefinite |
+
+Standard retention (90 days) applies to Free, Starter, and Pro plans. Extended retention (180 days) is available on Pro (opt-in) and is the default on Enterprise. The retention clock starts from the **submission timestamp** (`submitted_at`).
+
+Deletion audit records are the tombstone entries created when a record is deleted. They contain no feedback content — see [Deletion phases](#deletion-phases) below.
+
+## Deletion phases
+
+When a Customer Voice record reaches its retention boundary, or when an operator issues an early deletion request, it passes through the following cascade:
+
+| Phase | Timing | What happens |
+|---|---|---|
+| **Expiry / request** | At `submitted_at + retention_days`, or on demand | Record flagged for deletion |
+| **Hard delete** | Within 24 hours of scheduled expiry; within 5 minutes (p99) for on-request | Feedback response, session identifier, and agent context snapshot permanently deleted from primary database |
+| **Cache clear** | Within 24 hours | Cloudflare KV entries for the record cleared |
+| **Tombstone written** | Simultaneously with hard delete | Deletion audit record written: record ID, deletion timestamp, org ID, and deletion reason. No feedback content. |
+
+Tombstone records are retained indefinitely as the Article 30 record of processing. They confirm that erasure was performed without retaining what was erased.
+
+## On-request deletion (early)
+
+Operators may delete Customer Voice data before its scheduled expiry:
+
+```bash
+# Delete all Customer Voice submissions for an org
+curl -X DELETE \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice
+
+# Delete a single submission
+curl -X DELETE \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/{submission_id}
+```
+
+Both endpoints return `202 Accepted`. The deletion cascade completes within 5 minutes (p99).
+
+## Configuring retention
+
+```bash
+# Check the current retention setting for an org
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+
+# Set extended retention (Pro opt-in / Enterprise)
+curl -X PATCH \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"retention_days": 180}' \
+  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+
+# Restore standard retention
+curl -X PATCH \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"retention_days": 90}' \
+  https://api.mnemom.ai/v1/orgs/{org_id}/customer-voice/settings
+```
+
+<Warning>
+Reducing `retention_days` from 180 to 90 schedules immediate deletion of all records older than 90 days. The next scheduled deletion run (within 24 hours) will permanently remove those records. This action is irreversible.
+</Warning>
+
+## Audit trail
+
+Every deletion — scheduled or on-request — is recorded in the org governance audit log:
+
+| Audit field | Value |
+|---|---|
+| `event_type` | `customer_voice.record_deleted` (single) or `customer_voice.bulk_deleted` (org-wide) |
+| `submission_id` | The deleted record's ID (omitted for bulk) |
+| `record_count` | Number of records deleted (bulk only) |
+| `deletion_reason` | `retention_expiry`, `operator_request`, or `subject_request` |
+| `org_id` | The org that owned the records |
+| `deleted_at` | ISO 8601 timestamp |
+
+Query the audit log:
+
+```bash
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/orgs/{org_id}/audit-log?event_type=customer_voice.record_deleted"
+```
+
+The audit log entry serves as the GDPR Article 30 record of processing for the deletion and is available to data protection officers conducting compliance reviews.
+
+## Plan availability
+
+| Plan | `retention_days` default | Maximum | Configurable |
+|---|---|---|---|
+| Free | 90 | 90 | No |
+| Starter | 90 | 90 | No |
+| Pro | 90 | 180 | Yes (opt-in) |
+| Enterprise | 180 | 180 | Yes (can be reduced to 90) |
+
+## Related
+
+- [Customer Voice Privacy & Data Use](/guides/customer-voice-privacy) — What is collected, consent, and data subject rights
+- [GDPR Data Subject Rights](/guides/gdpr-data-subject-rights) — Right to erasure and full deletion cascade architecture
+- [EU AI Act Compliance](/guides/eu-compliance) — Article 50 audit-trail obligations
