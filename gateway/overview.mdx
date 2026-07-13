@@ -9,7 +9,7 @@ icon: "satellite-dish"
 
 Mnemom is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
 
-Mnemom is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs real-time [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
+Mnemom is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs per-turn [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
 
 ## Architecture
 
@@ -32,10 +32,10 @@ Your App → mnemom   ├─── /openai/*    ──→ OpenAI (GPT-5)
                 ↓               ↑
            CF AI Gateway ← SSE stream
                 ↓           |
-         Response tee()     |
+         Response split     |
            /       \        |
     to client    to background analysis
-   (immediate)   (ctx.waitUntil)
+   (immediate)   (async)
                     |
               Parse SSE → extract thinking
                     |
@@ -54,7 +54,7 @@ Named agents use the `x-mnemom-agent` header to specify an agent name (e.g., `x-
 
 The system consists of five components:
 
-1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. For streaming responses (99%+ of traffic), the gateway uses `tee()` to fork the response stream — one fork goes to the client immediately (zero added latency), while the other fork is analyzed in background via `ctx.waitUntil()`. The background analysis parses SSE events, extracts thinking blocks, runs AIP integrity analysis with Claude Haiku (~3s), creates cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and creates nudges for boundary violations. Non-streaming responses are analyzed inline before returning.
+1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background — extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and — in nudge mode — recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered — on streaming this adds latency.
 
 2. **Observer** — A scheduled Cloudflare Worker (1-minute cron) that processes AI Gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against alignment cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints via `linkCheckpointToTrace()`. AIP integrity analysis is handled entirely by the gateway.
 
@@ -80,7 +80,7 @@ Mnemom Gateway builds AP-Traces that record:
 - **Decision** — What alternatives were considered and why one was selected
 - **Escalation** — Whether the agent escalated to a human and why
 - **Verification** — Whether the trace is consistent with the agent's declared alignment card
-- **Integrity** — Real-time AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
+- **Integrity** — Per-turn AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
 - **Policy** — [Policy evaluation](/concepts/policy-engine) results including verdict (pass/warn/fail), violations, warnings, and coverage report. The `X-Policy-Verdict` response header indicates the result.
 
 ### What is NOT stored

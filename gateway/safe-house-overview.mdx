@@ -51,6 +51,7 @@ Safe House runs as **Phase 0.5** — after agent identification resolves the age
 │  │  Phase 4    │  AIP conscience analysis (streaming tee)        │
 │  │             │  ◄── Safe House threat context injected here    │
 │  └──────┬──────┘                                                 │
+│         │  (enforce: gated before delivery; else post-hoc)       │
 │         ▼                                                        │
 │  Response returned to caller                                     │
 │  (with X-Safe-House-* headers)                                   │
@@ -125,6 +126,8 @@ The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemin
 ### Phase 4 — AIP conscience analysis
 
 The streaming response is teed through the AIP analysis pipeline. If Safe House scored the inbound message with a non-zero threat score (even if the verdict was `pass`), that score and the specific threat categories detected are injected into the conscience prompt. This gives AIP additional signal to scrutinize the resulting reasoning.
+
+What Phase 4 does with the AIP verdict depends on the agent's integrity mode. In **enforce** mode the response is gated the same turn — it is evaluated before it is delivered, so a violating response is blocked rather than returned (on streaming this adds latency). In **observe** and **nudge** modes the response is returned without being gated this turn; the verdict is recorded (and, for nudge, carried into the agent's next turn).
 
 The enrichment looks like:
 
