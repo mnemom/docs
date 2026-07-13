@@ -1,0 +1,66 @@
+name: Docs quality validators
+
+# Wires the 4 docs-quality validator scripts into CI. Each was built and
+# merged as a standalone `scripts/check-*.mjs` + `npm run check:*` entry but
+# deliberately shipped WITHOUT a workflow — editing `.github/workflows/**` is
+# a NEVER-AUTO change class the ZTE worker cannot make on its own, so each PR
+# scoped that out. Result: all 4 were advisory-only (run by hand or not at
+# all) until this workflow. This is the human follow-up that wires them in.
+#
+# The 4 checks (see each script's own header comment for its full contract):
+#   - check:heading-hierarchy (MNE-1032) — no duplicate page-level H1s; Mintlify
+#     renders frontmatter `title:` as the <h1>, so a page must not ALSO open
+#     with a markdown `# ` heading.
+#   - check:concept-fields    (MNE-1058) — opt-in API-identifier annotations on
+#     concept pages resolve against the live OpenAPI spec and stay honest
+#     (every annotated identifier actually appears in the page body).
+#   - check:anchors           (MNE-1161) — internal `#fragment` deep links
+#     resolve to a real heading anchor on their target page.
+#   - check:model-coverage    (MNE-989)  — the gateway quickstart and
+#     provider-support concept page agree with each other and with the model
+#     registry on which models are claimed as supported.
+#
+# All 4 scripts use only Node built-ins (confirmed by reading their imports),
+# so no `npm ci` step is needed — mirrors the `check:redirects` / `check:nav-
+# pages` / `check:nav-coverage` steps in mintlify-ci.yml. Each runs as its own
+# named step so a PR's checks list shows 4 distinct results, not one blob.
+#
+# This is an ORDINARY (non-required) check — it reports red/green on the PR
+# but does not block merge via branch protection. Promoting it to required is
+# a separate, later decision for the operator.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  docs-validators:
+    name: Docs quality validators
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      # MNE-1032: single-<h1>-per-page guard.
+      - name: Check heading hierarchy (MNE-1032)
+        run: npm run check:heading-hierarchy
+
+      # MNE-1161: internal anchor/fragment link resolution.
+      - name: Check anchors (MNE-1161)
+        run: npm run check:anchors
+
+      # MNE-989: model-ID coverage reconciliation across gateway + concept pages.
+      - name: Check model coverage (MNE-989)
+        run: npm run check:model-coverage
+
+      # MNE-1058: opt-in concept-page API-identifier field annotations.
+      - name: Check concept fields (MNE-1058)
+        run: npm run check:concept-fields
