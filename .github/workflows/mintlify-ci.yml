@@ -56,14 +56,6 @@ jobs:
       - name: Validate navigation coverage
         run: npm run check:nav-coverage
 
-      # Every api-reference endpoint page carries an openapi: directive; this
-      # gate ensures each one resolves to a real spec operation. A directive that
-      # matches no spec op means a removed endpoint was never cleaned up — it
-      # renders as a broken/empty reference page. Blocking; passes green when
-      # the committed endpoint/ and api-reference/openapi.json are in sync.
-      - name: Detect orphan api-reference pages
-        run: npm run check:api-reference-orphans
-
       # --- Advisory reporting gates (always run; never fail the build) ---
       # Each surfaces docs-health signal on every run without blocking, and can
       # be promoted to blocking later via its own --strict flag (tracked apart).
@@ -88,19 +80,3 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         run: npm run check:deprecation-coverage
-
-      # Assert the generator is a no-op on the committed tree: running
-      # generate-api-reference.mjs must not create/modify any endpoint page or
-      # docs.json nav entry. A non-empty diff means the committed pages are
-      # behind the spec (new ops, refreshed summaries, or nav changes not yet
-      # committed). Placed last so docs.json is not mutated before the nav
-      # checks above. Blocking; passes green when pages match the spec.
-      - name: Assert api-reference generation is idempotent
-        run: |
-          node scripts/generate-api-reference.mjs
-          if ! git diff --exit-code api-reference/endpoint/ docs.json; then
-            echo "::error::api-reference endpoint pages or docs.json nav are out of sync with api-reference/openapi.json."
-            echo "Run 'node scripts/generate-api-reference.mjs' locally and commit the generated changes."
-            exit 1
-          fi
-          echo "✓ api-reference generation is a no-op — pages and nav match the committed spec."

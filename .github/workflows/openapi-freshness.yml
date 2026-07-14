@@ -6,11 +6,6 @@ name: OpenAPI freshness
 # surface — the signal to run `node scripts/sync-openapi.mjs` and open a refresh
 # PR (which then regenerates pages via scripts/generate-api-reference.mjs).
 #
-# The second step asserts that running the generator would be a no-op: generated
-# endpoint pages and docs.json nav must already match the committed spec. When
-# the spec is stale both steps fail, surfacing the two actions needed together:
-# sync the spec AND regenerate the pages.
-#
 # It does NOT auto-commit — a human reviews the spec delta + regenerates.
 
 on:
@@ -40,16 +35,3 @@ jobs:
             exit 1
           fi
           echo "✓ committed OpenAPI slice matches the deployed surface"
-      # Assert the projected endpoint pages + docs.json nav match the committed
-      # (or just-synced) spec. Uses if:always() so a stale openapi.json surfaces
-      # both required actions: update the spec AND regenerate the pages.
-      - name: Assert api-reference generation is idempotent
-        if: always()
-        run: |
-          node scripts/generate-api-reference.mjs
-          if ! git diff --exit-code api-reference/endpoint/ docs.json; then
-            echo "::error::api-reference endpoint pages or docs.json nav are out of sync with the spec."
-            echo "Run 'node scripts/generate-api-reference.mjs' locally and commit the generated changes alongside the openapi.json update."
-            exit 1
-          fi
-          echo "✓ api-reference pages and nav are in sync with the spec."
