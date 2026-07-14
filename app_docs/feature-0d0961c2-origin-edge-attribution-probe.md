@@ -63,7 +63,8 @@ Flags (no secrets; the origin endpoint is public config passed via flag):
 
 ## Notes
 
-- Two acceptance-criteria pieces are tracked as out-of-repo follow-ups (they cannot be closed by a change in this repo):
+- **Scope, stated honestly:** this repo delivers the reusable attribution *tooling* — the probe and its machine-readable payload — which is AC #1's in-repo share. It does **not** deliver the *automatic* alert-time labeling (AC #1's "automatically" wording) or the monitor-window reduction (AC #2); both require changes outside `mnemom/docs` and are filed as a tracked follow-up, not silently deferred.
+- **Filed tracking issue:** [mnemom/docs#377](https://github.com/mnemom/docs/issues/377) — covers both out-of-repo pieces (the work lands in mnemom-adw / ops-responder; the issue is filed in this repo because the ADW automation is scoped here):
+  - **Wire the probe payload into the live alert (AC #1, automatic labeling):** the ops-responder alert pipeline must invoke the probe and attach its JSON to the fired BetterStack alert. This repo provides the reusable probe and payload; the automatic wiring is the ops-responder follow-up.
   - **Tighten monitor `4536046` confirmation window (AC #2):** lives in **mnemom-adw** (`ops_service_map.yaml` `docs` entry and the ops-responder BetterStack provisioning scripts).
-  - **Wire the probe payload into the live alert (AC #1):** injecting the attribution payload into the fired BetterStack alert requires the ops-responder side to invoke the probe and attach its JSON. This repo provides the reusable probe and machine-readable payload; the wiring is a human / ops-responder follow-up.
 - The probe is a decision aid: on `indeterminate` verdicts a human must still triage and escalate manually.

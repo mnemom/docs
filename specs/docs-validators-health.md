@@ -59,19 +59,22 @@ Actions workflow is a NEVER-AUTO surface for this lane.
 ## Out-of-repo follow-ups (tracked, not silently dropped)
 
 The origin-vs-edge work (issue #269) has two acceptance-criteria pieces that
-cannot be closed by a change in this repo. They are recorded here so they are
-not silently dropped:
+cannot be closed by a change in this repo. They are recorded here — and filed
+as a tracked issue — so they are not silently dropped. **Filed tracking issue:
+[mnemom/docs#377](https://github.com/mnemom/docs/issues/377)** (the work lands
+in mnemom-adw / ops-responder; the tracking issue is filed in this repo because
+the ADW automation is scoped here).
 
 - **Tighten monitor `4536046` confirmation window (AC #2):** the BetterStack
   monitor confirmation/retry window is a configuration living in **mnemom-adw**
   (`ops_service_map.yaml` `docs` entry) and the ops-responder provisioning
   scripts (`apps/ops-responder/scripts/setup-betterstack-*.py`) — no file in
-  this repo can change it. File/route a follow-up against mnemom-adw.
+  this repo can change it. Tracked in mnemom/docs#377.
 - **Wire the probe payload into the live alert (part of AC #1):** injecting the
   probe's attribution payload into the fired BetterStack alert requires the
   ops-responder side to invoke the probe and attach its JSON. This repo
-  provides the reusable probe + machine-readable payload; the wiring is a
-  human / ops-responder follow-up.
+  provides the reusable probe + machine-readable payload; the *automatic*
+  wiring is an ops-responder follow-up. Tracked in mnemom/docs#377.
 
 ## Verification (no unexpected files)
 
