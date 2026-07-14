@@ -28,10 +28,12 @@ only.
   enforces the manifest's shape, uniqueness, URL ownership, collection coverage,
   and exact reconciliation against `docs.json` navigation. Includes a built-in
   `--self-test` suite of in-memory fixtures.
-- **An npm script** (`check:grounding-corpus`) and a **BLOCKING CI step** wired
-  into `mintlify-ci.yml`, running on all PRs.
-- **A validator-health registry entry** (row 10) documenting the gate's trigger,
-  cadence, posture, and contract.
+- **An npm script** (`check:grounding-corpus`) for running the gate locally and
+  in CI. The **CI wiring** (a blocking step in `mintlify-ci.yml`) is **not** part
+  of this change: `.github/workflows/**` is a NEVER-AUTO path that must land
+  through a separate human-reviewed PR (see below).
+- **A validator-health registry entry** (row 10) documenting the gate's contract
+  and the pending CI-wiring follow-up.
 
 ## Technical Implementation
 
@@ -43,10 +45,16 @@ only.
 - `scripts/check-grounding-corpus.mjs` (new, 522 lines): The validator. Node ≥22
   built-ins only (no dependencies). Exports its pure core (`checkCorpus`) and
   helpers so they can be unit-exercised via `--self-test`.
-- `.github/workflows/mintlify-ci.yml`: Adds the "Validate Aletheia grounding
-  corpus manifest" step (BLOCKING, no `npm ci` required).
 - `package.json`: Adds the `check:grounding-corpus` script.
-- `specs/docs-validators-health.md`: Adds row 10 to the validator registry.
+- `specs/docs-validators-health.md`: Adds row 10 to the validator registry
+  (marked NOT YET WIRED, with the CI-wiring follow-up recorded in the
+  maintenance notes).
+
+**Deferred (separate human-reviewed PR):** `.github/workflows/mintlify-ci.yml` is
+intentionally **not** modified here. `.github/workflows/**` is a NEVER-AUTO path,
+so the blocking CI step (`run: npm run check:grounding-corpus`, placed after
+`check:nav-coverage` and before the advisory gates, no `npm ci`) must be added by
+a human in its own PR.
 
 ### Key Changes
 
@@ -95,7 +103,8 @@ interact with it as follows:
    ```
    node scripts/check-grounding-corpus.mjs --self-test
    ```
-4. CI runs the same gate automatically on every PR (BLOCKING).
+4. Once the CI step is wired in (see the deferred follow-up above), CI will run
+   the same gate automatically on every PR (BLOCKING). Until then, run it locally.
 
 ## Configuration
 
@@ -124,8 +133,8 @@ configurable from the manifest.
   wrong for-agents URL, missing-from-manifest, non-navigable, title/url
   mismatch, fail-closed empty/null/non-object manifest, and index-slug URL
   normalization).
-- **CI:** the "Validate Aletheia grounding corpus manifest" step in
-  `mintlify-ci.yml` runs on all PRs and daily at 06:00.
+- **CI:** not yet wired. The blocking `mintlify-ci.yml` step is deferred to a
+  separate human-reviewed PR (`.github/workflows/**` is a NEVER-AUTO path).
 
 ## Notes
 
