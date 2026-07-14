@@ -15,6 +15,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   assertCustomerOnly,
@@ -22,6 +27,19 @@ import {
   normalizeSlice,
   serializeSlice,
 } from "./lib/openapi-slice.mjs";
+
+const CLI = fileURLToPath(new URL("./check-slice-freshness.mjs", import.meta.url));
+const COMMITTED = fileURLToPath(new URL("../api-reference/openapi.json", import.meta.url));
+
+// Spawn the real CLI against a local live-spec fixture (no network) and return
+// its exit code + captured streams. Exercises the actual exit-code contract
+// and guard ordering, not a re-implementation of the predicate.
+function runCli(liveSpecPath, extraArgs = []) {
+  const r = spawnSync("node", [CLI, "--spec-path", liveSpecPath, ...extraArgs], {
+    encoding: "utf8",
+  });
+  return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "" };
+}
 
 // ── Fixture helpers ──────────────────────────────────────────────────────
 const op = (summary = "op") => ({ summary, responses: { 200: { description: "ok" } } });
@@ -148,11 +166,73 @@ test("assertCustomerOnly passes a customer-only slice through unchanged", () => 
   assert.equal(assertCustomerOnly(clean), clean);
 });
 
-test("cold-start guard predicate: an empty live paths object is detectable as CANNOT-VERIFY, not 'everything removed'", () => {
-  // The CLI treats this predicate as CANNOT VERIFY (exit 2) BEFORE calling
-  // diffSlices — it must never let an empty live slice render as a giant
-  // false "N paths removed" drift.
-  const live = spec({});
-  const isEmptyLive = !live?.paths || Object.keys(live.paths).length === 0;
-  assert.equal(isEmptyLive, true);
+// ── CLI exit-code contract (real subprocess, no network) ─────────────────
+// These spawn the actual script so they exercise the guard ORDERING and exit
+// codes — a test that only recomputed a predicate would pass even if the guard
+// were removed or reordered after the diff call.
+
+test("CLI: empty live paths → exit 2 (CANNOT VERIFY), diff bypassed, no false 'removed' drift", () => {
+  const dir = mkdtempSync(join(tmpdir(), "slice-freshness-"));
+  try {
+    const empty = join(dir, "empty.json");
+    writeFileSync(empty, JSON.stringify({ openapi: "3.1.0", info: { title: "t", version: "1" }, paths: {} }));
+    // Strict AND soft must both fail closed on an unusable live spec.
+    for (const args of [[], ["--soft"]]) {
+      const r = runCli(empty, args);
+      assert.equal(r.code, 2, `expected exit 2 for args ${JSON.stringify(args)}`);
+      assert.match(r.stderr, /live spec has no paths/);
+      // The guard fires BEFORE diffSlices — no drift summary is emitted, so an
+      // empty live slice is never rendered as a giant false "N paths removed".
+      assert.doesNotMatch(r.stdout, /committed-slice vs live:/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: live == committed slice → exit 0 (FRESH) + 0/0/0 diff line", () => {
+  const r = runCli(COMMITTED);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /committed-slice vs live: 0 paths added \/ 0 removed \/ 0 changed/);
+});
+
+test("CLI: drifting live spec → exit 1 (strict) but exit 0 (--soft), diff line printed in both", () => {
+  const dir = mkdtempSync(join(tmpdir(), "slice-freshness-"));
+  try {
+    const drift = join(dir, "drift.json");
+    writeFileSync(
+      drift,
+      JSON.stringify({ openapi: "3.1.0", info: { title: "t", version: "1" }, paths: { "/only-here-live": { get: { responses: { 200: { description: "ok" } } } } } }),
+    );
+    const strict = runCli(drift);
+    assert.equal(strict.code, 1);
+    assert.match(strict.stdout, /committed-slice vs live:/);
+    const soft = runCli(drift, ["--soft"]);
+    assert.equal(soft.code, 0);
+    assert.match(soft.stdout, /committed-slice vs live:/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: staff-path leak in live spec → exit 2 (CANNOT VERIFY)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "slice-freshness-"));
+  try {
+    const staff = join(dir, "staff.json");
+    writeFileSync(
+      staff,
+      JSON.stringify({ openapi: "3.1.0", info: { title: "t", version: "1" }, paths: { "/admin/x": { get: {} } } }),
+    );
+    const r = runCli(staff);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /staff paths in served slice/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: missing live spec file → exit 2 (CANNOT VERIFY)", () => {
+  const r = runCli(join(tmpdir(), "does-not-exist-slice.json"));
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /does not exist/);
 });
