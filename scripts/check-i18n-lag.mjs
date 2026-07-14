@@ -36,18 +36,18 @@
 //                        fingerprint and others the old; re-run to completion.
 //   --help, -h         usage.
 //
-// REQUIRED HUMAN FOLLOW-UP (tracked, NOT silently dropped) — issue #283 AC3.
-// AC3 ("a workflow runs this on pull_request touching **/*.mdx") is deferred to
+// REQUIRED HUMAN FOLLOW-UP — tracked in docs#395 (do NOT silently drop). #283 AC2.
+// AC2 ("a workflow runs this on pull_request touching **/*.mdx") is deferred to
 // a human operator BY DESIGN, not omitted: the maintainer override on #283
 // (@wassimwehbi-mnemom) forbids the autonomous worker from authoring the file,
 // and `.github/workflows/*.yml` is a NEVER-AUTO path the worker must not create.
 // This detector is a no-op for regressions until an operator lands
-// `.github/workflows/i18n-lag.yml` in the consolidated CI PR (docs#350 precedent)
-// with EXACTLY:
+// `.github/workflows/i18n-lag.yml` (tracked in docs#395; docs#350 is the
+// consolidated-CI-PR precedent) with EXACTLY:
 //   on: { pull_request: { paths: ["**/*.mdx"] } }
 //   job step: npm ci && npm run check:i18n-lag   # optionally: npm run test:i18n-lag
-// Until then a PR introducing EN-only drift will NOT be blocked — this tension is
-// surfaced here and in the PR body per MNE-440/MNE-443.
+// Until docs#395 lands a PR introducing EN-only drift will NOT be blocked — this
+// tension is surfaced here and in the PR body per MNE-440/MNE-443.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
