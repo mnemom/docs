@@ -30,6 +30,52 @@ Last verified: 2026-06-29.
 - **Engine A activation** (validator 9): configure `vars.APP_ID` and `secrets.APP_PRIVATE_KEY` (mnemom-docs GitHub App) to move from skip to advisory. Promote to blocking after the drift backlog is cleared (see workflow header for the two-step flip).
 - **Internal-reference gate** (validator 3): the `What it validates` column above lists the patterns the gate searches for — this is intentional meta-documentation, not a leak of the patterns themselves. The gate does not scan `.md` files today; if that changes, the descriptions in this column remain correct as meta-documentation.
 
+## On-demand probes (not scheduled)
+
+These are run by a human on demand (or wired into an external caller later);
+they are intentionally NOT scheduled CI workflows — a new/modified GitHub
+Actions workflow is a NEVER-AUTO surface for this lane.
+
+- **Origin-vs-edge attribution probe** — `scripts/probe-docs-origin-edge.mjs`
+  (classification core: `scripts/lib/origin-edge-attribution.mjs`; tests:
+  `scripts/probe-docs-origin-edge.test.mjs`). At alert time it tells an
+  on-call responder whether a docs.mnemom.ai outage (e.g. a sustained HTTP
+  403) is a Mintlify **origin** fault or a Cloudflare **edge/DNS** fault, and
+  attaches the supporting response headers — encoding the manual triage that
+  cost ≈5.5 min during incident `980582706`.
+  - Run: `npm run probe:origin-edge -- --origin-url <origin-direct-url> [--verbose]`
+    (or `node scripts/probe-docs-origin-edge.mjs --help`). The origin endpoint
+    is passed via flag/env (public config, no secrets); no origin hostname is
+    hard-coded.
+  - Verdict vocabulary: `healthy`, `origin-fault`, `edge-fault`, `both-down`,
+    `indeterminate`. Fails **closed** — on cold-start / no-data / missing
+    markers it reports `indeterminate` and says "escalate manually", never a
+    misleading `healthy`.
+  - Exit-code contract (mirrors the `check-*.mjs` validators): `0` = `healthy`,
+    `1` = any attributed-down / `indeterminate` verdict, `2` = bad CLI usage.
+  - Unit test: `npm run test:probe` (`node:test`, no live network — drives the
+    classifier with mocked observations, including the incident 403 case).
+
+## Out-of-repo follow-ups (tracked, not silently dropped)
+
+The origin-vs-edge work (issue #269) has two acceptance-criteria pieces that
+cannot be closed by a change in this repo. They are recorded here — and filed
+as a tracked issue — so they are not silently dropped. **Filed tracking issue:
+[mnemom/docs#377](https://github.com/mnemom/docs/issues/377)** (the work lands
+in mnemom-adw / ops-responder; the tracking issue is filed in this repo because
+the ADW automation is scoped here).
+
+- **Tighten monitor `4536046` confirmation window (AC #2):** the BetterStack
+  monitor confirmation/retry window is a configuration living in **mnemom-adw**
+  (`ops_service_map.yaml` `docs` entry) and the ops-responder provisioning
+  scripts (`apps/ops-responder/scripts/setup-betterstack-*.py`) — no file in
+  this repo can change it. Tracked in mnemom/docs#377.
+- **Wire the probe payload into the live alert (part of AC #1):** injecting the
+  probe's attribution payload into the fired BetterStack alert requires the
+  ops-responder side to invoke the probe and attach its JSON. This repo
+  provides the reusable probe + machine-readable payload; the *automatic*
+  wiring is an ops-responder follow-up. Tracked in mnemom/docs#377.
+
 ## Verification (no unexpected files)
 
 After any edit to this file, confirm the diff is scoped to `specs/docs-validators-health.md` only:
