@@ -34,7 +34,7 @@
  *   2  — usage / configuration error.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync } from "node:fs";
 import { argv, env, exit } from "node:process";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -49,6 +49,12 @@ import {
   buildSpecIndex,
   matchSpecPath,
 } from "./lib/doc-examples-extract.mjs";
+
+import {
+  buildCoverageSummary,
+  renderCoverageText,
+  renderCoverageMarkdown,
+} from "./lib/coverage-summary.mjs";
 
 // ── Ajv (mirrors the walker; needed for actual-response validation) ──────
 const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
@@ -103,6 +109,7 @@ let dryRun = false;
 let includeWrites = false;
 let verbose = false;
 let stagingBase = env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1";
+let minExecutedPctArg = null;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--scope") scope = args[++i];
@@ -110,14 +117,39 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--include-writes") includeWrites = true;
   else if (a === "--verbose") verbose = true;
   else if (a === "--staging-base") stagingBase = args[++i];
+  else if (a === "--min-executed-pct") minExecutedPctArg = args[++i];
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--staging-base url] [--verbose]");
+    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--staging-base url] [--min-executed-pct n] [--verbose]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${a}`);
     exit(2);
   }
 }
+
+// ── Optional coverage floor (issue #380, warn-only) ────────────────────────
+//
+// Resolution order: --min-executed-pct flag > MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT
+// env > unset (null = no floor). An empty / whitespace-only value (the GitHub
+// Actions default when the repo variable is not configured) is treated as
+// unset, NOT as a parse error — only a non-empty non-numeric / out-of-range
+// value is a config error (exit 2).
+function resolveMinExecutedPct(raw) {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    console.error(
+      `Invalid coverage floor "${raw}" (--min-executed-pct / MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT): expected a number between 0 and 100.`,
+    );
+    exit(2);
+  }
+  return n;
+}
+const minExecutedPct = resolveMinExecutedPct(
+  minExecutedPctArg ?? env.MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT ?? null,
+);
 
 // ── Fixtures + auth ──────────────────────────────────────────────────────
 let fixtures = {};
@@ -301,11 +333,11 @@ for (const file of files) {
       if (norm.skip) continue; // out-of-scope host
       const matched = matchSpecPath(norm.segments, specIndex);
       if (!matched) {
-        skipped.push({ file, line: block.line, method, url, reason: "spec path not matched (T5-1.1 should have caught this)" });
+        skipped.push({ file, line: block.line, method, url, reason: "spec path not matched (T5-1.1 should have caught this)", reasonClass: "spec-path-unmatched" });
         continue;
       }
       if (method !== "GET" && !(includeWrites && isWriteAllowed(method, matched.raw))) {
-        skipped.push({ file, line: block.line, method, url, reason: method === "GET" ? "?" : "write op — opt-in via --include-writes + WRITE_ALLOWLIST" });
+        skipped.push({ file, line: block.line, method, url, reason: method === "GET" ? "?" : "write op — opt-in via --include-writes + WRITE_ALLOWLIST", reasonClass: "write-op-not-allowlisted" });
         continue;
       }
 
@@ -313,13 +345,13 @@ for (const file of files) {
       // staging fixtures — without them every request 404s.
       const needsFixture = pathSegmentsNeedingFixture(norm.segments);
       if (needsFixture.length > 0) {
-        skipped.push({ file, line: block.line, method, url, reason: `needs fixture for path segment(s): ${needsFixture.join(", ")}` });
+        skipped.push({ file, line: block.line, method, url, reason: `needs fixture for path segment(s): ${needsFixture.join(", ")}`, reasonClass: "needs-fixture" });
         continue;
       }
 
       const urlResolved = resolvePlaceholders(url);
       if (!urlResolved.ok) {
-        skipped.push({ file, line: block.line, method, url, reason: `unresolved placeholder${urlResolved.missing.length > 1 ? "s" : ""}: ${urlResolved.missing.join(", ")}` });
+        skipped.push({ file, line: block.line, method, url, reason: `unresolved placeholder${urlResolved.missing.length > 1 ? "s" : ""}: ${urlResolved.missing.join(", ")}`, reasonClass: "unresolved-placeholder" });
         continue;
       }
 
@@ -367,6 +399,33 @@ if (verbose) {
   for (const s of skipped) {
     console.log(`  ⏭ ${s.method.padEnd(6)} ${s.url}   ${s.reason}   (${s.file}:${s.line})`);
   }
+}
+
+// ── Coverage summary (issue #380) ──────────────────────────────────────────
+//
+// Emitted on EVERY run that reaches planning (the workflow's preflight gates
+// out token-less runs, so there is no un-summarized run). Placed before the
+// --dry-run / empty-plan early exits so dry-run reports the same executed%
+// a live run would — the plan/skipped classification is identical either way.
+const coverage = buildCoverageSummary({ plan, skipped, minPct: minExecutedPct });
+console.log();
+console.log(renderCoverageText(coverage));
+if (env.GITHUB_STEP_SUMMARY) {
+  // Fail-soft: a step-summary write error must not fail the executor; stdout
+  // is the primary signal for this reporting side-channel.
+  try {
+    appendFileSync(env.GITHUB_STEP_SUMMARY, `${renderCoverageMarkdown(coverage)}\n`);
+  } catch (err) {
+    console.log(`::notice::Could not write coverage summary to GITHUB_STEP_SUMMARY: ${err.message}`);
+  }
+}
+if (coverage.floor.breached) {
+  // Warn-only: the floor is a regression SIGNAL, not a gate. Near-100%-skip is
+  // the expected baseline, so a breach must NOT change the exit code — the
+  // run's real pass/fail verdict (assertion failures below) still governs it.
+  const msg = `Live doc-example coverage ${coverage.executedPct.toFixed(1)}% is below the configured floor of ${minExecutedPct}% (warn-only — run verdict unaffected).`;
+  console.log(msg);
+  console.log(`::warning::${msg}`);
 }
 
 if (dryRun) {
