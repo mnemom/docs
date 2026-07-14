@@ -4,6 +4,13 @@
 **Date:** 2026-07-14
 **Plan-Spec:** agents/da700504/plan/issue-379-adw-da700504-wire-check-links-into-mintlify-ci-plan.md
 
+## Merge Gate
+
+> **Human review required before merge.**
+> This PR edits `.github/workflows/mintlify-ci.yml`, a NEVER-AUTO protected path.
+> Per the ADW safety invariant, a human reviewer must explicitly approve the
+> workflow-file change before this PR is merged. Do not auto-merge.
+
 ## Overview
 
 This feature wires the previously orphaned `scripts/check-links-local.mjs` script into the `mintlify-ci.yml` GitHub Actions workflow as a blocking CI step. The step enforces cross-locale link hygiene: pages under `fr/` or `es/` must not silently fall back to English-locale link targets unless the fallback is explicitly allowlisted.
@@ -59,3 +66,4 @@ The script exits `0` when no unapproved cross-locale leaks are found and prints 
 - The broken-link sub-check inside `check-links-local.mjs` is advisory and will never fail CI on its own. `mint broken-links` (the preceding step) is the authoritative broken-link gate.
 - The script resolves locale from the file path prefix (`fr/`, `es/`). Pages not under a locale subdirectory are skipped by the cross-locale check entirely.
 - Allowlist entries should shrink over time as sections get translated; stale entries (where the translation has since landed) are surfaced as repoint errors on the next run.
+- **AC (b) 'rewrite' clause is pre-satisfied.** Issue #379 AC (b) says "rewrite it and wire it." No rewrite was required in this PR — `check-links-local.mjs` had already evolved beyond a simple broken-link checker to serve cross-locale link hygiene before this issue was filed. The script's current form (cross-locale `exit 1` + advisory broken-link logging) is the output of that prior evolution. This PR's scope is wire-only, which satisfies the intent of AC (b).
