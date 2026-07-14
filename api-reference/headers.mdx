@@ -52,10 +52,14 @@ Each value is one of `pass | observed | nudged | enforced`. The semantics of eac
 |---|---|---|---|---|
 | **`front`** (Protection inbound) | No threat detected. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`). |
 | **`autonomy`** (CLPI on tool calls) | Tool call within bounds. | Out-of-bounds tool call observed but allowed. | Tool call surfaced a warning. | Tool call replaced with a synthetic error response. |
-| **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Reasoning surfaced a nudge into the response. | Response was replaced same-turn with a same-voice intervention. |
-| **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged with a warning suffix. | Output redacted, replaced, or blocked same-turn. |
+| **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Verdict recorded post-hoc and carried into the agent's next turn (`mode=nudge`); this response is not gated. | Response was replaced same-turn with a same-voice intervention. |
+| **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged; recorded post-hoc (`mode=nudge`) and carried into the next turn — this response is not gated. | Output redacted, replaced, or blocked same-turn. |
 
 The four-checkpoint model is documented in the [Safe House concept](/concepts/safe-house). All four checkpoints **always run** on every gateway-routed request — `pass` means the checkpoint ran and the request was clean.
+
+<Note>
+Verdict timing is mode-dependent: in `enforce` the `integrity`/`back` verdicts are resolved before the response is returned (streaming adds latency to preserve this); in `observe`/`nudge` analysis is post-hoc, so a backgrounded checkpoint's same-turn header value is provisional. `off` runs no analysis.
+</Note>
 
 ### Parser snippets
 

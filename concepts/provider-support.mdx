@@ -84,7 +84,7 @@ Each cell describes the v1 commitment level. Symbols:
 
 ### [1] Anthropic — full extended thinking
 
-Anthropic models expose full **extended thinking blocks** through the response API. AIP reads completed thinking blocks post-response, pre-delivery, and the verifier (Claude Haiku 4.5) has full chain-of-thought visibility. This is the most complete AIP coverage Mnemom offers — and the baseline against which other providers are compared.
+Anthropic models expose full **extended thinking blocks** through the response API. AIP reads completed thinking blocks post-response (before delivery in `enforce`, which adds latency; post-delivery in `observe`/`nudge`), and the verifier (Claude Haiku 4.5) has full chain-of-thought visibility. This is the most complete AIP coverage Mnemom offers — and the baseline against which other providers are compared.
 
 ### [2] OpenAI — reasoning summaries only
 
@@ -133,9 +133,9 @@ Of all per-provider gaps, **integrity-checkpoint coverage** is the load-bearing 
 In aggregate:
 
 - **Safe House dispatch** adds ~15 ms P50 / ~60 ms P95 across all providers (the dispatch path is provider-agnostic).
-- **AIP analysis** runs post-response, pre-delivery. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash and OpenAI non-thinking models emit thin traces and complete AIP analysis in P50 ≤ 800 ms.
+- **AIP analysis** runs post-response (before delivery in `enforce`, which adds the latency below; post-delivery in `observe`/`nudge`). Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash and OpenAI non-thinking models emit thin traces and complete AIP analysis in P50 ≤ 800 ms.
 
-Mid-stream interruption for integrity violations is not supported on any provider. AIP runs after the upstream response completes, but before the gateway delivers it to the customer.
+The gateway does not interrupt a response mid-stream. In `enforce`, AIP runs after the upstream response completes but before the gateway delivers it to the customer, so a violating response is gated before delivery (adding latency); this holds on every provider. In `observe` and `nudge`, the response is delivered first and the verdict is recorded post-hoc.
 
 ## How we test against each provider
 

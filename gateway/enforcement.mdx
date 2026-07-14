@@ -19,7 +19,7 @@ The Mnemom Gateway supports three enforcement modes that control how the system 
     Detect violations and inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct.
   </Card>
   <Card title="Enforce" icon="ban">
-    Hard block with 403 for non-streaming requests. Falls back to nudge for streaming requests.
+    Gates same-turn on both streaming and non-streaming requests (HTTP 403 for non-streaming); on streaming this adds latency because the response is evaluated before it is delivered.
   </Card>
 </CardGroup>
 
@@ -67,7 +67,7 @@ In nudge mode, when a violation is detected, the gateway creates a pending nudge
 
 **How nudges work:**
 
-1. The gateway detects a violation in real-time via streaming response analysis (`tee()` + background AIP check, ~3s latency)
+1. The gateway detects a violation via background streaming analysis (~3s latency)
 2. A pending nudge record is created immediately — ready before the agent's next turn
 3. On the agent's next API call, the gateway injects a system prompt addition:
    ```
@@ -92,12 +92,12 @@ In nudge mode, when a violation is detected, the gateway creates a pending nudge
 
 ### Enforce mode
 
-In enforce mode, the gateway actively blocks requests when critical violations are detected. The behavior depends on whether the request is streaming or non-streaming.
+In enforce mode, the gateway actively blocks when critical violations are detected. It gates the same turn on both streaming and non-streaming requests — the guarantee is identical; only the latency differs.
 
 **Behavior:**
 
-- **Non-streaming requests**: Hard block with HTTP 403 response. The request does not reach the AI provider.
-- **Streaming requests**: Falls back to nudge mode (injects integrity notice into system prompt). This is because streaming connections cannot be cleanly terminated mid-stream.
+- **Non-streaming requests**: Hard block with HTTP 403 response. The violating response is not delivered.
+- **Streaming requests**: The response is evaluated before it is delivered, so a violating response is gated the same turn. This adds latency on streaming, but preserves the same-turn guarantee — enforce does **not** fall back to advisory nudging.
 
 **When to use:**
 
@@ -109,7 +109,7 @@ In enforce mode, the gateway actively blocks requests when critical violations a
 **Configuration:** set `integrity_mode: enforce` (and/or `autonomy_mode: enforce`) on the agent's [alignment card](/specifications/alignment-card-schema). See [Setting enforcement mode](#setting-enforcement-mode) below.
 
 <Warning>
-Enforce mode will block non-streaming API calls when violations are detected. Ensure your application handles 403 responses gracefully before enabling this mode.
+Enforce mode gates both streaming and non-streaming API calls when violations are detected — HTTP 403 for non-streaming, and same-turn gating before delivery for streaming (which adds latency). Ensure your application handles 403 responses gracefully before enabling this mode.
 </Warning>
 
   </Tab>
@@ -301,11 +301,13 @@ All enforcement actions are tracked in the conscience timeline, accessible via t
 
 Enforcement works across all providers where AIP is supported:
 
-| Provider | Observe | Nudge | Enforce (non-streaming) | Enforce (streaming) |
-|----------|---------|-------|------------------------|---------------------|
-| Anthropic | Yes | Yes | Yes | Falls back to nudge |
-| OpenAI | Yes | Yes | Yes | Falls back to nudge |
-| Gemini | Yes | Yes | Yes | Falls back to nudge |
+| Provider | Observe | Nudge | Enforce |
+|----------|---------|-------|---------|
+| Anthropic | Yes | Yes | Yes |
+| OpenAI | Yes | Yes | Yes |
+| Gemini | Yes | Yes | Yes |
+
+Enforce gates same-turn on both streaming and non-streaming across all three providers; on streaming this adds latency because the response is evaluated before it is delivered.
 
 ## See also
 
