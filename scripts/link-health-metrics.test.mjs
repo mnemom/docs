@@ -117,6 +117,45 @@ test("assertRowInvariants throws when pct is inconsistent with the counts", () =
   assert.throws(() => assertRowInvariants(row), /pct .* !== expected/);
 });
 
+// Per-group value checks in the inner loop (distinct from the group-SUM checks
+// above): each per-group violation must throw its own labelled error.
+
+test("assertRowInvariants throws on a negative per-group total", () => {
+  const row = buildRow(sampleResult(), META);
+  row.by_group.guides.total = -1;
+  assert.throws(
+    () => assertRowInvariants(row),
+    /by_group\.guides\.total must be a non-negative integer/,
+  );
+});
+
+test("assertRowInvariants throws on a negative per-group broken", () => {
+  const row = buildRow(sampleResult(), META);
+  row.by_group.guides.broken = -1;
+  assert.throws(
+    () => assertRowInvariants(row),
+    /by_group\.guides\.broken must be a non-negative integer/,
+  );
+});
+
+test("assertRowInvariants throws when a per-group broken exceeds its total", () => {
+  const row = buildRow(sampleResult(), META);
+  row.by_group.guides.broken = row.by_group.guides.total + 1;
+  assert.throws(
+    () => assertRowInvariants(row),
+    /by_group\.guides\.broken .* must be <= total/,
+  );
+});
+
+test("assertRowInvariants throws when a per-group pct is inconsistent with its counts", () => {
+  const row = buildRow(sampleResult(), META);
+  row.by_group.guides.pct = 99.9; // guides is 1/3 → expected 33.3
+  assert.throws(
+    () => assertRowInvariants(row),
+    /by_group\.guides\.pct .* !== expected/,
+  );
+});
+
 test("assertRowInvariants throws on a malformed date", () => {
   const row = buildRow(sampleResult(), META);
   row.date = "07/14/2026";
