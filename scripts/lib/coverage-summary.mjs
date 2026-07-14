@@ -143,3 +143,35 @@ export function renderCoverageMarkdown(summary) {
   }
   return lines.join("\n");
 }
+
+/**
+ * Parse an optional coverage-floor value (issue #380). PURE — no `process`,
+ * no I/O; the CLI wrapper (`run-doc-examples.mjs`) maps the result to its
+ * `console.error` + `exit(2)` usage-error contract, keeping this module
+ * side-effect-free and unit-testable.
+ *
+ * Semantics:
+ *   - `null` / `undefined` / empty / whitespace-only → `{ ok: true, value: null }`
+ *     (unset = no floor). GitHub Actions passes `""` for an unset repo
+ *     variable, which MUST resolve to no-floor, NOT a parse error — otherwise
+ *     every nightly run with the variable unconfigured would exit 2.
+ *   - a finite number in `[0, 100]` → `{ ok: true, value: n }`.
+ *   - anything else (non-numeric, e.g. `"abc"`/`"90x"`, or out of range,
+ *     e.g. `-1`/`101`) → `{ ok: false, error }` (a config error).
+ *
+ * @param {?string|number} raw
+ * @returns {{ok: true, value: ?number} | {ok: false, error: string}}
+ */
+export function parseMinExecutedPct(raw) {
+  if (raw == null) return { ok: true, value: null };
+  const trimmed = String(raw).trim();
+  if (trimmed === "") return { ok: true, value: null };
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    return {
+      ok: false,
+      error: `Invalid coverage floor "${raw}" (--min-executed-pct / MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT): expected a number between 0 and 100.`,
+    };
+  }
+  return { ok: true, value: n };
+}

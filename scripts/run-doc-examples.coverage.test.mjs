@@ -20,6 +20,7 @@ import {
   buildCoverageSummary,
   renderCoverageText,
   renderCoverageMarkdown,
+  parseMinExecutedPct,
 } from "./lib/coverage-summary.mjs";
 
 // ── Fixture builders ───────────────────────────────────────────────────────
@@ -151,4 +152,49 @@ test("renderCoverageMarkdown: no floor line when floor unset; cold start says N/
   const md = renderCoverageMarkdown(summary);
   assert.doesNotMatch(md, /Coverage floor/);
   assert.match(md, /coverage N\/A/);
+});
+
+// ── parseMinExecutedPct: every branch (floor config parsing) ────────────────
+//
+// Directly exercises the exit-2 classification and — critically — the
+// empty-string path GitHub Actions produces for an unset repo variable, which
+// MUST resolve to no-floor rather than exit 2 (which would kill the nightly
+// job) or a silent floor of 0.
+
+test("parseMinExecutedPct: unset (null/undefined) → no floor", () => {
+  assert.deepEqual(parseMinExecutedPct(null), { ok: true, value: null });
+  assert.deepEqual(parseMinExecutedPct(undefined), { ok: true, value: null });
+});
+
+test("parseMinExecutedPct: empty / whitespace-only → no floor (GitHub unset repo var)", () => {
+  assert.deepEqual(parseMinExecutedPct(""), { ok: true, value: null });
+  assert.deepEqual(parseMinExecutedPct("   "), { ok: true, value: null });
+  assert.deepEqual(parseMinExecutedPct("\t\n"), { ok: true, value: null });
+});
+
+test("parseMinExecutedPct: non-numeric → config error (maps to exit 2)", () => {
+  for (const bad of ["abc", "90x", "%", "NaN"]) {
+    const r = parseMinExecutedPct(bad);
+    assert.equal(r.ok, false, `expected ${JSON.stringify(bad)} to be rejected`);
+    assert.match(r.error, /between 0 and 100/);
+  }
+});
+
+test("parseMinExecutedPct: out-of-range (<0 or >100) → config error", () => {
+  assert.equal(parseMinExecutedPct("-1").ok, false);
+  assert.equal(parseMinExecutedPct("101").ok, false);
+  assert.equal(parseMinExecutedPct(-0.1).ok, false);
+  assert.equal(parseMinExecutedPct(100.5).ok, false);
+});
+
+test("parseMinExecutedPct: valid values (incl. 0, 100, boundaries) → parsed number", () => {
+  assert.deepEqual(parseMinExecutedPct("0"), { ok: true, value: 0 });
+  assert.deepEqual(parseMinExecutedPct("100"), { ok: true, value: 100 });
+  assert.deepEqual(parseMinExecutedPct("50"), { ok: true, value: 50 });
+  assert.deepEqual(parseMinExecutedPct("33.3"), { ok: true, value: 33.3 });
+  // Surrounding whitespace is trimmed before parsing.
+  assert.deepEqual(parseMinExecutedPct(" 90 "), { ok: true, value: 90 });
+  // Accepts a numeric argument (the --min-executed-pct flag value is a string,
+  // but the function is robust to a number too).
+  assert.deepEqual(parseMinExecutedPct(75), { ok: true, value: 75 });
 });

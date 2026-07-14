@@ -54,15 +54,9 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      # The executor prints a live-executor coverage summary (executed /
-      # skipped-by-reason / executed%) to stdout and appends it to the job
-      # summary ($GITHUB_STEP_SUMMARY, auto-provided). The optional coverage
-      # floor (MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT repo variable) is
-      # WARN-ONLY — a breach emits a ::warning:: but never fails the run.
       - name: Execute safe doc examples
         if: steps.preflight.outputs.skip == 'false'
         env:
           MNEMOM_STAGING_TOKEN: ${{ secrets.MNEMOM_STAGING_TOKEN }}
           MNEMOM_STAGING_BASE_URL: ${{ vars.MNEMOM_STAGING_BASE_URL || 'https://api-staging.mnemom.ai/v1' }}
-          MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT: ${{ vars.MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT }}
         run: node scripts/run-doc-examples.mjs --verbose

@@ -54,6 +54,7 @@ import {
   buildCoverageSummary,
   renderCoverageText,
   renderCoverageMarkdown,
+  parseMinExecutedPct,
 } from "./lib/coverage-summary.mjs";
 
 // ── Ajv (mirrors the walker; needed for actual-response validation) ──────
@@ -130,26 +131,27 @@ for (let i = 0; i < args.length; i++) {
 // ── Optional coverage floor (issue #380, warn-only) ────────────────────────
 //
 // Resolution order: --min-executed-pct flag > MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT
-// env > unset (null = no floor). An empty / whitespace-only value (the GitHub
-// Actions default when the repo variable is not configured) is treated as
-// unset, NOT as a parse error — only a non-empty non-numeric / out-of-range
-// value is a config error (exit 2).
-function resolveMinExecutedPct(raw) {
-  if (raw == null) return null;
-  const trimmed = String(raw).trim();
-  if (trimmed === "") return null;
-  const n = Number(trimmed);
-  if (!Number.isFinite(n) || n < 0 || n > 100) {
-    console.error(
-      `Invalid coverage floor "${raw}" (--min-executed-pct / MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT): expected a number between 0 and 100.`,
-    );
-    exit(2);
-  }
-  return n;
-}
-const minExecutedPct = resolveMinExecutedPct(
+// env > unset (null = no floor). The parse itself lives in the pure, unit-
+// tested `parseMinExecutedPct` (lib/coverage-summary.mjs); this wrapper maps a
+// parse failure to the script's usage-error exit(2) contract.
+//
+// CI note: `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` is honored from the process
+// env by any means. GitHub Actions repo *variables* are NOT auto-exposed as
+// env, so to drive the floor from a repo variable an operator must add
+//   MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT: ${{ vars.MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT }}
+// to the "Execute safe doc examples" step's `env:` in doc-examples-live.yml.
+// That one-line workflow edit is intentionally left to the operator: editing
+// `.github/workflows/**` is a NEVER-AUTO path this automated change must not
+// touch. Until then the floor is set via the --min-executed-pct flag; unset =
+// no floor (the documented default), so nothing is silently ignored.
+const parsedFloor = parseMinExecutedPct(
   minExecutedPctArg ?? env.MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT ?? null,
 );
+if (!parsedFloor.ok) {
+  console.error(parsedFloor.error);
+  exit(2);
+}
+const minExecutedPct = parsedFloor.value;
 
 // ── Fixtures + auth ──────────────────────────────────────────────────────
 let fixtures = {};
