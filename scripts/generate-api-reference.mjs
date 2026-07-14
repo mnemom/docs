@@ -129,47 +129,12 @@ const scopeOf = (p) => {
 
 const spec = JSON.parse(readFileSync(SPEC, "utf8"));
 
-// Already-projected: by openapi-directive key AND by filename (preserves hand-written pages).
-const existingFiles = new Set(readdirSync(ENDPOINT_DIR).filter((f) => f.endsWith(".mdx")));
-const projectedKeys = new Set();
-const directiveByFile = new Map(); // file -> "METHOD path" (for the orphan audit)
-for (const f of existingFiles) {
-  const m = readFileSync(join(ENDPOINT_DIR, f), "utf8").match(/^openapi:\s*"([A-Z]+)\s+([^"]+)"/m);
-  if (m) {
-    projectedKeys.add(`${m[1]} ${m[2]}`);
-    directiveByFile.set(f, { method: m[1], path: m[2] });
-  }
-}
-
-// --check: orphan-drift audit. Every endpoint page carrying an openapi: directive
-// must resolve to a real operation in the committed spec. A page whose directive
-// matches no spec op documents an endpoint the contract no longer defines — it
-// renders as a broken/empty reference page (e.g. a stub left behind when an op was
-// removed from the published slice; the add/refresh passes never delete these).
-// Advisory: opt-in flag, exits 1 so a (non-required) CI step can surface it.
-if (CHECK) {
-  const orphans = [];
-  for (const [f, { method, path }] of directiveByFile) {
-    const op = (spec.paths?.[path] || {})[method.toLowerCase()];
-    if (!op) orphans.push(`${f}: ${method} ${path}`);
-  }
-  if (orphans.length) {
-    process.stderr.write(
-      `generate-api-reference --check: ${orphans.length} ORPHAN directive(s) — ` +
-        `endpoint page(s) reference an operation absent from the committed spec:\n  ` +
-        orphans.sort().join("\n  ") +
-        `\nRemove the stale page(s) + their docs.json nav refs, or restore the op upstream.\n`,
-    );
-    process.exit(1);
-  }
-  process.stderr.write(`generate-api-reference --check: ✓ all ${directiveByFile.size} directive pages resolve to a spec op.\n`);
-  process.exit(0);
-}
-
 // --report: write a deterministic coverage manifest of every spec op classified
 // as generated/excluded/held. Committed as api-reference/.coverage-manifest.json
 // and diffed in CI so any silent change to what's published or excluded surfaces
-// as a required, reviewed delta.
+// as a required, reviewed delta. Classification is recomputed from the spec alone
+// (HELD + exclusionReason), so this short-circuits BEFORE the endpoint-file scan
+// below — that scan is only needed by the default/refresh and --check paths.
 if (REPORT) {
   const manifest = {
     generated: [],
@@ -206,6 +171,43 @@ if (REPORT) {
       `  excluded.dashboard-session: ${manifest.excluded["dashboard-session"].length}\n` +
       `  excluded.non-api: ${manifest.excluded["non-api"].length}\n`,
   );
+  process.exit(0);
+}
+
+// Already-projected: by openapi-directive key AND by filename (preserves hand-written pages).
+const existingFiles = new Set(readdirSync(ENDPOINT_DIR).filter((f) => f.endsWith(".mdx")));
+const projectedKeys = new Set();
+const directiveByFile = new Map(); // file -> "METHOD path" (for the orphan audit)
+for (const f of existingFiles) {
+  const m = readFileSync(join(ENDPOINT_DIR, f), "utf8").match(/^openapi:\s*"([A-Z]+)\s+([^"]+)"/m);
+  if (m) {
+    projectedKeys.add(`${m[1]} ${m[2]}`);
+    directiveByFile.set(f, { method: m[1], path: m[2] });
+  }
+}
+
+// --check: orphan-drift audit. Every endpoint page carrying an openapi: directive
+// must resolve to a real operation in the committed spec. A page whose directive
+// matches no spec op documents an endpoint the contract no longer defines — it
+// renders as a broken/empty reference page (e.g. a stub left behind when an op was
+// removed from the published slice; the add/refresh passes never delete these).
+// Advisory: opt-in flag, exits 1 so a (non-required) CI step can surface it.
+if (CHECK) {
+  const orphans = [];
+  for (const [f, { method, path }] of directiveByFile) {
+    const op = (spec.paths?.[path] || {})[method.toLowerCase()];
+    if (!op) orphans.push(`${f}: ${method} ${path}`);
+  }
+  if (orphans.length) {
+    process.stderr.write(
+      `generate-api-reference --check: ${orphans.length} ORPHAN directive(s) — ` +
+        `endpoint page(s) reference an operation absent from the committed spec:\n  ` +
+        orphans.sort().join("\n  ") +
+        `\nRemove the stale page(s) + their docs.json nav refs, or restore the op upstream.\n`,
+    );
+    process.exit(1);
+  }
+  process.stderr.write(`generate-api-reference --check: ✓ all ${directiveByFile.size} directive pages resolve to a spec op.\n`);
   process.exit(0);
 }
 
