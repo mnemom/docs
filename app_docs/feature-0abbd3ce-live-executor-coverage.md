@@ -26,8 +26,9 @@ rather than passing unnoticed.
 - Plain-text (stdout) and GitHub-flavored-markdown (job summary) renderers for
   the coverage summary, emitted on every run.
 - An optional, **warn-only** coverage floor (`--min-executed-pct` flag or
-  `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` env/repo variable) that emits a
-  `::warning::` on breach but never fails the run.
+  `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` env var) that emits a `::warning::`
+  on breach but never fails the run. Using a GitHub repo variable requires
+  operator workflow wiring — see Configuration.
 - Wiring of the coverage summary into `$GITHUB_STEP_SUMMARY` in the nightly
   workflow, plus a dedicated test suite and npm test script.
 
@@ -45,9 +46,6 @@ rather than passing unnoticed.
   `$GITHUB_STEP_SUMMARY` on every run (before the dry-run / empty-plan exits).
 - `scripts/run-doc-examples.coverage.test.mjs` (new): Regression suite driving
   the coverage core with fixture `plan`/`skipped` arrays.
-- `.github/workflows/doc-examples-live.yml`: Passes the
-  `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` repo variable into the execute step
-  and documents the warn-only floor behavior.
 - `package.json`: Adds the `test:doc-coverage` script.
 
 ### Key Changes
@@ -86,8 +84,15 @@ rather than passing unnoticed.
 ## Configuration
 
 - `--min-executed-pct <n>` — CLI flag; warn-only coverage floor (0–100).
-- `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` — env var / GitHub repo variable
-  fallback for the floor; empty/unset means no floor.
+- `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT` — env var fallback for the floor;
+  empty/unset means no floor (no silent failure). **Note:** GitHub Actions repo
+  variables are NOT auto-exposed as env vars. To drive the floor from a repo
+  variable an operator must add
+  `MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT: ${{ vars.MNEMOM_DOC_EXAMPLES_MIN_EXECUTED_PCT }}`
+  to the `env:` block of the "Execute safe doc examples" step in
+  `doc-examples-live.yml`. That one-line workflow edit is intentionally left to
+  the operator (editing `.github/workflows/**` is a NEVER-AUTO path). Until
+  wired, set the floor via the `--min-executed-pct` CLI flag.
 - `--include-writes` — existing flag; opts write ops into the executable plan
   (which raises coverage), gated by the `WRITE_ALLOWLIST`.
 
