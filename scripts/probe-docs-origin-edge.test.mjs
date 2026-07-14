@@ -62,6 +62,16 @@ test("edge fault: edge 502 with no Cloudflare markers while origin-direct ok →
   assert.equal(result.originHealthy, true);
 });
 
+test("edge fault: edge 503 with CF markers while origin-direct ok → edge-fault (high, CF-marker reason)", () => {
+  const result = classifyAttribution({
+    edge: { ok: false, status: 503, headers: CF_MARKERS },
+    origin: { ok: true, status: 200, headers: VERCEL_MARKERS },
+  });
+  assert.equal(result.verdict, "edge-fault");
+  assert.equal(result.confidence, "high");
+  assert.match(result.reason, /the edge returned a failure/i);
+});
+
 test("healthy: edge 200 + origin 200 → healthy", () => {
   const result = classifyAttribution({
     edge: { ok: true, status: 200, headers: CF_MARKERS },
