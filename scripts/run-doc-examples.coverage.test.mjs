@@ -23,6 +23,28 @@ import {
   parseMinExecutedPct,
 } from "./lib/coverage-summary.mjs";
 
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SCRIPT = join(__dirname, "run-doc-examples.mjs");
+const REPO_ROOT = join(__dirname, "..");
+
+function mkIntegrationEnv() {
+  const dir = mkdtempSync(join(tmpdir(), "run-doc-eg-test-"));
+  // Minimal spec: no paths → every curl gets spec-path-unmatched → executedPct = 0
+  writeFileSync(join(dir, "openapi.json"), JSON.stringify({ paths: {} }));
+  // One GET example in a bash block — no credential-shaped values (MNE-339)
+  writeFileSync(
+    join(dir, "fixture.mdx"),
+    "```bash\ncurl https://api.mnemom.ai/v1/agents\n```\n",
+  );
+  return dir;
+}
+
 // ── Fixture builders ───────────────────────────────────────────────────────
 function planItem(i) {
   return { file: `guides/example-${i}.mdx`, line: i, method: "GET", url: `https://api-staging.example/thing/${i}` };
@@ -197,4 +219,61 @@ test("parseMinExecutedPct: valid values (incl. 0, 100, boundaries) → parsed nu
   // Accepts a numeric argument (the --min-executed-pct flag value is a string,
   // but the function is robust to a number too).
   assert.deepEqual(parseMinExecutedPct(75), { ok: true, value: 75 });
+});
+
+// ── Integration: wiring in run-doc-examples.mjs (child-process) ──────────────
+//
+// These tests exercise branches in the top-level script that cannot be reached
+// by importing coverage-summary.mjs alone. They spawn a real child process with
+// a minimal temp spec (no paths → all examples are spec-path-unmatched,
+// executedPct = 0) so no network call or live fixture is required.
+
+test("floor-breach emits ::warning:: annotation with correct percentage format", () => {
+  const dir = mkIntegrationEnv();
+  try {
+    const r = spawnSync(
+      process.execPath,
+      [SCRIPT, "--dry-run", "--min-executed-pct", "99", "--scope", join(dir, "fixture.mdx")],
+      {
+        cwd: REPO_ROOT,
+        env: { ...process.env, OPENAPI_SPEC_PATH: join(dir, "openapi.json") },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.ok(
+      r.stdout.includes(
+        "::warning::Live doc-example coverage 0.0% is below the configured floor of 99%",
+      ),
+      `expected ::warning:: annotation in stdout\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GITHUB_STEP_SUMMARY appendFileSync error emits ::notice:: annotation", () => {
+  const dir = mkIntegrationEnv();
+  try {
+    const r = spawnSync(
+      process.execPath,
+      [SCRIPT, "--dry-run", "--scope", join(dir, "fixture.mdx")],
+      {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          OPENAPI_SPEC_PATH: join(dir, "openapi.json"),
+          GITHUB_STEP_SUMMARY: dir, // directory → appendFileSync throws EISDIR
+        },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.ok(
+      r.stdout.includes("::notice::Could not write coverage summary to GITHUB_STEP_SUMMARY:"),
+      `expected ::notice:: annotation in stdout\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
