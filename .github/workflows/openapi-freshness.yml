@@ -6,6 +6,10 @@ name: OpenAPI freshness
 # surface — the signal to run `node scripts/sync-openapi.mjs` and open a refresh
 # PR (which then regenerates pages via scripts/generate-api-reference.mjs).
 #
+# It also validates the coverage manifest (api-reference/.coverage-manifest.json),
+# which classifies every spec op as generated/excluded/held. Any silent drift in
+# what's published or excluded surfaces as a required, reviewed delta.
+#
 # It does NOT auto-commit — a human reviews the spec delta + regenerates.
 
 on:
@@ -15,7 +19,9 @@ on:
   pull_request:
     paths:
       - "api-reference/openapi.json"
+      - "api-reference/.coverage-manifest.json"
       - "scripts/sync-openapi.mjs"
+      - "scripts/generate-api-reference.mjs"
 
 jobs:
   freshness:
@@ -35,3 +41,13 @@ jobs:
             exit 1
           fi
           echo "✓ committed OpenAPI slice matches the deployed surface"
+      - name: Re-generate coverage manifest
+        run: node scripts/generate-api-reference.mjs --report
+      - name: Assert coverage manifest is up-to-date
+        run: |
+          if ! git diff --exit-code api-reference/.coverage-manifest.json; then
+            echo "::error::api-reference/.coverage-manifest.json is stale."
+            echo "Run 'node scripts/generate-api-reference.mjs --report' and commit the updated manifest."
+            exit 1
+          fi
+          echo "✓ coverage manifest matches the committed spec"
