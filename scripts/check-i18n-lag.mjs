@@ -36,10 +36,18 @@
 //                        fingerprint and others the old; re-run to completion.
 //   --help, -h         usage.
 //
-// CI wiring is intentionally NOT authored here (maintainer override; NEVER-AUTO
-// path). The operator lands the workflow separately with:
+// REQUIRED HUMAN FOLLOW-UP (tracked, NOT silently dropped) — issue #283 AC3.
+// AC3 ("a workflow runs this on pull_request touching **/*.mdx") is deferred to
+// a human operator BY DESIGN, not omitted: the maintainer override on #283
+// (@wassimwehbi-mnemom) forbids the autonomous worker from authoring the file,
+// and `.github/workflows/*.yml` is a NEVER-AUTO path the worker must not create.
+// This detector is a no-op for regressions until an operator lands
+// `.github/workflows/i18n-lag.yml` in the consolidated CI PR (docs#350 precedent)
+// with EXACTLY:
 //   on: { pull_request: { paths: ["**/*.mdx"] } }
-//   job: npm ci && npm run check:i18n-lag
+//   job step: npm ci && npm run check:i18n-lag   # optionally: npm run test:i18n-lag
+// Until then a PR introducing EN-only drift will NOT be blocked — this tension is
+// surfaced here and in the PR body per MNE-440/MNE-443.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -169,6 +177,140 @@ export function setFrontmatterField(src, key, value) {
   return m[1] + newFm + m[3] + src.slice(m[0].length);
 }
 
+// ── Locale-page discovery ────────────────────────────────────────────────────
+
+function walkMdx(dir, out = []) {
+  for (const e of readdirSync(dir)) {
+    if (e === "node_modules" || e === ".git") continue;
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) walkMdx(p, out);
+    else if (e.endsWith(".mdx")) out.push(p);
+  }
+  return out;
+}
+
+// Every localized page descriptor: { locale, abs, rel, enRel }. A localized page
+// at `<locale>/<rel>` maps to the EN counterpart at `<enRel>` (locale prefix
+// stripped). Exported so tests can supply a stub, and reused by --write.
+export function discoverLocalizedPages(root = ROOT) {
+  const pages = [];
+  for (const locale of LOCALES) {
+    const localeDir = join(root, locale);
+    if (!existsSync(localeDir)) continue;
+    for (const abs of walkMdx(localeDir)) {
+      const rel = relative(root, abs); // e.g. fr/quickstart/overview.mdx
+      const enRel = relative(join(root, locale), abs); // e.g. quickstart/overview.mdx
+      pages.push({ locale, abs, rel, enRel });
+    }
+  }
+  return pages;
+}
+
+// ── Orchestration core (exported, side-effect-free) ──────────────────────────
+// The read-only check's decision logic, extracted from main() so its every
+// branch (missing → errors, stale → stale, cold-start, counter invariant) is
+// directly testable with an injected `listPages`/`readFile` — no filesystem
+// writes, no subprocess. main() supplies the real fs and owns all I/O (printing
+// + exit); this function only computes counts, reports, and the exit code.
+
+// The four disjoint counters must partition `checked` exactly (MNE-438).
+export function countersConsistent({ inSync, stale, errors, checked }) {
+  return inSync + stale + errors === checked;
+}
+
+// Non-zero iff the counter invariant was violated OR any page is stale/errored.
+export function computeExitCode({ inSync, stale, errors, checked }) {
+  if (!countersConsistent({ inSync, stale, errors, checked })) return 1;
+  return stale + errors > 0 ? 1 : 0;
+}
+
+// Run the read-only check. Returns a result object; performs NO console/exit.
+// `listPages(root)` and `readFile(absPath)` are injectable for testing;
+// `readFile` throws (like fs.readFileSync) when a path is absent/unreadable.
+export function runCheck({
+  root = ROOT,
+  listPages = discoverLocalizedPages,
+  readFile = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  const pages = listPages(root);
+
+  // Cold-start fail-closed (MNE-442): a detector that silently passes when it
+  // found nothing to check is the fail-open trap — report and exit non-zero.
+  if (pages.length === 0) {
+    return {
+      exitCode: 1,
+      coldStart: true,
+      invariantOk: true,
+      checked: 0,
+      inSync: 0,
+      stale: 0,
+      errors: 0,
+      staleReports: [],
+      errorReports: [],
+    };
+  }
+
+  let checked = 0;
+  let inSync = 0;
+  let stale = 0;
+  let errors = 0;
+  const staleReports = [];
+  const errorReports = [];
+
+  for (const { locale, abs, rel, enRel } of pages) {
+    checked++;
+
+    // Read the localized page (fail closed on unreadable/unparseable).
+    let locSrc;
+    try {
+      locSrc = readFile(abs);
+    } catch (e) {
+      errors++;
+      errorReports.push(`${rel}: unreadable — ${e.message}`);
+      continue;
+    }
+
+    // Read the EN counterpart (fail closed on missing/unreadable — cannot verify).
+    let enSrc;
+    try {
+      enSrc = readFile(join(root, enRel));
+    } catch (e) {
+      errors++;
+      errorReports.push(`${rel}: EN counterpart ${enRel} missing/unreadable — ${e.message}`);
+      continue;
+    }
+
+    const enFingerprint = computeFingerprint(enSrc);
+    const { frontmatter } = stripFrontmatter(locSrc);
+    const recorded = readFrontmatterField(frontmatter, "source_fingerprint");
+
+    // Missing fingerprint is an untracked translation — indistinguishable from a
+    // stale one, so it fails closed as an error (never in-sync). (MNE-438/442)
+    const { status } = compareFingerprint(enFingerprint, recorded);
+    if (status === "missing") {
+      errors++;
+      errorReports.push(`${rel}: no source_fingerprint frontmatter — run \`--write\` to baseline against ${enRel}`);
+    } else if (status === "stale") {
+      stale++;
+      staleReports.push(`${rel} [${locale}]: EN source ${enRel} changed since this translation was recorded`);
+    } else {
+      inSync++;
+    }
+  }
+
+  return {
+    exitCode: computeExitCode({ inSync, stale, errors, checked }),
+    coldStart: false,
+    invariantOk: countersConsistent({ inSync, stale, errors, checked }),
+    checked,
+    inSync,
+    stale,
+    errors,
+    staleReports,
+    errorReports,
+  };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 // Only run when executed directly (`node scripts/check-i18n-lag.mjs`), never
 // when imported by the test harness — importing must not trigger the CLI/exit.
@@ -197,33 +339,6 @@ for (const arg of args) {
     console.error(`Unknown flag: ${arg}`);
     exit(2);
   }
-}
-
-// ── Locale-page discovery ────────────────────────────────────────────────────
-
-function walkMdx(dir, out = []) {
-  for (const e of readdirSync(dir)) {
-    if (e === "node_modules" || e === ".git") continue;
-    const p = join(dir, e);
-    if (statSync(p).isDirectory()) walkMdx(p, out);
-    else if (e.endsWith(".mdx")) out.push(p);
-  }
-  return out;
-}
-
-// Every localized page path (absolute) and its EN counterpart (relative to ROOT).
-function discoverLocalizedPages() {
-  const pages = [];
-  for (const locale of LOCALES) {
-    const localeDir = join(ROOT, locale);
-    if (!existsSync(localeDir)) continue;
-    for (const abs of walkMdx(localeDir)) {
-      const rel = relative(ROOT, abs); // e.g. fr/quickstart/overview.mdx
-      const enRel = relative(join(ROOT, locale), abs); // e.g. quickstart/overview.mdx
-      pages.push({ locale, abs, rel, enRel });
-    }
-  }
-  return pages;
 }
 
 // ── Self-test (inline assertions, no filesystem side effects) ────────────────
@@ -305,66 +420,16 @@ if (write) {
 
 // ── Read-only check (default) ────────────────────────────────────────────────
 
-const pages = discoverLocalizedPages();
+const result = runCheck();
+const { checked, inSync, stale, errors, staleReports, errorReports } = result;
 
-// Cold-start fail-closed (MNE-442): a detector that silently passes when it found
-// nothing to check is the fail-open trap — report and exit non-zero instead.
-if (pages.length === 0) {
+if (result.coldStart) {
   console.error("✗ check-i18n-lag: no localized pages found under fr/, es/ — nothing to verify.");
   exit(1);
 }
 
-let checked = 0;
-let inSync = 0;
-let stale = 0;
-let errors = 0;
-const staleReports = [];
-const errorReports = [];
-
-for (const { locale, abs, rel, enRel } of pages) {
-  checked++;
-
-  // Read the localized page (fail closed on unreadable/unparseable).
-  let locSrc;
-  try {
-    locSrc = readFileSync(abs, "utf8");
-  } catch (e) {
-    errors++;
-    errorReports.push(`${rel}: unreadable — ${e.message}`);
-    continue;
-  }
-
-  // Read the EN counterpart (fail closed on missing/unreadable — cannot verify).
-  const enPath = join(ROOT, enRel);
-  let enSrc;
-  try {
-    enSrc = readFileSync(enPath, "utf8");
-  } catch (e) {
-    errors++;
-    errorReports.push(`${rel}: EN counterpart ${enRel} missing/unreadable — ${e.message}`);
-    continue;
-  }
-
-  const enFingerprint = computeFingerprint(enSrc);
-  const { frontmatter } = stripFrontmatter(locSrc);
-  const recorded = readFrontmatterField(frontmatter, "source_fingerprint");
-
-  // Missing fingerprint is an untracked translation — indistinguishable from a
-  // stale one, so it fails closed as an error (never in-sync). (MNE-438/442)
-  const { status } = compareFingerprint(enFingerprint, recorded);
-  if (status === "missing") {
-    errors++;
-    errorReports.push(`${rel}: no source_fingerprint frontmatter — run \`--write\` to baseline against ${enRel}`);
-  } else if (status === "stale") {
-    stale++;
-    staleReports.push(`${rel} [${locale}]: EN source ${enRel} changed since this translation was recorded`);
-  } else {
-    inSync++;
-  }
-}
-
 // Enforce the counter invariant before reporting (MNE-438).
-if (inSync + stale + errors !== checked) {
+if (!result.invariantOk) {
   console.error(`✗ check-i18n-lag: counter invariant violated — inSync(${inSync}) + stale(${stale}) + errors(${errors}) !== checked(${checked})`);
   exit(1);
 }
@@ -380,9 +445,9 @@ if (errorReports.length > 0) {
 
 console.log(`\ncheck-i18n-lag: checked ${checked} · in-sync ${inSync} · stale ${stale} · errors ${errors}`);
 
-if (stale + errors > 0) {
+if (result.exitCode !== 0) {
   console.error("Re-run `node scripts/check-i18n-lag.mjs --write` after re-translating to re-baseline.");
-  exit(1);
+  exit(result.exitCode);
 }
 console.log("✓ all localized pages track their EN source.");
 exit(0);

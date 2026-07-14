@@ -23,6 +23,9 @@ import {
   readFrontmatterField,
   compareFingerprint,
   setFrontmatterField,
+  runCheck,
+  countersConsistent,
+  computeExitCode,
 } from "./check-i18n-lag.mjs";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -231,4 +234,148 @@ test("recorded EN fingerprint matches → in sync; after EN edit → stale", () 
   assert.equal(compareFingerprint(computeFingerprint(EN), recorded).status, "in-sync");
   const enEdited = EN.replace("# Choose your path", "# Choose your path now");
   assert.equal(compareFingerprint(computeFingerprint(enEdited), recorded).status, "stale");
+});
+
+// ── Orchestration loop (runCheck) — mock filesystem, no writes/subprocess ────
+//
+// Each scenario injects `listPages` (page descriptors) and `readFile` (an
+// in-memory path→content map that throws on absent paths, like fs.readFileSync),
+// so the exact branch each localized page takes inside the main loop is asserted
+// at the loop level — not just via the pure helpers (review finding 3a(b)).
+
+const ROOT = "/root";
+
+// A localized page that records `fp` as its EN baseline. `fp` omitted → no
+// source_fingerprint key at all (the untracked-translation case).
+function localizedPage(fp) {
+  return fp === undefined
+    ? FR
+    : setFrontmatterField(FR, "source_fingerprint", fp);
+}
+
+// Build { listPages, readFile } for a single fr/quickstart/overview.mdx page.
+// `enSrc` is the EN counterpart content; pass `enSrc: null` to simulate a
+// missing/unreadable EN file (readFile throws for it).
+function singlePageFixture({ locSrc, enSrc }) {
+  const enRel = "quickstart/overview.mdx";
+  const rel = `fr/${enRel}`;
+  const abs = `${ROOT}/${rel}`;
+  const enAbs = `${ROOT}/${enRel}`;
+  const files = { [abs]: locSrc };
+  if (enSrc !== null) files[enAbs] = enSrc;
+  const listPages = () => [{ locale: "fr", abs, rel, enRel }];
+  const readFile = (p) => {
+    if (p in files) return files[p];
+    throw new Error(`ENOENT: no such file, open '${p}'`);
+  };
+  return { root: ROOT, listPages, readFile };
+}
+
+test("runCheck: clean page (recorded fingerprint matches EN) → in-sync, exit 0", () => {
+  const fx = singlePageFixture({ locSrc: localizedPage(computeFingerprint(EN)), enSrc: EN });
+  const r = runCheck(fx);
+  assert.equal(r.exitCode, 0);
+  assert.equal(r.checked, 1);
+  assert.equal(r.inSync, 1);
+  assert.equal(r.stale, 0);
+  assert.equal(r.errors, 0);
+  assert.equal(r.invariantOk, true);
+});
+
+test("runCheck: EN edited since translation → routes to stale (not errors), exit 1", () => {
+  // Baseline recorded against the ORIGINAL EN; EN then gains a heading.
+  const recorded = computeFingerprint(EN);
+  const enEdited = EN.replace("## Create your account", "## Create your organization account");
+  const fx = singlePageFixture({ locSrc: localizedPage(recorded), enSrc: enEdited });
+  const r = runCheck(fx);
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.stale, 1);
+  assert.equal(r.errors, 0);
+  assert.equal(r.inSync, 0);
+  assert.equal(r.staleReports.length, 1);
+  assert.match(r.staleReports[0], /fr\/quickstart\/overview\.mdx/);
+  assert.match(r.staleReports[0], /EN source quickstart\/overview\.mdx changed/);
+});
+
+test("runCheck: missing source_fingerprint → routes to errors (NOT stale), exit 1, names the file", () => {
+  // This is the fail-closed invariant: a null/untracked case must increment
+  // `errors`, never fall through to `stale` or `inSync`.
+  const fx = singlePageFixture({ locSrc: localizedPage(undefined), enSrc: EN });
+  const r = runCheck(fx);
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.errors, 1);
+  assert.equal(r.stale, 0);
+  assert.equal(r.inSync, 0);
+  assert.equal(r.errorReports.length, 1);
+  assert.match(r.errorReports[0], /fr\/quickstart\/overview\.mdx/);
+  assert.match(r.errorReports[0], /no source_fingerprint/);
+});
+
+test("runCheck: EN counterpart missing/unreadable → errors (fail closed, cannot verify), exit 1", () => {
+  const fx = singlePageFixture({ locSrc: localizedPage(computeFingerprint(EN)), enSrc: null });
+  const r = runCheck(fx);
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.errors, 1);
+  assert.equal(r.stale, 0);
+  assert.match(r.errorReports[0], /EN counterpart quickstart\/overview\.mdx missing\/unreadable/);
+});
+
+test("runCheck: cold-start (zero localized pages) → coldStart, exit 1", () => {
+  const r = runCheck({ root: ROOT, listPages: () => [], readFile: () => "" });
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.coldStart, true);
+  assert.equal(r.checked, 0);
+});
+
+test("runCheck: counters partition checked exactly across a mixed batch", () => {
+  const recorded = computeFingerprint(EN);
+  const enEdited = EN.replace("# Choose your path", "# Choose your path v2");
+  const files = {
+    // in-sync
+    [`${ROOT}/fr/a.mdx`]: setFrontmatterField(FR, "source_fingerprint", recorded),
+    [`${ROOT}/a.mdx`]: EN,
+    // stale (EN changed)
+    [`${ROOT}/fr/b.mdx`]: setFrontmatterField(FR, "source_fingerprint", recorded),
+    [`${ROOT}/b.mdx`]: enEdited,
+    // error (no fingerprint)
+    [`${ROOT}/fr/c.mdx`]: FR,
+    [`${ROOT}/c.mdx`]: EN,
+  };
+  const pages = [
+    { locale: "fr", abs: `${ROOT}/fr/a.mdx`, rel: "fr/a.mdx", enRel: "a.mdx" },
+    { locale: "fr", abs: `${ROOT}/fr/b.mdx`, rel: "fr/b.mdx", enRel: "b.mdx" },
+    { locale: "fr", abs: `${ROOT}/fr/c.mdx`, rel: "fr/c.mdx", enRel: "c.mdx" },
+  ];
+  const r = runCheck({
+    root: ROOT,
+    listPages: () => pages,
+    readFile: (p) => {
+      if (p in files) return files[p];
+      throw new Error("ENOENT");
+    },
+  });
+  assert.equal(r.checked, 3);
+  assert.equal(r.inSync, 1);
+  assert.equal(r.stale, 1);
+  assert.equal(r.errors, 1);
+  assert.equal(r.invariantOk, true);
+  assert.equal(r.exitCode, 1);
+});
+
+// ── Counter/exit-code invariants (MNE-438) ───────────────────────────────────
+
+test("countersConsistent: true iff inSync + stale + errors === checked", () => {
+  assert.equal(countersConsistent({ inSync: 1, stale: 1, errors: 1, checked: 3 }), true);
+  assert.equal(countersConsistent({ inSync: 10, stale: 0, errors: 0, checked: 10 }), true);
+  assert.equal(countersConsistent({ inSync: 1, stale: 1, errors: 1, checked: 5 }), false);
+});
+
+test("computeExitCode: violated invariant → 1 (exercises the invariant-violation branch)", () => {
+  assert.equal(computeExitCode({ inSync: 1, stale: 1, errors: 1, checked: 5 }), 1);
+});
+
+test("computeExitCode: consistent + clean → 0; consistent + stale/errors → 1", () => {
+  assert.equal(computeExitCode({ inSync: 12, stale: 0, errors: 0, checked: 12 }), 0);
+  assert.equal(computeExitCode({ inSync: 10, stale: 2, errors: 0, checked: 12 }), 1);
+  assert.equal(computeExitCode({ inSync: 10, stale: 0, errors: 2, checked: 12 }), 1);
 });
