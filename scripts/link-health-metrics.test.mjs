@@ -2,21 +2,35 @@
  * link-health-metrics.test.mjs — regression suite for the link-health TREND
  * artifact core (`scripts/link-health-metrics.mjs`).
  *
- * Drives the exported pure helpers (buildRow / assertRowInvariants / appendRow /
- * round1) with hand-built computeLinkHealth-shaped fixtures — NO live scan.
- * Covers row shaping + pct rounding, counter-correspondence invariants (MNE-438),
- * fail-closed invariant violations (MNE-442), the cold-start/empty-tree edge
- * (no divide-by-zero), and the append round-trip that proves two consecutive
- * runs produce two distinct rows.
+ * Two layers:
+ *   1. Pure helpers (buildRow / assertRowInvariants / appendRow / round1) driven
+ *      with hand-built computeLinkHealth-shaped fixtures — NO live scan. Covers
+ *      row shaping + pct rounding, counter-correspondence invariants (MNE-438),
+ *      fail-closed invariant violations (MNE-442), the cold-start/empty-tree
+ *      edge (no divide-by-zero), and the two-distinct-rows append round-trip.
+ *   2. CLI branches (the main() flag parser + dry-run/write/fail-closed paths)
+ *      driven end-to-end via child_process.spawnSync against a tiny temp docs
+ *      tree — pins the --print dry-run contract (prints JSON, writes nothing,
+ *      takes precedence over --file), the --root/--file/--date/--help paths,
+ *      each missing-argument and unknown-flag error, and the scan/write
+ *      fail-closed exits.
  *
  * Fixtures are link/count data only — no credential-shaped values (MNE-339).
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import {
   round1,
@@ -223,4 +237,110 @@ test("appendRow creates a missing parent directory / file (cold start)", () => {
   const lines = readFileSync(file, "utf8").trim().split("\n");
   assert.equal(lines.length, 1);
   assert.deepEqual(JSON.parse(lines[0]), row);
+});
+
+// ── CLI (main()) — end-to-end via spawnSync ──────────────────────────────────
+// These drive the real script as a subprocess so every main() branch has a
+// direct test. A tiny temp docs tree keeps scans fast and deterministic (no
+// dependency on the real docs/ content).
+
+const SCRIPT = fileURLToPath(new URL("./link-health-metrics.mjs", import.meta.url));
+
+// guides/a.mdx links to guides/b (which exists) → 1 internal link, 0 broken.
+function makeDocsTree() {
+  const root = mkdtempSync(join(tmpdir(), "lh-cli-docs-"));
+  mkdirSync(join(root, "guides"), { recursive: true });
+  writeFileSync(join(root, "guides", "a.mdx"), "See [b](/guides/b).\n");
+  writeFileSync(join(root, "guides", "b.mdx"), "No links here.\n");
+  return root;
+}
+
+function runCli(args) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+}
+
+test("--print emits a valid JSON row to stdout (and honors --date/--root)", () => {
+  const root = makeDocsTree();
+  const res = runCli(["--print", "--root", root, "--date", "2020-01-01"]);
+  assert.equal(res.status, 0);
+  const row = JSON.parse(res.stdout.trim()); // throws if not valid JSON
+  assert.equal(row.date, "2020-01-01"); // --date override is applied
+  assert.equal(row.total_links, 1);
+  assert.equal(row.broken, 0);
+  assert.equal(row.pct, 0);
+  assert.deepEqual(row.by_group.guides, { total: 1, broken: 0, pct: 0 });
+});
+
+test("--print takes precedence over --file: prints and writes NO file", () => {
+  const root = makeDocsTree();
+  const outFile = join(mkdtempSync(join(tmpdir(), "lh-cli-out-")), "sub", "link-health.jsonl");
+  const res = runCli(["--print", "--file", outFile, "--root", root]);
+  assert.equal(res.status, 0);
+  assert.doesNotThrow(() => JSON.parse(res.stdout.trim()));
+  assert.equal(existsSync(outFile), false); // dry run wrote nothing
+});
+
+test("--file writes one JSONL line, and a second run appends a distinct line", () => {
+  const root = makeDocsTree();
+  const outFile = join(mkdtempSync(join(tmpdir(), "lh-cli-out-")), "sub", "link-health.jsonl");
+
+  const res1 = runCli(["--file", outFile, "--root", root, "--date", "2020-01-01"]);
+  assert.equal(res1.status, 0);
+  assert.match(res1.stdout, /wrote row date=2020-01-01/);
+  assert.equal(existsSync(outFile), true);
+  assert.equal(readFileSync(outFile, "utf8").trim().split("\n").length, 1);
+
+  const res2 = runCli(["--file", outFile, "--root", root, "--date", "2020-01-02"]);
+  assert.equal(res2.status, 0);
+  const lines = readFileSync(outFile, "utf8").trim().split("\n");
+  assert.equal(lines.length, 2);
+  assert.notDeepEqual(JSON.parse(lines[0]), JSON.parse(lines[1]));
+});
+
+test("--help prints usage and exits 0", () => {
+  const res = runCli(["--help"]);
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /Usage: link-health-metrics\.mjs/);
+});
+
+test("--root with no argument exits 2", () => {
+  const res = runCli(["--root"]);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--root requires a path argument/);
+});
+
+test("--file with no argument exits 2", () => {
+  const res = runCli(["--file"]);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--file requires a path argument/);
+});
+
+test("--date with no argument exits 2", () => {
+  const res = runCli(["--date"]);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--date requires a YYYY-MM-DD argument/);
+});
+
+test("an unknown flag exits 2", () => {
+  const res = runCli(["--bogus"]);
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /Unknown flag: --bogus/);
+});
+
+test("a nonexistent --root fails closed with exit 1 and a useful signal", () => {
+  const missing = join(tmpdir(), "lh-cli-nope", "nope", "nope");
+  const res = runCli(["--print", "--root", missing]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /::error::.*could not scan/);
+});
+
+test("a write error fails closed with exit 1 (append path)", () => {
+  const root = makeDocsTree();
+  // Create a regular file, then point --file "underneath" it so mkdirSync
+  // hits ENOTDIR — exercises the appendRow write-error exit path.
+  const blocker = join(mkdtempSync(join(tmpdir(), "lh-cli-block-")), "afile");
+  writeFileSync(blocker, "x");
+  const res = runCli(["--file", join(blocker, "sub", "link-health.jsonl"), "--root", root]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /::error::.*could not write/);
 });
