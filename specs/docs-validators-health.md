@@ -58,6 +58,72 @@ Actions workflow is a NEVER-AUTO surface for this lane.
   - Unit test: `npm run test:probe` (`node:test`, no live network — drives the
     classifier with mocked observations, including the incident 403 case).
 
+- **Committed-slice freshness check** — `scripts/check-slice-freshness.mjs`
+  (normalization/diff core: `scripts/lib/openapi-slice.mjs`, shared with
+  `scripts/sync-openapi.mjs`; tests: `scripts/check-slice-freshness.test.mjs`).
+  Read-only: it revalidates the committed `api-reference/openapi.json` slice
+  against the live customer slice INDEPENDENTLY of validator 8's narrow
+  trigger, so a PR that edits `api-reference/endpoint/**` pages or `docs.json`
+  (but not `openapi.json`) can still be caught building on a stale slice. It
+  emits an explicit `committed-slice vs live: N paths added / M removed / K
+  changed (ops +A / -R)` line plus a JSON payload. It NEVER writes a file and
+  NEVER auto-commits (same human-review contract as validator 8). Because it
+  shares one normalization lib with `sync-openapi.mjs`, its verdict can never
+  disagree with the Monday `openapi-freshness.yml` gate.
+  - Run: `npm run check:slice-freshness [-- --soft --verbose]`
+    (or `node scripts/check-slice-freshness.mjs --help`). Live source is the
+    same as `sync-openapi.mjs`: `MNEMOM_OPENAPI_URL` / `--url`
+    (default `https://api.mnemom.ai/openapi.json`), or a local file via
+    `--spec-path` / `OPENAPI_SPEC_PATH` for offline runs.
+  - Exit-code contract — **default (strict/blocking):** `0` = fresh (byte-match,
+    0/0/0); `1` = drift (≥1 added/removed/changed — re-sync + open a refresh
+    PR); `2` = cannot verify (committed file missing/unparseable, live
+    fetch/HTTP/JSON error, live leaked staff paths, or live had no paths).
+    Fails **closed** — a "cannot verify" is never reported as fresh.
+  - Exit-code contract — **`--soft` (advisory):** `0` = fresh OR drift (drift is
+    downgraded to an advisory warning; the diff line is still printed); `2` =
+    cannot verify (UNCHANGED from strict — soft never silently masks a broken
+    live endpoint). `1` is never returned in `--soft` mode.
+  - Unit test: `npm run test:slice-freshness` (`node:test`, no live network —
+    drives the diff core with in-memory fixtures, including the path-added,
+    path-removed, path-changed, schema-order-only, staff-leak, and empty-live
+    edges).
+  - Canonical ADR-054 intent: the **committed-snapshot** reading is canonical —
+    `api-reference/openapi.json` is committed, re-synced, and diffed (drift is
+    detected, not "impossible by construction"). The stale "live-only" phrasing
+    in `scripts/_load-spec.mjs` and `AGENTS.md` was corrected to match.
+
+### Wiring hook — committed-slice freshness (operator's consolidated PR)
+
+The check ships here as on-demand tooling; making a PR that edits ONLY
+`api-reference/endpoint/**` or `docs.json` actually RUN it requires a
+`.github/workflows/**` edit, which is a **NEVER-AUTO** surface for this lane —
+it lands separately, by the operator, in a consolidated PR (precedent: the
+grounding-corpus and origin-edge wiring recorded above). The exact hook, so it
+is not silently dropped (MNE-443):
+
+- File: `.github/workflows/openapi-freshness.yml` (or a new gate).
+- Add these two globs to `on.pull_request.paths` (which today lists only
+  `api-reference/openapi.json` and `scripts/sync-openapi.mjs`):
+
+  ```yaml
+  on:
+    pull_request:
+      paths:
+        - "api-reference/openapi.json"
+        - "scripts/sync-openapi.mjs"
+        - "api-reference/endpoint/**"   # add
+        - "docs.json"                    # add
+  ```
+
+- Invoke the check as a step. Two options, with their exit-code implications:
+  - **Blocking:** `run: node scripts/check-slice-freshness.mjs` — exit `1` on
+    drift fails the PR (same posture as validator 8's git-diff assert).
+  - **Non-blocking signal:** `run: node scripts/check-slice-freshness.mjs --soft`
+    with `continue-on-error: true` — drift is surfaced as an advisory diff line
+    (exit `0`) but a genuine cannot-verify (exit `2`) still fails, so a broken
+    live endpoint is never masked.
+
 ## Out-of-repo follow-ups (tracked, not silently dropped)
 
 The origin-vs-edge work (issue #269) has two acceptance-criteria pieces that
