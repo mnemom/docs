@@ -320,4 +320,9 @@ function main() {
   exit(0); // Advisory: always succeed.
 }
 
-main();
+// Run the CLI only when invoked as the entrypoint, so sibling scripts (e.g.
+// link-health-metrics.mjs) can import computeLinkHealth without triggering a
+// scan/exit on import. Behavior when run directly is unchanged.
+if (argv[1] && resolve(argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
