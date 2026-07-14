@@ -101,7 +101,10 @@ in-memory fixtures with no `docs.json` on disk.
   (the "Validate redirects" step), so the new cycle/chain/duplicate invariants are
   enforced on every push against the real `docs.json`.
 - The self-test follows the same `--self-test` convention as
-  `scripts/check-internal-refs.mjs` (wired via `.github/workflows/internal-reference-gate.yml`).
+  `scripts/check-internal-refs.mjs`; that sibling's CI wiring
+  (`.github/workflows/internal-reference-gate.yml`, self-test-then-live) is the
+  pattern the deferred operator PR mirrors — see **Deferred / follow-ups** below.
+  The self-test does NOT yet run in CI for redirects.
 
 ## Notes
 
@@ -112,3 +115,31 @@ in-memory fixtures with no `docs.json` on disk.
   chains/cycles.
 - Duplicate normalized sources are treated as a defect (a source may have only
   one destination) and reported rather than silently overwritten.
+
+## Deferred / follow-ups
+
+- **AC #4 (CI self-test wiring) is DEFERRED — not implemented in this PR.** The
+  acceptance criterion "`mintlify-ci.yml` runs `--self-test` before the live
+  check, mirroring `internal-reference-gate.yml`'s self-test-then-live pattern"
+  is intentionally NOT satisfied here: `.github/workflows/mintlify-ci.yml` is a
+  **NEVER-AUTO path** per the issue's authoritative maintainer scope override
+  (`adw-dispatcher:wassim/dogfood`), and the workflow wiring lands in a separate
+  operator-authored consolidated PR (precedent: docs#350). This is surfaced, not
+  silently dropped (MNE-443): the review-gate finding that flags AC #4 as unmet
+  is correct on the letter of the AC but conflicts with that maintainer override,
+  which takes precedence for automated changes.
+- **Exact wiring hook for the operator PR** — add a step to
+  `.github/workflows/mintlify-ci.yml` immediately BEFORE the existing "Validate
+  redirects" step (currently line 41-42), mirroring `internal-reference-gate.yml`
+  lines 35-38:
+
+  ```yaml
+  - name: Self-test the redirect checker
+    run: npm run check:redirects:self-test
+
+  - name: Validate redirects
+    run: npm run check:redirects
+  ```
+
+  The `check:redirects:self-test` npm script is already in `package.json`, so the
+  operator PR is a self-contained one-step workflow edit with no code change.
