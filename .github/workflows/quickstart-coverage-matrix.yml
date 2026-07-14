@@ -1,0 +1,51 @@
+name: Quickstart Coverage Matrix
+
+# Coverage gate for issue #295. Asserts every provider × auth-header ×
+# integration-path (× SDK-language) the quickstart CLAIMS to support also ships a
+# worked, copy-pasteable example — so a future edit cannot silently remove a curl
+# example or strip an SDK-operation block and leave a documented-but-unexemplified
+# cell.
+#
+# The check derives the asserted-supported set from the docs (the gateway
+# supported-providers sentinel table + the sdk-direct Install <CodeGroup> labels)
+# and fails closed (exit 1) on any uncovered cell, a missing source region, or
+# zero extracted blocks.
+#
+# Triggers:
+#   - pull_request to main when any quickstart page in the matrix, the check
+#     script, or this workflow changes
+#   - schedule daily (catches an accidental revert or drift)
+#   - workflow_dispatch (manual)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "quickstart/gateway.mdx"
+      - "quickstart/sdk-direct.mdx"
+      - "quickstart/self-hosted.mdx"
+      - "scripts/check-quickstart-matrix.mjs"
+      - ".github/workflows/quickstart-coverage-matrix.yml"
+  schedule:
+    - cron: "45 7 * * *" # daily, staggered from other doc checks
+  workflow_dispatch:
+
+jobs:
+  check-quickstart-matrix:
+    name: Assert every provider × path × SDK-language is exemplified
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      # No `npm ci` needed — the check uses only Node built-ins + scripts/lib.
+      - name: Check quickstart coverage matrix
+        run: node scripts/check-quickstart-matrix.mjs
