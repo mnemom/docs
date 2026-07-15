@@ -228,6 +228,17 @@ const VALID_OPENAPI = JSON.stringify({ paths: { "/widgets": { get: widgetOp() } 
 const VALID_DOCS = JSON.stringify(docsWith([{ group: "Tools", pages: ["api-reference/endpoint/get-widgets"] }]));
 const VALID_PAGE = { "get-widgets.mdx": stubBody("List widgets", "get", "/widgets", widgetOp()) };
 
+test("`--check` exits 0 on a clean tree (no drift)", () => {
+  const root = makeTree({ openapi: VALID_OPENAPI, docs: VALID_DOCS, pages: VALID_PAGE });
+  try {
+    const r = checkIn(root);
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /✓ no drift/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("fail-closed: missing openapi.json → exit non-zero with a clear error", () => {
   const root = makeTree({ docs: VALID_DOCS, pages: VALID_PAGE }); // no openapi.json
   try {
