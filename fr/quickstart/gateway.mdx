@@ -75,7 +75,7 @@ Vos prompts et réponses passent inchangés. Vos clés API ne quittent jamais vo
     | En-tête | Quand émis | Que faire |
     |---------|-----------|-----------|
     | `X-Mnemom-Request-Id` | Toujours | UUIDv4 par requête. **Toujours journaliser.** Collez-le dans un ticket de support et nous pouvons récupérer chaque ligne de log pour la requête. |
-    | `X-Mnemom-Verdict` | Toujours (gateway) | Structuré `front=…; autonomy=…; integrity=…; back=…` avec chaque valeur dans `{pass \| observed \| nudged \| enforced}`. Analysez-le ; l'état à quatre points de contrôle indique ce que Safe House a observé (front+back), ce que CLPI a fait sur les appels d'outils (autonomy), et ce que AIP a fait sur le raisonnement (integrity). |
+    | `X-Mnemom-Verdict` | Toujours (gateway) | Structuré `front=…; autonomy=…; integrity=…; back=…` avec chaque valeur dans `{pass \| observed \| nudged \| enforced \| unverified}`. Analysez-le ; l'état à quatre points de contrôle indique ce que Safe House a observé (front+back), ce que CLPI a fait sur les appels d'outils (autonomy), et ce que AIP a fait sur le raisonnement (integrity). `unverified` est propre à integrity : l'analyseur a échoué, donc aucun verdict fiable n'existe — `enforce` retient la réponse (fail-closed, toujours 2xx), `observe`/`nudge` la transmettent et enregistrent l'état unverified. Jamais rapporté comme `pass`. |
     | `X-Mnemom-Advisory` | Quand la gateway a des avis | JSON compact `[{source, text, severity?, id?}, …]`. Exposez les entrées dans votre UI opérateur / logs. Omis entièrement quand vide. |
     | `X-Mnemom-Agent` | Quand la requête est liée à un agent nommé | L'identifiant d'agent que la gateway a résolu pour votre requête (ex. `mnm-a1b2c3d4…`). Utile pour le recoupement des lignes du tableau de bord. |
     | `X-Mnemom-Session` | Sur les sessions multi-tours | Token de corrélation de session stable. Renvoyez-le au tour suivant pour maintenir la continuité de session. |
@@ -90,6 +90,10 @@ Vos prompts et réponses passent inchangés. Vos clés API ne quittent jamais vo
 
     if (checkpoints.integrity === 'enforced') {
       // Un remplacement AIP du même tour s'est produit — exposez-le dans votre UI.
+    }
+    if (checkpoints.integrity === 'unverified') {
+      // L'analyseur a échoué — aucun verdict fiable. En enforce, cette
+      // réponse a déjà été retenue/remplacée ; en observe/nudge, elle a été transmise.
     }
     ```
 
