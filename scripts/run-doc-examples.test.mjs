@@ -188,3 +188,47 @@ test("CLI --min-executed-pct out of range → usage error (exit 2)", () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /\[0, 100\]/);
 });
+
+// ── CLI coverage output (dry-run + local spec, network-free) ─────────────
+const FIXTURE_SPEC = join(__dirname, "test-fixtures/minimal-openapi.json");
+
+function runCliWithSpec(cliArgs, extraEnv = {}) {
+  return spawnSync(process.execPath, [SCRIPT, ...cliArgs], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MNEMOM_STAGING_TOKEN: "",
+      OPENAPI_SPEC_PATH: FIXTURE_SPEC,
+      ...extraEnv,
+    },
+  });
+}
+
+test("CLI --dry-run + local spec: coverage one-liner appears on stdout", () => {
+  const r = runCliWithSpec(["--dry-run"]);
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stdout, /Executor coverage:/);
+});
+
+test("CLI --dry-run + local spec: exit 0 with default floor (0)", () => {
+  const r = runCliWithSpec(["--dry-run"]);
+  assert.equal(r.status, 0);
+});
+
+test("CLI --dry-run + local spec: exit 0 (warn-only) when floor tripped", () => {
+  // With an empty spec, coverage is 0%; a floor of 50 is above coverage.
+  // AC requires warn-only (exit 0), not exit 1.
+  const r = runCliWithSpec(["--dry-run", "--min-executed-pct", "50"]);
+  assert.equal(r.status, 0, `expected exit 0 (warn-only) but got ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /warning/i);
+});
+
+test("CLI --dry-run + local spec: no skip reasons emitted when list is empty", () => {
+  // Use --scope "" to produce a zero-file scan (plan=0, skipped=0) so the
+  // skip-reason loop has nothing to emit. The empty spec alone is insufficient
+  // because the script still scans all MDX files and skips every example as
+  // "spec path not matched".
+  const r = runCliWithSpec(["--dry-run", "--scope", ""]);
+  assert.equal(r.status, 0);
+  assert.ok(!r.stdout.includes("Skipped by reason:"), "no skip-reason lines when nothing was skipped");
+});
