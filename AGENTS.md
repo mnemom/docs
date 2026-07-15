@@ -23,9 +23,13 @@ verified nightly by the watchdog.
   navigation, branding, integrations).
 - **MDX/MD** — pages are `.mdx` (full Mintlify components) or `.md`
   (plain markdown).
-- **OpenAPI specs** — Mintlify fetches the live customer-facing slice
-  from `https://api.mnemom.ai/openapi.json` (ADR-054). No local
-  `api-reference/openapi.json` — drift impossible by construction.
+- **OpenAPI specs** — the customer-facing slice is served live from
+  `https://api.mnemom.ai/openapi.json`, but the canonical ADR-054 intent is
+  the **committed-snapshot** one: `api-reference/openapi.json` IS committed
+  (source of truth for the generated pages) and re-synced from the live
+  surface by `scripts/sync-openapi.mjs`. Drift is DETECTED — git-diffed by
+  `.github/workflows/openapi-freshness.yml` and by
+  `scripts/check-slice-freshness.mjs` — not "impossible by construction".
 - No package.json, no build step. Mintlify handles everything.
 
 ## Local preview

@@ -356,6 +356,7 @@ if (SELFTEST) {
 // ── Load spec ────────────────────────────────────────────────────────────
 // ADR-054: spec loaded from the live URL (or OPENAPI_SPEC_PATH override).
 import { loadSpec } from "./_load-spec.mjs";
+import { diffSlices } from "./lib/openapi-slice.mjs";
 const spec = await loadSpec();
 
 // ── Spec leakage gate (AC2) ───────────────────────────────────────────────
@@ -376,6 +377,44 @@ if (staffLeakedFromSpec.length) {
     `check-doc-examples: refusing — staff/internal path(s) present in the served spec (server filter gap, ADR-054): ${staffLeakedFromSpec.join(", ")}\n`,
   );
   exit(2);
+}
+
+// ── Committed-slice vs live drift line (issue #278 — AC branch b) ──────────
+//
+// The committed `api-reference/openapi.json` slice is the source of truth for
+// the generated endpoint pages. This job runs daily AND on every PR touching
+// `**/*.mdx` (which includes `api-reference/endpoint/**` pages) or
+// `scripts/lib/**`, so emitting the explicit "committed-slice vs live" diff
+// line here means a PR built on a stale slice is flagged even when it never
+// touches `openapi.json` — satisfying the AC's second alternative in-repo,
+// with no `.github/workflows/**` change (a NEVER-AUTO surface for this lane).
+//
+// ADVISORY only: this NEVER changes this gate's pass/fail. Blocking drift
+// enforcement lives in `openapi-freshness.yml` + `scripts/check-slice-
+// freshness.mjs` (strict). It shares the ONE normalization in
+// `scripts/lib/openapi-slice.mjs` so its verdict can never disagree. It is
+// read-only and fails soft — any inability to read the committed slice or an
+// empty live spec is reported as a skip, never a false "fresh" or a crash.
+try {
+  const committedSlice = JSON.parse(
+    readFileSync(
+      process.env.COMMITTED_SLICE_PATH || new URL("../api-reference/openapi.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  if (spec?.paths && Object.keys(spec.paths).length > 0) {
+    const drift = diffSlices(committedSlice, spec);
+    console.log(drift.summaryLine);
+    if (!drift.byteEqual) {
+      console.log(
+        "  ↑ committed slice differs from live — run 'node scripts/sync-openapi.mjs && node scripts/generate-api-reference.mjs' and open a refresh PR (blocking check: scripts/check-slice-freshness.mjs).",
+      );
+    }
+  } else {
+    console.log("committed-slice vs live: skipped — live spec has no paths (likely a bad fetch)");
+  }
+} catch (err) {
+  console.log(`committed-slice vs live: skipped — ${err.message}`);
 }
 
 // ── Ajv + dereferencer ───────────────────────────────────────────────────
