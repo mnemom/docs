@@ -60,6 +60,6 @@ The manifest path is fixed at `api-reference/.coverage-manifest.json`. Exclusion
 
 ## Notes
 
-- The manifest is a snapshot of *classification intent*, not a second source of truth — it is always regenerated from the committed OpenAPI slice, so it can never drift from the spec without CI catching it.
+- The manifest is a snapshot of classification intent, not a second source of truth — it is always regenerated from the committed OpenAPI slice. Once the CI gate lands (path triggers + manifest-freshness step), any drift will surface as a failing check; until then, regenerate and commit the manifest manually before opening a refresh PR.
 - Counts at time of writing: 462 generated, 26 deprecated-excluded, 6 dashboard-session-excluded, 2 non-api-excluded, 2 held.
 - The gate does not auto-commit; a human reviews the spec delta and the manifest delta and regenerates. The final decision about publishing or excluding an op remains a human, reviewed action.
