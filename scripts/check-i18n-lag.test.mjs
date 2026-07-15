@@ -327,6 +327,27 @@ test("runCheck: cold-start (zero localized pages) → coldStart, exit 1", () => 
   assert.equal(r.checked, 0);
 });
 
+test("runCheck: unreadable localized page → routes to errors (fail closed), exit 1", () => {
+  const enRel = "quickstart/overview.mdx";
+  const abs = `${ROOT}/fr/${enRel}`;
+  const enAbs = `${ROOT}/${enRel}`;
+  // Only enAbs is readable; abs is intentionally absent so readFile(abs) throws.
+  const readFile = (p) => {
+    if (p === enAbs) return EN;
+    throw new Error(`ENOENT: no such file, open '${p}'`);
+  };
+  const r = runCheck({
+    root: ROOT,
+    listPages: () => [{ locale: "fr", abs, rel: `fr/${enRel}`, enRel }],
+    readFile,
+  });
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.errors, 1);
+  assert.equal(r.stale, 0);
+  assert.equal(r.inSync, 0);
+  assert.match(r.errorReports[0], /unreadable/);
+});
+
 test("runCheck: counters partition checked exactly across a mixed batch", () => {
   const recorded = computeFingerprint(EN);
   const enEdited = EN.replace("# Choose your path", "# Choose your path v2");
