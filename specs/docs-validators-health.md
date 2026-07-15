@@ -8,7 +8,7 @@ Last verified: 2026-06-29.
 | # | Validator | Workflow | PR trigger | Schedule (UTC) | Posture | What it validates |
 |---|-----------|----------|------------|----------------|---------|-------------------|
 | 1 | Mintlify CI | `mintlify-ci.yml` | All PRs (no path filter) | Daily 06:00 (`0 6 * * *`) | BLOCKING | `mint validate` build + broken internal links + redirect-table integrity (`docs.json` `redirects`) |
-| 2 | Doc Examples vs OpenAPI | `doc-examples.yml` | PRs touching `**/*.mdx`, `**/*.md`, scripts, `package.json` | Daily 06:45 (`45 6 * * *`) | BLOCKING | Every `curl https://api.mnemom.ai/v1/…` invocation in MDX must resolve to a real `{path, method}` in the live OpenAPI spec |
+| 2 | Doc Examples vs OpenAPI | `doc-examples.yml` | PRs touching `**/*.mdx`, `**/*.md`, scripts, `package.json` | Daily 06:45 (`45 6 * * *`) | BLOCKING (curl drift); ADVISORY (slice drift line) | Every `curl https://api.mnemom.ai/v1/…` invocation in MDX must resolve to a real `{path, method}` in the live OpenAPI spec. Also emits (advisory, non-failing) the `committed-slice vs live: N paths added / M removed / K changed` drift line (issue #278) — see the committed-slice freshness check under "On-demand probes" |
 | 3 | Internal-reference gate | `internal-reference-gate.yml` | All PRs (no path filter) | — (PR + push only) | BLOCKING | Scans `*.mdx` and `api-reference/openapi.json` prose for: private-repo links (`github.com/mnemom/scale`, `safe-house-hardening`, `safe-house-aegis`, `deploy`); retired codenames XFD/CBD/CFD; internal codename polis; internal agent names solon/themis/cassandra/blackbeard/wintermute; 1Password paths (`op://`); internal tooling paths (`emps.`, `packages/core`); internal tracker refs UC-N, `mnemom-platform#N`, AEGIS-N; ADR refs (ADR-NNN, MDX only) |
 | 4 | Spec Examples Validation | `spec-examples.yml` | PRs touching `specifications/**/*.mdx`, scripts, `package.json` | Daily 07:00 (`0 7 * * *`) | BLOCKING | YAML/JSON fenced blocks in `specifications/*.mdx` annotated `# t5-3:full-example` validate against the live OpenAPI schema via Ajv 2020 |
 | 5 | Doc Examples Live (staging) | `doc-examples-live.yml` | No PR trigger | Daily 07:00 (`0 7 * * *`) | ADVISORY (requires `MNEMOM_STAGING_TOKEN` secret; skips without it) | Executes safe curl examples from MDX against the staging environment and asserts response status is documented or 2xx |
@@ -57,6 +57,83 @@ Actions workflow is a NEVER-AUTO surface for this lane.
     `1` = any attributed-down / `indeterminate` verdict, `2` = bad CLI usage.
   - Unit test: `npm run test:probe` (`node:test`, no live network — drives the
     classifier with mocked observations, including the incident 403 case).
+
+- **Committed-slice freshness check** — `scripts/check-slice-freshness.mjs`
+  (normalization/diff core: `scripts/lib/openapi-slice.mjs`, shared with
+  `scripts/sync-openapi.mjs`; tests: `scripts/check-slice-freshness.test.mjs`).
+  Read-only: it revalidates the committed `api-reference/openapi.json` slice
+  against the live customer slice INDEPENDENTLY of validator 8's narrow
+  trigger, so a PR that edits `api-reference/endpoint/**` pages or `docs.json`
+  (but not `openapi.json`) can still be caught building on a stale slice. It
+  emits an explicit `committed-slice vs live: N paths added / M removed / K
+  changed (ops +A / -R)` line plus a JSON payload. It NEVER writes a file and
+  NEVER auto-commits (same human-review contract as validator 8). Because it
+  shares one normalization lib with `sync-openapi.mjs`, its verdict can never
+  disagree with the Monday `openapi-freshness.yml` gate.
+  - Run: `npm run check:slice-freshness [-- --soft --verbose]`
+    (or `node scripts/check-slice-freshness.mjs --help`). Live source is the
+    same as `sync-openapi.mjs`: `MNEMOM_OPENAPI_URL` / `--url`
+    (default `https://api.mnemom.ai/openapi.json`), or a local file via
+    `--spec-path` / `OPENAPI_SPEC_PATH` for offline runs.
+  - Exit-code contract — **default (strict/blocking):** `0` = fresh (byte-match,
+    0/0/0); `1` = drift (≥1 added/removed/changed — re-sync + open a refresh
+    PR); `2` = cannot verify (committed file missing/unparseable, live
+    fetch/HTTP/JSON error, live leaked staff paths, or live had no paths).
+    Fails **closed** — a "cannot verify" is never reported as fresh.
+  - Exit-code contract — **`--soft` (advisory):** `0` = fresh OR drift (drift is
+    downgraded to an advisory warning; the diff line is still printed); `2` =
+    cannot verify (UNCHANGED from strict — soft never silently masks a broken
+    live endpoint). `1` is never returned in `--soft` mode.
+  - Unit test: `npm run test:slice-freshness` (`node:test`, no live network —
+    drives the diff core with in-memory fixtures, including the path-added,
+    path-removed, path-changed, schema-order-only, staff-leak, and empty-live
+    edges).
+  - Canonical ADR-054 intent: the **committed-snapshot** reading is canonical —
+    `api-reference/openapi.json` is committed, re-synced, and diffed (drift is
+    detected, not "impossible by construction"). The stale "live-only" phrasing
+    in `scripts/_load-spec.mjs` and `AGENTS.md` was corrected to match.
+  - **CI wiring — satisfied in-repo via validator 2 (issue #278 AC branch b):**
+    the same diff line is emitted (advisory) by `scripts/check-doc-examples.mjs`
+    (validator 2, `doc-examples.yml`), which already triggers **daily** and on
+    every PR touching `**/*.mdx` — and `api-reference/endpoint/**` pages ARE
+    `.mdx`, so **a PR editing only an endpoint page already triggers the slice
+    freshness emission** (the issue's verification criterion) with no workflow
+    change. That emission is advisory-only: it prints `committed-slice vs live:
+    …` and NEVER changes validator 2's pass/fail. It shares the one
+    normalization lib, so it can never disagree with the blocking check.
+
+### Optional upgrade — blocking committed-slice trigger (operator's consolidated PR)
+
+The AC is satisfied in-repo (validator 2 emission, above). This is an OPTIONAL
+STRONGER upgrade: to make committed-slice drift **block** a PR that edits only
+`api-reference/endpoint/**` or `docs.json` (rather than surface an advisory
+line), add a dedicated trigger. That requires a `.github/workflows/**` edit,
+which is a **NEVER-AUTO** surface for this lane — it lands separately, by the
+operator, in a consolidated PR (precedent: the grounding-corpus and origin-edge
+wiring recorded above). The exact hook, so it is not silently dropped
+(MNE-443):
+
+- File: `.github/workflows/openapi-freshness.yml` (or a new gate).
+- Add these two globs to `on.pull_request.paths` (which today lists only
+  `api-reference/openapi.json` and `scripts/sync-openapi.mjs`):
+
+  ```yaml
+  on:
+    pull_request:
+      paths:
+        - "api-reference/openapi.json"
+        - "scripts/sync-openapi.mjs"
+        - "api-reference/endpoint/**"   # add
+        - "docs.json"                    # add
+  ```
+
+- Invoke the check as a step. Two options, with their exit-code implications:
+  - **Blocking:** `run: node scripts/check-slice-freshness.mjs` — exit `1` on
+    drift fails the PR (same posture as validator 8's git-diff assert).
+  - **Non-blocking signal:** `run: node scripts/check-slice-freshness.mjs --soft`
+    with `continue-on-error: true` — drift is surfaced as an advisory diff line
+    (exit `0`) but a genuine cannot-verify (exit `2`) still fails, so a broken
+    live endpoint is never masked.
 
 ## Out-of-repo follow-ups (tracked, not silently dropped)
 
