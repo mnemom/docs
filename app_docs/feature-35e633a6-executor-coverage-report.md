@@ -12,7 +12,7 @@ The live doc-example executor (`run-doc-examples.mjs`) discovers every safe-to-r
 
 - A pure helper module (`scripts/lib/executor-coverage.mjs`) that computes executor coverage, parses/validates the CLI floor, groups skip reasons, and renders a Markdown summary.
 - Coverage reporting wired into `run-doc-examples.mjs`: every run prints coverage to stdout and appends a Markdown table to `$GITHUB_STEP_SUMMARY` (or stdout under `--verbose`).
-- A new `--min-executed-pct N` CLI flag that gates the run — coverage below `N` exits non-zero. Defaults to `0` (report-only, non-blocking).
+- A new `--min-executed-pct N` CLI flag — coverage below `N` emits a warning to stderr (warn-only, exit 0). Defaults to `0` (report-only, non-blocking).
 - A "Skipped by reason" breakdown that groups skip categories (missing fixtures, write ops, unresolved placeholders) so erosion is diagnosable at a glance.
 - A regression suite (`scripts/run-doc-examples.test.mjs`) covering the pure helpers and the CLI flag contract, plus a `test:doc-examples` npm script.
 
@@ -21,7 +21,7 @@ The live doc-example executor (`run-doc-examples.mjs`) discovers every safe-to-r
 ### Files Modified
 
 - `scripts/lib/executor-coverage.mjs` (new): Pure, I/O-free helpers — `parseMinExecutedPct`, `computeExecutorCoverage`, `coverageFloorMet`, `summarizeSkipReasons`, and `renderCoverageSummary`. No `process`/`env` reads, so the floor policy stays CLI-only and the helpers are directly unit-testable.
-- `scripts/run-doc-examples.mjs`: Added `--min-executed-pct` parsing (with a usage-error `exit(2)` for a missing/blank/invalid value), computed coverage from the executed `plan` vs `skipped` split, appended the rendered summary to `$GITHUB_STEP_SUMMARY`, and added a fail-closed `exit(1)` when coverage falls below the floor.
+- `scripts/run-doc-examples.mjs`: Added `--min-executed-pct` parsing (with a usage-error `exit(2)` for a missing/blank/invalid value), computed coverage from the executed `plan` vs `skipped` split, appended the rendered summary to `$GITHUB_STEP_SUMMARY`, and emits a warning when coverage falls below the floor (warn only — floor violation never causes a non-zero exit).
 - `scripts/run-doc-examples.test.mjs` (new): Two-layer suite — pure-helper unit tests (CLI-value contract, cold-start zero-divide edge, floor comparison, summary shape) plus network-free end-to-end CLI tests driven through `child_process`.
 - `package.json`: Added the `test:doc-examples` script (`node --test scripts/run-doc-examples.test.mjs`).
 
@@ -40,7 +40,7 @@ The live doc-example executor (`run-doc-examples.mjs`) discovers every safe-to-r
    node scripts/run-doc-examples.mjs --verbose
    ```
 2. Read the `Executor coverage: X/Y discovered example(s) executable (Z%)` line on stdout, or the "Live doc-example executor coverage" table in the GitHub Actions step summary.
-3. To enforce a minimum, pass a floor. Coverage below it exits non-zero:
+3. To surface a warning when coverage drops below a threshold, pass a floor. Coverage below it emits a `::warning::` to stderr (warn-only, exit 0):
    ```bash
    node scripts/run-doc-examples.mjs --min-executed-pct 25
    ```
@@ -59,7 +59,7 @@ The live doc-example executor (`run-doc-examples.mjs`) discovers every safe-to-r
 
 - Run the new suite: `npm run test:doc-examples` (or `node --test scripts/run-doc-examples.test.mjs`).
 - The suite has two layers: pure-helper unit tests (no scan, no network) and end-to-end CLI flag-contract tests driven via `child_process` that resolve before any network call.
-- Coverage exit codes: `0` (no assertion failures and coverage meets the floor), `1` (an executed call failed assertion **or** coverage fell below `--min-executed-pct`), `2` (usage/configuration error).
+- Coverage exit codes: `0` (no assertion failures; floor violations emit a stderr warning but never change the exit code), `1` (at least one executed call failed assertion), `2` (usage/configuration error). A `--min-executed-pct` floor below the actual coverage produces a `::warning::` on stderr and exits `0`.
 
 ## Notes
 

@@ -208,6 +208,9 @@ test("CLI --dry-run + local spec: coverage one-liner appears on stdout", () => {
   const r = runCliWithSpec(["--dry-run"]);
   assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
   assert.match(r.stdout, /Executor coverage:/);
+  // MDX files are scanned with the empty fixture (no paths), so every curl
+  // example is skipped as 'spec path not matched' — skip-reason output must appear.
+  assert.match(r.stdout, /Skipped by reason:/);
 });
 
 test("CLI --dry-run + local spec: exit 0 with default floor (0)", () => {

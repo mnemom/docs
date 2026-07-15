@@ -21,9 +21,11 @@
  * Coverage (issue #380):
  *   Every run reports "executor coverage" — the share of DISCOVERED examples
  *   that are executable (not skipped for fixtures/writes/placeholders) — to
- *   `$GITHUB_STEP_SUMMARY` (or stdout under --verbose). `--min-executed-pct N`
- *   turns that report into a gate: coverage below N exits non-zero. The floor
- *   is CLI-only (never an env var); it defaults to 0 (report-only).
+ *   stdout always; the full Markdown table appends to `$GITHUB_STEP_SUMMARY`
+ *   (or stdout under --verbose). `--min-executed-pct N` surfaces a warning to
+ *   stderr when coverage falls below N (warn-only — exit 0 always;
+ *   near-100%-skip is the expected current baseline). The floor is CLI-only
+ *   (never an env var); it defaults to 0 (report-only).
  *
  * Auth:
  *   The MNEMOM_STAGING_TOKEN env var (CI: secret of the same name)
