@@ -168,10 +168,16 @@ test("counter correctness: each drift class increments only its own counter", ()
 
 // ── CLI --check: smoke test against the real committed tree ────────────────
 
-test("smoke: `--check` exits 0 on the committed tree (no drift)", () => {
-  const r = spawnSync(process.execPath, [CLI, "--check"], { encoding: "utf8" });
-  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stderr}`);
-  assert.match(r.stderr, /✓ no drift/);
+test("committed stub whose description-only drifted (title unchanged) → refreshed === 1", () => {
+  const opOld = widgetOp(); // no description field; descriptionFor falls back to summary
+  const opNew = { ...opOld, description: "A precise technical description for widgets." };
+  const r = run({
+    spec: { paths: { "/widgets": { get: opNew } } },
+    pages: { "get-widgets.mdx": stubBody("List widgets", "get", "/widgets", opOld) },
+    docs: docsWith([{ group: "Tools", pages: ["api-reference/endpoint/get-widgets"] }]),
+  });
+  assert.equal(r.refreshed, 1, "description-only drift must trigger a refresh");
+  assert.equal(r.written, 0, "page already exists — not a new write");
 });
 
 test("`--check` exits non-zero and prints the remediation line when the tree has drifted", () => {

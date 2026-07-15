@@ -15,7 +15,6 @@ The `generate-api-reference.mjs --check` flag was upgraded from an advisory, orp
 - **Fail-closed** behavior: a missing/unparseable spec, an empty `endpoint/` directory, or a missing/malformed `docs.json` now exits non-zero with an actionable `::error::` line instead of silently reporting "no drift".
 - A regression test suite (15 tests) covering each drift class in memory plus the CLI's exit-code contract via subprocess.
 - Two new npm scripts wiring the gate and its tests into the CI toolchain.
-- A reconciled endpoint description so the committed tree passes the new gate cleanly.
 
 ## Technical Implementation
 
@@ -25,7 +24,7 @@ The `generate-api-reference.mjs --check` flag was upgraded from an advisory, orp
 - `scripts/generate-api-reference.mjs`: Refactored to import and route through `computeDrift`. The write/dry-run path now applies the helper's plan (`toGen`, `refreshList`, mutated `docs`) to disk; the `--check` path asserts the plan is a total no-op. Added fail-closed loaders (`loadSpec`, `loadEndpointFiles`, `loadDocs`) and a `checkFail()` helper that emits `::error::` and exits 1.
 - `scripts/generate-api-reference.test.mjs` *(new)*: 15-test suite — unit tests drive `computeDrift` with minimal fixtures (one per drift class) and subprocess tests exercise the real CLI's exit codes, including all fail-closed edge cases.
 - `package.json`: Added `check:api-reference-drift` (`node scripts/generate-api-reference.mjs --check`) and `test:api-reference` (`node --test scripts/generate-api-reference.test.mjs`).
-- `api-reference/endpoint/get-auth-me-personal-org.mdx`: Reconciled the `description` field to match the current spec summary so the committed tree passes the gate.
+- `api-reference/endpoint/get-auth-me-personal-org.mdx`: NOT modified. Known description drift between the committed page and the current spec is deferred to a follow-up reconciliation PR (scope guard: api-reference/endpoint/** files are out of scope for this issue).
 
 ### Key Changes
 
