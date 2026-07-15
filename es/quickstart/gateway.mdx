@@ -75,7 +75,7 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
     | Encabezado | Cuándo se emite | Qué hacer |
     |-----------|----------------|-----------|
     | `X-Mnemom-Request-Id` | Siempre | UUIDv4 por solicitud. **Siempre regístralo.** Pégalo en un ticket de soporte y podremos recuperar cada línea de log de la solicitud. |
-    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced}`. Analízalo; el estado de cuatro puntos de control te indica qué observó Safe House (front+back), qué hizo CLPI en las llamadas a herramientas (autonomy) y qué hizo AIP en el razonamiento (integrity). |
+    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced \| unverified}`. Analízalo; el estado de cuatro puntos de control te indica qué observó Safe House (front+back), qué hizo CLPI en las llamadas a herramientas (autonomy) y qué hizo AIP en el razonamiento (integrity). `unverified` es exclusivo de integrity: el analizador falló, así que no existe un veredicto confiable — `enforce` retiene la respuesta (fail-closed, sigue siendo 2xx), `observe`/`nudge` la reenvían y registran el estado unverified. Nunca se reporta como `pass`. |
     | `X-Mnemom-Advisory` | Cuando la pasarela tiene avisos | JSON compacto `[{source, text, severity?, id?}, …]`. Muestra las entradas en tu UI de operador / logs. Se omite por completo cuando está vacío. |
     | `X-Mnemom-Agent` | Cuando la solicitud está vinculada a un agente nombrado | El identificador del agente que la pasarela resolvió para tu solicitud (p. ej., `mnm-a1b2c3d4…`). Útil para cruzar referencias con filas del panel de control. |
     | `X-Mnemom-Session` | En sesiones multi-turno | Token de correlación de sesión estable. Devuélvelo en el siguiente turno para mantener la continuidad de la sesión. |
@@ -90,6 +90,10 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
 
     if (checkpoints.integrity === 'enforced') {
       // Ocurrió un reemplazo AIP en el mismo turno — muéstralo en tu UI.
+    }
+    if (checkpoints.integrity === 'unverified') {
+      // El analizador falló — no hay veredicto confiable. En enforce esta
+      // respuesta ya fue retenida/reemplazada; en observe/nudge fue reenviada.
     }
     ```
 

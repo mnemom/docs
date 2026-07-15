@@ -18,7 +18,7 @@ There is **no dual-emit window** and **no `Sunset` header** on the legacy names 
 | Header | Always emitted? | Emitted by | Purpose |
 |---|---|---|---|
 | `X-Mnemom-Request-Id` | Always | Gateway | UUIDv4 per request — paste into a support ticket and we can pull every log line for that request. Stable across the whole pipeline. |
-| `X-Mnemom-Verdict` | Always (gateway) | Gateway | Structured per-checkpoint verdict: `front=…; autonomy=…; integrity=…; back=…`, each in `{pass \| observed \| nudged \| enforced}`. Parse once; grep four checkpoints. |
+| `X-Mnemom-Verdict` | Always (gateway) | Gateway | Structured per-checkpoint verdict: `front=…; autonomy=…; integrity=…; back=…`, each in `{pass \| observed \| nudged \| enforced \| unverified}`. Parse once; grep four checkpoints. |
 | `X-Mnemom-Advisory` | When non-empty | Gateway | Compact JSON array of advisory entries `[{source, text, severity?, id?}, …]`. Capped at 5 entries. Omitted entirely when no advisories fired. |
 | `X-Mnemom-Schema` | On API responses with versioned shapes | mnemom-api | Response-shape identifier (e.g. `alignment_card/v1`, `safe-house-harness-state/v1`). Mirrors the shape your client should validate against. |
 | `X-Mnemom-Version` | Always (mnemom-api) | mnemom-api | Echoes the date-based API version the response was rendered against (`YYYY-MM-DD`). Stripe-Version analog. |
@@ -33,7 +33,7 @@ There is **no dual-emit window** and **no `Sunset` header** on the legacy names 
 | `X-AIP-Checkpoint-Id` | When AIP analysis stored a checkpoint | Pointer to the integrity checkpoint row. Use this to fetch the full attestation chain via the [integrity checkpoints REST surface](/api-reference/endpoint/get-agents-agent-id-checkpoints-checkpoint-id). |
 
 <Note>
-**Unclaimed agents: verdict headers are fail-open, not analytical.** Gateway-auto-provisioned agents that have not been claimed have no canonical alignment card. `X-Mnemom-Verdict` and `X-AIP-Verdict` are still emitted on every request, but their values (`pass`/`clear`) come from the gateway's fail-open path — AIP analysis did not run. `X-AIP-Checkpoint-Id` will not be present. This is expected behavior. The full integrity pipeline starts after claim. See [integrity during the unclaimed phase](/guides/agent-claim-flow#between-steps-integrity-during-the-unclaimed-phase).
+**Unclaimed agents: verdict headers are fail-open, not analytical.** Gateway-auto-provisioned agents that have not been claimed have no canonical alignment card. `X-Mnemom-Verdict` and `X-AIP-Verdict` are still emitted on every request, but their values (`pass`/`clear`) come from the gateway's fail-open path — AIP analysis did not run. `X-AIP-Checkpoint-Id` will not be present. This is expected behavior; it is not the `unverified` state described above — `unverified` means analysis was attempted (a canonical card exists) and failed, whereas an unclaimed agent has no analysis to attempt in the first place. The full integrity pipeline starts after claim. See [integrity during the unclaimed phase](/guides/agent-claim-flow#between-steps-integrity-during-the-unclaimed-phase).
 </Note>
 
 Plus standards: `Content-Type`, `Cache-Control`, CORS headers, and `Idempotent-Replay: true` on cached idempotency replays.
@@ -46,19 +46,21 @@ Plus standards: `Content-Type`, `Cache-Control`, CORS headers, and `Idempotent-R
 X-Mnemom-Verdict: front=pass; autonomy=pass; integrity=pass; back=pass
 ```
 
-Each value is one of `pass | observed | nudged | enforced`. The semantics of each verdict per checkpoint:
+Each value is one of `pass | observed | nudged | enforced | unverified`. The semantics of each verdict per checkpoint:
 
-| Checkpoint | `pass` | `observed` | `nudged` | `enforced` |
-|---|---|---|---|---|
-| **`front`** (Protection inbound) | No threat detected. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`). |
-| **`autonomy`** (CLPI on tool calls) | Tool call within bounds. | Out-of-bounds tool call observed but allowed. | Tool call surfaced a warning. | Tool call replaced with a synthetic error response. |
-| **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Verdict recorded post-hoc and carried into the agent's next turn (`mode=nudge`); this response is not gated. | Response was replaced same-turn with a same-voice intervention. |
-| **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged; recorded post-hoc (`mode=nudge`) and carried into the next turn — this response is not gated. | Output redacted, replaced, or blocked same-turn. |
+| Checkpoint | `pass` | `observed` | `nudged` | `enforced` | `unverified` |
+|---|---|---|---|---|---|
+| **`front`** (Protection inbound) | No threat detected. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`). | Not produced by this checkpoint — Safe House evaluation fails closed internally rather than surfacing an unverified state. |
+| **`autonomy`** (CLPI on tool calls) | Tool call within bounds. | Out-of-bounds tool call observed but allowed. | Tool call surfaced a warning. | Tool call replaced with a synthetic error response. | Not produced by this checkpoint. |
+| **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Verdict recorded post-hoc and carried into the agent's next turn (`mode=nudge`); this response is not gated. | Response was replaced same-turn with a same-voice intervention. | The integrity checkpoint produced no trustworthy verdict — the analysis LLM timed out or errored. In `enforce` the response is **withheld** (fail-closed, still returned as a 2xx intervention); in `observe`/`nudge` the response is forwarded and the unverified state is recorded. Never reported as `pass`. |
+| **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged; recorded post-hoc (`mode=nudge`) and carried into the next turn — this response is not gated. | Output redacted, replaced, or blocked same-turn. | Not produced by this checkpoint. |
 
 The four-checkpoint model is documented in the [Safe House concept](/concepts/safe-house). All four checkpoints **always run** on every gateway-routed request — `pass` means the checkpoint ran and the request was clean.
 
 <Note>
 Verdict timing is mode-dependent: in `enforce` the `integrity`/`back` verdicts are resolved before the response is returned (streaming adds latency to preserve this); in `observe`/`nudge` analysis is post-hoc, so a backgrounded checkpoint's same-turn header value is provisional. `off` runs no analysis.
+
+**`unverified` is integrity-only and fail-closed by design.** It is the sole verdict that can never be silently reported as `pass` — an analyzer failure (timeout, error, or breaker-open) is a *distinct* outcome from a clean analysis, so the header says so explicitly. This is orthogonal to `off`/no-analysis: `off` never runs a checkpoint at all, while `unverified` means analysis was attempted and failed.
 </Note>
 
 ### Parser snippets
@@ -66,11 +68,13 @@ Verdict timing is mode-dependent: in `enforce` the `integrity`/`back` verdicts a
 **TypeScript:**
 
 ```ts
+type VerdictValue = 'pass' | 'observed' | 'nudged' | 'enforced' | 'unverified';
+
 type CheckpointVerdicts = {
-  front: 'pass' | 'observed' | 'nudged' | 'enforced';
-  autonomy: 'pass' | 'observed' | 'nudged' | 'enforced';
-  integrity: 'pass' | 'observed' | 'nudged' | 'enforced';
-  back: 'pass' | 'observed' | 'nudged' | 'enforced';
+  front: VerdictValue;
+  autonomy: VerdictValue;
+  integrity: VerdictValue; // the only checkpoint that can report 'unverified'
+  back: VerdictValue;
 };
 
 function parseMnemomVerdict(headerValue: string): CheckpointVerdicts {
@@ -90,7 +94,7 @@ if (v.integrity === 'enforced') {
 ```python
 from typing import TypedDict, Literal
 
-VerdictValue = Literal['pass', 'observed', 'nudged', 'enforced']
+VerdictValue = Literal['pass', 'observed', 'nudged', 'enforced', 'unverified']
 
 class CheckpointVerdicts(TypedDict):
     front: VerdictValue

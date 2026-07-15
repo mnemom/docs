@@ -106,23 +106,11 @@ This is the most useful metric for threshold calibration. If your false positive
 
 ## Session threat escalation
 
-The `X-Safe-House-Session-Risk` response header on every gateway response reflects the current session risk level for that session. Your application code can read this header and take action:
+<Note>
+**`X-Safe-House-Session-Risk` was retired clean-break on 2026-05-08.** Session risk was always an operator-dashboard signal, not part of the customer-facing verdict contract — it was never re-surfaced as a response header. It lives in the Security Observatory (below) and via the [Safe House sessions API](/api-reference/endpoint/get-safe-house-sessions). See [What was retired](/api-reference/headers#what-was-retired) for the full legacy → canonical mapping.
+</Note>
 
-```typescript
-const response = await fetch(MNEMOM_GATEWAY_URL, {
-  method: 'POST',
-  headers: { /* ... */ },
-  body: JSON.stringify(requestBody),
-});
-
-const sessionRisk = response.headers.get('X-Safe-House-Session-Risk');
-// 'low' | 'medium' | 'high'
-
-if (sessionRisk === 'high') {
-  // Pause the automated workflow and route to human review
-  await workflowQueue.escalate(sessionId, { reason: 'Safe House session risk elevated' });
-}
-```
+The current session risk level for a session is visible in the Security Observatory's threat feed (above), and programmatically via [`GET /v1/safe-house/sessions`](/api-reference/endpoint/get-safe-house-sessions) — see that endpoint's reference for the exact response shape. To act on session risk in your own workflow (e.g. pausing an automated flow and routing to human review when a session escalates to `high`), poll that endpoint rather than reading a response header.
 
 **Risk level progression:**
 

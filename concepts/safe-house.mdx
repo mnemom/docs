@@ -35,7 +35,7 @@ Safe House uses the canonical four-mode enum shared with the [Protection Card](/
     Detection is skipped entirely. No analysis, no telemetry, no headers. The agent's traffic passes through unchanged.
   </Card>
   <Card title="Observe" icon="eye">
-    Full evaluation runs, but the response is returned without being gated this turn; verdicts and session-risk scores are recorded post-hoc — logged in the Observatory and surfaced in response headers. Zero operational impact on the transaction — no message is blocked, no advisory is injected. Use this to characterize your threat landscape before escalating.
+    Full evaluation runs, but the response is returned without being gated this turn; the verdict is recorded post-hoc and surfaced in the `X-Mnemom-Verdict` response header, while session-risk scores are logged to the Observatory (operator-dashboard only, not a response header). Zero operational impact on the transaction — no message is blocked, no advisory is injected. Use this to characterize your threat landscape before escalating.
   </Card>
   <Card title="Nudge" icon="bell">
     Detectors run; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context and can adjust behavior accordingly.
@@ -95,10 +95,12 @@ Safe House adds headers to every gateway response so your application can inspec
 
 | Header | Present When | Values |
 |--------|-------------|--------|
-| `X-Safe-House-Verdict` | `observe`, `nudge`, or `enforce` mode | `pass`, `warn`, `quarantine`, `block` |
-| `X-Safe-House-Quarantine-Id` | Verdict is `quarantine` (under `enforce`) | UUID of the quarantine entry |
-| `X-Mnemom-Advisory` | `nudge` mode and verdict is `warn` or higher | Advisory annotation surfaced into model context |
-| `X-Safe-House-Session-Risk` | `observe`, `nudge`, or `enforce` mode | `low`, `medium`, `high`, `critical` |
+| `X-Mnemom-Verdict` | Always — Safe House populates the `front` (inbound) and `back` (outbound) fields | Each field in `pass`, `observed`, `nudged`, `enforced` |
+| `X-Mnemom-Advisory` | `nudge` mode and verdict is `warn` or higher, or an `enforce`-mode `quarantine` or `block` | Advisory annotation surfaced into model context; the entry's optional `id` carries the quarantine ID when applicable |
+
+<Note>
+**Legacy `X-Safe-House-*` headers were retired clean-break on 2026-05-08** — `X-Safe-House-Verdict` folds into `X-Mnemom-Verdict.front`/`.back`, `X-Safe-House-Quarantine-Id` folds into the `X-Mnemom-Advisory` entry's `id` field, and `X-Safe-House-Session-Risk` (along with `X-Safe-House-Mode` and `X-Safe-House-Simulated-Verdict`) was an operator-dashboard-only signal that was never re-surfaced as a header — that data lives in the Observatory / `sh_evaluations` / `audit_log`, not in response headers. There is no dual-emit window. See [What was retired](/api-reference/headers#what-was-retired) for the complete legacy → canonical mapping.
+</Note>
 
 ## Canary credentials
 
