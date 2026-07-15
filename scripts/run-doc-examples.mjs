@@ -18,6 +18,13 @@
  *     skipped with reason "unresolved placeholder: $X".
  *   - --dry-run prints the planned executions without sending them.
  *
+ * Coverage (issue #380):
+ *   Every run reports "executor coverage" — the share of DISCOVERED examples
+ *   that are executable (not skipped for fixtures/writes/placeholders) — to
+ *   `$GITHUB_STEP_SUMMARY` (or stdout under --verbose). `--min-executed-pct N`
+ *   turns that report into a gate: coverage below N exits non-zero. The floor
+ *   is CLI-only (never an env var); it defaults to 0 (report-only).
+ *
  * Auth:
  *   The MNEMOM_STAGING_TOKEN env var (CI: secret of the same name)
  *   carries a staging-scoped service-account token. The executor
@@ -30,11 +37,12 @@
  * Exit codes:
  *   0  — no executed call returned a status outside the example's
  *        documented surface (verdict per assertExpectedStatus).
- *   1  — at least one executed call failed assertion.
+ *   1  — at least one executed call failed assertion, OR executor coverage
+ *        fell below --min-executed-pct.
  *   2  — usage / configuration error.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync } from "node:fs";
 import { argv, env, exit } from "node:process";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -49,6 +57,12 @@ import {
   buildSpecIndex,
   matchSpecPath,
 } from "./lib/doc-examples-extract.mjs";
+import {
+  parseMinExecutedPct,
+  computeExecutorCoverage,
+  coverageFloorMet,
+  renderCoverageSummary,
+} from "./lib/executor-coverage.mjs";
 
 // ── Ajv (mirrors the walker; needed for actual-response validation) ──────
 const ajv = new Ajv2020({ strict: false, allErrors: true, allowUnionTypes: true });
@@ -103,6 +117,7 @@ let dryRun = false;
 let includeWrites = false;
 let verbose = false;
 let stagingBase = env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1";
+let minExecutedPctArg;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--scope") scope = args[++i];
@@ -110,13 +125,31 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--include-writes") includeWrites = true;
   else if (a === "--verbose") verbose = true;
   else if (a === "--staging-base") stagingBase = args[++i];
+  else if (a === "--min-executed-pct") minExecutedPctArg = args[++i];
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--staging-base url] [--verbose]");
+    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--staging-base url] [--min-executed-pct N] [--verbose]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${a}`);
     exit(2);
   }
+}
+
+// Resolve the executor-coverage floor from the CLI (issue #380). The floor is
+// a CLI-ONLY policy — never read from the environment. A `--min-executed-pct`
+// with no trailing value leaves minExecutedPctArg === undefined; because
+// `undefined ?? null` would otherwise fall through to the report-only default,
+// we reject the no-value form here as a usage error (design-review advisory).
+if (args.includes("--min-executed-pct") && minExecutedPctArg === undefined) {
+  console.error("--min-executed-pct requires a value");
+  exit(2);
+}
+let minExecutedPct;
+try {
+  minExecutedPct = parseMinExecutedPct(minExecutedPctArg ?? null);
+} catch (err) {
+  console.error(err.message);
+  exit(2);
 }
 
 // ── Fixtures + auth ──────────────────────────────────────────────────────
@@ -367,6 +400,48 @@ if (verbose) {
   for (const s of skipped) {
     console.log(`  ⏭ ${s.method.padEnd(6)} ${s.url}   ${s.reason}   (${s.file}:${s.line})`);
   }
+}
+
+// ── Executor coverage (issue #380) ─────────────────────────────────────────
+// Coverage = the share of DISCOVERED examples that are executable (not
+// skipped). It is a plan-time property, so it is reported (and gated) in every
+// mode, including --dry-run — a fast, token-free PR gate is
+// `--dry-run --min-executed-pct N`.
+const coverage = computeExecutorCoverage({
+  executed: plan.length,
+  skipped: skipped.length,
+});
+const floorMet = coverageFloorMet(coverage.pct, minExecutedPct);
+const summary = renderCoverageSummary({
+  ...coverage,
+  floor: minExecutedPct,
+  floorMet,
+  skippedItems: skipped,
+});
+// env.GITHUB_STEP_SUMMARY is the OUTPUT DESTINATION (a file path GitHub
+// Actions provides), NOT the floor policy — the floor comes only from
+// --min-executed-pct. Appending here is the standard Actions step-summary
+// pattern (see link-health-report.mjs), not a forbidden env-driven threshold.
+const summaryPath = env.GITHUB_STEP_SUMMARY;
+if (summaryPath) {
+  try {
+    appendFileSync(summaryPath, summary + "\n");
+  } catch (err) {
+    console.error(`Could not write $GITHUB_STEP_SUMMARY: ${err.message}`);
+  }
+} else if (verbose) {
+  console.log(summary);
+}
+console.log(
+  `Executor coverage: ${coverage.executed}/${coverage.discovered} discovered example(s) executable (${coverage.pct}%); floor ${minExecutedPct}%.`,
+);
+if (!floorMet) {
+  // Fail CLOSED: coverage below an explicit floor is a build signal, surfaced
+  // before execution so it gates in --dry-run too.
+  console.error(
+    `::error::Executor coverage ${coverage.pct}% is below the --min-executed-pct floor (${minExecutedPct}%).`,
+  );
+  exit(1);
 }
 
 if (dryRun) {
