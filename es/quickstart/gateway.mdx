@@ -11,7 +11,7 @@ source_fingerprint: sha256:74e4c44c7fb0dcdeb8c23d4b31ac1e28686463c6969c92b3e71fc
 Mnemom Gateway es una pasarela de IA transparente que se sitúa entre tu aplicación y cualquier proveedor LLM. Proporciona la stack de confianza completa de Mnemom desde el primer momento:
 
 - AP-Traces verificables
-- Comprobaciones de integridad AIP en tiempo real
+- Comprobaciones de integridad AIP por turno
 - Aplicación de políticas a partir de las secciones `capabilities` y `enforcement` de la tarjeta de alineamiento
 - Protección Safe House configurada mediante la tarjeta de protección
 - Verificación frente a la tarjeta de alineamiento del agente
@@ -235,7 +235,7 @@ También puedes crear agentes de forma programática mediante la API CRUD de age
 | OpenAI legacy (o3/o4-mini) | No compatible | Razonamiento cifrado |
 
 <Note>
-**Elementos thinking en respuestas proxiadas.** Safe House / AIP habilita el thinking extendido para analizar el razonamiento del agente en tiempo real. Las respuestas proxiadas incluyen por lo tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido de solo texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no puede desactivarse.
+**Elementos thinking en respuestas proxiadas.** Safe House / AIP habilita el thinking extendido para analizar el razonamiento del agente por turno. Las respuestas proxiadas incluyen por lo tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido de solo texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no puede desactivarse.
 </Note>
 
 ## Qué se rastrea
@@ -246,7 +246,7 @@ Mnemom Gateway construye [AP-Traces](https://github.com/mnemom/aap) que registra
 - **Decisión** -- Qué alternativas se consideraron y por qué se seleccionó una
 - **Escalada** -- Si el agente escaló a un humano y por qué
 - **Verificación** -- Si la traza es coherente con la tarjeta de alineamiento declarada del agente
-- **Integridad** -- Análisis AIP en tiempo real de los bloques de pensamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
+- **Integridad** -- Análisis AIP por turno de los bloques de pensamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
 
 ## Qué NO se almacena
 
@@ -262,7 +262,7 @@ Mnemom Gateway admite tres modos de aplicación cuando se detecta una violación
 |------|---------------|
 | `observe` | Detecta violaciones, las registra, no actúa (predeterminado) |
 | `nudge` | Detecta violaciones, inyecta retroalimentación en la siguiente solicitud del agente mediante el prompt del sistema. El agente lo ve y puede auto-corregirse. |
-| `enforce` | Bloqueo duro con HTTP 403 para solicitudes sin streaming. Recurre a nudge para streaming. |
+| `enforce` | Aplica el veredicto en el mismo turno tanto para solicitudes con streaming como sin streaming (HTTP 403 para las solicitudes sin streaming); en streaming esto añade latencia porque la respuesta se evalúa antes de entregarse. |
 
 Establece el modo de aplicación actualizando la tarjeta de alineamiento del agente. `integrity_mode` y `autonomy_mode` son campos de nivel superior en la tarjeta de alineamiento; el endpoint legacy `/v1/agents/{id}/enforcement` fue retirado el 2026-05-14.
 

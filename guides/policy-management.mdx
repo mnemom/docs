@@ -294,7 +294,7 @@ curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
   -d '{
     "policy": { "meta": { "schema_version": "1.0", "name": "support-agent", "scope": "agent" } },
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-    "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
+    "tools": [{ "name": "mcp__browser__navigate" }, { "name": "mcp__filesystem__delete" }],
     "context": "gateway"
   }'
 ```
@@ -406,7 +406,7 @@ jobs:
 
 ## Using policy recommendations
 
-The Intelligence Layer can analyze your team's fault lines and generate policy recommendations based on observed agent behavior, common violation patterns, and alignment card structure.
+The Intelligence Layer turns a **risk forecast** into a concrete policy recommendation. First generate a forecast from a fault-line analysis (`POST /v1/teams/forecast`), then pass its `forecast_id` here — the recommendation draws on the forecast's observed agent behavior, failure modes, and fault-line structure.
 
 ### Generate a recommendation
 
@@ -415,8 +415,8 @@ curl -X POST https://api.mnemom.ai/v1/teams/recommend-policy \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "team_id": "team-support-ops",
-    "analysis_window_days": 30
+    "forecast_id": "rf-8f21c0a49d3b",
+    "constraints": { "enforcement_mode": "warn" }
   }'
 ```
 
