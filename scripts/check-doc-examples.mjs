@@ -397,7 +397,10 @@ if (staffLeakedFromSpec.length) {
 // empty live spec is reported as a skip, never a false "fresh" or a crash.
 try {
   const committedSlice = JSON.parse(
-    readFileSync(new URL("../api-reference/openapi.json", import.meta.url), "utf8"),
+    readFileSync(
+      process.env.COMMITTED_SLICE_PATH || new URL("../api-reference/openapi.json", import.meta.url),
+      "utf8",
+    ),
   );
   if (spec?.paths && Object.keys(spec.paths).length > 0) {
     const drift = diffSlices(committedSlice, spec);

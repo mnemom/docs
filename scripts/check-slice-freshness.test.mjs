@@ -236,3 +236,69 @@ test("CLI: missing live spec file → exit 2 (CANNOT VERIFY)", () => {
   assert.equal(r.code, 2);
   assert.match(r.stderr, /does not exist/);
 });
+
+// ── Advisory block branches in check-doc-examples.mjs ──────────────────
+// These exercise the two untested skip paths of the committed-slice
+// advisory block. They spawn the real script with an empty --scope (zero
+// MDX files, fast exit) and env-var overrides to steer the two branches.
+
+const DOC_EXAMPLES_CLI = fileURLToPath(new URL("./check-doc-examples.mjs", import.meta.url));
+
+// Minimal helper: spawn check-doc-examples with controlled inputs.
+// liveSpecPath  → OPENAPI_SPEC_PATH  (what loadSpec() reads)
+// committedSlicePath → COMMITTED_SLICE_PATH (what the advisory readFileSync reads)
+// scope         → --scope flag (pass an empty dir to skip all MDX validation)
+function runDocExamplesCli({ liveSpecPath, committedSlicePath, scope }) {
+  const env = { ...process.env };
+  if (liveSpecPath) env.OPENAPI_SPEC_PATH = liveSpecPath;
+  if (committedSlicePath) env.COMMITTED_SLICE_PATH = committedSlicePath;
+  const r = spawnSync("node", [DOC_EXAMPLES_CLI, "--scope", scope], {
+    encoding: "utf8",
+    env,
+  });
+  return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "" };
+}
+
+test("advisory block in check-doc-examples: else branch — logs skip when live spec has no paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doc-examples-advisory-"));
+  try {
+    const emptyPathsSpec = join(dir, "empty-paths.json");
+    writeFileSync(
+      emptyPathsSpec,
+      JSON.stringify({ openapi: "3.1.0", info: { title: "t", version: "1" }, paths: {} }),
+    );
+    const r = runDocExamplesCli({ liveSpecPath: emptyPathsSpec, scope: dir });
+    // Advisory block must not crash the script; gate continues to exit 0.
+    assert.equal(r.code, 0, `expected exit 0, got ${r.code}; stderr: ${r.stderr}`);
+    assert.match(
+      r.stdout,
+      /committed-slice vs live: skipped — live spec has no paths/,
+      "expected skip message for empty live spec paths",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("advisory block in check-doc-examples: catch branch — logs skip when committed slice is unreadable", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doc-examples-advisory-"));
+  try {
+    const missingSlice = join(dir, "no-such-committed-slice.json");
+    // OPENAPI_SPEC_PATH → the real committed spec so spec.paths is non-empty
+    // (ensures we reach the readFileSync call rather than the else branch).
+    const r = runDocExamplesCli({
+      liveSpecPath: COMMITTED,
+      committedSlicePath: missingSlice,
+      scope: dir,
+    });
+    // Catch block must not propagate — script exits 0 (advisory, non-failing).
+    assert.equal(r.code, 0, `expected exit 0, got ${r.code}; stderr: ${r.stderr}`);
+    assert.match(
+      r.stdout,
+      /committed-slice vs live: skipped — /,
+      "expected skip message from catch block",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
