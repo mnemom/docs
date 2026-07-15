@@ -45,7 +45,7 @@ Add `scripts/check-quickstart-matrix.mjs`: a Node ≥22, dependency-free (`node:
 
 ### The fence-detection fix (blocking, per @wassimwehbi-mnemom)
 
-`doc-examples-extract.mjs`'s `extractFencedBlocks` uses **column-0** fence detection (`line.startsWith("\`\`\`")`). Every fence in `gateway.mdx` is 4-space indented inside `<Step>` / `<CodeGroup>` MDX tags, so that extractor parses **zero** blocks from these pages — the fail-closed guard would fire on every run and the AC could never exit 0. **The new script must NOT reuse that column-0 detector for block splitting.** Instead it defines a **local, indentation-tolerant** `extractFencedBlocks` that trims leading whitespace before testing for the ```` ``` ```` marker and strips the common indent from block bodies — modeled on the working extractor already in `scripts/check-sdk-quickstart.mjs:35`. (We deliberately do **not** edit the shared `doc-examples-extract.mjs` extractor: it has three other consumers — `check-doc-examples.mjs`, `run-doc-examples.mjs`, `extractBashBlocks` — and changing its splitting behavior would be an out-of-scope rewrite (MNE-437). Only `extractCurls`/`parseCurl`, which operate on an already-extracted block *body*, are reused.) A fixture with an **indented** fence is added to `--self-test` so this regresses loudly if it ever breaks again.
+`doc-examples-extract.mjs`'s `extractFencedBlocks` uses **column-0** fence detection (``line.startsWith("\`\`\`")``). Every fence in `gateway.mdx` is 4-space indented inside `<Step>` / `<CodeGroup>` MDX tags, so that extractor parses **zero** blocks from these pages — the fail-closed guard would fire on every run and the AC could never exit 0. **The new script must NOT reuse that column-0 detector for block splitting.** Instead it defines a **local, indentation-tolerant** `extractFencedBlocks` that trims leading whitespace before testing for the ```` ``` ```` marker and strips the common indent from block bodies — modeled on the working extractor already in `scripts/check-sdk-quickstart.mjs:35`. (We deliberately do **not** edit the shared `doc-examples-extract.mjs` extractor: it has three other consumers — `check-doc-examples.mjs`, `run-doc-examples.mjs`, `extractBashBlocks` — and changing its splitting behavior would be an out-of-scope rewrite (MNE-437). Only `extractCurls`/`parseCurl`, which operate on an already-extracted block *body*, are reused.) A fixture with an **indented** fence is added to `--self-test` so this regresses loudly if it ever breaks again.
 
 ### New Files
 
@@ -85,7 +85,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ### 5. Compute the matrix + report
 
-- Build the asserted cell set: gateway × {each provider}, self-hosted × {each provider}, sdk-direct × {each language}.
+- Build the asserted cell set: gateway × \{each provider\}, self-hosted × \{each provider\}, sdk-direct × \{each language\}.
 - Diff asserted − documented → uncovered cells. Track `covered`/`total` counts where numerator and denominator correspond (MNE-438); list each uncovered cell exactly once with provider, auth-header, path, and the missing evidence type.
 - Exit 0 when `uncovered.length === 0`; else exit 1 printing the exact uncovered cells. Add `--print` to render the full matrix table to stdout regardless of pass/fail.
 
