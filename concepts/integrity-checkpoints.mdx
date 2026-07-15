@@ -1,13 +1,13 @@
 ---
 title: "Integrity Checkpoints"
-description: "Real-time analysis of LLM reasoning to detect prompt injection, manipulation, and drift"
+description: "Per-turn analysis of LLM reasoning to detect prompt injection, manipulation, and drift"
 sidebarTitle: "Integrity Checkpoints"
 icon: "shield-check"
 ---
 
 {/* concept-fields: bounded_actions, linked_trace_id, thinking_block_hash, boundary_violation, review_needed */}
 
-An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block — the internal reasoning the model produces before or alongside its visible response. The checkpoint runs **same-turn** between the model's response generation and delivery to the user (`enforce` blocks the offending action at every checkpoint same-turn; the chat completes 2xx, and the agent's response references what was prevented).
+An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block — the internal reasoning the model produces before or alongside its visible response. The guarantee is set by the integrity mode, not the transport: `enforce` gates same-turn on both streaming and non-streaming (on streaming this adds latency because the response is evaluated before it is delivered), while `observe` and `nudge` return the response without gating it this turn and record the verdict post-hoc. Under `enforce`, the offending action is blocked at the checkpoint same-turn; the chat completes 2xx, and the agent's response references what was prevented.
 
 [AP-Traces](/concepts/ap-traces) are the durable artifact the checkpoint writes; the trace records what happened — both the model's thinking and the integrity verdict — in the same turn. Drift detection and coherence analysis then operate on the trace surface longitudinally (sideband) across multiple turns.
 
@@ -19,13 +19,13 @@ Integrity Checkpoints are the primary data structure of the [Agent Integrity Pro
 
 ## Why Integrity Checkpoints exist
 
-Real-time analysis of the thinking block lets `integrity_mode = enforce` prevent these three failure modes **before** the response reaches the user:
+Per-turn analysis of the thinking block lets `integrity_mode = enforce` prevent these three failure modes **before** the response reaches the user:
 
 - **Prompt injection**: A malicious prompt would otherwise cause the agent to exfiltrate data. The checkpoint catches the intent in the thinking block; enforcement replaces the response same-turn before delivery.
-- **Gradual drift**: Each individual checkpoint is same-turn, but the longitudinal pattern across many turns reveals subtle direction shifts. The sideband drift detector reads the trace surface and emits a `pending_advisory` on the next turn when a threshold is crossed.
+- **Gradual drift**: Each checkpoint evaluates a single turn (and, under `enforce`, gates it same-turn), but the longitudinal pattern across many turns reveals subtle direction shifts. The sideband drift detector reads the trace surface and emits a `pending_advisory` on the next turn when a threshold is crossed.
 - **Misaligned intent**: The thinking block reveals an intended forbidden action; the checkpoint catches it before the action lands.
 
-All three failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints make that visibility actionable same-turn.
+All three failure modes are visible in thinking blocks *before* the action lands. Integrity checkpoints surface that visibility every turn; under `enforce` it is actionable same-turn (the action is gated before delivery), while `observe` and `nudge` record the verdict post-hoc.
 
 ## How it works
 
@@ -388,7 +388,7 @@ Integrity checkpoints and AP-Traces are complementary:
 
 | Dimension | Integrity Checkpoint (AIP) | AP-Trace (AAP) |
 |---|---|---|
-| **Timing** | Real-time, between turns | Post-hoc, after action |
+| **Timing** | Per-turn (enforce gates same-turn; observe/nudge post-hoc) | Post-hoc, after action |
 | **Analyzes** | What the agent was thinking | What the agent did |
 | **Verdict** | `clear` / `review_needed` / `boundary_violation` | `verified: true/false` with violations |
 | **Storage** | Checkpoint table | Trace table |

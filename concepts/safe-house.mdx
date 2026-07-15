@@ -5,7 +5,7 @@ sidebarTitle: "Safe House"
 icon: "door-open"
 ---
 
-Safe House is an optional pre-screening layer that sits in front of your AI agent and evaluates every inbound message before it reaches the model. Where [AIP integrity checkpoints](/concepts/integrity-checkpoints) analyze the agent's *reasoning*, Safe House analyzes *what is being sent to the agent* — catching adversarial inputs before they have a chance to influence behavior.
+Safe House is an optional pre-screening layer that sits in front of your AI agent and evaluates every inbound message. Where [AIP integrity checkpoints](/concepts/integrity-checkpoints) analyze the agent's *reasoning*, Safe House analyzes *what is being sent to the agent*. In `enforce`, a flagged message is caught before it reaches the model; in `observe` and `nudge` the message is forwarded and the verdict is recorded post-hoc (nudge surfaces an advisory on the next turn).
 
 ## Where it runs
 
@@ -35,7 +35,7 @@ Safe House uses the canonical four-mode enum shared with the [Protection Card](/
     Detection is skipped entirely. No analysis, no telemetry, no headers. The agent's traffic passes through unchanged.
   </Card>
   <Card title="Observe" icon="eye">
-    Full evaluation runs; verdicts and session-risk scores are logged in the Observatory and surfaced in response headers. Zero operational impact on the transaction — no message is blocked, no advisory is injected. Use this to characterize your threat landscape before escalating.
+    Full evaluation runs, but the response is returned without being gated this turn; verdicts and session-risk scores are recorded post-hoc — logged in the Observatory and surfaced in response headers. Zero operational impact on the transaction — no message is blocked, no advisory is injected. Use this to characterize your threat landscape before escalating.
   </Card>
   <Card title="Nudge" icon="bell">
     Detectors run; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context and can adjust behavior accordingly.
@@ -151,7 +151,7 @@ Composition across scopes follows the same intersection-then-union rule as the r
 Safe House screens in both directions:
 
 - **Inbound**: Evaluates user and tool messages before they reach the agent (the primary use case).
-- **Outbound screening**: Scans agent responses for data leaks — PII patterns, secret formats, or content that should not leave the agent's context — before the response is returned to the caller.
+- **Outbound screening**: Scans agent responses for data leaks — PII patterns, secret formats, or content that should not leave the agent's context. In `enforce`, a flagged response is caught before it is returned to the caller (which adds latency); in `observe` and `nudge` the response is returned and the finding is recorded post-hoc.
 
 Outbound screening is configured separately and applies regardless of inbound mode.
 
@@ -165,8 +165,8 @@ Safe House's runtime treatment is configured by **two parallel cascades** of nam
 
 | Artifact | Scope | What it controls | When |
 |---|---|---|---|
-| [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates. Agent self-declared (with org/platform as floor). | Same-turn at the gateway: CLPI (tool calls) + AIP (reasoning) |
-| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources, and **`protected_surface`** (org-owned assets, forbidden operations, escalation requirements). Org-defined — not agent-authored. | Same-turn at the gateway: front-door + back-door; `protected_surface` read by L2 |
+| [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates. Agent self-declared (with org/platform as floor). | At the gateway: CLPI (tool calls) + AIP (reasoning); enforce gates same-turn, observe/nudge record post-hoc |
+| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources, and **`protected_surface`** (org-owned assets, forbidden operations, escalation requirements). Org-defined — not agent-authored. | At the gateway: front-door + back-door; enforce gates same-turn, observe/nudge record post-hoc; `protected_surface` read by L2 |
 | [Trust Posture](/concepts/trust-posture) | Per-team | Sideband detector firing rules (coherence, fault-line, fleet) | Async sideband sweep → carryover via `pending_advisories` |
 | Card-cascade composition | Platform → Org → Team → Agent | Strictest-wins fold per-agent; `protected_surface` is strengthen-only union with org as primary authoring scope | Read by gateway at request time |
 
