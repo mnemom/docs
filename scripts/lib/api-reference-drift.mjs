@@ -32,10 +32,10 @@
  *   }
  */
 
-const METHODS = ["get", "post", "put", "patch", "delete"]; // also = display order within a resource
+export const METHODS = ["get", "post", "put", "patch", "delete"]; // also = display order within a resource
 
 // Endpoints intentionally NOT published (tracked in Linear). Keys are "METHOD /path".
-const HELD = new Set([
+export const HELD = new Set([
   "POST /safe-house/ingest-pattern", // MNE-122 — customer pattern contribution, post-GA security review
   "POST /safe-house/patterns", // MNE-122
   // MNE-128: cbd evaluations un-held — superseded by the /safe-house/outbound/ alias (mnemom-api#721); cbd ops are now deprecated-excluded.
@@ -83,7 +83,7 @@ const GROUP_ORDER = [
 
 // Not part of the programmatic product API — the web app / website surface.
 // (CookieAuth-only endpoints are excluded structurally below.)
-const NON_API = new Set([
+export const NON_API = new Set([
   "POST /contact/submit", // marketing site contact form
   "POST /auth/sessions/revoke-via-email", // email-link account-security flow (website, not API)
 ]);
@@ -94,7 +94,7 @@ const NON_API = new Set([
 //  - the NON_API website endpoints above
 // Public (no-auth) PRODUCT endpoints — reputation badges, transparency log, tools
 // registry, catalog, JWKS, public plans — ARE part of the API and are kept.
-function exclusionReason(key, op, secStr) {
+export function exclusionReason(key, op, secStr) {
   if (op.deprecated) return "deprecated";
   if (/CookieAuth/.test(secStr) && !/ApiKeyAuth|BearerAuth|LicenseJwtAuth|AgentAuth/.test(secStr)) return "dashboard-session";
   if (NON_API.has(key)) return "non-api";

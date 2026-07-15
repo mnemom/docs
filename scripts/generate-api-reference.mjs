@@ -21,6 +21,9 @@
 //
 // Usage:  node scripts/generate-api-reference.mjs           (write pages + nav)
 //         node scripts/generate-api-reference.mjs --dry-run (report only)
+//         node scripts/generate-api-reference.mjs --report  (write api-reference/.coverage-manifest.json
+//             classifying every spec op as generated/excluded/held; committed and
+//             diffed in CI to make exclusion changes explicit and reviewable)
 //         node scripts/generate-api-reference.mjs --check   (drift gate; exit 1
 //             if running the generator WOULD create or modify any endpoint page
 //             or docs.json nav entry — i.e. the committed tree has drifted from
@@ -35,7 +38,7 @@ import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { computeDrift } from "./lib/api-reference-drift.mjs";
+import { computeDrift, HELD, METHODS, exclusionReason } from "./lib/api-reference-drift.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SPEC = join(ROOT, "api-reference", "openapi.json");
@@ -43,6 +46,8 @@ const ENDPOINT_DIR = join(ROOT, "api-reference", "endpoint");
 const DOCS_JSON = join(ROOT, "docs.json");
 const DRY = process.argv.includes("--dry-run");
 const CHECK = process.argv.includes("--check");
+const REPORT = process.argv.includes("--report");
+const MANIFEST = join(ROOT, "api-reference", ".coverage-manifest.json");
 
 // --check must fail CLOSED: any condition that prevents a trustworthy drift
 // evaluation exits non-zero with an actionable ::error:: line, never a false ✓.
@@ -98,6 +103,49 @@ function loadDocs() {
 }
 
 const spec = loadSpec();
+
+// --report: classify every spec op from the spec alone (no endpoint files needed).
+// Committed as api-reference/.coverage-manifest.json and diffed in CI so any
+// silent change to what's published or excluded surfaces as a reviewed delta.
+if (REPORT) {
+  const manifest = {
+    generated: [],
+    excluded: { "dashboard-session": [], deprecated: [], "non-api": [] },
+    held: [],
+  };
+  for (const [path, item] of Object.entries(spec.paths || {})) {
+    for (const m of METHODS) {
+      const op = item[m];
+      if (!op) continue;
+      const key = `${m.toUpperCase()} ${path}`;
+      if (HELD.has(key)) {
+        manifest.held.push(key);
+      } else {
+        const sec = (op.security || spec.security || []).map((o) => Object.keys(o).join("+")).join("|") || "none";
+        const reason = exclusionReason(key, op, sec);
+        if (reason) {
+          manifest.excluded[reason].push(key);
+        } else {
+          manifest.generated.push(key);
+        }
+      }
+    }
+  }
+  manifest.generated.sort();
+  manifest.held.sort();
+  for (const arr of Object.values(manifest.excluded)) arr.sort();
+  writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + "\n");
+  process.stderr.write(
+    `generate-api-reference --report: manifest written → ${MANIFEST}\n` +
+      `  generated: ${manifest.generated.length}\n` +
+      `  held: ${manifest.held.length}\n` +
+      `  excluded.deprecated: ${manifest.excluded.deprecated.length}\n` +
+      `  excluded.dashboard-session: ${manifest.excluded["dashboard-session"].length}\n` +
+      `  excluded.non-api: ${manifest.excluded["non-api"].length}\n`,
+  );
+  process.exit(0);
+}
+
 const existingFiles = loadEndpointFiles();
 const docs = loadDocs();
 const readEndpoint = (f) => readFileSync(join(ENDPOINT_DIR, f), "utf8");
