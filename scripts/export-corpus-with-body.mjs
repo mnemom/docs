@@ -15,9 +15,21 @@
  *   · a frontmatter-only page (e.g. an OpenAPI-generated API-reference page, which
  *     renders from `openapi:` and has no prose) → its `description` + the
  *     `openapi` operation line.
- * Non-`docs` sources (knowledgebase / for-agents) point at external marketing
- * pages with no local file, so they carry no body offline and are not exported
- * here — the manifest remains their system of record.
+ * Non-`docs` sources are NOT exported here — the manifest remains their system
+ * of record:
+ *   · the 4 `knowledgebase` sources point at external marketing pages with no
+ *     local file, so they carry no body offline;
+ *   · the 1 `for-agents` source (`for-agents:www`) is likewise an external
+ *     https://www.mnemom.ai/for-agents URL, not a local page.
+ * AC RESOLUTION (631 vs 632 entries): the acceptance criterion grouped
+ * `for-agents` with `docs` as "1:1 mappable to an existing .mdx file" (632
+ * entries). That grouping is inaccurate for `for-agents:www` — its URL is the
+ * marketing site (www.mnemom.ai), NOT docs.mnemom.ai, so no docs page backs it;
+ * and the local "for agents" landing page IS already exported here, as the
+ * separate `docs:for-agents/index` entry (backed by for-agents/index.mdx).
+ * Re-exporting that same body under a marketing-site URL/id would be
+ * misattributed duplication, so `for-agents:www` is deliberately excluded and
+ * the artifact holds 631 `docs` entries by design (not a silent omission).
  *
  * Like its sibling, this change is DARK: the artifact is a scripts/ data file
  * (not a Mintlify page), so it renders nothing and exposes nothing to customers.
@@ -47,8 +59,9 @@
  *   built-ins only, so no `npm ci` is required to run it.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { argv, exit } from "node:process";
 
@@ -260,21 +273,49 @@ function selfTest() {
   // 4) A page with neither body nor description/openapi → empty (validateBodies rejects).
   assert("no body + no desc/openapi → empty", composeBody(emptyPage) === "");
 
-  // 5) buildBodyCorpus exports only `docs` sources, in order, with bodies.
-  const manifest = {
-    manifest_version: 1,
-    sources: [
-      { source_id: "docs:a", collection: "docs", url: "https://docs.mnemom.ai/a", title: "A" },
-      { source_id: "kb:x", collection: "knowledgebase", url: "https://www.mnemom.ai/x/", title: "X" },
-      { source_id: "docs:b", collection: "docs", url: "https://docs.mnemom.ai/b", title: "B" },
-    ],
-  };
-  // Stub resolvePageText by pointing root at a shape composeBody can read: here
-  // we build entries directly to keep the self-test file-free, then check filter.
-  const entries = manifest.sources
-    .filter((e) => e.collection === "docs")
-    .map((e) => ({ ...e, body: e.source_id === "docs:a" ? "Alpha body" : "Beta body" }));
-  assert("only docs sources exported, in order", entries.length === 2 && entries[0].source_id === "docs:a" && entries[1].source_id === "docs:b");
+  // 5) buildBodyCorpus, exercised END-TO-END against real files in a temp root
+  //    (the function under test is actually called — not reimplemented). It must
+  //    export only `docs` sources in manifest order, compose each body from the
+  //    backing page (both `<slug>.mdx` and `<slug>/index.mdx` forms), and take
+  //    the resolvePageText-null branch for a `docs` source with NO backing file,
+  //    yielding body "". That empty-body branch is the one the CI drift check
+  //    cannot exercise, so it is asserted directly here.
+  let built;
+  const tmpRoot = mkdtempSync(join(tmpdir(), "corpus-body-selftest-"));
+  try {
+    writeFileSync(join(tmpRoot, "a.mdx"), mdPage);
+    mkdirSync(join(tmpRoot, "b"), { recursive: true });
+    writeFileSync(join(tmpRoot, "b", "index.mdx"), apiPage); // <slug>/index form
+    // No file is written for docs:missing → resolvePageText returns null.
+    const tmpManifest = {
+      manifest_version: 1,
+      sources: [
+        { source_id: "docs:a", collection: "docs", url: "https://docs.mnemom.ai/a", title: "A" },
+        { source_id: "kb:x", collection: "knowledgebase", url: "https://www.mnemom.ai/x/", title: "X" },
+        { source_id: "docs:b", collection: "docs", url: "https://docs.mnemom.ai/b", title: "B" },
+        { source_id: "docs:missing", collection: "docs", url: "https://docs.mnemom.ai/missing", title: "Missing" },
+      ],
+    };
+    built = buildBodyCorpus({ manifest: tmpManifest, root: tmpRoot });
+    assert(
+      "buildBodyCorpus exports only docs sources, in manifest order",
+      built.length === 3 && built.map((e) => e.source_id).join(",") === "docs:a,docs:b,docs:missing",
+    );
+    assert("buildBodyCorpus composes markdown body from <slug>.mdx", built[0].body === "# Heading\n\nBody text here.");
+    assert(
+      "buildBodyCorpus composes fallback body from <slug>/index.mdx",
+      built[1].body === "Reset conscience values to defaults\n\nDELETE /agents/{agent_id}/conscience-values",
+    );
+    assert("buildBodyCorpus yields empty body for a missing backing file", built[2].body === "");
+    const flaggedMissing = validateBodies(built);
+    assert(
+      "validateBodies flags exactly the missing-file entry",
+      flaggedMissing.length === 1 && flaggedMissing[0].source_id === "docs:missing",
+    );
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+  const goodEntries = built.slice(0, 2); // the two backed entries (non-empty bodies)
 
   // 6) validateBodies flags empty/whitespace bodies only.
   const withEmpty = [
@@ -284,10 +325,14 @@ function selfTest() {
   ];
   const bad = validateBodies(withEmpty);
   assert("validateBodies flags empty + whitespace bodies", bad.length === 2 && bad.every((e) => e.source_id !== "docs:a"));
-  assert("validateBodies passes when all bodies present", validateBodies(entries).length === 0);
+  assert("validateBodies passes when all bodies present", validateBodies(goodEntries).length === 0);
 
   // 7) Serialization is stable, 2-space indented, newline-terminated.
-  const art = buildArtifact({ manifest, entries, generatedFrom: `scripts/${MANIFEST_FILE}` });
+  const art = buildArtifact({
+    manifest: { manifest_version: 1, sources: [] },
+    entries: goodEntries,
+    generatedFrom: `scripts/${MANIFEST_FILE}`,
+  });
   const s = serializeArtifact(art);
   assert("artifact wrapper shape", art.manifest_version === 1 && art.generated_from === `scripts/${MANIFEST_FILE}` && Array.isArray(art.entries));
   assert("serialization is 2-space + trailing newline", s.endsWith("\n") && s.includes('\n  "entries"') && serializeArtifact(art) === s);
