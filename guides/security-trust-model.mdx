@@ -19,7 +19,7 @@ Mnemom provides **transparency, not guarantees**. The two protocols serve comple
 
 - **AAP** provides **post-hoc verification**. It records agent decisions as [AP-Traces](/concepts/ap-traces), detects behavioral [drift](/concepts/drift-detection), and verifies traces against declared [Alignment Cards](/concepts/alignment-cards). AAP operates after the action has been taken -- typically 30-60 seconds later.
 
-- **AIP** provides **real-time detection**. It analyzes the agent's [thinking blocks](/concepts/integrity-checkpoints) between turns, producing integrity verdicts before the next action executes. AIP operates in the ~2-second window between agent reasoning and agent action.
+- **AIP** provides **per-turn detection**. It analyzes the agent's [thinking blocks](/concepts/integrity-checkpoints), producing integrity verdicts. In `enforce`, the verdict gates the current turn — the response is evaluated before it is delivered (which adds latency); in `observe` and `nudge` it is recorded post-hoc, available before the next action executes.
 
 Together they provide **full-coverage observability**: AIP catches problems as the agent thinks; AAP catches problems after the agent acts. The cross-protocol linkage (`IntegrityCheckpoint.linked_trace_id` references `APTrace.trace_id`) creates a complete audit chain from reasoning to decision.
 
@@ -173,7 +173,7 @@ Every item below describes a threat Mnemom *does* address — treat the list abo
 
 An agent can produce perfect AP-Traces and pass every integrity checkpoint while acting against its principal's interests. If the agent controls what it logs and reasons in ways not captured by the thinking block, the protocols provide visibility into what the agent *declares* and *exposes*, not what it *actually does*.
 
-AAP provides **visibility, not prevention**. AIP provides **detection, not certainty**. Together they raise the cost of deception -- an adversarial agent must maintain consistency across both real-time thinking analysis and post-hoc trace verification -- but they do not make deception impossible.
+AAP provides **visibility, not prevention**. AIP provides **detection, not certainty**. Together they raise the cost of deception -- an adversarial agent must maintain consistency across both per-turn thinking analysis and post-hoc trace verification -- but they do not make deception impossible.
 
 <Warning>
 Do not treat protocol compliance as evidence of alignment. A verified trace and a clear integrity verdict mean the agent's observable behavior is internally consistent with its declarations. They do not mean the agent is safe.

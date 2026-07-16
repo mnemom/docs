@@ -3,6 +3,7 @@ title: "Inicio rápido de Mnemom Gateway"
 description: "Gobernanza completa de agentes — verificación, análisis de integridad y aplicación de políticas — en 5 minutos sin cambios de código"
 sidebarTitle: "Gateway"
 icon: "bolt"
+source_fingerprint: sha256:74e4c44c7fb0dcdeb8c23d4b31ac1e28686463c6969c92b3e71fca0890ea8d03
 ---
 
 # Mnemom Gateway
@@ -10,7 +11,7 @@ icon: "bolt"
 Mnemom Gateway es una pasarela de IA transparente que se sitúa entre tu aplicación y cualquier proveedor LLM. Proporciona la stack de confianza completa de Mnemom desde el primer momento:
 
 - AP-Traces verificables
-- Comprobaciones de integridad AIP en tiempo real
+- Comprobaciones de integridad AIP por turno
 - Aplicación de políticas a partir de las secciones `capabilities` y `enforcement` de la tarjeta de alineamiento
 - Protección Safe House configurada mediante la tarjeta de protección
 - Verificación frente a la tarjeta de alineamiento del agente
@@ -74,7 +75,7 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
     | Encabezado | Cuándo se emite | Qué hacer |
     |-----------|----------------|-----------|
     | `X-Mnemom-Request-Id` | Siempre | UUIDv4 por solicitud. **Siempre regístralo.** Pégalo en un ticket de soporte y podremos recuperar cada línea de log de la solicitud. |
-    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced}`. Analízalo; el estado de cuatro puntos de control te indica qué observó Safe House (front+back), qué hizo CLPI en las llamadas a herramientas (autonomy) y qué hizo AIP en el razonamiento (integrity). |
+    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced \| unverified}`. Analízalo; el estado de cuatro puntos de control te indica qué observó Safe House (front+back), qué hizo CLPI en las llamadas a herramientas (autonomy) y qué hizo AIP en el razonamiento (integrity). `unverified` es exclusivo de integrity: el analizador falló, así que no existe un veredicto confiable — `enforce` retiene la respuesta (fail-closed, sigue siendo 2xx), `observe`/`nudge` la reenvían y registran el estado unverified. Nunca se reporta como `pass`. |
     | `X-Mnemom-Advisory` | Cuando la pasarela tiene avisos | JSON compacto `[{source, text, severity?, id?}, …]`. Muestra las entradas en tu UI de operador / logs. Se omite por completo cuando está vacío. |
     | `X-Mnemom-Agent` | Cuando la solicitud está vinculada a un agente nombrado | El identificador del agente que la pasarela resolvió para tu solicitud (p. ej., `mnm-a1b2c3d4…`). Útil para cruzar referencias con filas del panel de control. |
     | `X-Mnemom-Session` | En sesiones multi-turno | Token de correlación de sesión estable. Devuélvelo en el siguiente turno para mantener la continuidad de la sesión. |
@@ -89,6 +90,10 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
 
     if (checkpoints.integrity === 'enforced') {
       // Ocurrió un reemplazo AIP en el mismo turno — muéstralo en tu UI.
+    }
+    if (checkpoints.integrity === 'unverified') {
+      // El analizador falló — no hay veredicto confiable. En enforce esta
+      // respuesta ya fue retenida/reemplazada; en observe/nudge fue reenviada.
     }
     ```
 
@@ -234,7 +239,7 @@ También puedes crear agentes de forma programática mediante la API CRUD de age
 | OpenAI legacy (o3/o4-mini) | No compatible | Razonamiento cifrado |
 
 <Note>
-**Elementos thinking en respuestas proxiadas.** Safe House / AIP habilita el thinking extendido para analizar el razonamiento del agente en tiempo real. Las respuestas proxiadas incluyen por lo tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido de solo texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no puede desactivarse.
+**Elementos thinking en respuestas proxiadas.** Safe House / AIP habilita el thinking extendido para analizar el razonamiento del agente por turno. Las respuestas proxiadas incluyen por lo tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido de solo texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no puede desactivarse.
 </Note>
 
 ## Qué se rastrea
@@ -245,7 +250,7 @@ Mnemom Gateway construye [AP-Traces](https://github.com/mnemom/aap) que registra
 - **Decisión** -- Qué alternativas se consideraron y por qué se seleccionó una
 - **Escalada** -- Si el agente escaló a un humano y por qué
 - **Verificación** -- Si la traza es coherente con la tarjeta de alineamiento declarada del agente
-- **Integridad** -- Análisis AIP en tiempo real de los bloques de pensamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
+- **Integridad** -- Análisis AIP por turno de los bloques de pensamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
 
 ## Qué NO se almacena
 
@@ -261,7 +266,7 @@ Mnemom Gateway admite tres modos de aplicación cuando se detecta una violación
 |------|---------------|
 | `observe` | Detecta violaciones, las registra, no actúa (predeterminado) |
 | `nudge` | Detecta violaciones, inyecta retroalimentación en la siguiente solicitud del agente mediante el prompt del sistema. El agente lo ve y puede auto-corregirse. |
-| `enforce` | Bloqueo duro con HTTP 403 para solicitudes sin streaming. Recurre a nudge para streaming. |
+| `enforce` | Aplica el veredicto en el mismo turno tanto para solicitudes con streaming como sin streaming (HTTP 403 para las solicitudes sin streaming); en streaming esto añade latencia porque la respuesta se evalúa antes de entregarse. |
 
 Establece el modo de aplicación actualizando la tarjeta de alineamiento del agente. `integrity_mode` y `autonomy_mode` son campos de nivel superior en la tarjeta de alineamiento; el endpoint legacy `/v1/agents/{id}/enforcement` fue retirado el 2026-05-14.
 

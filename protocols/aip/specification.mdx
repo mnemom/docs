@@ -1,6 +1,6 @@
 ---
 title: "Agent Integrity Protocol (AIP) Specification"
-description: "Complete protocol specification for real-time integrity assurance of autonomous agents via thinking block analysis"
+description: "Complete protocol specification for per-turn integrity assurance of autonomous agents via thinking block analysis"
 sidebarTitle: "Specification"
 icon: "book"
 ---
@@ -43,7 +43,7 @@ icon: "book"
 
 ## 1. abstract
 
-The Agent Integrity Protocol (AIP) provides real-time integrity assurance for autonomous agents by analyzing thinking blocks before actions are executed. Where the Agent Alignment Protocol (AAP) records what happened (post-hoc verification via AP-Traces), AIP evaluates what the agent is thinking (in-flight analysis via Integrity Checkpoints). AIP follows the daimonion philosophy: silence means aligned, voice means outside boundaries. AIP is a sister protocol to AAP -- it shares the same Alignment Card, enriches the same AP-Trace, and stores alerts alongside AAP's drift detection, but operates on a fundamentally different timescale: real-time rather than retroactive.
+The Agent Integrity Protocol (AIP) provides per-turn integrity assurance for autonomous agents by analyzing thinking blocks. Where the Agent Alignment Protocol (AAP) records what happened (post-hoc verification via AP-Traces), AIP evaluates what the agent is thinking (in-flight analysis via Integrity Checkpoints). The strength of the guarantee is set by the integrity mode, not the transport: `enforce` gates the current turn — the response is evaluated before it is delivered (which adds latency on streaming) — while `observe` and `nudge` record the verdict post-hoc and act between turns. AIP follows the daimonion philosophy: silence means aligned, voice means outside boundaries. AIP is a sister protocol to AAP -- it shares the same Alignment Card, enriches the same AP-Trace, and stores alerts alongside AAP's drift detection, but operates on a fundamentally different timescale from AAP's retroactive verification.
 
 ---
 
@@ -59,11 +59,11 @@ This delay creates a window of vulnerability:
 - **Gradual drift**: An agent's reasoning shifts subtly over multiple turns. Each individual action passes verification, but the cumulative direction is misaligned.
 - **Misaligned intent**: The agent's thinking block reveals it intends to take a forbidden action, but the thinking block is only examined retroactively.
 
-All three of these failure modes are visible in thinking blocks *before* the action lands. AIP fills this gap by analyzing thinking blocks in real-time, between turns, enabling intervention before harm occurs.
+All three of these failure modes are visible in thinking blocks *before* the action lands. AIP fills this gap by analyzing thinking blocks per turn: in `enforce` the current turn is gated (the response is evaluated before it is delivered), while `observe` and `nudge` surface the verdict between turns.
 
 ### 2.2 design goals
 
-1. **Real-time over retroactive.** AIP operates between agent turns, not after a processing delay. The integrity verdict SHOULD be available before the next action executes.
+1. **Per-turn over retroactive.** AIP evaluates each turn as it happens, not after a processing delay. In `enforce`, the verdict gates the current turn — the response is evaluated before it is delivered (adding latency, on streaming too). In `observe`/`nudge`, the verdict is recorded post-hoc and SHOULD be available before the next action executes.
 
 2. **LLM-powered analysis, not regex.** Pattern matching is trivially gameable. AIP uses an LLM to evaluate semantic intent against declared alignment, understanding context and nuance that rule-based systems cannot.
 
@@ -71,12 +71,12 @@ All three of these failure modes are visible in thinking blocks *before* the act
 
 4. **Daimonion philosophy.** The analysis model acts as a daimonion -- a conscience voice. Silence (`clear`) means aligned; voice (`review_needed`, `boundary_violation`) means outside boundaries. The daimonion never commands, only warns.
 
-5. **Side-channel intervention between turns.** AIP delivers signals via SDK callbacks or HTTP webhooks, enabling the host system to pause, escalate, or deny the next action. Intervention happens between turns, not mid-stream.
+5. **Side-channel intervention between turns.** AIP delivers signals via SDK callbacks or HTTP webhooks, enabling the host system to pause, escalate, or deny the next action. This side-channel path applies to `observe` and `nudge`. In `enforce`, the gateway additionally gates the current turn — the response is evaluated before it is delivered (which adds latency on streaming).
 
 ### 2.3 non-goals
 
 - **Preventing injection.** AIP detects injection patterns in thinking; it does not prevent the injected content from reaching the model.
-- **Interrupting streams.** AIP operates between turns. It does not cancel in-flight streaming responses.
+- **Interrupting streams (observe/nudge).** In `observe` and `nudge`, AIP's signal path operates between turns and does not alter the in-flight streaming response. In `enforce`, the response is instead evaluated before delivery, so a violating streaming response is gated the same turn (which adds latency).
 - **Replacing AAP.** AIP supplements AAP. Post-hoc verification, trace storage, and public transparency remain AAP's domain.
 - **Requiring conscience values.** AIP operates with an Alignment Card alone. Conscience values are an optional augmentation that increases detection sensitivity.
 
@@ -184,7 +184,7 @@ AIP operates as a three-layer system that sits alongside the existing Mnemom gat
 **Relationship to Mnemom gateway infrastructure:**
 
 - The **Gateway Worker** routes requests and attaches metadata (agent_id, session_id). AIP uses the same session_id mechanism.
-- The **Observer Worker** processes logs post-hoc via AAP. AIP operates in parallel, in real-time.
+- The **Observer Worker** processes logs post-hoc via AAP. AIP operates in parallel, per turn.
 - The **API Worker** serves traces and integrity scores. AIP checkpoints enrich these via AAP integration (Section 12).
 - The **Alignment Card** is shared. AIP MUST use the same card as AAP (Section 12.4).
 
@@ -224,7 +224,7 @@ AIP and AAP share infrastructure and data structures:
 
 AIP supports three signal delivery paths, each serving different deployment patterns.
 
-**Gateway Stream Interception (Primary).** The RECOMMENDED path for hosted deployments. The gateway proxy uses `tee()` to fork the streaming response — one fork goes to the client immediately, while the other is analyzed in background via `ctx.waitUntil()`. SSE events are parsed, thinking blocks extracted, and AIP analysis runs in ~3 seconds. Signals are delivered as attested checkpoints with full cryptographic attestation (Ed25519 + chain hash + Merkle tree). Nudges are created immediately, ready for injection on the agent's next request.
+**Gateway Stream Interception (Primary).** The RECOMMENDED path for hosted deployments. In `observe` and `nudge`, the gateway returns the streaming response to the client immediately while AIP analysis runs in the background — thinking blocks are extracted and analyzed in ~3 seconds. Signals are delivered as attested checkpoints with full cryptographic attestation (Ed25519 + chain hash + Merkle tree). Nudges are created immediately, ready for injection on the agent's next request. In `enforce`, the guarantee is stronger: the response is evaluated before it is delivered, so a violating response is gated the same turn rather than forwarded — this adds latency on streaming.
 
 **SDK Signal Path.** For agents running in a process where the AIP SDK is imported directly. Signals are delivered via callbacks (synchronous or async). This path is useful for custom integrations outside the hosted gateway.
 
@@ -985,16 +985,16 @@ When displayed in a UI, IntegrityDriftAlerts SHOULD use Braid V2's divergence al
 
 ### 10.0 gateway stream interception
 
-The primary signal delivery path in production. The gateway proxy intercepts streaming responses using `ReadableStream.tee()`, parsing SSE events in a background task (`ctx.waitUntil`) while the client receives the response with zero added latency.
+The primary signal delivery path in production. In `observe` and `nudge`, the gateway analyzes streaming responses in the background while the client receives the response with zero added latency. In `enforce`, the response is instead evaluated before it is delivered — so a violating response is gated the same turn — which adds latency on streaming.
 
 ```
 Agent → Gateway → AI Provider
                 ← SSE stream ←
                     |
-                  tee()
+                  split
                  /     \
           client       background
-       (immediate)    (ctx.waitUntil)
+       (immediate)    (async)
                           |
                     Parse SSE events
                     Extract thinking

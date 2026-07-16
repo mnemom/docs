@@ -8,7 +8,7 @@ icon: "bolt"
 The Mnemom Gateway is a transparent AI gateway that sits between your application and any LLM provider. It provides the full Mnemom trust stack out of the box:
 
 - Verifiable [AP-Traces](/concepts/ap-traces)
-- Real-time [AIP integrity checks](/concepts/integrity-checkpoints)
+- Per-turn [AIP integrity checks](/concepts/integrity-checkpoints)
 - Policy enforcement from the alignment card's `capabilities` and `enforcement` sections
 - [Safe House](/concepts/safe-house) protection configured via the [protection card](/concepts/protection-card)
 - Verification against the agent's [alignment card](/concepts/agent-cards)
@@ -57,6 +57,33 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
       }'
     ```
 
+    The same call against OpenAI uses the `/openai` path and the `Authorization: Bearer` header:
+
+    ```bash
+    # Instead of https://api.openai.com/v1/chat/completions
+    curl -i https://gateway.mnemom.ai/openai/v1/chat/completions \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
+      -H "content-type: application/json" \
+      -d '{
+        "model": "gpt-5",
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
+
+    And against Gemini, the `/gemini` path with the `x-goog-api-key` header:
+
+    ```bash
+    # Instead of https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+    curl -i https://gateway.mnemom.ai/gemini/v1beta/models/gemini-2.5-flash:generateContent \
+      -H "x-goog-api-key: $GEMINI_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
+      -H "content-type: application/json" \
+      -d '{
+        "contents": [{"parts": [{"text": "Hello"}]}]
+      }'
+    ```
+
     The gateway supports all three providers at their standard paths:
 
     | Provider | Gateway Path | Direct Equivalent |
@@ -76,7 +103,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     | Header | When emitted | What to do with it |
     |---|---|---|
     | `X-Mnemom-Request-Id` | Always | UUIDv4 per request. **Always log this.** Paste into a support ticket and we can pull every log line for the request. |
-    | `X-Mnemom-Verdict` | Always (gateway) | Structured `front=…; autonomy=…; integrity=…; back=…` with each value in `{pass \| observed \| nudged \| enforced}`. Parse it; the four-checkpoint state tells you what Safe House observed (front+back), what CLPI did on tool calls (autonomy), and what AIP did on reasoning (integrity). |
+    | `X-Mnemom-Verdict` | Always (gateway) | Structured `front=…; autonomy=…; integrity=…; back=…` with each value in `{pass \| observed \| nudged \| enforced \| unverified}`. Parse it; the four-checkpoint state tells you what Safe House observed (front+back), what CLPI did on tool calls (autonomy), and what AIP did on reasoning (integrity). `unverified` is integrity-only: the analyzer failed, so no trustworthy verdict exists — `enforce` withholds the response (fail-closed, still 2xx), `observe`/`nudge` forward it and record the unverified state. Never reported as `pass`. |
     | `X-Mnemom-Advisory` | When the gateway has advisories | Compact JSON `[{source, text, severity?, id?}, …]`. Surface entries to your operator UI / logs. Omitted entirely when empty. |
     | `X-Mnemom-Agent` | When the request is bound to a named agent | The agent identifier the gateway resolved your request to (e.g., `mnm-a1b2c3d4…`). Useful for cross-referencing dashboard rows. |
     | `X-Mnemom-Session` | On multi-turn sessions | Stable session correlation token. Echo it back on the next turn to maintain session continuity. |
@@ -91,6 +118,10 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
 
     if (checkpoints.integrity === 'enforced') {
       // Same-turn AIP replacement happened — surface that in your UI.
+    }
+    if (checkpoints.integrity === 'unverified') {
+      // Analyzer failed — no trustworthy verdict. In enforce this response
+      // was already withheld/replaced; in observe/nudge it was forwarded.
     }
     ```
 
@@ -243,7 +274,7 @@ You can also create agents programmatically via the [Agent CRUD API](/api-refere
 | OpenAI o-series (o3, o3-mini) | Partial | Reasoning summaries only — reduced confidence |
 
 <Note>
-**Thinking elements in proxied responses.** Safe House / AIP enables extended thinking to analyze the agent's reasoning in real time. Proxied responses therefore include a `thinking` content element in the `content` array alongside the standard `text` block. Clients that assume text-only content arrays should be updated to handle or ignore `thinking` blocks. Thinking output tokens are billed as standard output tokens — this behavior is intentional and cannot be disabled.
+**Thinking elements in proxied responses.** Safe House / AIP enables extended thinking to analyze the agent's reasoning per turn. Proxied responses therefore include a `thinking` content element in the `content` array alongside the standard `text` block. Clients that assume text-only content arrays should be updated to handle or ignore `thinking` blocks. Thinking output tokens are billed as standard output tokens — this behavior is intentional and cannot be disabled.
 </Note>
 
 ## What gets traced
@@ -254,7 +285,7 @@ The Mnemom Gateway builds [AP-Traces](https://github.com/mnemom/aap) that record
 - **Decision** -- What alternatives were considered and why one was selected
 - **Escalation** -- Whether the agent escalated to a human and why
 - **Verification** -- Whether the trace is consistent with the agent's declared Alignment Card
-- **Integrity** -- Real-time AIP analysis of thinking blocks, with verdict (`clear` / `review_needed` / `boundary_violation`)
+- **Integrity** -- Per-turn AIP analysis of thinking blocks, with verdict (`clear` / `review_needed` / `boundary_violation`)
 
 ## What is NOT stored
 
@@ -270,7 +301,7 @@ The Mnemom Gateway supports three enforcement modes when an integrity violation 
 |------|----------|
 | `observe` | Detect violations, record them, take no action (default) |
 | `nudge` | Detect violations, inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct. |
-| `enforce` | Hard block with HTTP 403 for non-streaming requests. Falls back to nudge for streaming. |
+| `enforce` | Gates same-turn on both streaming and non-streaming requests (HTTP 403 for non-streaming); on streaming this adds latency because the response is evaluated before it is delivered. |
 
 Set enforcement mode by updating the agent's alignment card. `integrity_mode` and `autonomy_mode` are top-level fields on the alignment card; the legacy `/v1/agents/{id}/enforcement` endpoint was retired 2026-05-14.
 

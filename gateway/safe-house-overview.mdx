@@ -9,6 +9,10 @@ icon: "shield-halved"
 
 This page explains how Safe House integrates technically with the Mnemom gateway. If you are new to Safe House, start with the [concept overview](/concepts/safe-house) first.
 
+<Warning>
+**This page predates the 2026-05-08 vocabulary + header clean-break and has not been fully updated.** It still refers to the legacy `disabled` / `simulate` modes (canonical: `off` / `observe` / `nudge` / `enforce` — see [Vocabulary canonicalization](/concepts/safe-house#modes)) and to retired `X-Safe-House-*` headers (canonical: `X-Mnemom-Verdict` / `X-Mnemom-Advisory` — see [What was retired](/api-reference/headers#what-was-retired)). Treat [Safe House concept](/concepts/safe-house), [Enforcement Modes](/gateway/enforcement), and [Response Headers](/api-reference/headers) as the canonical references; this page's phase-by-phase mechanics are directionally correct but its mode names, header names, and status codes need a full pass against those pages before you rely on the specifics below.
+</Warning>
+
 ## Request pipeline
 
 Safe House runs as **Phase 0.5** — after agent identification resolves the agent config and policy, but before quota enforcement or message forwarding. This placement is intentional: the gateway already knows which agent is handling the request (so Safe House config can be loaded), but no downstream resources have been consumed yet.
@@ -51,6 +55,7 @@ Safe House runs as **Phase 0.5** — after agent identification resolves the age
 │  │  Phase 4    │  AIP conscience analysis (streaming tee)        │
 │  │             │  ◄── Safe House threat context injected here    │
 │  └──────┬──────┘                                                 │
+│         │  (enforce: gated before delivery; else post-hoc)       │
 │         ▼                                                        │
 │  Response returned to caller                                     │
 │  (with X-Safe-House-* headers)                                   │
@@ -125,6 +130,8 @@ The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemin
 ### Phase 4 — AIP conscience analysis
 
 The streaming response is teed through the AIP analysis pipeline. If Safe House scored the inbound message with a non-zero threat score (even if the verdict was `pass`), that score and the specific threat categories detected are injected into the conscience prompt. This gives AIP additional signal to scrutinize the resulting reasoning.
+
+What Phase 4 does with the AIP verdict depends on the agent's integrity mode. In **enforce** mode the response is gated the same turn — it is evaluated before it is delivered, so a violating response is blocked rather than returned (on streaming this adds latency). In **observe** and **nudge** modes the response is returned without being gated this turn; the verdict is recorded (and, for nudge, carried into the agent's next turn).
 
 The enrichment looks like:
 

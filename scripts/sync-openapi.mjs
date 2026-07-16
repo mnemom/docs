@@ -14,10 +14,21 @@
 //
 // Usage:  node scripts/sync-openapi.mjs            (writes the file)
 //         node scripts/sync-openapi.mjs --check    (writes; CI then diffs)
+//
+// Note: `--check` is a CI invocation convention only — this script does not
+// parse argv and ALWAYS writes the file; CI then runs `git diff` to detect
+// drift (see openapi-freshness.yml). Do not read `--check` as gating a write.
+//
+// The staff-leak guard + `components.schemas` sort + serialization live in
+// scripts/lib/openapi-slice.mjs so the read-only drift check
+// (scripts/check-slice-freshness.mjs) shares ONE normalization and can never
+// disagree with what this script writes.
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+
+import { assertCustomerOnly, serializeSlice } from "./lib/openapi-slice.mjs";
 
 const SOURCE = process.env.MNEMOM_OPENAPI_URL || "https://api.mnemom.ai/openapi.json";
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "api-reference", "openapi.json");
@@ -31,20 +42,14 @@ const spec = await res.json();
 
 // Defensive: the served slice must be customer-only. If a staff path leaks
 // through, fail loudly rather than commit it (matches the leakage gate intent).
-const STAFF = /^\/(admin|arena|internal|sonar|rb2b)\/|^\/v1\/internal\//;
-const leaked = Object.keys(spec.paths || {}).filter((p) => STAFF.test(p));
-if (leaked.length) {
-  process.stderr.write(`sync-openapi: refusing — staff paths in served slice: ${leaked.join(", ")}\n`);
+try {
+  assertCustomerOnly(spec);
+} catch (err) {
+  process.stderr.write(`sync-openapi: ${err.message}\n`);
   process.exit(2);
 }
 
-if (spec.components?.schemas) {
-  spec.components.schemas = Object.fromEntries(
-    Object.entries(spec.components.schemas).sort(([a], [b]) => a.localeCompare(b))
-  );
-}
-
-writeFileSync(OUT, JSON.stringify(spec, null, 2) + "\n");
+writeFileSync(OUT, serializeSlice(spec));
 const ops = Object.values(spec.paths || {}).reduce(
   (n, item) => n + ["get", "put", "post", "delete", "patch"].filter((m) => item[m]).length,
   0,
