@@ -1,0 +1,39 @@
+name: i18n translation-lag
+
+# Wires the i18n translation-lag detector (scripts/check-i18n-lag.mjs,
+# `npm run check:i18n-lag`) into CI. It shipped in #283 as a standalone
+# `check:i18n-lag` script but deliberately WITHOUT a workflow — editing
+# `.github/workflows/**` was scoped out per the #283 maintainer override, to
+# land here in the operator's consolidated CI PR (precedent: docs-validators.yml
+# / #350). Closes #395 (#283 AC2). Until this landed the detector was a no-op:
+# a PR editing EN pages without re-baselining their fr/ + es/ translations
+# passed green.
+#
+# The script uses only Node built-ins (node:fs/crypto/path/url/process — see its
+# imports), so no `npm ci` step is needed, mirroring docs-validators.yml.
+#
+# ORDINARY (non-required) check — it reports red/green on the PR but does not
+# block merge via branch protection; promoting it to required is a separate,
+# later operator decision.
+
+on:
+  pull_request:
+    paths: ["**/*.mdx"]
+
+jobs:
+  i18n-lag:
+    name: i18n translation-lag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+
+      # #283 AC2 / #395: fail when an EN page changed without re-baselining its
+      # fr/ + es/ translations. `--write` re-baselines locally to make it pass.
+      - name: Check i18n translation lag (#283)
+        run: npm run check:i18n-lag
