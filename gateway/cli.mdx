@@ -31,9 +31,8 @@ Auth tokens are stored in `~/.mnemom/auth.json`. All subsequent commands use thi
 
 <Note>
 Logging in does **not** select an organization — the session carries no org
-context. Org-scoped commands (like `agents claim`) default to your **active
-org** when one is set, else to your personal org. Set a durable default with
-[`mnemom org use`](#mnemom-org-use).
+context. Org-scoped commands (like `agents claim`) target an org via `--org`,
+defaulting to your personal org when omitted.
 </Note>
 
 ### `mnemom logout`
@@ -66,28 +65,11 @@ Logged in as alex@example.com (org: mnemom)
 
 ### `mnemom org list`
 
-List every org you belong to. Your personal org is tagged `(personal)`; the
-active org (if set) is tagged `*active`.
+List every org you belong to. Your personal org is tagged `(personal)`.
 
 ```bash
 mnemom org list
 ```
-
-### `mnemom org use`
-
-Set the **active org** — the default destination for org-scoped commands like
-`agents claim`. Validated against your live memberships and persisted in
-`~/.mnemom/config.json` (separate from your auth token, so it survives
-re-login).
-
-```bash
-mnemom org use mnemom        # set by slug (or org id)
-mnemom org use               # show the current setting
-mnemom org use --clear       # forget it — claims revert to your personal org
-```
-
-Resolution order for org-scoped commands: explicit `--org` flag → active org →
-personal org (with a loud notice, so agents never land there silently).
 
 ### `mnemom org show [org_id]`
 
@@ -352,28 +334,14 @@ lifecycle.
 mnemom agents claim mnm-... --key "$AGENT_PROVIDER_KEY" --org mnemom
 ```
 
-- `--org <slug|id>` — destination org. Defaults to your **active org**
-  (`mnemom org use`), else your personal org (with a loud notice).
+- `--org <slug|id>` — destination org. Defaults to your personal org (with a
+  loud notice) when omitted.
 - `--key <key>` — the agent's provider API key; the CLI derives the
   `hash_proof` locally. Alternatively pass `--hash-proof <64-hex>` directly.
 
-### `mnemom agents move <id-or-name>`
-
-Move an agent to another org **without its key** — role-based: you must be an
-owner/admin of **both** the agent's current org and the destination.
-
-```bash
-mnemom agents move mnm-... --to mnemom
-```
-
-- `--to <slug|id>` — destination org. Required and always explicit: a move is
-  an administrative action, so it never defaults to the active org.
-- Moving to the agent's current org is an idempotent no-op.
-
 <Note>
-Two ways to relocate an agent: `move` is **role-based** (admin in both orgs, no
-key needed); re-`claim` with a new `--org` is **possession-based** (requires the
-agent's key). On either path the destination org's template can floor/cap the
+To re-home an agent, re-`claim` it with a new `--org` (possession-based:
+requires the agent's key). The destination org's template can floor/cap the
 agent's composed card — its effective posture may change. See
 [Idempotency and re-homing](/guides/agent-claim-flow#idempotency-and-re-homing).
 </Note>
