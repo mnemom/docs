@@ -1,4 +1,4 @@
-# Persist Link-Health Metrics Over Time (Broken-% Trend)
+# Persist Link-Health Metrics Over Time (Broken-Percent Trend)
 
 **ADW ID:** 32288566
 **Date:** 2026-07-14
