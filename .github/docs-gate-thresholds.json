@@ -1,0 +1,34 @@
+{
+  "_comment": "MNE-1064 — per-layer enforcement policy for verify-docs-gate.yml. Consumed by .github/scripts/enforce-docs-gate.sh against the run's SurfaceReport (report.json). 'blocking' layers fail the PR when (failed + errors) exceeds budget for that axis -- normally budget 0, so ANY new drift in a now-clean layer red-walls immediately. 'advisory' layers never fail the PR; their budget/reason fields are informational, tracking a known false-positive backlog pending a gate-infra fix (never a reason to edit docs to match a stale oracle).",
+  "updated_at": "2026-07-21",
+  "verified_against_run": "local verify-full.sh --env=prod --layers=cli,sdk,links against docs@b4b3182 + mnemom-test@0ba42e2 + mnemom-platform@0a74ead, 2026-07-21",
+  "layers": {
+    "api-coverage": {
+      "mode": "advisory",
+      "reason": "not in MNE-1064 scope; validates against the committed API spec (mnemom-test #61) -- candidate for a future flip ticket, not this one."
+    },
+    "api-reference-orphans": {
+      "mode": "advisory",
+      "reason": "not in MNE-1064 scope."
+    },
+    "api-examples": {
+      "mode": "advisory",
+      "reason": "wraps the live-prod walker (curl bodies vs requestBody schemas against api.mnemom.ai) -- has a live-prod dependency, stays advisory per MNE-1064's explicit scope (cli/sdk/links only)."
+    },
+    "cli": {
+      "mode": "advisory",
+      "budget": 2,
+      "reason": "MNE-1064's premise (burndown complete per MNE-1394) does NOT hold as of 2026-07-21: live run shows 2 real fails -- `mnemom agents move` (gateway/cli.mdx:366) and `mnemom org use` (gateway/cli.mdx:84). Both commands exist in mnemom-platform's CLI (cli/src/index.ts, added 2026-07-07) but are MISSING from the committed oracle snapshot (command-tree.json, cli_version 0.16.2, regenerated 2026-07-14 by MNE-1394/mnemom-test#235) -- the refresh's own generator failed to capture them even though the version tag matches. This is a gate-infra bug (stale/incomplete oracle), not real docs drift -- do not edit the docs to work around it. Re-run `docs/cli/run.sh --refresh` (or fix the generator) so the snapshot actually includes `agents move` + `org use`, confirm failed==0, THEN flip this layer's mode to blocking with budget 0."
+    },
+    "sdk": {
+      "mode": "blocking",
+      "budget": 0,
+      "reason": "Verified genuinely clean as of 2026-07-21: live run against mnemom-platform@main (shared/sdk/src) reports 5/5 pass, 0 fail, 0 warn, 0 err. No live-prod dependency. Flipped per MNE-1064."
+    },
+    "links": {
+      "mode": "advisory",
+      "budget": 2,
+      "reason": "MNE-1064's premise (burndown complete per MNE-1394) does NOT hold as of 2026-07-21: live run shows 2 real fails, both on app_docs/feature-406ea199-anchor-fragment-validator.md:16 -- `/path#frag` and `#frag` are backtick-quoted link-SYNTAX EXAMPLES in that page's own prose (it documents the anchor-fragment validator), mis-parsed by the walker as real links. This is exactly the false-positive class MNE-1394's own nightly re-check comment (2026-07-11) flagged as NOT covered by the specs/adw/** exclusion that shipped in mnemom-test#235 -- it warned an app_docs/feature-* exclusion (or inline-code-span-aware parsing) would still be needed. That follow-up never landed. Do not edit this page to dodge the walker -- fix the walker (exclude app_docs/feature-*, or better, skip link-shaped text inside inline-code spans/fenced code generally) THEN flip to blocking with budget 0."
+    }
+  }
+}

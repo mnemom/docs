@@ -11,19 +11,23 @@ name: Verify docs gate (Engine A)
 # defers to. It checks out mnemom-test (the runner) + this PR's docs (the oracle
 # under test), points DOCS_DIR at the PR checkout, and runs the layers.
 #
-# ── Posture: ADVISORY until the docs↔code drift backlog is burned down ────────
-# The harness currently reports a real drift backlog (cli/sdk/links + the live-
-# prod-dependent layers). Turning this gate BLOCKING before that backlog is
-# cleared would red-wall every docs PR for pre-existing drift unrelated to the
-# PR. So for now EVERY layer is advisory (surfaced in the Summary, never fails
-# the PR). Two explicit flips, in order:
-#   1. Burn down the existing drift (the SurfaceReport is the backlog).
-#   2. Then make `cli, sdk, links` BLOCKING (they have no live-prod dependency)
-#      by setting BLOCKING below — see the "Enforce" step.
-# `api-coverage` now validates against the COMMITTED API spec (mnemom-test #61),
-# so it no longer flags deploy-lag as drift — but it needs the mnemom-api
-# checkout as its oracle (MNEMOM_API_DIR), wired below. `api-examples` still
-# wraps the live-prod walker and stays advisory until that's addressed.
+# ── Posture: per-layer, driven by the committed threshold manifest (MNE-1064) ──
+# The harness's per-layer enforcement policy lives in the committed
+# `.github/docs-gate-thresholds.json` manifest, read by
+# `.github/scripts/enforce-docs-gate.sh` after every run. A layer marked
+# "blocking" there fails the PR the moment its SurfaceReport (failed + errors)
+# exceeds its committed budget (normally 0 — any new drift red-walls); a layer
+# marked "advisory" is only ever surfaced in the Summary, never fails the PR.
+#
+# As of the 2026-07-21 flip only `sdk` is genuinely clean and blocking — a live
+# run found `cli` and `links` still carry real, tracked false-positives (stale/
+# incomplete CLI oracle snapshot; a link-walker false-positive on its own
+# anchor-fragment-validator doc) despite MNE-1394's earlier burndown, so they
+# stay advisory pending a further gate-infra fix — see the manifest's per-layer
+# `reason` fields for specifics and what unblocks each one's flip.
+# `api-examples` wraps the live-prod walker and stays advisory (out of scope —
+# MNE-1064 only covers the no-live-prod-dependency layers cli/sdk/links).
+# `api-coverage` / `api-reference-orphans` are untouched by this ticket.
 #
 # ── Activation: org-owned mnemom-docs GitHub App ──────────────────────────────
 # Reading the PRIVATE mnemom-test / mnemom-platform / mnemom-api repos uses the
@@ -126,10 +130,11 @@ jobs:
         with:
           node-version: "22.x"
 
-      # Every layer runs ADVISORY for now (continue-on-error). The SurfaceReport
-      # is the drift backlog; nothing here fails the PR yet. See header for the
-      # flip-to-blocking plan.
-      - name: Run docs conformance layers (advisory)
+      # Full run is always continue-on-error at THIS step — enforcement is a
+      # separate, later step so we always get one full report + summary
+      # regardless of which layers are blocking. See docs-gate-thresholds.json
+      # for which layers actually fail the PR.
+      - name: Run docs conformance layers
         if: env.GATE_ACTIVE == 'true'
         id: run
         continue-on-error: true
@@ -149,14 +154,18 @@ jobs:
         if: env.GATE_ACTIVE == 'true'
         run: |
           {
-            echo "## docs surface — Engine A (env: prod, ADVISORY)"
+            echo "## docs surface — Engine A (env: prod)"
             echo ""
-            echo "Runner exit: \`${{ steps.run.outputs.exit_code }}\` — advisory; does not fail the PR (drift-backlog burndown in progress)."
+            echo "Runner exit: \`${{ steps.run.outputs.exit_code }}\`. Per-layer enforcement below is driven by \`.github/docs-gate-thresholds.json\` — a layer marked \`blocking\` there fails this PR on any budget breach; \`advisory\` layers are informational only."
             echo ""
             if [ -s "${GITHUB_WORKSPACE}/report.json" ]; then
-              echo "| axis | total | pass | warn | fail | err |"
-              echo "|------|------:|-----:|-----:|-----:|----:|"
-              jq -r '.axes[] | "| \(.axis) | \(.total) | \(.passed) | \(.warned) | \(.failed) | \(.errors) |"' "${GITHUB_WORKSPACE}/report.json" 2>/dev/null || echo "| (unparseable report) | | | | | |"
+              echo "| axis | mode | total | pass | warn | fail | err |"
+              echo "|------|------|------:|-----:|-----:|-----:|----:|"
+              jq -r --slurpfile th "${GITHUB_WORKSPACE}/docs/.github/docs-gate-thresholds.json" '
+                . as $r | $th[0].layers as $layers
+                | $r.axes[]
+                | "| \(.axis) | \($layers[.axis].mode // "advisory") | \(.total) | \(.passed) | \(.warned) | \(.failed) | \(.errors) |"
+              ' "${GITHUB_WORKSPACE}/report.json" 2>/dev/null || echo "| (unparseable report) | | | | | | |"
               echo ""
               echo "### Failures"
               jq -r '.axes[].details[]? | select(.severity=="fail" or .severity=="error") | "- ❌ \(.description) — \(.message)"' "${GITHUB_WORKSPACE}/report.json" 2>/dev/null
@@ -174,15 +183,27 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      # ── FLIP TO BLOCKING HERE (step 2, after the drift burndown) ──────────────
-      # When the backlog is cleared, replace the advisory run above with a
-      # blocking run of the no-live-prod-dependency layers and enforce its exit:
-      #
-      #   ./docs/verify-full.sh --env=prod --layers=cli,sdk,links  (+ api-coverage
-      #   once you're comfortable the committed-spec oracle is wired in CI)
-      #   then: [ "$exit_code" = "0" ] || exit "$exit_code"
-      #
-      # Until then this step is a no-op note so the gate stays advisory.
-      - name: Enforcement (currently advisory — see header)
+      # Per-layer enforcement (MNE-1064) — fails the job (and so the PR check)
+      # iff a layer marked "blocking" in docs-gate-thresholds.json breached its
+      # budget in this run's report.json. Advisory layers never trip this.
+      - name: Enforce per-layer thresholds
         if: env.GATE_ACTIVE == 'true'
-        run: echo "Gate is advisory; not failing the PR. Flip to blocking after the docs↔code drift burndown (see workflow header)."
+        run: |
+          ./docs/.github/scripts/enforce-docs-gate.sh \
+            "${GITHUB_WORKSPACE}/report.json" \
+            "${GITHUB_WORKSPACE}/docs/.github/docs-gate-thresholds.json"
+
+  docs-gate-enforcement-selftest:
+    name: enforce-docs-gate.sh self-test (fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # No GATE_ACTIVE / App key needed — pure fixture-driven unit test of the
+    # enforcement script + the committed thresholds manifest. Runs on every
+    # PR, including ones with no App key configured, so the enforcement logic
+    # itself is always under CI (MNE-1064 "Verified" acceptance criteria).
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v5
+
+      - name: Run enforce-docs-gate.sh fixture suite
+        run: ./.github/scripts/test-enforce-docs-gate.sh
