@@ -28,6 +28,30 @@ jobs:
       - name: Install Mintlify CLI
         run: npm i -g mint
 
+      # Work around an upstream @mintlify/link-rot bug (MNE-2314). Its static
+      # broken-link checker calls the THROWING cleanHeadingId() a second time on
+      # headings that contain a bare '%' (e.g. "### Integrity ratio (40%)"),
+      # crashing the whole `mint broken-links` run with "URIError: URI malformed"
+      # before --check-anchors is ever consulted. The render pipeline already
+      # uses the catching safeCleanHeadingId() (both are exported from
+      # @mintlify/common), so we swap link-rot's static checker to that same safe
+      # variant. This is behaviour-preserving (safeCleanHeadingId == cleanHeadingId
+      # for every non-malformed id) and touches ZERO doc content — the bare-'%'
+      # score-weighting headings stay as authored. Remove once upstream ships a
+      # fix; tracked in MNE-2314 (upstream bug report pending).
+      - name: Patch link-rot heading-id crash (upstream bug, MNE-2314)
+        run: |
+          root="$(npm root -g)"
+          for rel in graph.js static-checking/getBrokenInternalLinks.js; do
+            f="$(find "$root" -path "*@mintlify/link-rot/dist/$rel" | head -1)"
+            if [ -z "$f" ]; then
+              echo "::error::link-rot $rel not found under $root — layout changed, patch must be revisited (MNE-2314)"
+              exit 1
+            fi
+            perl -pi -e 's/\bcleanHeadingId\b/safeCleanHeadingId/g' "$f"
+            echo "patched $f"
+          done
+
       - name: Validate documentation build
         run: mint validate || echo "::warning::mint validate reported issues (non-blocking)"
 
