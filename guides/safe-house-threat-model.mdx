@@ -5,7 +5,7 @@ sidebarTitle: "Safe House Threat Model"
 icon: "shield-virus"
 ---
 
-Safe House operates as the inbound security layer for every message an agent receives. Before a turn is processed, Safe House evaluates it against a library of known attack patterns, a behavioral session model, and an LLM-based analysis layer. This document details what Safe House defends against, how each attack class is detected, and where the limits are.
+Safe House operates as the inbound security layer for everything an agent receives. It evaluates that content against a library of known attack patterns, a behavioral session model, and an LLM-based analysis layer — the user/principal message when the request arrives, and each tool result the request carries turn-internally, inline, before the request is forwarded upstream. This document details what Safe House defends against, how each attack class is detected, and where the limits are.
 
 ---
 
@@ -13,18 +13,35 @@ Safe House operates as the inbound security layer for every message an agent rec
 
 Agents receive input from many sources, each with a different trust profile. An email assistant reads messages from strangers. A research agent fetches content from arbitrary URLs. An internal workflow agent receives instructions from other agents in a pipeline. Safe House sits in front of all of these:
 
+Safe House screens these sources at two different moments in the same turn — when the request arrives, and again mid-request for every tool result it carries:
+
 ```
-Inbound sources                Safe House layers       Agent
-─────────────────────          ──────────────          ────────
-User message ──────────────→   L1: Pattern match  →─┐
-Incoming email ────────────→   L2: LLM analysis   →─┤→ allowed → Agent turn
-Tool result (API/search) ──→   L3: Session model  →─┤
-Agent-to-agent message ────→   Canary tripwires   →─┘
-                                        │
-                                        └──→ quarantine / block
+WHEN THE REQUEST ARRIVES
+────────────────────────
+User message ───────────┐
+Incoming email ─────────┤→  L1 pattern → L2 LLM → L3 session → canaries
+Agent-to-agent message ─┘             │
+                                      ├─→ pass / warn ──→ request continues
+                                      └─→ quarantine / block ──→ 422 / 403
+
+SAME TURN, BEFORE THE REQUEST IS FORWARDED UPSTREAM
+───────────────────────────────────────────────────
+Tool result #1 ─────────┐   screened one at a time, in order;
+Tool result #2 ─────────┤→  session posture ratchets up only
+Tool result #3 ─────────┘             │
+                                      ├─→ pass ──→ forwarded unchanged
+                                      ├─→ warn ──→ delivered, marked untrusted
+                                      └─→ quarantine / block ──→ WITHHELD:
+                                          content replaced in the outbound
+                                          request; the model never sees it
+                                      │
+                                      ▼
+                                 Agent turn
 ```
 
-**L1 (Pattern matching)** runs synchronously with near-zero latency — 19 regex families across override, jailbreak, and social engineering phrases. **L2 (LLM analysis)** runs a full threat classification when L1 produces a non-trivial signal or when the message touches sensitive action categories. **L3 (Session model)** tracks cross-turn behavioral trajectories to catch multi-turn attacks that no single turn would trigger.
+**L1 (Pattern matching)** runs synchronously with near-zero latency — 19 regex families across override, jailbreak, and social engineering phrases. **L2 (LLM analysis)** runs a full threat classification when L1 produces a non-trivial signal or when the content touches sensitive action categories. **L3 (Session model)** tracks cross-turn behavioral trajectories to catch multi-turn attacks that no single turn would trigger.
+
+The L1→L2 ladder runs **per screened item**, not once per turn. A turn that carries three tool results produces one screen for the inbound message and three more for the tool results, each with its own verdict and its own per-surface action.
 
 ---
 
@@ -80,10 +97,12 @@ An agent browsing the web retrieves a page that contains, hidden in white text o
 Indirect injection embeds malicious instructions inside content the agent processes as data — email bodies, search results, web pages, API responses, document contents. The agent receives these as tool output, not as user messages, which makes them harder to attribute but no less dangerous.
 
 **Detection approach:**
-- Safe House evaluates tool results before they reach the agent's next-turn context window
+- Safe House screens tool results **turn-internally** — inline, inside the same request, one result at a time, before the request is forwarded upstream. Interception happens in the turn that carries the payload, not on a later one
 - MinHash similarity matching compares tool results against a library of known injection payloads
 - L2 analysis flags content that contains instruction-like imperative structures embedded in otherwise data-like content
 - Pattern matching targets instruction delimiters ("System:", "Assistant:", "Human:", XML/YAML tags used as instruction wrappers)
+
+**What happens on a hit.** The action is per surface, not per request. In `enforce`, a tool result scoring at or above the quarantine threshold is **withheld**: its content is replaced in the outbound request with a quarantine notice, so the model never sees the payload, while the rest of the turn proceeds. A `warn`-level result is delivered but marked untrusted. Mechanics and the gateway call sites are in [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
 
 **Known limit:** Sufficiently novel indirect injection payloads that bear no similarity to known patterns will produce lower L1/L2 confidence scores. The arena flywheel addresses this over time — when a new pattern is observed and confirmed as malicious, it enters the candidate pool and can be promoted to active detection.
 
@@ -182,11 +201,11 @@ Being explicit about limits is as important as documenting what works.
 
 **Agent's own reasoning errors.** If the agent misinterprets a legitimate request and takes a harmful action, Safe House does not catch this. That is the domain of AIP (Agent Integrity Protocol), which analyzes the agent's thinking blocks and, in `enforce`, gates the response before the action lands (in `observe`/`nudge` the verdict is recorded post-hoc).
 
-**Deeply embedded indirect injection in tool output.** When injected instructions are semantically indistinguishable from legitimate content — e.g., embedded in a large document in natural language with no structural markers — L1 and L2 may not detect it. MinHash similarity matching reduces this gap, but novel, carefully crafted payloads remain a risk. Defense-in-depth via AIP thinking block analysis provides a second layer.
+**Deeply embedded indirect injection in tool output.** When injected instructions are semantically indistinguishable from legitimate content — e.g., embedded in a large document in natural language with no structural markers — L1 and L2 may not detect it. MinHash similarity matching reduces this gap, but novel, carefully crafted payloads remain a risk. If the turn-internal tool-result screen misses the payload, the payload reaches the model in that same turn; AIP thinking-block analysis is the downstream backstop, catching the *effect* on the agent's reasoning after the fact rather than re-screening the tool result.
 
 **Zero-day attack patterns.** New attack patterns not yet in the Safe House library will produce low confidence scores and may pass through. The arena flywheel mitigates this over time: the canary credential system and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns are promoted from candidate to active status.
 
-**Attacks targeting the LLM's base behavior.** Safe House evaluates messages before they reach the model. If a model has been fine-tuned or otherwise modified to comply with certain instruction patterns, Safe House's detection of those patterns doesn't prevent the model from responding to them — it only prevents the message from reaching the model in block mode.
+**Attacks targeting the LLM's base behavior.** Safe House evaluates content before it reaches the model — messages at request arrival, tool results mid-request. If a model has been fine-tuned or otherwise modified to comply with certain instruction patterns, Safe House's detection of those patterns doesn't prevent the model from responding to them — it only prevents the content from reaching the model in block mode (by rejecting the request, or by withholding the offending tool result from it).
 
 ---
 

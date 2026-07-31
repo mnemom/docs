@@ -50,12 +50,16 @@ Each value is one of `pass | observed | nudged | enforced | unverified`. The sem
 
 | Checkpoint | `pass` | `observed` | `nudged` | `enforced` | `unverified` |
 |---|---|---|---|---|---|
-| **`front`** (Protection inbound) | No threat detected. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`). | Not produced by this checkpoint — Safe House evaluation fails closed internally rather than surfacing an unverified state. |
+| **`front`** (Protection inbound) | Every front-door screen on this request ran clean. | Threat observed but not acted on (`mode=observe`). | Inbound content carried a guidance nudge (`mode=nudge`). | Inbound content was replaced or quarantined same-turn (`mode=enforce`) — the message itself, or any one of the request's tool results. | Not produced by this checkpoint — Safe House evaluation fails closed internally rather than surfacing an unverified state. |
 | **`autonomy`** (CLPI on tool calls) | Tool call within bounds. | Out-of-bounds tool call observed but allowed. | Tool call surfaced a warning. | Tool call replaced with a synthetic error response. | Not produced by this checkpoint. |
 | **`integrity`** (AIP on reasoning) | Reasoning within boundary. | Boundary violation observed but no replacement. | Verdict recorded post-hoc and carried into the agent's next turn (`mode=nudge`); this response is not gated. | Response was replaced same-turn with a same-voice intervention. | The integrity checkpoint produced no trustworthy verdict — the analysis LLM timed out or errored. In `enforce` the response is **withheld** (fail-closed, still returned as a 2xx intervention); in `observe`/`nudge` the response is forwarded and the unverified state is recorded. Never reported as `pass`. |
 | **`back`** (Protection outbound) | Output clean. | Output flagged but unchanged. | Output flagged; recorded post-hoc (`mode=nudge`) and carried into the next turn — this response is not gated. | Output redacted, replaced, or blocked same-turn. | Not produced by this checkpoint. |
 
 The four-checkpoint model is documented in the [Safe House concept](/concepts/safe-house). All four checkpoints **always run** on every gateway-routed request — `pass` means the checkpoint ran and the request was clean.
+
+<Note>
+**`front` is a per-request rollup, not a count of screens.** The front door runs more than once per turn: the inbound message is screened when the request arrives, and — when `screen_surfaces.tool_responses` is enabled — each tool result the request carries is screened turn-internally before the request is forwarded. One `front=enforced` can therefore roll up several per-surface decisions: a rejected inbound message, one or more withheld tool results, or both. Conversely, `front=pass` means *every* screen on that request came back clean — not that only one ran. Per-surface detail lives in the `X-Mnemom-Advisory` entries and in `sh_evaluations`; see [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
+</Note>
 
 <Note>
 Verdict timing is mode-dependent: in `enforce` the `integrity`/`back` verdicts are resolved before the response is returned (streaming adds latency to preserve this); in `observe`/`nudge` analysis is post-hoc, so a backgrounded checkpoint's same-turn header value is provisional. `off` runs no analysis.

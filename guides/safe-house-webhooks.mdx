@@ -24,12 +24,20 @@ Safe House evaluation ──→ Gateway ──→ Signed POST (X-AIP-Signature) 
 
 | Event | When It Fires | Severity |
 |-------|--------------|----------|
-| `sh.evaluation.warn` | Safe House flags a turn above the warn threshold but below block | Informational |
-| `sh.evaluation.quarantine` | Safe House quarantines a turn for human review | High |
-| `sh.evaluation.block` | Safe House blocks a turn outright | Critical |
+| `sh.evaluation.warn` | A screened surface scores above the warn threshold but below block | Informational |
+| `sh.evaluation.quarantine` | Safe House quarantines a screened surface — an inbound message held for human review, or a tool result withheld from the forwarded request | High |
+| `sh.evaluation.block` | Safe House blocks a screened surface outright | Critical |
 | `sh.canary.triggered` | A canary credential was used — indicating active exploitation | Critical |
 | `sh.session.escalated` | Session risk has risen to `high` across multiple turns | High |
 | `sh.campaign.detected` | Multiple agents have received similar attacks from the same infrastructure | Critical |
+
+---
+
+<Note>
+**`sh.evaluation.*` granularity is per screened surface, not per turn.** The front door screens the inbound message when the request arrives and each tool result turn-internally, inline, before the request is forwarded — so one turn can emit several `sh.evaluation.*` events, one per surface that scored. Correlate them by `session_id` plus timestamp rather than assuming one evaluation per turn. See [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
+
+Shadow- and observe-mode recording is backgrounded, but it still runs inside the same request — a backgrounded evaluation event is not a next-turn event.
+</Note>
 
 ---
 
@@ -83,6 +91,8 @@ All events share a common envelope. The `data` object varies by event type.
   }
 }
 ```
+
+This example is a **tool-result** evaluation — note the `reasoning` string. In `enforce` the matching tool result was withheld from the request before it was forwarded (its content replaced with a quarantine notice); the turn itself continued, so the caller saw a 200, not a 422. If the same turn carried several tool results, each one that scored produced its own event.
 
 ### `sh.canary.triggered`
 

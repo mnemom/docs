@@ -5,7 +5,11 @@ sidebarTitle: "Safe House"
 icon: "door-open"
 ---
 
-Safe House is an optional pre-screening layer that sits in front of your AI agent and evaluates every inbound message. Where [AIP integrity checkpoints](/concepts/integrity-checkpoints) analyze the agent's *reasoning*, Safe House analyzes *what is being sent to the agent*. In `enforce`, a flagged message is caught before it reaches the model; in `observe` and `nudge` the message is forwarded and the verdict is recorded post-hoc (nudge surfaces an advisory on the next turn).
+Safe House is an optional screening layer that sits in front of your AI agent and evaluates what reaches it. Where [AIP integrity checkpoints](/concepts/integrity-checkpoints) analyze the agent's *reasoning*, Safe House analyzes *what is being sent to the agent*.
+
+The front door is not a single gate in front of the turn. The incoming prompt is screened as the request arrives, and every tool result the request carries is screened **turn-internally** — inline, one result at a time, inside the same request, before anything is forwarded upstream. See [Turn-internal tool-result screening](#turn-internal-tool-result-screening) for the mechanics.
+
+In `enforce`, flagged content is caught before it reaches the model: a flagged inbound message is held or dropped, and a flagged tool result is withheld and replaced in the outbound request mid-turn. In `observe` and `nudge` the content is forwarded and the verdict is recorded post-hoc (nudge surfaces an advisory on the next turn).
 
 ## Where it runs
 
@@ -20,7 +24,7 @@ Both shapes use the same Safe House contract and the same [headers](/api-referen
 
 Agents that operate in the open world face a threat class that alignment cards and integrity checks cannot address: malicious inputs crafted specifically to hijack the agent. These attacks do not look like boundary violations — they look like normal messages. By the time AIP flags the resulting behavior, the agent has already been manipulated.
 
-Safe House solves this by treating every inbound message as untrusted until it passes inspection. It does not replace AIP or enforcement modes — it extends them. A message that Safe House quarantines never reaches the model, so there is no behavior for AIP to analyze in the first place.
+Safe House solves this by treating everything that reaches the agent as untrusted until it passes inspection — the inbound message when the request arrives, and each tool result as the request is being assembled for the upstream provider. It does not replace AIP or enforcement modes — it extends them. A message that Safe House quarantines never reaches the model, and a quarantined tool result has its content replaced before the request is forwarded, so in both cases there is no behavior for AIP to analyze in the first place.
 
 <Note>
 Safe House is `off` by default for all agents. Enabling it in `observe` mode first is strongly recommended — it gives you a picture of your threat landscape with zero operational impact before moving to `nudge` or `enforce`.
@@ -41,7 +45,7 @@ Safe House uses the canonical four-mode enum shared with the [Protection Card](/
     Detectors run; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header) but the request proceeds. The model sees the advisory as part of its context and can adjust behavior accordingly.
   </Card>
   <Card title="Enforce" icon="shield-halved">
-    Full synchronous analysis. Messages that score above the `quarantine` threshold are held in a review queue; messages above `block` are dropped entirely. This is the only mode that actively blocks the agent's traffic.
+    Full synchronous analysis. Inbound messages that score above the `quarantine` threshold are held in a review queue; messages above `block` are dropped entirely. On the `tool_responses` surface the same thresholds act per result — the offending tool result is withheld and replaced mid-turn while the rest of the request proceeds. This is the only mode that actively gates the agent's traffic.
   </Card>
 </CardGroup>
 
@@ -60,6 +64,8 @@ Safe House uses a layered approach that balances speed with accuracy:
 | **L3** | Session escalation | Stateful | Flags sessions where earlier messages establish suspicious context |
 
 L1 runs first and can short-circuit the pipeline entirely for high-confidence detections. If L1 passes or returns a `warn` score, L2 runs. L3 operates continuously across the session, not per-message.
+
+The L1→L2 ladder runs **per screened item**, not once per request: the incoming message gets a screen, and then each tool result carried in the same request gets its own screen. A single turn therefore commonly produces several front-door evaluations.
 
 ### L2 and the org's `protected_surface`
 
@@ -152,14 +158,45 @@ Composition across scopes follows the same intersection-then-union rule as the r
 
 Safe House screens in both directions:
 
-- **Inbound**: Evaluates user and tool messages before they reach the agent (the primary use case).
+- **Inbound (user/principal message)**: Evaluated as the request arrives, before it reaches the agent (the primary use case).
+- **Inbound (tool results)**: Evaluated turn-internally — each tool result in the request gets its own screen inline, mid-request, before the request is forwarded. See [Turn-internal tool-result screening](#turn-internal-tool-result-screening).
 - **Outbound screening**: Scans agent responses for data leaks — PII patterns, secret formats, or content that should not leave the agent's context. In `enforce`, a flagged response is caught before it is returned to the caller (which adds latency); in `observe` and `nudge` the response is returned and the finding is recorded post-hoc.
 
 Outbound screening is configured separately and applies regardless of inbound mode.
 
+## Turn-internal tool-result screening
+
+Tool results are the primary indirect-injection surface, and they arrive *during* a turn rather than in front of it. Safe House screens them where they land: inline, in the same request, once per result.
+
+When the `tool_responses` surface is enabled and mode is `nudge` or `enforce`, the gateway walks the tool results the request carries and screens them **sequentially**, awaiting each verdict before the request is forwarded upstream. The session's threat posture ratchets **up only** across that loop, so a clean later result cannot undo an earlier finding. Each result gets its own verdict, and those verdicts act on the *same* turn:
+
+| Per-result verdict | Action in `enforce` |
+|---|---|
+| `pass` | The tool result is forwarded unchanged. |
+| `warn` | The result is delivered but decorated as untrusted, so the model reads it as unverified data rather than as instructions. |
+| `quarantine` / `block` | The result is **withheld** — its content is replaced in the outbound request with a quarantine notice. The model never sees the payload. |
+
+Because the action is per surface, a withheld tool result does not fail the request: the turn proceeds with the offending result replaced. That is why a tool-result interception is not reported as an HTTP error — see [verdict-to-status mapping](/api-reference/errors#safe-house-verdict-to-status-mapping).
+
+This is a front-door action and it is **not deferred**. It does not wait for the agent's next turn, and it is not performed by [AIP](/concepts/integrity-checkpoints) — AIP analyzes the reasoning the model produces *after* the request has already been forwarded. The front-door result is merely cached as extra signal for that later AIP pass.
+
+<Note>
+**Where this lives in the gateway.** The screening function `gateway/src/index.ts::judgeShadowScreen` is defined at `gateway/src/index.ts:7683` and is called with `sourceType: "tool_result"` from exactly three places (line numbers at commit `c8122e65c6395b9d39364c61834a5d8deffa4ff4`):
+
+| Call site | Path | Timing |
+|---|---|---|
+| `gateway/src/index.ts:8088` | The acting judge chain (`gateway/src/index.ts::runJudgeActingDecision`), per-tool-result loop | Awaited inline in the request path; its verdicts drive the same turn's per-surface withhold |
+| `gateway/src/index.ts:7990` | Shadow screening (`gateway/src/index.ts::runJudgeShadowScreens`) | Same request, backgrounded after the acting decision; record-only |
+| `gateway/src/index.ts:14977` | Observe-mode recording (`gateway/src/index.ts::runObserveSH`) | Same request, backgrounded; record-only |
+
+All three sit inside a single request lifecycle. None of them defers screening to a later turn; only telemetry and persistence are backgrounded.
+</Note>
+
 ## Integration with AIP
 
 When Safe House is active, its threat context enriches the AIP conscience analysis. If a message passes Safe House but scored close to a threshold, that score is included in the conscience prompt so AIP can apply extra scrutiny to the resulting reasoning. The signal flows in both directions: a high AIP boundary-violation rate for a session elevates Safe House's L3 session risk score.
+
+**AIP does not screen tool results.** Enrichment is one-directional signal-passing, not a second screening pass: the front-door result is cached and handed to AIP, and AIP then analyzes the reasoning the model produced from the already-forwarded request. Tool results are screened by the front door, turn-internally, before that request is forwarded — see [Turn-internal tool-result screening](#turn-internal-tool-result-screening).
 
 ## The four artifact types
 

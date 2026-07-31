@@ -17,7 +17,9 @@ Este inicio rápido te guía para activar Safe House en un agente existente, obs
 
 ## Paso 1 — Activar Safe House en modo observe
 
-Comienza con el modo `observe`. Ejecuta un análisis completo de amenazas sin impacto en la latencia, para que puedas ver lo que Safe House detectaría antes de comprometerte con el bloqueo. La configuración de Safe House reside en la **tarjeta de protección** del agente — `mode` es el interruptor maestro de nivel superior; `screen_surfaces` decide qué superficies inspecciona el pipeline de detección.
+Comienza con el modo `observe`. Ejecuta un análisis completo de amenazas sin impacto en la latencia, para que puedas ver lo que Safe House detectaría antes de comprometerte con el bloqueo. La configuración de Safe House reside en la **tarjeta de protección** del agente — `mode` es el interruptor maestro de nivel superior; `screen_surfaces` decide qué superficies inspecciona el pipeline de detección, y cada superficie tiene su propio momento: `incoming` se analiza cuando llega la petición, `tool_responses` dentro del propio turno (un análisis por cada resultado de herramienta, en línea, antes de reenviar la petición al proveedor) y `outgoing` en la puerta trasera, a la salida.
+
+La tarjeta de abajo deja `tool_responses` desactivado para simplificar la primera ejecución. Activarlo añade un análisis esperado por cada resultado de herramienta en la ruta de la petición y, en `enforce`, permite que Safe House retenga un único resultado de herramienta a mitad de turno — sustituyendo su contenido por un aviso de cuarentena mientras el resto del turno continúa — en lugar de rechazar la petición completa. Consulta [Análisis de resultados de herramientas dentro del turno](/concepts/safe-house#turn-internal-tool-result-screening).
 
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
@@ -113,6 +115,8 @@ content-type: application/json
 
 <Note>
 En modo observe, `X-Mnemom-Verdict.front` informa `observed` para que puedas rastrear lo que *habría* ocurrido en modo enforce — el mensaje aún llega al agente en cualquier caso. El encabezado `X-Mnemom-Advisory` lleva los resultados del detector como un array JSON; consulta `/api-reference/headers#x-mnemom-advisory`.
+
+`front` resume todos los análisis de la puerta de entrada de esa petición, no una única evaluación: con `tool_responses` activado, un turno produce un análisis del mensaje más uno por cada resultado de herramienta, y todos se agregan en ese único valor `front=`.
 </Note>
 
 ## Paso 3 — Revisar las detecciones en el observatorio

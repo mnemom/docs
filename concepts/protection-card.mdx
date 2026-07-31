@@ -20,7 +20,7 @@ Top-level action policy for Safe House on this agent. Shares the four-mode enum 
 - **`off`** — detection skipped entirely (cost / latency / non-applicability cases). No telemetry.
 - **`observe`** — all detectors run, signals are logged asynchronously to the trace + reputation pipeline, no action is taken on the agent's request.
 - **`nudge`** — detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header — see the [Headers reference](/api-reference/headers)) but the request proceeds. The model sees the advisory as part of its context.
-- **`enforce`** — detectors run synchronously; matches block the request (quarantine ≥ quarantine threshold, hard block ≥ block threshold).
+- **`enforce`** — detectors run synchronously; the action depends on the surface that matched. On `incoming` the request is stopped (quarantine ≥ quarantine threshold, hard block ≥ block threshold). On `tool_responses` the offending tool result is **withheld** — its content is replaced in the outbound request and the turn proceeds — rather than the whole request being blocked.
 
 `enforce` is implicitly synchronous — to block a request, the gateway must wait for the verdict. There is no separate `enforce_sync` mode.
 
@@ -49,10 +49,10 @@ Three bands map cleanly onto the SOC severity ladder familiar to most operators.
 
 Which request surfaces Safe House inspects:
 
-- `incoming` — the user/principal prompt entering the agent
-- `outgoing` — the agent's response leaving the agent
+- `incoming` — the user/principal prompt entering the agent, screened when the request arrives
+- `outgoing` — the agent's response leaving the agent, screened at the back door
 - `tool_calls` — tool-use invocations the agent makes
-- `tool_responses` — responses to those tool calls
+- `tool_responses` — responses to those tool calls, screened turn-internally: one inline screen per result, inside the same request, before it is forwarded upstream
 
 ```yaml
 screen_surfaces:
@@ -119,9 +119,11 @@ Exemptions replace the legacy boolean `org_card_exempt` flag — which waived th
 Every request hits:
 
 1. `canonical_protection_cards` read (KV-cached, 5-min TTL) to get the composed protection card.
-2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`.
-3. `mode` determines the action: observe (log only), nudge (advisory), enforce (block).
+2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`. This is not one pass over the request: the `incoming` surface is screened once at arrival, and the `tool_responses` surface is screened turn-internally — the gateway iterates the request's tool results and awaits a screen for each, threading an up-only session-posture ratchet, before the request is forwarded.
+3. `mode` determines the action, applied **per surface**: observe (log only), nudge (advisory), enforce (block the request on `incoming`; withhold and replace the offending result on `tool_responses`).
 4. `trusted_sources` short-circuits detectors for allowlisted upstreams (with trace entry).
+
+The whole sequence happens inside one turn. Nothing is handed to a later turn or to AIP for re-screening — see [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
 
 The protection card is never fetched from the agent-scope row on the request path — it's always the canonical (pre-composed) version.
 
@@ -149,7 +151,7 @@ All three master switches — the alignment card's `autonomy_mode` and `integrit
 | `off` | Skip AIP + drift detection | Detection skipped entirely |
 | `observe` | Integrity checkpoints run; violations logged | Safe House detectors run; signals logged |
 | `nudge` | Violations inject advisory on next request | Detectors attach advisory; request proceeds |
-| `enforce` | Violations hard-block (auto-pause on boundary) | Detectors may block (quarantine / block) |
+| `enforce` | Violations hard-block (auto-pause on boundary) | Detectors act per surface (block the request, or withhold a tool result) |
 
 A well-run fleet has both dimensions aligned across all agents. The [fleet coherence v2 scorer](/concepts/fleet-coherence) checks integrity uniformity as a first-order structural invariant.
 

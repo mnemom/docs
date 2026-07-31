@@ -40,9 +40,9 @@ mode: enforce   # "off" | "observe" | "nudge" | "enforce"
 | `off` | Detection skipped entirely. No telemetry. For cost / latency / non-applicability cases. |
 | `observe` | Detectors run, signals logged asynchronously, no request-path action. |
 | `nudge` | Detectors run synchronously; matches attach an advisory annotation to the agent's prompt context (and an `X-Mnemom-Advisory` response header) but the request proceeds. |
-| `enforce` | Detectors run synchronously; matches block the request (quarantine ≥ quarantine threshold, hard block ≥ block threshold). |
+| `enforce` | Detectors run synchronously; matches act per surface (quarantine ≥ quarantine threshold, hard block ≥ block threshold). On `incoming` the request is blocked; on `tool_responses` the offending result is withheld from the forwarded request. |
 
-`enforce` implies synchronous verdict — to block a request, the gateway must wait for the verdict before delivering the message. There is no separate `enforce_sync` mode.
+`enforce` implies synchronous verdict — to act on content, the gateway must wait for the verdict before forwarding the request. That applies to every screened surface, including each tool result screened turn-internally. There is no separate `enforce_sync` mode.
 
 **Composition: strictest wins** across `enforce > nudge > observe > off`. An agent cannot drop below the platform/org floor.
 
@@ -62,7 +62,7 @@ thresholds:
 | Field | Range | Meaning |
 |-------|-------|---------|
 | `warn` | `[0, 1]` | Score at-or-above triggers a warn-level annotation in observe/nudge mode (and a soft annotation in enforce). |
-| `quarantine` | `[0, 1]` | Score at-or-above triggers a quarantine in enforce mode (message held for review); informational in observe/nudge. |
+| `quarantine` | `[0, 1]` | Score at-or-above triggers a quarantine in enforce mode (an `incoming` message is held for review; a tool result is withheld from the forwarded request); informational in observe/nudge. |
 | `block` | `[0, 1]` | Score at-or-above triggers a hard block in enforce mode. |
 
 **Validation:** `warn ≤ quarantine ≤ block`. The validator rejects any out-of-order combination at write time.
@@ -88,9 +88,22 @@ screen_surfaces:
 | `incoming` | `true` | Inbound prompts: user messages, webhook triggers, queue messages, API calls — anything entering the agent. |
 | `outgoing` | `true` | The agent's generated response leaving the agent. |
 | `tool_calls` | `true` | Arguments the agent sends to tool invocations (outbound tool side). |
-| `tool_responses` | `true` | Return values from tool calls reaching the agent (inbound tool side). |
+| `tool_responses` | `true` | Return values from tool calls reaching the agent (inbound tool side). Screened **turn-internally**: one inline screen per tool result, inside the request that carries it, before that request is forwarded upstream. |
 
 **Validation:** Only the four named keys are accepted. Unknown keys are rejected at write time.
+
+### Timing and per-surface action
+
+`screen_surfaces` selects *what* is screened; the surface also determines *when* it is screened and *what enforcement does* when it matches.
+
+| Surface | When it is screened | Action at `enforce` |
+|---|---|---|
+| `incoming` | Once, when the request arrives. | The request is stopped — `422` at the quarantine band, `403` at the block band. |
+| `tool_calls` | On the outbound tool invocation. | The tool call is gated per the autonomy checkpoint. |
+| `tool_responses` | Turn-internally — once per tool result, inline in the same request, awaited before forwarding. | **Per-surface withhold**: the offending tool result's content is replaced in the outbound request with a quarantine notice and the turn proceeds. No HTTP error is emitted for this. |
+| `outgoing` | At the back door, on the agent's response. | The response is redacted, replaced, or blocked same-turn. |
+
+Setting `tool_responses: true` therefore adds N awaited screens to a request carrying N tool results; the results are screened sequentially and the session's threat posture ratchets up only across them. It does **not** schedule a separate later pass, and it is not performed by the AIP integrity checkpoint. Mechanics and gateway call sites: [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
 
 **Composition: OR per field — true wins.** If any scope sets a surface to `true`, it's scanned. Agents cannot disable scanning that org or platform requires. Phrased in alignment-card vocabulary: **strictest wins** (with `true = scan` being the more restrictive choice).
 
