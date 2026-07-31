@@ -32,6 +32,8 @@
  *   }
  */
 
+import { stripHtmlTags } from "./strip-html-tags.mjs";
+
 export const METHODS = ["get", "post", "put", "patch", "delete"]; // also = display order within a resource
 
 // Endpoints intentionally NOT published (tracked in Linear). Keys are "METHOD /path".
@@ -56,13 +58,13 @@ const STUB_RE = /^---\ntitle: .*\n(?:description: .*\n)?openapi: "[^"]*"\n---\s*
 function descriptionFor(op) {
   const raw = (op.description || op.summary || "").trim();
   if (!raw) return "";
-  const plain = raw
+  const unwrapped = raw
     .replace(/^#+\s+/gm, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/\*([^*]+)\*/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/<[^>]+>/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  const plain = stripHtmlTags(unwrapped) // inline HTML (loop-until-stable; MNE-3528)
     .replace(/\n+/g, " ")
     .trim();
   const first = plain.split(/(?<=[.!?])\s+/)[0] || plain;
