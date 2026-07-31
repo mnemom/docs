@@ -58,6 +58,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { argv, exit } from "node:process";
+import { stripHtmlTags } from "./lib/strip-html-tags.mjs";
 
 // ── Slugifier ──────────────────────────────────────────────────────────────
 // GitHub-slugger-compatible: lowercase, strip a fixed punctuation set, spaces
@@ -83,7 +84,7 @@ function headingText(rawLine) {
   let t = rawLine.replace(/^#{1,6}\s+/, "").replace(/\s+#+\s*$/, "");
   t = t.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1"); // images → alt text
   t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"); // links → link text
-  t = t.replace(/<[^>]+>/g, ""); // inline HTML tags
+  t = stripHtmlTags(t); // inline HTML tags (loop-until-stable; MNE-3528)
   return t.trim();
 }
 
@@ -292,6 +293,8 @@ function selfTest() {
       "## Registration",
       "",
       "## Registration", // duplicate → second slug is `registration-1`
+      "",
+      "## Nested <<b>b>tag section", // nested inline HTML → rendered text "Nested tag section" (MNE-3528)
     ].join("\n"),
   );
 
@@ -302,6 +305,7 @@ function selfTest() {
       "",
       "See [Target](/concepts/target#registration) for details.", // valid cross-page
       "See [Dupe](/concepts/target#registration-1) too.", // valid duplicate anchor
+      "See [Nested](/concepts/target#nested-tag-section) too.", // valid — nested-tag heading strips cleanly
       "Jump to [Changelog](#changelog).", // valid same-page
       "Broken [ref](/concepts/target#does-not-exist).", // BROKEN cross-page
       "Broken [self](#no-such-section).", // BROKEN same-page
@@ -320,6 +324,10 @@ function selfTest() {
   assert(
     "duplicate heading disambiguates to #registration-1",
     !isBroken("registration-1"),
+  );
+  assert(
+    "nested-tag heading strips to #nested-tag-section and resolves",
+    !isBroken("nested-tag-section"),
   );
   assert("valid same-page anchor #changelog resolves", !isBroken("changelog"));
   assert("non-existent cross-page anchor is reported", isBroken("does-not-exist"));
