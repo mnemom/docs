@@ -63,19 +63,48 @@ function walkDir(dir, out) {
   return out;
 }
 
+// Blank out code so link-shaped EXAMPLES quoted in prose are never counted as
+// live links. Removes (a) fenced code blocks (``` / ~~~) and (b) inline `code`
+// spans, replacing each with equal-width whitespace (fenced lines become empty
+// lines) so line/column accounting and the surrounding prose are otherwise
+// unchanged. Mirrors check-anchors.mjs, which already excludes fenced code from
+// anchor extraction. Exported for external consumers / future unit tests.
+export function stripCodeSpans(content) {
+  const lines = content.split(/\r?\n/);
+  let fence = null; // active code-fence marker (``` or ~~~) or null
+  const out = lines.map((line) => {
+    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (fence === null) fence = marker;
+      else if (marker === fence) fence = null;
+      return ""; // fence delimiter line — never a live link
+    }
+    if (fence !== null) return ""; // inside a fenced block
+    // Inline `code` spans → blanked to equal-width whitespace (preserve columns).
+    // A span is a run of N backticks, content, then a matching run of N; an
+    // unbalanced lone backtick in prose is left untouched.
+    return line.replace(/(`+)[^\n]*?\1/g, (m) => " ".repeat(m.length));
+  });
+  return out.join("\n");
+}
+
 // Extract internal link targets from both markdown and JSX/MDX syntax.
 // (Verbatim behavior from check-links-local.mjs so results stay consistent.)
+// Code (fenced blocks + inline spans) is blanked first so backtick-quoted
+// link-syntax examples in prose are not mis-counted as live links.
 function extractInternalLinks(content) {
+  const scannable = stripCodeSpans(content);
   const links = [];
   let m;
   // Markdown-style: [text](/path) — path before optional fragment
   const mdRe = /\[.*?\]\((\/?[a-z][^)#\s]*)(#[^)]+)?\)/gi;
-  while ((m = mdRe.exec(content)) !== null) {
+  while ((m = mdRe.exec(scannable)) !== null) {
     links.push(m[1]);
   }
   // JSX/MDX href attribute: href="/path" or href='/path' — strip fragment
   const jsxRe = /href=["'](\/[^"']+)/gi;
-  while ((m = jsxRe.exec(content)) !== null) {
+  while ((m = jsxRe.exec(scannable)) !== null) {
     const raw = m[1];
     const hashIdx = raw.indexOf("#");
     links.push(hashIdx >= 0 ? raw.slice(0, hashIdx) : raw);
@@ -259,6 +288,60 @@ function selfTest() {
   assert("table has header row", table.includes("| Group | Total links | Broken | % broken |"));
   assert("table renders guides 33.3%", table.includes("| guides | 3 | 1 | 33.3% |"));
   assert("table renders All row 40.0%", table.includes("| **All** | **5** | **2** | **40.0%** |"));
+
+  // Inline-code / fenced-code awareness (issue #423: the feature-406ea199:16 /
+  // patch-adw-bc4f2e9d:21 false-positive class). The helper blanks code so a
+  // backtick-quoted link EXAMPLE is not counted, while prose links survive.
+  const stripped = stripCodeSpans(
+    "keep [real](/real) but drop `[fake](/nope)` and\n```\n[fenced](/also/nope)\n```\ntail.",
+  );
+  assert(
+    "stripCodeSpans keeps a genuine prose link target",
+    stripped.includes("/real"),
+  );
+  assert(
+    "stripCodeSpans blanks an inline-code link example",
+    !stripped.includes("/nope"),
+  );
+  assert(
+    "stripCodeSpans blanks a fenced-code link example",
+    !stripped.includes("/also/nope"),
+  );
+
+  // End-to-end regression guard in a SECOND, isolated temp tree so the count
+  // assertions above stay unchanged. A page whose ONLY link-shaped text sits in
+  // an inline-code span and a fenced block, plus one genuine live link: the
+  // code examples must not be counted, only the live link (which resolves).
+  const root2 = mkdtempSync(join(tmpdir(), "link-health-codespan-"));
+  const touch2 = (rel, body) => {
+    const abs = join(root2, rel);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, body);
+  };
+  touch2(
+    "codespans/page.mdx",
+    [
+      "Inline example `[ex](/does/not/exist)` must be ignored.",
+      "",
+      "```md",
+      "[ex](/also/missing)",
+      "```",
+      "",
+      "But [live](/codespans/target) is a real, resolvable link.",
+      "",
+    ].join("\n"),
+  );
+  touch2("codespans/target.mdx", "Target page.\n");
+
+  const r2 = computeLinkHealth(root2);
+  assert(
+    "code-span fixture: only the genuine link is counted (total = 1)",
+    r2.totals.total === 1,
+  );
+  assert(
+    "code-span fixture: the genuine link resolves (broken = 0)",
+    r2.totals.broken === 0,
+  );
 
   console.log(`\nself-test: ${pass}/${pass + fail} assertions passed`);
   return fail === 0;
