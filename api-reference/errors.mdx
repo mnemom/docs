@@ -128,7 +128,7 @@ The distinction between 503 (downstream unhealthy) and 529 (gateway-saturated) m
 
 ## Safe House verdict-to-status mapping
 
-The Safe House front-door inspects every inbound message and emits a verdict (`pass | observed | nudged | enforced`). When the agent's `protection.mode` is `enforce`, the verdict drives the HTTP response:
+The Safe House front-door inspects every inbound surface a request carries — the inbound message, and each tool result the request is handing back to the model — and emits a verdict (`pass | observed | nudged | enforced`). When the agent's `protection.mode` is `enforce`, the verdict drives the HTTP response:
 
 | Verdict | HTTP status | Error code | Notes |
 |---|---|---|---|
@@ -139,6 +139,10 @@ The Safe House front-door inspects every inbound message and emits a verdict (`p
 | `enforced` (quarantine → block threshold) | **403** | `safe_house_blocked` | Inbound message blocked outright. |
 
 The same mapping applies symmetrically on the back-door (outbound screening) — though `enforced` outbound replaces or redacts content rather than dropping the response, so the customer-visible status is still 200 with a modified body.
+
+<Note>
+**A front-door finding on a tool result does not produce a 4xx.** The table above describes the front door acting on the *inbound message*. When the front door acts on a **tool result** carried in the same request — which it does synchronously, before the body is forwarded upstream — the request is not failed. The offending tool result is withheld (its content replaced with a quarantine notice) or decorated as untrusted, the rest of the body is forwarded, and you get a **200 with `front=enforced`** on `X-Mnemom-Verdict`. Do not read a 200 as "no front-door action this turn": read the header.
+</Note>
 
 The `X-Mnemom-Verdict` response header reflects the full per-checkpoint state even on error responses — useful for distinguishing "front-door blocked" (`front=enforced`) from "agent's own integrity intervention" (`integrity=enforced`).
 

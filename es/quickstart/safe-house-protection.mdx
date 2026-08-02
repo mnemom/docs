@@ -19,6 +19,8 @@ Este inicio rápido te guía para activar Safe House en un agente existente, obs
 
 Comienza con el modo `observe`. Ejecuta un análisis completo de amenazas sin impacto en la latencia, para que puedas ver lo que Safe House detectaría antes de comprometerte con el bloqueo. La configuración de Safe House reside en la **tarjeta de protección** del agente — `mode` es el interruptor maestro de nivel superior; `screen_surfaces` decide qué superficies inspecciona el pipeline de detección.
 
+Las superficies son unidades de filtrado, no un presupuesto por turno: la puerta de entrada se ejecuta una vez por cada superficie habilitada que transporte la solicitud. La tarjeta de abajo empieza solo con `incoming`, así que verás una evaluación de puerta de entrada por solicitud. Activar `tool_responses` ([Paso 7](#paso-7--filtrar-los-resultados-de-herramientas)) añade otra evaluación por cada resultado de herramienta que la solicitud devuelve al modelo — dentro de esa misma solicitud, antes de que el modelo lo lea.
+
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
@@ -280,6 +282,37 @@ curl -X DELETE https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF12
 Liberar un mensaje en cuarentena también lo registra como falso positivo, lo que retroalimenta la calibración de umbrales. Tras más de 10 falsos positivos confirmados en una categoría, el Observatorio sugerirá ajustes de umbral para tu agente.
 </Tip>
 
+## Paso 7 — Filtrar los resultados de herramientas
+
+Los pasos 1–6 solo filtraron `incoming` — el mensaje del usuario. Si tu agente usa herramientas, la vía de inyección más habitual es el *resultado de herramienta*: un resultado de búsqueda, el cuerpo de un correo, una respuesta de API con instrucciones ocultas dentro. Activa la superficie `tool_responses`:
+
+```yaml
+screen_surfaces:
+  incoming: true
+  outgoing: false
+  tool_calls: false
+  tool_responses: true      # filtrar los valores que devuelven las herramientas
+```
+
+A partir de aquí, una solicitud que devuelve resultados de herramientas al modelo se filtra **de nuevo dentro de esa misma solicitud** — una vez por cada resultado de herramienta, en su propia superficie, antes de que el cuerpo se reenvíe al proveedor. En los modos `nudge` y `enforce`, la pasarela toma los tres primeros resultados de herramienta que transporta el cuerpo. Es una comprobación de puerta de entrada; nada espera al siguiente turno del agente.
+
+La forma de aplicación difiere de la del Paso 5. Un *mensaje* marcado hace fallar la solicitud con un 422 o un 403. Un *resultado de herramienta* marcado no hace fallar la solicitud — se retira del cuerpo:
+
+| Veredicto por herramienta | Lo que ves |
+|---|---|
+| `pass` | El resultado de herramienta se reenvía sin cambios. |
+| `warn` | El resultado de herramienta se entrega, anotado como no confiable. |
+| `quarantine` / `block` | El contenido del resultado de herramienta se sustituye por un aviso de cuarentena; el modelo nunca ve la carga útil. La solicitud sigue devolviendo **200**, con `front=enforced` en `X-Mnemom-Verdict`. |
+
+```
+HTTP/2 200
+X-Mnemom-Verdict: front=enforced; autonomy=pass; integrity=pass; back=pass
+```
+
+<Tip>
+No interpretes un 200 como «la puerta de entrada no hizo nada en este turno». Analiza `X-Mnemom-Verdict` — `front=enforced` en un 200 significa que un resultado de herramienta fue retenido o anotado dentro de la solicitud.
+</Tip>
+
 ## Próximos pasos
 
 <CardGroup cols={2}>
@@ -300,5 +333,6 @@ Liberar un mensaje en cuarentena también lo registra como falso positivo, lo qu
 ## Véase también
 
 - [Concepto Safe House](/concepts/safe-house) — Explicación completa de los modos, categorías de amenazas y capas de detección
+- [Cuándo se ejecuta la puerta de entrada](/concepts/safe-house#when-the-front-door-runs) — Por qué la puerta de entrada se dispara una vez por superficie de entrada, no una vez por turno
 - [Integración Safe House Gateway](/gateway/safe-house-overview) — Cómo encaja Safe House en el pipeline de solicitudes de la pasarela de Mnemom
 - [Modos de aplicación](/gateway/enforcement) — Cómo maneja la pasarela las violaciones después de que llegan al agente

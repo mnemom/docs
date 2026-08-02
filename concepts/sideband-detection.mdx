@@ -7,6 +7,8 @@ icon: "radar"
 
 **Sideband detection** is the asynchronous half of Mnemom's Safe House. While the gateway intervenes [same-turn at four checkpoints](/concepts/safe-house) on each agent request (under `enforce`; in `observe`/`nudge` the verdict is recorded post-hoc), the observer runs a parallel cron sweep across teams of agents and emits *advisories* the agent receives at the start of its next turn.
 
+Note that "same-turn" is not "once per turn." The runtime front door fires on every inbound surface a request carries — the message, and each tool result travelling back to the model — all within that request. Only *sideband* findings cross a turn boundary; nothing the front door screens is deferred. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
+
 Four detector axes share this surface:
 
 | Source value | Detector | What it catches |
@@ -34,7 +36,7 @@ The runtime gateway can't see those patterns — it sees one request, one agent,
 
 ## The two-turn dance
 
-Runtime checkpoints intervene same-turn under `enforce`; sideband checkpoints intervene cross-turn via the advisory carryover.
+Runtime checkpoints intervene same-turn under `enforce` — and, at the front door, as many times within that turn as the request has inbound surfaces. Sideband checkpoints are the only ones that intervene cross-turn, via the advisory carryover.
 
 ```
 turn N: agent works as usual; observer's cron sweep detects something

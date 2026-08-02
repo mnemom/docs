@@ -16,6 +16,8 @@ This quickstart walks you through enabling Safe House on an existing agent, obse
 
 Start with `observe` mode. This runs full threat analysis with zero latency impact, so you can see what Safe House would catch before committing to blocking. Safe House configuration lives on the agent's **protection card** — `mode` is the top-level master switch; `screen_surfaces` decides which surfaces the detector pipeline inspects.
 
+Surfaces are screening units, not a per-turn budget: the front door runs once per enabled surface a request carries. The card below starts with `incoming` only, so you will see one front-door evaluation per request. Turning on `tool_responses` ([Step 7](#step-7--screen-tool-results)) adds another evaluation for each tool result the request hands back to the model — inside that same request, before the model reads it.
+
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
@@ -277,6 +279,37 @@ curl -X DELETE https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF12
 Releasing a quarantined message also records it as a false positive, which feeds back into threshold calibration. After 10+ confirmed false positives in a category, the Observatory will suggest threshold adjustments for your agent.
 </Tip>
 
+## Step 7 — Screen tool results
+
+Steps 1–6 only screened `incoming` — the user message. If your agent uses tools, the more common injection route is the *tool result*: a search hit, an email body, an API response with instructions hidden inside it. Turn on the `tool_responses` surface:
+
+```yaml
+screen_surfaces:
+  incoming: true
+  outgoing: false
+  tool_calls: false
+  tool_responses: true      # screen values coming back from tools
+```
+
+From here on, a request that hands tool results back to the model is screened **again inside that same request** — once per tool result, on its own surface, before the body is forwarded upstream. Under `nudge` and `enforce` the gateway takes the first three tool results the body carries. This is a front-door check; nothing waits for the agent's next turn.
+
+The enforcement shape differs from Step 5. A flagged *message* fails the request with a 422 or 403. A flagged *tool result* does not fail the request — it is removed from the body:
+
+| Per-tool verdict | What you see |
+|---|---|
+| `pass` | Tool result forwarded unchanged. |
+| `warn` | Tool result delivered, annotated as untrusted. |
+| `quarantine` / `block` | Tool result content replaced with a quarantine notice; the model never sees the payload. The request still returns **200**, with `front=enforced` on `X-Mnemom-Verdict`. |
+
+```
+HTTP/2 200
+X-Mnemom-Verdict: front=enforced; autonomy=pass; integrity=pass; back=pass
+```
+
+<Tip>
+Do not read a 200 as "the front door did nothing this turn." Parse `X-Mnemom-Verdict` — `front=enforced` on a 200 means a tool result was withheld or decorated inside the request.
+</Tip>
+
 ## Next steps
 
 <CardGroup cols={2}>
@@ -297,5 +330,6 @@ Releasing a quarantined message also records it as a false positive, which feeds
 ## See also
 
 - [Safe House concept](/concepts/safe-house) — Full explanation of modes, threat categories, and detection layers
+- [When the front door runs](/concepts/safe-house#when-the-front-door-runs) — Why the front door fires once per inbound surface, not once per turn
 - [Safe House Gateway Integration](/gateway/safe-house-overview) — How Safe House fits into the Mnemom gateway request pipeline
 - [Enforcement Modes](/gateway/enforcement) — How the gateway handles violations after they reach the agent

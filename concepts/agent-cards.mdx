@@ -43,7 +43,7 @@ The protection card answers *how this agent is defended at runtime* and *what th
 |---------|------------------|
 | `mode` | `observe` / `nudge` / `enforce` (see below) |
 | `thresholds` | Per-signal cutoffs (injection, exfiltration, canary, semantic-novelty, etc.) |
-| `screen_surfaces` | Which surfaces Safe House inspects (`incoming`, `outgoing`, `tool_calls`) |
+| `screen_surfaces` | Which surfaces Safe House inspects (`incoming`, `outgoing`, `tool_calls`, `tool_responses`). The front door runs once per enabled inbound surface a request carries, so `tool_responses` means each tool result is screened inside the request that carries it back to the model — see [When the front door runs](/concepts/safe-house#when-the-front-door-runs) |
 | `trusted_sources` | Per-scope allowlists for data sources the agent may ingest without full scanning |
 | `protected_surface` | **Org's enforced policy**: `assets` (sealed records, sensitive fields), `forbidden_operations` (categorically blocked actions), `escalation_required` (actions needing elevated authority). Org-owned — not agent-authored. Safe House L2 enforces it independent of what the agent declares. |
 
@@ -112,7 +112,7 @@ Every request through the Mnemom gateway:
 4. Fetches the canonical **protection card** for [Safe House](/concepts/safe-house) detection. The card's `protected_surface` (org-owned `assets`, `forbidden_operations`, `escalation_required`) is the source of truth for Safe House L2 enforcement — independent of what the agent declares in its alignment card.
 5. Applies alignment-card `autonomy.forbidden_actions` as a behavioral hard deny; applies `integrity_mode` to the checkpoint pipeline; applies protection-card `protected_surface.forbidden_operations` as the org's hard policy floor via Safe House.
 
-All of this is one canonical-card read per concern, not a lazy per-request merge.
+All of this is one canonical-card read per concern, not a lazy per-request merge. One *read*, not one *screen*: the card is fetched once, then Safe House applies it once per enabled inbound surface the request carries — the message, and each tool result travelling back to the model in the same body.
 
 ### Observer (trace analysis)
 

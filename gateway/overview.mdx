@@ -56,6 +56,8 @@ The system consists of five components:
 
 1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background — extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and — in nudge mode — recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered — on streaming this adds latency.
 
+    That describes the *response* path. On the **request** path the gateway also runs [Safe House](/concepts/safe-house) front-door screening, and that is not a single gate per turn: it screens the inbound message and, when `screen_surfaces.tool_responses` is enabled, each tool result the request is handing back to the model — synchronously, before the body is forwarded upstream. A flagged tool result is withheld (replaced with a quarantine notice) or decorated as untrusted in that same request. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
+
 2. **Observer** — A scheduled Cloudflare Worker (1-minute cron) that processes AI Gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against alignment cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints via `linkCheckpointToTrace()`. AIP integrity analysis is handled entirely by the gateway.
 
 3. **API** — Serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
@@ -81,6 +83,7 @@ Mnemom Gateway builds AP-Traces that record:
 - **Escalation** — Whether the agent escalated to a human and why
 - **Verification** — Whether the trace is consistent with the agent's declared alignment card
 - **Integrity** — Per-turn AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
+- **Protection** — Safe House front-door and back-door verdicts. The front door records one evaluation per inbound surface, so a turn that carries tool results produces several — see [When the front door runs](/concepts/safe-house#when-the-front-door-runs)
 - **Policy** — [Policy evaluation](/concepts/policy-engine) results including verdict (pass/warn/fail), violations, warnings, and coverage report. The `X-Policy-Verdict` response header indicates the result.
 
 ### What is NOT stored

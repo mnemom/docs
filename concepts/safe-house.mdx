@@ -7,6 +7,8 @@ icon: "door-open"
 
 Safe House is an optional pre-screening layer that sits in front of your AI agent and evaluates every inbound message. Where [AIP integrity checkpoints](/concepts/integrity-checkpoints) analyze the agent's *reasoning*, Safe House analyzes *what is being sent to the agent*. In `enforce`, a flagged message is caught before it reaches the model; in `observe` and `nudge` the message is forwarded and the verdict is recorded post-hoc (nudge surfaces an advisory on the next turn).
 
+The front door is not a once-per-turn gate. It runs on **every inbound surface a request carries** — the user message *and* each tool result travelling back to the model in that same request body — and every one of those runs happens before anything is forwarded upstream. See [When the front door runs](#when-the-front-door-runs).
+
 ## Where it runs
 
 Safe House ships in two deployment shapes:
@@ -20,7 +22,7 @@ Both shapes use the same Safe House contract and the same [headers](/api-referen
 
 Agents that operate in the open world face a threat class that alignment cards and integrity checks cannot address: malicious inputs crafted specifically to hijack the agent. These attacks do not look like boundary violations — they look like normal messages. By the time AIP flags the resulting behavior, the agent has already been manipulated.
 
-Safe House solves this by treating every inbound message as untrusted until it passes inspection. It does not replace AIP or enforcement modes — it extends them. A message that Safe House quarantines never reaches the model, so there is no behavior for AIP to analyze in the first place.
+Safe House solves this by treating every inbound message as untrusted until it passes inspection — and a tool result is an inbound message, screened on the way back to the model rather than waved through because the agent asked for it. It does not replace AIP or enforcement modes — it extends them. A message or tool result that Safe House quarantines never reaches the model, so there is no behavior for AIP to analyze in the first place.
 
 <Note>
 Safe House is `off` by default for all agents. Enabling it in `observe` mode first is strongly recommended — it gives you a picture of your threat landscape with zero operational impact before moving to `nudge` or `enforce`.
@@ -60,6 +62,8 @@ Safe House uses a layered approach that balances speed with accuracy:
 | **L3** | Session escalation | Stateful | Flags sessions where earlier messages establish suspicious context |
 
 L1 runs first and can short-circuit the pipeline entirely for high-confidence detections. If L1 passes or returns a `warn` score, L2 runs. L3 operates continuously across the session, not per-message.
+
+The L1→L2 pipeline runs **once per screened surface, not once per turn**. A request that carries a user message plus two tool results runs it three times, each with its own surface label and its own verdict.
 
 ### L2 and the org's `protected_surface`
 
@@ -148,11 +152,34 @@ Composition across scopes follows the same intersection-then-union rule as the r
 
 **Security note:** the validator's deny-list is non-exhaustive — adding a publicly-routable IP range or a customer-controllable domain is a critical misconfiguration even if it passes the deny-list. Treat `trusted_sources` as a sharp tool. See the canonical schema at [/specifications/protection-card-schema#trusted_sources](/specifications/protection-card-schema#trusted_sources).
 
+## When the front door runs
+
+The front door is **not** a single pre-turn gate that input passes through once. It runs once per inbound *surface* carried by a request, and every one of those runs is **turn-internal**: the gateway awaits each verdict and acts on it before the request is forwarded to the provider.
+
+For a request that carries tool results back to the model, that means:
+
+1. The gateway extracts the tool results from the **inbound body of that same request** — the first three, when `screen_surfaces.tool_responses` is enabled.
+2. Each one is screened on its own `tool_result` surface: its own L1 pass, its own L2 judgement, its own verdict. Synchronously, in the request path — not backgrounded, not queued.
+3. The per-tool verdicts act on **this** request, before dispatch. `block` and `quarantine` **withhold** the offending tool result — its content is replaced with a quarantine notice, so the model never sees the payload. `warn` **decorates** it: delivered, but annotated as untrusted. `pass` forwards it unchanged.
+4. Only then is the request body re-serialized and sent upstream. That re-serialization is the single choke point; whatever the front door decided is already baked into it.
+
+This is a front-door check, not an AIP check. AIP is a response-side pass over the model's *reasoning* — by the time it runs, the model has already read whatever the front door let through. Tool-result screening is not deferred to AIP and is not deferred to the agent's next turn; AIP sits behind the front door as defense in depth, not in front of it as the primary control.
+
+<Note>
+**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` is defined at `gateway/src/index.ts:7683` and is called with `sourceType: "tool_result"` at three sites:
+
+- `gateway/src/index.ts:8088` — the **synchronous acting chain**. This is the call whose per-tool decisions the request path then applies (withhold / decorate) before the body is forwarded.
+- `gateway/src/index.ts:7990` — the **shadow chain**, fired via `waitUntil` after the acting decision. Recording only; it can never change acting behaviour and adds no response-path latency.
+- `gateway/src/index.ts:14977` — the **`observe` recorder**, which never modifies the message.
+
+All three run inside the lifecycle of the request that carried the tool results.
+</Note>
+
 ## Bidirectional screening
 
 Safe House screens in both directions:
 
-- **Inbound**: Evaluates user and tool messages before they reach the agent (the primary use case).
+- **Inbound**: Evaluates user messages *and* tool results before they reach the model — each on its own surface, in the request that carries it (the primary use case). See [When the front door runs](#when-the-front-door-runs).
 - **Outbound screening**: Scans agent responses for data leaks — PII patterns, secret formats, or content that should not leave the agent's context. In `enforce`, a flagged response is caught before it is returned to the caller (which adds latency); in `observe` and `nudge` the response is returned and the finding is recorded post-hoc.
 
 Outbound screening is configured separately and applies regardless of inbound mode.
@@ -161,6 +188,8 @@ Outbound screening is configured separately and applies regardless of inbound mo
 
 When Safe House is active, its threat context enriches the AIP conscience analysis. If a message passes Safe House but scored close to a threshold, that score is included in the conscience prompt so AIP can apply extra scrutiny to the resulting reasoning. The signal flows in both directions: a high AIP boundary-violation rate for a session elevates Safe House's L3 session risk score.
 
+AIP is downstream of the front door, not a substitute for it. Injection carried in a tool result is intercepted at the front door in the request that carries the tool result; AIP catches what survives that, by reading the reasoning the model produced afterwards.
+
 ## The four artifact types
 
 Safe House's runtime treatment is configured by **two parallel cascades** of named-object artifacts:
@@ -168,7 +197,7 @@ Safe House's runtime treatment is configured by **two parallel cascades** of nam
 | Artifact | Scope | What it controls | When |
 |---|---|---|---|
 | [Alignment Card](/concepts/alignment-cards) | Per-agent | Bounded actions, forbidden tools, escalation triggers, integrity gates. Agent self-declared (with org/platform as floor). | At the gateway: CLPI (tool calls) + AIP (reasoning); enforce gates same-turn, observe/nudge record post-hoc |
-| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources, and **`protected_surface`** (org-owned assets, forbidden operations, escalation requirements). Org-defined — not agent-authored. | At the gateway: front-door + back-door; enforce gates same-turn, observe/nudge record post-hoc; `protected_surface` read by L2 |
+| [Protection Card](/concepts/protection-card) | Per-agent | Threat-screening thresholds, screen surfaces, trusted sources, and **`protected_surface`** (org-owned assets, forbidden operations, escalation requirements). Org-defined — not agent-authored. | At the gateway: front-door (once per inbound surface — the message *and* each tool result in the same request) + back-door; enforce gates same-turn, observe/nudge record post-hoc; `protected_surface` read by L2 |
 | [Trust Posture](/concepts/trust-posture) | Per-team | Sideband detector firing rules (coherence, fault-line, fleet) | Async sideband sweep → carryover via `pending_advisories` |
 | Card-cascade composition | Platform → Org → Team → Agent | Strictest-wins fold per-agent; `protected_surface` is strengthen-only union with org as primary authoring scope | Read by gateway at request time |
 
@@ -212,6 +241,8 @@ mnemom protection publish protection.card.yaml
 ```
 
 Start with `mode: observe` — full detection, no blocking — then move to `nudge` or `enforce` once you have a picture of your threat landscape. See [Protection Card Schema](/specifications/protection-card-schema) for all fields and composition rules.
+
+`screen_surfaces.tool_responses` is what enables the turn-internal tool-result screen described in [When the front door runs](#when-the-front-door-runs). It ships `false` in this starter card so that a first `observe` rollout costs nothing on the tool path; with it off, tool results reach the model unscreened and indirect injection has an open lane. Turn it on before you rely on Safe House for indirect-injection coverage.
 
 ## See also
 

@@ -17,6 +17,8 @@ This page explains how Safe House integrates technically with the Mnemom gateway
 
 Safe House runs as **Phase 0.5** — after agent identification resolves the agent config and policy, but before quota enforcement or message forwarding. This placement is intentional: the gateway already knows which agent is handling the request (so Safe House config can be loaded), but no downstream resources have been consumed yet.
 
+Phase 0.5 is **not a single screen per turn**. It runs once per inbound surface the request carries: the inbound message, and — when `screen_surfaces.tool_responses` is enabled — each tool result the agent is handing back to the model in that same request body. A turn that makes three tool calls comes back through Phase 0.5 with those results in tow, and they are screened there, before Phase 3 forwards anything. Nothing about tool-result screening is deferred to Phase 4 or to a later request.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Mnemom gateway                              │
@@ -33,11 +35,15 @@ Safe House runs as **Phase 0.5** — after agent identification resolves the age
 │  ┌─────────────┐  ◄── SAFE_HOUSE_ENABLED=true required          │
 │  │  Phase 0.5  │                                                 │
 │  │ Safe House  │  L1 heuristics → L2 Haiku → L3 session risk    │
+│  │             │  runs per inbound surface: the message and      │
+│  │             │  each tool result in the same request body      │
 │  │             │  enforce: sync block/quarantine                 │
+│  │             │           withhold/decorate tool results        │
 │  │             │  observe:  async via waitUntil (zero latency)   │
 │  │             │  simulate: sync analysis, no action             │
 │  └──────┬──────┘                                                 │
-│         │  (enforce: only pass verdicts continue)                │
+│         │  (enforce: only pass verdicts continue; screened       │
+│         │   tool results are rewritten in the body here)         │
 │         ▼                                                        │
 │  ┌─────────────┐                                                 │
 │  │  Phase 1    │  Quota enforcement                              │
@@ -115,6 +121,24 @@ This is the recommended first step when enabling Safe House on an existing agent
   </Tab>
 </Tabs>
 
+#### Tool results are screened here, in the same request
+
+When `screen_surfaces.tool_responses` is enabled, Phase 0.5 does not stop at the inbound message. The gateway extracts the tool results from the **inbound body of the request it is currently handling** (the first three) and screens each on its own `tool_result` surface — a separate L1 pass, a separate L2 judgement, a separate verdict per tool result. This is a bare `await` in the request path, not a background task.
+
+The per-tool verdicts are then applied to that same request body before Phase 3 dispatches it:
+
+| Per-tool verdict | What Phase 0.5 does to the body |
+|---|---|
+| `pass` | The tool result is forwarded unchanged. |
+| `warn` | The tool result is **decorated** — delivered to the model, annotated as untrusted. |
+| `quarantine` / `block` | The tool result is **withheld** — its content is replaced with a quarantine notice, so the model never sees the payload. |
+
+The request body is re-serialized after this rewrite and that serialization is what Phase 3 forwards. There is no path by which an unscreened tool result reaches the provider, and no part of this is handed off to the Phase 4 AIP pass or to the agent's next request.
+
+<Note>
+**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` is defined at `gateway/src/index.ts:7683` and called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` (the synchronous acting chain that produces the per-tool decisions applied above), `gateway/src/index.ts:7990` (the `waitUntil` shadow chain — recording only, never changes acting behaviour), and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run inside the lifecycle of the request that carried the tool results.
+</Note>
+
 ### Phase 1 — Quota enforcement
 
 Standard token and request quota checks run here. In enforce mode, this phase is only reached by messages that passed Safe House screening, so quota is not consumed by quarantined or blocked attempts.
@@ -125,7 +149,7 @@ The three-layer policy merge (org → agent → transaction) runs here. Safe Hou
 
 ### Phase 3 — Forward to AI provider
 
-The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemini, etc.). In enforce mode, only messages with a Safe House `pass` or `warn` verdict reach this stage.
+The message is forwarded to the configured AI provider (Anthropic, OpenAI, Gemini, etc.). In enforce mode, only messages with a Safe House `pass` or `warn` verdict reach this stage — and what is forwarded is the body **as rewritten by Phase 0.5**, with withheld tool results already replaced by their quarantine notices and warned tool results already decorated.
 
 ### Phase 4 — AIP conscience analysis
 
@@ -141,7 +165,7 @@ Threat signals: social_engineering (0.38), privilege_escalation (0.21).
 Message passed Safe House threshold but apply elevated scrutiny.
 ```
 
-Note: Safe House L2 enforcement of the org's `protected_surface` (forbidden operations, sealed assets) happens in **Phase 0.5**, not Phase 4. By the time Phase 4 runs, the org's hard policy floor has already been evaluated. Phase 4 AIP enrichment adds behavioral context from the alignment card; it does not re-derive the org's `protected_surface`.
+Note: Safe House L2 enforcement of the org's `protected_surface` (forbidden operations, sealed assets) happens in **Phase 0.5**, not Phase 4. The same is true of tool-result screening — it is a Phase 0.5 front-door check on the inbound body, not something Phase 4 picks up afterwards. By the time Phase 4 runs, the org's hard policy floor has already been evaluated and every screened tool result has already been withheld, decorated, or passed. Phase 4 AIP enrichment adds behavioral context from the alignment card; it does not re-derive the org's `protected_surface` and it is not the tool-result screen.
 
 ## KV caching
 
@@ -158,7 +182,7 @@ The `BILLING_CACHE` binding must be present in `wrangler.toml` for Safe House to
 
 ## Pre-emptive nudge injection
 
-When a message passes Safe House screening but its L2 score is ≥ 0.6, Safe House writes a record to the `enforcement_nudges` table. On the agent's *next* request, the gateway's standard nudge injection logic picks this up and prepends a notice to the system prompt:
+This is the one Safe House mechanism that genuinely carries to a later request — and it is an *advisory*, not a screen. When a message passes Safe House screening but its L2 score is ≥ 0.6, Safe House writes a record to the `enforcement_nudges` table. On the agent's *next* request, the gateway's standard nudge injection logic picks this up and prepends a notice to the system prompt:
 
 ```
 [SAFE HOUSE NOTICE] A previous message in this session scored 0.67 on threat analysis
@@ -207,7 +231,7 @@ For agents operating in high-trust, high-risk environments (financial automation
 }
 ```
 
-The key differences from default settings: `enforce` mode is on (instead of `observe`); thresholds are tighter than defaults; and all four surfaces are screened — `incoming` (user/principal prompts), `outgoing` (the agent's response), `tool_calls` (arguments going to tools), and `tool_responses` (values coming back from tools). Trust nothing implicitly: `trusted_sources` starts empty and is widened only with explicit, audited entries.
+The key differences from default settings: `enforce` mode is on (instead of `observe`); thresholds are tighter than defaults; and all four surfaces are screened — `incoming` (user/principal prompts), `outgoing` (the agent's response), `tool_calls` (arguments going to tools), and `tool_responses` (values coming back from tools, screened in Phase 0.5 of the request that carries them, before the model sees them). Trust nothing implicitly: `trusted_sources` starts empty and is widened only with explicit, audited entries.
 
 Canary credentials (`sh.canary.triggered`) and session-escalation policy are configured separately from the protection card; see [Canary credentials](/concepts/safe-house#canary-credentials) and the [webhook event catalog](/api-reference/webhook-events) for the canonical surfaces.
 

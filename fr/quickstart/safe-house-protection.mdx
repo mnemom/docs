@@ -19,6 +19,8 @@ Ce démarrage rapide vous guide pour activer Safe House sur un agent existant, o
 
 Commencez par le mode `observe`. Il exécute une analyse complète des menaces sans aucun impact sur la latence, vous permettant de voir ce que Safe House détecterait avant de vous engager dans le blocage. La configuration de Safe House se trouve sur la **carte de protection** de l'agent — `mode` est l'interrupteur principal de premier niveau ; `screen_surfaces` décide quelles surfaces le pipeline de détection inspecte.
 
+Les surfaces sont des unités de filtrage, pas un budget par tour : la porte d'entrée s'exécute une fois par surface activée que la requête transporte. La carte ci-dessous ne commence qu'avec `incoming`, vous verrez donc une évaluation de porte d'entrée par requête. Activer `tool_responses` ([Étape 7](#étape-7--filtrer-les-résultats-doutils)) ajoute une évaluation supplémentaire pour chaque résultat d'outil que la requête renvoie au modèle — à l'intérieur de cette même requête, avant que le modèle ne le lise.
+
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
@@ -280,6 +282,37 @@ curl -X DELETE https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF12
 Libérer un message mis en quarantaine l'enregistre également comme faux positif, ce qui alimente la calibration des seuils. Après plus de 10 faux positifs confirmés dans une catégorie, l'Observatoire suggérera des ajustements de seuil pour votre agent.
 </Tip>
 
+## Étape 7 — Filtrer les résultats d'outils
+
+Les étapes 1 à 6 n'ont filtré que `incoming` — le message de l'utilisateur. Si votre agent utilise des outils, la voie d'injection la plus courante est le *résultat d'outil* : un résultat de recherche, un corps d'e-mail, une réponse d'API contenant des instructions dissimulées. Activez la surface `tool_responses` :
+
+```yaml
+screen_surfaces:
+  incoming: true
+  outgoing: false
+  tool_calls: false
+  tool_responses: true      # filtrer les valeurs renvoyées par les outils
+```
+
+À partir de là, une requête qui renvoie des résultats d'outils au modèle est filtrée **à nouveau à l'intérieur de cette même requête** — une fois par résultat d'outil, sur sa propre surface, avant que le corps ne soit transmis au fournisseur. En modes `nudge` et `enforce`, la passerelle prend les trois premiers résultats d'outils que le corps transporte. C'est une vérification de porte d'entrée ; rien n'attend le tour suivant de l'agent.
+
+La forme de l'application diffère de celle de l'étape 5. Un *message* signalé fait échouer la requête avec un 422 ou un 403. Un *résultat d'outil* signalé ne fait pas échouer la requête — il est retiré du corps :
+
+| Verdict par outil | Ce que vous voyez |
+|---|---|
+| `pass` | Le résultat d'outil est transmis inchangé. |
+| `warn` | Le résultat d'outil est livré, annoté comme non fiable. |
+| `quarantine` / `block` | Le contenu du résultat d'outil est remplacé par un avis de quarantaine ; le modèle ne voit jamais la charge utile. La requête renvoie tout de même **200**, avec `front=enforced` dans `X-Mnemom-Verdict`. |
+
+```
+HTTP/2 200
+X-Mnemom-Verdict: front=enforced; autonomy=pass; integrity=pass; back=pass
+```
+
+<Tip>
+N'interprétez pas un 200 comme « la porte d'entrée n'a rien fait ce tour-ci ». Analysez `X-Mnemom-Verdict` — `front=enforced` sur un 200 signifie qu'un résultat d'outil a été retenu ou annoté à l'intérieur de la requête.
+</Tip>
+
 ## Prochaines étapes
 
 <CardGroup cols={2}>
@@ -300,5 +333,6 @@ Libérer un message mis en quarantaine l'enregistre également comme faux positi
 ## Voir aussi
 
 - Concept Safe House — Explication complète des modes, catégories de menaces et couches de détection
+- Quand la porte d'entrée s'exécute — Pourquoi la porte d'entrée se déclenche une fois par surface entrante, et non une fois par tour
 - Intégration Safe House Gateway — Comment Safe House s'intègre dans le pipeline de requêtes de la passerelle Mnemom
 - Modes d'application — Comment la passerelle gère les violations après qu'elles atteignent l'agent

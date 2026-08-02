@@ -93,15 +93,17 @@ curl -X POST https://api.mnemom.ai/v1/safe-house/config/bulk-apply \
 
 ## Quarantine management
 
-Quarantined turns are held pending human review. Reviewers can release (with or without a false-positive flag) or confirm as a genuine threat.
+Quarantined items are held pending human review. Reviewers can release (with or without a false-positive flag) or confirm as a genuine threat.
+
+The unit is an **evaluation, not a turn**. The front door runs once per inbound surface a request carries, so a single turn can produce several evaluations and several quarantine records — one for the inbound message, and one for each tool result screened in the same request. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/v1/safe-house/quarantine` | List quarantined items — filter by `status`, `agent_id`, `threat_type`, date range |
 | `GET` | `/v1/safe-house/quarantine/:id` | Retrieve a single quarantine record with full evaluation detail |
 | `DELETE` | `/v1/safe-house/quarantine/:id` | Delete a quarantine record (admin only; irreversible) |
-| `POST` | `/v1/safe-house/quarantine/:id/release` | Release the quarantined turn to the agent; optionally mark as false positive |
-| `POST` | `/v1/safe-house/quarantine/:id/report` | Confirm the quarantined turn as a genuine threat |
+| `POST` | `/v1/safe-house/quarantine/:id/release` | Release the quarantined content to the agent; optionally mark as false positive |
+| `POST` | `/v1/safe-house/quarantine/:id/report` | Confirm the quarantined content as a genuine threat |
 
 **List open quarantine items:**
 
@@ -334,7 +336,7 @@ curl "https://api.mnemom.ai/v1/compliance/safe-house-report?from=2026-01-01T00:0
   -H "Accept: application/json"
 ```
 
-Returns a structured compliance report covering all evaluation decisions, blocked/quarantined turns, false positive resolutions, and configuration change audit records within the requested window. Supports `Accept: text/csv` for spreadsheet-compatible export.
+Returns a structured compliance report covering all evaluation decisions, blocked/quarantined content (inbound messages and screened tool results alike), false positive resolutions, and configuration change audit records within the requested window. Supports `Accept: text/csv` for spreadsheet-compatible export.
 
 ---
 
