@@ -5,7 +5,7 @@ sidebarTitle: "AEGIS"
 icon: "shield-check"
 ---
 
-**Mnemom AEGIS** — Adaptive Enforcement, Governance & Intelligence Substrate — is the protection layer of [Safe House](/concepts/safe-house). It screens every agent transaction at four checkpoints (front door, back door, inside.autonomy, inside.integrity), each independently set to one of four enforcement modes (`off`, `observe`, `nudge`, `enforce`). AEGIS is the cross-tenant defensive network above the per-customer perimeter: per-customer Safe Houses detect on what they can see; AEGIS sees across all of them and feeds signed Managed Rules back to every gateway in the network.
+**Mnemom AEGIS** — Adaptive Enforcement, Governance & Intelligence Substrate — is the protection layer of [Safe House](/concepts/safe-house). It screens every agent transaction at four checkpoints (front door, back door, inside.autonomy, inside.integrity), each independently set to one of four enforcement modes (`off`, `observe`, `nudge`, `enforce`). A checkpoint is a position, not a single evaluation — the front door alone screens the inbound message *and* every tool result the request carries, inside the same turn. AEGIS is the cross-tenant defensive network above the per-customer perimeter: per-customer Safe Houses detect on what they can see; AEGIS sees across all of them and feeds signed Managed Rules back to every gateway in the network.
 
 AEGIS learns from three signal sources: a built-in adversarial arena that probes every Safe House around the clock, customer-reported false negatives and false positives, and aggregated cross-tenant patterns the network can see but no individual customer can. When a new detection pattern crosses the promotion bar, AEGIS converts it into an Ed25519-signed [Managed Rule](/concepts/managed-rules) and propagates it to every affected customer's gateway in under thirty seconds at P95. Tier-1 and tier-2 rules require dual-control human review under an append-only audit chain; the entire pipeline is governed by [published SLOs](https://trust.mnemom.ai/slos) and a public STIX 2.1 [Indicator-of-Compromise feed](/concepts/iocs).
 
@@ -15,11 +15,13 @@ This page is the conceptual entry point. The five-layer architecture is document
 
 Every agent transaction passes four positions in the request lifecycle. Each position is independently configurable to one of four modes. This is the load-bearing bidirectional matrix Safe House operators tune; AEGIS does not introduce new modes or new checkpoints — it ships detection content that composes against the same matrix.
 
+A checkpoint is a *position*, not a single evaluation. The front door in particular fires more than once per turn: it screens the inbound message when the request arrives, and then screens each tool result the request carries turn-internally — inline, one result at a time, before the request is forwarded. See [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
+
 ### Four checkpoints
 
 | Checkpoint | Position | What it screens |
 |---|---|---|
-| **Front door** | Inbound (enforce: before agent; observe/nudge: post-hoc) | Prompt injection, indirect injection, social engineering, BEC fraud, agent spoofing |
+| **Front door** | Inbound — the message at request arrival, plus each tool result turn-internally, mid-request (enforce: before the content reaches the agent; observe/nudge: post-hoc) | Prompt injection, indirect injection (per tool result, with an up-only session-posture ratchet across the results in a turn), social engineering, BEC fraud, agent spoofing |
 | **Inside.autonomy** | Mid-transaction | Tool-use policy, action verification, CLPI proofs |
 | **Inside.integrity** | Mid-transaction | AIP reasoning checks, drift detection, conscience |
 | **Back door** | Outbound (enforce: before delivery; observe/nudge: post-hoc) | PII leakage, exfiltration patterns, alignment-card violations, regulated advice |
@@ -31,7 +33,7 @@ Every agent transaction passes four positions in the request lifecycle. Each pos
 | **`off`** | Inactive. No analysis, no logging. |
 | **`observe`** | Full evaluation; verdict in header + Observatory; zero operational impact on the transaction. |
 | **`nudge`** | Soft intervention — warnings, prompts, advisories. Transaction proceeds. |
-| **`enforce`** | Synchronous block at quarantine / block thresholds. |
+| **`enforce`** | Synchronous action at quarantine / block thresholds — the request is blocked, or, on the tool-result surface, the offending result is withheld and the turn continues. |
 
 The canonical enum is `off / observe / nudge / enforce`. See [Protection Card](/concepts/protection-card) for the per-agent configuration surface and [Card Composition](/concepts/card-composition) for the strictest-wins scope cascade.
 

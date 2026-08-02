@@ -15,18 +15,19 @@ The Security Observatory is the Safe House surface inside each agent's dashboard
 
 ### Threat feed
 
-A real-time stream of evaluation events across all agents in your org, newest first. Each row shows:
+A real-time stream of evaluation events across all agents in your org, newest first. **One row is one screened surface, not one turn** — the front door screens the inbound message when the request arrives and each tool result [turn-internally](/concepts/safe-house#turn-internal-tool-result-screening), inline, before the request is forwarded, so a single turn carrying three tool results contributes up to four rows. Each row shows:
 
 - **Agent ID and session ID** — which agent, which conversation
+- **Surface** — `incoming` or `tool_responses`; several rows from one turn share a session ID and a near-identical timestamp
 - **Verdict** — `warn`, `quarantine`, or `block` (color-coded amber/orange/red)
 - **Top threat type** — the highest-confidence threat category
 - **Confidence score** — L2 confidence percentage
 - **Detection layer** — whether the verdict came from L1 (pattern match), L2 (LLM analysis), or L3 (session model)
 - **Time** — seconds or minutes ago
 
-Click any row to open the full evaluation detail: the turn content, all threat signals, the full L2 reasoning, and the quarantine management actions.
+Click any row to open the full evaluation detail: the screened content (the inbound message, or the single tool result that scored), all threat signals, the full L2 reasoning, and the quarantine management actions.
 
-**What to look for:** A sudden spike in `prompt_injection` or `indirect_injection` events on a specific agent often means its data sources (search results, email, API responses) have been poisoned. Investigate the source, not just the individual turn.
+**What to look for:** A sudden spike in `prompt_injection` or `indirect_injection` events on a specific agent often means its data sources (search results, email, API responses) have been poisoned. `indirect_injection` rows are almost always `tool_responses` rows; in `enforce` that result was already withheld from the turn that carried it, so the absence of an HTTP error does not mean nothing was intercepted. Investigate the source, not just the individual evaluation.
 
 
 ### Metrics overview
@@ -40,9 +41,9 @@ Four KPI cards with 7-day and 30-day comparisons:
 
 ### Session risk panel
 
-Lists all active sessions with elevated risk (`medium` or `high`). A session enters `medium` risk when any single turn scores above the warn threshold. It escalates to `high` when:
+Lists all active sessions with elevated risk (`medium` or `high`). A session enters `medium` risk when any single screened surface scores above the warn threshold. It escalates to `high` when:
 
-- Two or more turns in the session have scored above `warn`, or
+- Two or more screens in the session have scored above `warn` — these need not be in different turns, since one turn contributes a screen for the inbound message plus one per tool result it carries, and the session posture ratchets **up only** across them, or
 - A `hijack_attempt` pattern has been detected (topic/scope pivot after benign history), or
 - A `session.escalated` event has fired
 
@@ -53,8 +54,8 @@ Lists all active sessions with elevated risk (`medium` or `high`). A session ent
 Displays detected cross-agent attack campaigns — groups of agents that have received structurally similar attacks from what appears to be the same infrastructure within a rolling time window.
 
 Campaign detection fires when:
-- 3 or more agents in the same org receive turns that score ≥ 0.85 on the same threat type, and
-- MinHash similarity between those turns is ≥ 0.88
+- 3 or more agents in the same org receive screened content that scores ≥ 0.85 on the same threat type — inbound messages, tool results, or a mix, and
+- MinHash similarity between those payloads is ≥ 0.88
 
 **What it means:** A campaign detection is strong evidence of a coordinated attack rather than a coincidental spike. The attacker is probing multiple agents simultaneously, possibly to find the one with the weakest enforcement configuration. Respond by checking whether any of the targeted agents have higher thresholds than the others.
 
@@ -130,7 +131,7 @@ When the campaign tracker shows a new campaign, your response workflow should be
 
 1. **Identify the weakest enforcement link** — which of the affected agents has the lowest block threshold for the campaign's threat type? Tighten it first.
 2. **Check for a common data source** — if the affected agents all read from the same email inbox, API feed, or shared data store, that source may be compromised.
-3. **Review the similarity evidence** — the campaign detail view shows representative turns from each affected agent. The structural similarities are often informative about the attacker's tooling.
+3. **Review the similarity evidence** — the campaign detail view shows representative screened payloads from each affected agent, labeled by surface. A campaign carried on the `tool_responses` surface points at a poisoned upstream data source rather than at a hostile caller.
 4. **File a pattern candidate** — if the campaign's payload structure is novel, submit it as a candidate pattern so it enters the arena evaluation pipeline.
 
 Query all active campaigns:

@@ -97,7 +97,7 @@ Protection-card composition follows the [three-scope model](/concepts/card-compo
 |-------|-------------|
 | `mode` | **Strictest wins** (`enforce > nudge > observe > off`). Agent can go stricter, not looser. |
 | `thresholds.*` | **Min across scopes** — lowest = strictest wins. An agent can tighten further than the platform/org but not loosen. |
-| `screen_surfaces.*` | **OR per field — true wins**. Any scope can require scanning a surface; agents cannot turn off scanning the org or platform requires. |
+| `screen_surfaces.*` | **OR per field — true wins**. Any scope can require scanning a surface; agents cannot turn off scanning the org or platform requires. Each surface also carries its own timing: `incoming` is screened at request arrival, `tool_responses` [turn-internally](/concepts/safe-house#turn-internal-tool-result-screening) — one inline screen per tool result, inside the request that carries it. |
 | `trusted_sources.{domains,agent_ids,ip_ranges}` | **Platform intersection, org+agent union**: platform allowlist is the compliance ceiling; downstream scopes can only add from inside that ceiling. |
 
 Publishing an org protection template propagates to all agents in the org via `mark_agents_for_recompose` — the same mechanism as alignment templates. See [Managing Card Composition](/guides/card-composition) for the full flow.
@@ -140,17 +140,25 @@ Review the event stream for 7-14 days. Adjust thresholds based on false-positive
 
 ### Performance-sensitive agent (tight tool-response window)
 
-If an agent's tool responses contain large payloads and per-request latency matters:
+`tool_responses` is the only surface whose cost scales with the *contents* of a turn. It is screened [turn-internally](/concepts/safe-house#turn-internal-tool-result-screening): the gateway walks the tool results the request carries and awaits one screen per result, in order, before the request is forwarded upstream. A turn carrying four large tool results therefore pays four sequential screens on the request path, not one.
+
+If that cost does not fit your latency budget, you can turn the surface off:
 
 ```yaml
 screen_surfaces:
   incoming: true
   outgoing: true
   tool_calls: true
-  tool_responses: false             # skip tool-response scanning
+  tool_responses: false             # skip tool-result screening
 
 mode: enforce
 ```
+
+<Warning>
+This is a real reduction in coverage, not a deferral. With `tool_responses: false` nothing re-screens tool results later — an indirect-injection payload in a tool result reaches the model **in the same turn that fetched it**. [AIP](/concepts/integrity-checkpoints) is not a fallback here: it analyzes the reasoning produced from the already-forwarded request, so it can only catch the downstream effect, after the payload has landed. Tool results are the primary indirect-injection surface; disable this only for agents whose tool responses come from sources you have independently validated.
+</Warning>
+
+Cheaper alternatives before you disable the surface outright: add the backing service to [`trusted_sources`](#trusted-internal-backend) so screening short-circuits for that upstream only, or raise `thresholds.warn` so most results settle at L1 without an L2 call.
 
 Every detection event logs which surfaces were inspected, so auditors can see what was *not* scanned. Document the reason in your internal runbook.
 

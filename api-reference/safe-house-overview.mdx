@@ -93,15 +93,15 @@ curl -X POST https://api.mnemom.ai/v1/safe-house/config/bulk-apply \
 
 ## Quarantine management
 
-Quarantined turns are held pending human review. Reviewers can release (with or without a false-positive flag) or confirm as a genuine threat.
+Quarantined items are held pending human review — an inbound message that was stopped at request arrival, or an individual tool result that was withheld from the request carrying it. Reviewers can release (with or without a false-positive flag) or confirm as a genuine threat.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/v1/safe-house/quarantine` | List quarantined items — filter by `status`, `agent_id`, `threat_type`, date range |
 | `GET` | `/v1/safe-house/quarantine/:id` | Retrieve a single quarantine record with full evaluation detail |
 | `DELETE` | `/v1/safe-house/quarantine/:id` | Delete a quarantine record (admin only; irreversible) |
-| `POST` | `/v1/safe-house/quarantine/:id/release` | Release the quarantined turn to the agent; optionally mark as false positive |
-| `POST` | `/v1/safe-house/quarantine/:id/report` | Confirm the quarantined turn as a genuine threat |
+| `POST` | `/v1/safe-house/quarantine/:id/release` | Release the quarantined item to the agent; optionally mark as false positive |
+| `POST` | `/v1/safe-house/quarantine/:id/report` | Confirm the quarantined item as a genuine threat |
 
 **List open quarantine items:**
 
@@ -334,7 +334,9 @@ curl "https://api.mnemom.ai/v1/compliance/safe-house-report?from=2026-01-01T00:0
   -H "Accept: application/json"
 ```
 
-Returns a structured compliance report covering all evaluation decisions, blocked/quarantined turns, false positive resolutions, and configuration change audit records within the requested window. Supports `Accept: text/csv` for spreadsheet-compatible export.
+Returns a structured compliance report covering all evaluation decisions, blocked/quarantined content, false positive resolutions, and configuration change audit records within the requested window. Supports `Accept: text/csv` for spreadsheet-compatible export.
+
+Decisions are reported **per screened surface, not per turn**: the front door screens the inbound message when the request arrives and each tool result [turn-internally](/concepts/safe-house#turn-internal-tool-result-screening), so one turn can contribute several rows. A `tool_responses` row records a *withheld* tool result — the offending content was replaced in the forwarded request and the turn continued — rather than a rejected request, so row counts will not reconcile against 4xx response counts.
 
 ---
 

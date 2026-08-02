@@ -70,13 +70,13 @@ The full taxonomy is auto-generated from `mnemom-api/src/index.ts`'s `errorRespo
 | `invalid_credentials` | 401 | API key revoked, JWT expired, signature mismatch. |
 | `insufficient_scope` | 403 | Authenticated, but the token's scope set doesn't include this operation. |
 | `org_access_denied` | 403 | Token belongs to a different org. |
-| `safe_house_blocked` | 403 | The agent's `protection.mode = enforce` blocked the inbound message. The response body's `details` includes the verdict and (when available) the quarantine ID. See [Safe House verdict-to-status mapping](#safe-house-verdict-to-status-mapping) below. |
+| `safe_house_blocked` | 403 | The agent's `protection.mode = enforce` blocked the inbound message. Emitted for the `incoming` surface only — a blocked tool result is withheld from the forwarded request instead of failing it. The response body's `details` includes the verdict and (when available) the quarantine ID. See [Safe House verdict-to-status mapping](#safe-house-verdict-to-status-mapping) below. |
 | `agent_not_found` | 404 | `agent_id` doesn't exist (or doesn't belong to the caller's org). Includes ID mistypes and just-deleted agents. |
 | `resource_not_found` | 404 | Generic — the target endpoint or sub-resource doesn't exist. |
 
 ## 422 — Safe House quarantine
 
-A `422 Unprocessable Entity` is the dedicated status code for Safe House `quarantine` verdicts: the inbound message was structurally valid (so not 400) and you were authorized (so not 403), but the content tripped the quarantine threshold and the gateway is holding it for review instead of forwarding it to the upstream provider.
+A `422 Unprocessable Entity` is the dedicated status code for Safe House `quarantine` verdicts **on the `incoming` surface**: the inbound message was structurally valid (so not 400) and you were authorized (so not 403), but the content tripped the quarantine threshold and the gateway is holding it for review instead of forwarding it to the upstream provider. A quarantined *tool result* is handled per surface instead — withheld from the forwarded request, 200 returned — so it never reaches this status code.
 
 ```jsonc
 {
@@ -128,7 +128,7 @@ The distinction between 503 (downstream unhealthy) and 529 (gateway-saturated) m
 
 ## Safe House verdict-to-status mapping
 
-The Safe House front-door inspects every inbound message and emits a verdict (`pass | observed | nudged | enforced`). When the agent's `protection.mode` is `enforce`, the verdict drives the HTTP response:
+The Safe House front-door screens the inbound message when the request arrives and, when `screen_surfaces.tool_responses` is enabled, each tool result the request carries — inline, in the same turn. It therefore produces a **set** of per-surface decisions per request, which `X-Mnemom-Verdict.front` rolls up into a single value (`pass | observed | nudged | enforced`). When the agent's `protection.mode` is `enforce`, only the **`incoming`-surface** decision can drive the HTTP response:
 
 | Verdict | HTTP status | Error code | Notes |
 |---|---|---|---|
@@ -138,9 +138,11 @@ The Safe House front-door inspects every inbound message and emits a verdict (`p
 | `enforced` (warn → quarantine threshold) | **422** | `safe_house_quarantined` | Held for review. |
 | `enforced` (quarantine → block threshold) | **403** | `safe_house_blocked` | Inbound message blocked outright. |
 
+**Tool-result decisions do not map to a status code.** A `block` or `quarantine` on the `tool_responses` surface is a per-surface *withhold*, not a request rejection: the gateway replaces that tool result's content in the outbound request with a quarantine notice and forwards the turn anyway. The response is a normal 200 with `front=enforced` on the verdict header, and there is no `safe_house_blocked` / `safe_house_quarantined` error body. Do not treat "no 4xx" as "nothing was intercepted" — see [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening).
+
 The same mapping applies symmetrically on the back-door (outbound screening) — though `enforced` outbound replaces or redacts content rather than dropping the response, so the customer-visible status is still 200 with a modified body.
 
-The `X-Mnemom-Verdict` response header reflects the full per-checkpoint state even on error responses — useful for distinguishing "front-door blocked" (`front=enforced`) from "agent's own integrity intervention" (`integrity=enforced`).
+The `X-Mnemom-Verdict` response header reflects the full per-checkpoint state even on error responses — useful for distinguishing "front-door blocked" (`front=enforced`) from "agent's own integrity intervention" (`integrity=enforced`). `front` is a rollup: one `front=enforced` can stand for a rejected inbound message, one or more withheld tool results, or both.
 
 <Note>
 **`integrity=unverified` does not get its own status code.** Unlike the Safe House front/back door, the `integrity` checkpoint has a fifth value, `unverified` — the analyzer timed out, errored, or the circuit breaker was open, so no trustworthy verdict was produced. This is never reported as `pass`. In `integrity_mode: enforce`, the response is withheld and replaced same-turn (fail-closed), the same way an `enforced` intervention is — **still a 2xx**, not a dedicated 4xx/5xx, since the intervention is delivered as the response body rather than as an error. In `observe`/`nudge`, the response is forwarded unmodified and the `unverified` state is recorded for post-hoc review. See [`X-Mnemom-Verdict`](/api-reference/headers#x-mnemom-verdict--structured-per-checkpoint-state) for the full semantics.

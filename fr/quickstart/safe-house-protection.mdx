@@ -1,6 +1,6 @@
 ---
 title: "Activer la protection Safe House"
-description: "Ajoutez la détection de menaces par pré-filtrage à un agent IA en 5 minutes — du mode observe à votre premier message mis en quarantaine"
+description: "Ajoutez le filtrage des menaces entrantes à un agent IA en 5 minutes — du mode observe à votre premier message mis en quarantaine"
 sidebarTitle: "Protection Safe House"
 icon: "shield-halved"
 source_fingerprint: sha256:8c62d82c8cce903994c41b69326ce7cd08574e349fe978b7e271d9ac82646d82
@@ -17,7 +17,9 @@ Ce démarrage rapide vous guide pour activer Safe House sur un agent existant, o
 
 ## Étape 1 — Activer Safe House en mode observe
 
-Commencez par le mode `observe`. Il exécute une analyse complète des menaces sans aucun impact sur la latence, vous permettant de voir ce que Safe House détecterait avant de vous engager dans le blocage. La configuration de Safe House se trouve sur la **carte de protection** de l'agent — `mode` est l'interrupteur principal de premier niveau ; `screen_surfaces` décide quelles surfaces le pipeline de détection inspecte.
+Commencez par le mode `observe`. Il exécute une analyse complète des menaces sans aucun impact sur la latence, vous permettant de voir ce que Safe House détecterait avant de vous engager dans le blocage. La configuration de Safe House se trouve sur la **carte de protection** de l'agent — `mode` est l'interrupteur principal de premier niveau ; `screen_surfaces` décide quelles surfaces le pipeline de détection inspecte, et chaque surface a son propre moment : `incoming` est analysée à l'arrivée de la requête, `tool_responses` à l'intérieur même du tour (une analyse par résultat d'outil, en ligne, avant que la requête ne soit transmise au fournisseur) et `outgoing` à la porte de sortie.
+
+La carte ci-dessous laisse `tool_responses` désactivé pour simplifier le premier essai. L'activer ajoute une analyse attendue par résultat d'outil sur le chemin de la requête et, en `enforce`, permet à Safe House de retenir un seul résultat d'outil en cours de tour — en remplaçant son contenu par un avis de mise en quarantaine pendant que le reste du tour se poursuit — au lieu de rejeter toute la requête. Voir `/concepts/safe-house#turn-internal-tool-result-screening`.
 
 ```bash
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
@@ -113,6 +115,8 @@ content-type: application/json
 
 <Note>
 En mode observe, `X-Mnemom-Verdict.front` indique `observed` afin que vous puissiez suivre ce qui *se serait* passé en mode enforce — le message atteint quand même l'agent dans tous les cas. L'en-tête `X-Mnemom-Advisory` porte les résultats du détecteur sous forme de tableau JSON ; voir `/api-reference/headers#x-mnemom-advisory`.
+
+`front` est un agrégat de toutes les analyses de la porte d'entrée pour cette requête, pas une évaluation unique : une fois `tool_responses` activé, un tour produit une analyse du message plus une par résultat d'outil, toutes repliées dans cette seule valeur `front=`.
 </Note>
 
 ## Étape 3 — Examiner les détections dans l'observatoire

@@ -38,7 +38,7 @@ const FAMILY_BLURBS = {
   'integrity': 'AIP integrity-checkpoint events fired after every analyze pass.',
   'quota': 'Org-level quota and risk-budget threshold crossings.',
   'reputation': 'Per-agent reputation evolution. (Catalog-only as of 2026-05-09 — emitter wiring pending.)',
-  'safe-house': 'Front-door evaluation outcomes and security tripwires. (Catalog-only as of 2026-05-09 — emitter wiring pending.)',
+  'safe-house': 'Front-door evaluation outcomes and security tripwires. `sh.evaluation.*` fires per screened surface, not per request — the front door screens the inbound message when the request arrives and each tool result turn-internally, inline, before that request is forwarded, so one request can emit several of these events. See [Turn-internal tool-result screening](/concepts/safe-house#turn-internal-tool-result-screening). (Catalog-only as of 2026-05-09 — emitter wiring pending.)',
   'sideband': 'Cross-turn detector firings (drift, coherence, fault-line, fleet) and operator-marked drift resolutions.',
   'team': 'Team lifecycle and membership events.',
   'trace': 'AAP alignment-trace verification and policy-violation events. (Emitted via the parallel AAP webhook rail — see debt #18.)',

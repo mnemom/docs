@@ -21,7 +21,7 @@ Safe House detects eight threat categories via its L1 pattern library, L2 LLM an
 |---|---|---|
 | Business Email Compromise | `bec_fraud` | Front door |
 | Prompt injection | `prompt_injection` | Front door |
-| Indirect injection | `indirect_injection` | Front door |
+| Indirect injection | `indirect_injection` | Front door (turn-internal, once per tool result) |
 | Social engineering | `social_engineering` | Front door |
 | Agent spoofing | `agent_spoofing` | Front door |
 | Multi-turn hijack | `hijack_attempt` | Front door (L3 session model) |
@@ -37,7 +37,7 @@ Each Safe House pattern maps to one or more OWASP ASI entries. A pattern can map
 | Safe House pattern | OWASP entry | Coverage level | Enforcement mechanism |
 |---|---|---|---|
 | `prompt_injection` | **ASI01** Agent Goal Hijack | Full — direct variant | L1 regex families (override phrases, role reassignment, jailbreak openers, authority spoofing); L2 compound confidence scoring; L3 session model. Direct injection is the canonical goal-hijack vector |
-| `indirect_injection` | **ASI01** Agent Goal Hijack | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
+| `indirect_injection` | **ASI01** Agent Goal Hijack | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Runs turn-internally — each tool result is screened inline before the request is forwarded, and a flagged one is withheld from that same request. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
 | `hijack_attempt` | **ASI01** Agent Goal Hijack | Partial — multi-turn variant | L3 session model: topic coherence tracking, escalating action scope, identity drift, pivot detection after a trust-building sequence. Substantial multi-turn coverage, with a known residual on novel multi-turn and multi-vector sequences (active recall work). Threshold: ≥ 0.7 confidence (routes to human review — see [calibration note](#asi01--multi-turn-hijack-human-escalation-at-default-threshold)) |
 | `bec_fraud` | **ASI09** Human-Agent Trust Exploitation, **ASI01** Agent Goal Hijack | Full — conjunction detection | Requires co-occurring: financial action term + authority claim + urgency marker + secrecy instruction. The authority/urgency/secrecy manipulation is trust exploitation; the intent to redirect the agent into an unauthorized action is goal hijack |
 | `social_engineering` | **ASI09** Human-Agent Trust Exploitation | Full | Authority + urgency signal pair, absent the financial-action component. Regulatory threat framing, role-authority claims, urgency escalation — manipulating the agent's trust to change its behavior |
@@ -72,7 +72,7 @@ The reverse view — starting from each OWASP entry and tracing what ships in en
 
 No shipped Safe House pattern targets memory/context store attacks. An attacker who can write to an agent's persistent memory — conversation history, vector store, retrieved documents — can influence future turns without a detectable inbound signal. The AIP thinking-block analysis layer provides partial mitigation: if the poisoned memory causes the agent to reason in ways inconsistent with its alignment card, AIP may flag it — and, in `enforce`, gate the response before the action lands (in `observe`/`nudge` the verdict is recorded post-hoc). That is detection of downstream effect, not upstream interception.
 
-**Recommended defense-in-depth:** treat memory stores as an untrusted input boundary, apply the same L1/L2 screening to memory-retrieved content as to external tool results, and enable AIP to catch the reasoning anomalies that poisoned memory produces.
+**Recommended defense-in-depth:** treat memory stores as an untrusted input boundary, apply the same L1/L2 screening to memory-retrieved content as the gateway applies inline to external tool results, and enable AIP to catch the reasoning anomalies that poisoned memory produces.
 
 ### ASI05 — Unexpected Code Execution
 
@@ -84,9 +84,11 @@ Mnemom screens per-agent message content and surfaces individual-agent drift (AA
 
 ### ASI01 — indirect injection, novel payloads
 
-Indirect injection via tool results is partially covered. MinHash similarity matching compares tool results against a library of known injection payloads. Sufficiently novel payloads that bear no structural or semantic similarity to known patterns will score below L1 thresholds. L2 analysis provides a second pass, but detection accuracy is bounded by the analysis model's capability.
+Indirect injection via tool results is partially covered, and the coverage is **turn-internal**: each tool result is screened inline inside the request that carries it, and in `enforce` a flagged result is withheld — replaced in the outbound request before the model sees it. Nothing about this waits for a later turn or for AIP.
 
-The arena flywheel closes this gap over time: canary credentials and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns promote to active detection. For high-sensitivity environments, consider adding application-layer validation of tool results before they re-enter the agent context.
+MinHash similarity matching compares tool results against a library of known injection payloads. Sufficiently novel payloads that bear no structural or semantic similarity to known patterns will score below L1 thresholds. L2 runs on the same tool result within the same inline screen — it is a deeper layer of the one screen, not a later re-screen — and detection accuracy is bounded by the analysis model's capability. When both layers miss, the payload lands in that turn's context; AIP then covers the downstream reasoning effect, not the tool result itself.
+
+The arena flywheel closes this gap over time: canary credentials and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns promote to active detection. For high-sensitivity environments, consider adding application-layer validation of tool results in your own tool-execution path, alongside the gateway's inline screen.
 
 ### ASI01 — multi-turn hijack, human escalation at default threshold
 
