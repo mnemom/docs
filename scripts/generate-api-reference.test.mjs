@@ -28,6 +28,7 @@ import { computeDrift, stubBody } from "./lib/api-reference-drift.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "generate-api-reference.mjs");
 const LIB = join(HERE, "lib", "api-reference-drift.mjs");
+const STRIP_LIB = join(HERE, "lib", "strip-html-tags.mjs"); // sibling import of LIB
 
 // ── In-memory fixture helpers ─────────────────────────────────────────────
 
@@ -180,6 +181,30 @@ test("committed stub whose description-only drifted (title unchanged) → refres
   assert.equal(r.written, 0, "page already exists — not a new write");
 });
 
+test("descriptionFor via stubBody: nested-tag description fully strips, well-formed tags unchanged (MNE-3528)", () => {
+  // Nested tag: a single-pass strip would leave a residual `<...>`; the shared
+  // loop-until-stable helper removes it, so no tag substring reaches frontmatter.
+  const nested = stubBody(
+    "List widgets",
+    "get",
+    "/widgets",
+    { description: "Deploy <<b>b>the widget fleet. Second sentence." },
+  );
+  const nestedDesc = /description: (.*)\n/.exec(nested)[1];
+  assert.ok(!/<[^<>]*>/.test(nestedDesc), "no residual HTML tag survives in the description");
+  assert.equal(JSON.parse(nestedDesc), "Deploy the widget fleet.");
+
+  // Well-formed (non-nested) tags strip exactly as before — zero regression.
+  const wellFormed = stubBody(
+    "List widgets",
+    "get",
+    "/widgets",
+    { description: "Deploy <b>the</b> widget fleet. Second sentence." },
+  );
+  const wfDesc = /description: (.*)\n/.exec(wellFormed)[1];
+  assert.equal(JSON.parse(wfDesc), "Deploy the widget fleet.");
+});
+
 test("`--check` exits non-zero and prints the remediation line when the tree has drifted", () => {
   // /widgets has no committed page → the generator WOULD write it.
   const spec = JSON.stringify({
@@ -213,6 +238,7 @@ function makeTree({ openapi, docs, pages } = {}) {
   mkdirSync(join(root, "api-reference", "endpoint"), { recursive: true });
   copyFileSync(CLI, join(root, "scripts", "generate-api-reference.mjs"));
   copyFileSync(LIB, join(root, "scripts", "lib", "api-reference-drift.mjs"));
+  copyFileSync(STRIP_LIB, join(root, "scripts", "lib", "strip-html-tags.mjs"));
   if (openapi !== undefined) writeFileSync(join(root, "api-reference", "openapi.json"), openapi);
   if (docs !== undefined) writeFileSync(join(root, "docs.json"), docs);
   for (const [name, content] of Object.entries(pages || {})) {
