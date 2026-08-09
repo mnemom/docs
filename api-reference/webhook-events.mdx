@@ -271,7 +271,7 @@ Fired when an agent's reputation score crosses a meaningful threshold. Operator-
 
 ## Safe House family
 
-Front-door evaluation outcomes and security tripwires. (Catalog-only as of 2026-05-09 — emitter wiring pending.)
+Front-door evaluation outcomes and security tripwires. `sh.evaluation.*` fires per screened surface, not per request — the front door screens the inbound message when the request arrives and each tool result turn-internally, inline, before that request is forwarded, so one request can emit several of these events. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs). (Catalog-only as of 2026-05-09 — emitter wiring pending.)
 
 ### `sh.campaign.detected`
 
@@ -289,21 +289,21 @@ Fired when a canary token (synthetic credential or sentinel string) appears in a
 
 ### `sh.evaluation.block`
 
-Fired when a Safe House evaluation blocks a request — strongest legacy verdict; the request was rejected.
+Fired when a Safe House evaluation blocks a screened surface — strongest legacy verdict. On the `incoming` surface the request was rejected; on `tool_responses` the offending tool result was withheld from the forwarded request and the turn continued.
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.block.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.block.example.json)
 
 ### `sh.evaluation.quarantine`
 
-Fired when a Safe House evaluation quarantines a request — the request was set aside for operator inspection rather than passed through.
+Fired when a Safe House evaluation quarantines a screened surface — an inbound message set aside for operator inspection rather than passed through, or a tool result withheld from the request that carried it.
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.quarantine.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.quarantine.example.json)
 
 ### `sh.evaluation.warn`
 
-Fired when a Safe House evaluation completes with a `warn` verdict — request was permitted but flagged for operator review. (Legacy shape; coexists with `integrity.checkpoint`/`integrity.violation`.)
+Fired when a Safe House evaluation completes with a `warn` verdict — the screened content was permitted (an inbound message or an individual tool result) and flagged for operator review. (Legacy shape; coexists with `integrity.checkpoint`/`integrity.violation`.)
 
 - [Schema](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.warn.schema.json)
 - [Example payload](https://github.com/mnemom/mnemom-api/blob/main/schemas/webhooks/sh.evaluation.warn.example.json)
