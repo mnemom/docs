@@ -52,7 +52,7 @@ One row per submitted run. Tracks lifecycle state (`status`) and the authoritati
 | `benchmark_id` | `text` | Same as `benchmark_results.benchmark_id`. |
 | `agent_id` | `text` | Mnemom agent identifier. |
 | `status` | `text` CHECK | `queued \| running \| completed \| failed \| aborted`. Lifecycle state — see transition table below. |
-| `outcome` | `text` CHECK | `pass \| fail \| error \| inconclusive \| timeout \| aborted`. **Added in MNE-5703.** The authoritative single-column result written by the harness on terminal `status`. Null while `status ∈ {queued, running}`. See [outcome values](#outcome-values). |
+| `outcome` | `text` CHECK (nullable) | `pass \| fail \| error \| inconclusive \| timeout \| aborted`. **Added in MNE-5703.** The authoritative single-column result written by the harness on terminal `status`. Null while `status ∈ {queued, running}`; non-null on every terminal `status`. See [outcome values](#outcome-values). |
 | `submitted_at` | `timestamptz` | When the run was enqueued. |
 | `started_at` | `timestamptz` | When the harness began executing the run. Null if not yet dequeued. |
 | `completed_at` | `timestamptz` | When `status` reached a terminal value. Null if still in progress. |
@@ -188,3 +188,5 @@ The following are explicitly outside this contract:
 - **Retry behaviour**: The harness does not automatically retry failed or aborted runs. The submitter is responsible for re-enqueueing.
 - **Score stability across harness versions**: A `harness_version` bump may change scoring logic. Runs from different `harness_version` values should not be directly compared without consulting the benchmark definition changelog.
 - **`trust_rating_at_capture` accuracy**: The rating is captured at submission time on a best-effort basis and may lag the live rating by up to the recompute interval.
+
+{/* TODO: Link the trust-rating service SLO once that page is published — the recompute interval is owned by that service and should be cited here by reference rather than duplicated. */}
