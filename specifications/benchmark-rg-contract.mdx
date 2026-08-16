@@ -1,0 +1,190 @@
+---
+title: "Benchmark Harness RG Contract"
+description: "Frozen L1 contract obligations to the Research Grade driver: results schema, ledger schema (including the MNE-5703 outcome field), snapshot manifest format, and isolation guarantees."
+sidebarTitle: "Benchmark RG Contract"
+icon: "file-contract"
+---
+
+This page is the normative reference for the frozen L1 benchmark harness contract. It states exactly what the harness owes the Research Grade (RG) driver — the schemas and guarantees the driver may build against without depending on the harness implementation directly.
+
+**Audience:** The Research Grade driver (`benchmarks-rg`, MNE-5539..5545) and any downstream consumer of harness output.
+
+**Scope:** L1 harness outputs only. No work inside the `benchmarks-rg` shard is described here. The harness-ledger `outcome` field documented in this page was landed in MNE-5703 and is part of this frozen contract.
+
+**Stability:** This contract is frozen for the current harness major version. Breaking changes increment `schema_version` in the snapshot manifest and are announced in the [changelog](/changelog) before any driver cutover is required.
+
+---
+
+## Results schema
+
+### `benchmark_results`
+
+One row per completed benchmark run. Written by the harness on `status = 'completed'`; readable by the RG driver immediately after the corresponding `harness_ledger.outcome` is set.
+
+| Column | Type | Notes |
+|---|---|---|
+| `run_id` | `text` PK | `brn-{12-hex}`. Stable across retries; a retry issues a new `run_id`. |
+| `benchmark_id` | `text` | Identifies the benchmark definition (slug, e.g., `integrity-v2`). |
+| `agent_id` | `text` | Mnemom agent identifier. Matches `agents.agent_id`. |
+| `suite` | `text` CHECK | `integrity \| alignment \| coherence \| safety`. The benchmark suite that produced this row. |
+| `score` | `numeric(7,2)` | Normalized 0–1000. Maps to the same scale as the [Mnemom Trust Rating](/concepts/reputation-scores). |
+| `grade` | `text` CHECK | `AAA \| AA \| A \| BBB \| BB \| B \| CCC \| NR`. Derived from `score`; see [score-to-grade mapping](/concepts/reputation-scores#score-range-and-grades). |
+| `component_scores` | `jsonb` | `{ "<component>": <numeric 0–1000>, ... }`. Keys are suite-specific; absent components are omitted. |
+| `verdict` | `text` CHECK | `pass \| fail \| inconclusive \| error \| timeout`. Per-suite interpretation of the score, set by the suite evaluator. Distinct from `harness_ledger.outcome` — see [status vs. outcome](#status-vs-outcome). |
+| `ran_at` | `timestamptz` | Harness-controlled wall clock at run completion. Always ≥ `harness_ledger.started_at`. |
+| `harness_version` | `text` | Semver of the harness that produced this row (e.g., `2.4.1`). |
+| `snapshot_ref` | `text` FK | `benchmark_snapshots.snapshot_id` — the environment captured before the run. |
+| `ledger_id` | `text` FK | `harness_ledger.ledger_id` — the corresponding ledger entry. |
+| `created_at` | `timestamptz` | Row insertion timestamp. |
+
+---
+
+## Ledger schema
+
+### `harness_ledger`
+
+One row per submitted run. Tracks lifecycle state (`status`) and the authoritative business result (`outcome`). The RG driver's primary read target: poll or subscribe on `(agent_id, benchmark_id)` and act on `outcome` once `status = 'completed'`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `ledger_id` | `text` PK | `bhl-{12-hex}`. |
+| `run_id` | `text` UNIQUE | Set when the run is initiated; null while `status = 'queued'`. FK → `benchmark_results.run_id` on completion. |
+| `benchmark_id` | `text` | Same as `benchmark_results.benchmark_id`. |
+| `agent_id` | `text` | Mnemom agent identifier. |
+| `status` | `text` CHECK | `queued \| running \| completed \| failed \| aborted`. Lifecycle state — see transition table below. |
+| `outcome` | `text` CHECK | `pass \| fail \| error \| inconclusive \| timeout \| aborted`. **Added in MNE-5703.** The authoritative single-column result written by the harness on terminal `status`. Null while `status ∈ {queued, running}`. See [outcome values](#outcome-values). |
+| `submitted_at` | `timestamptz` | When the run was enqueued. |
+| `started_at` | `timestamptz` | When the harness began executing the run. Null if not yet dequeued. |
+| `completed_at` | `timestamptz` | When `status` reached a terminal value. Null if still in progress. |
+| `harness_version` | `text` | Semver of the harness executing the run. |
+| `snapshot_ref` | `text` FK | `benchmark_snapshots.snapshot_id`. Set at submission time; immutable thereafter. |
+| `failure_reason` | `text` | Human-readable reason; populated on `status ∈ {failed, aborted}` and `outcome ∈ {error, aborted}`. Null otherwise. |
+| `created_at` | `timestamptz` | Row insertion timestamp. |
+| `updated_at` | `timestamptz` | Maintained by trigger on every status transition. |
+
+#### Status transitions
+
+```
+queued → running → completed
+                 → failed
+       → aborted (operator-initiated before dequeue)
+running → aborted (operator-initiated mid-run)
+```
+
+`failed` is a harness-internal terminal state (infrastructure error, snapshot missing, etc.). `aborted` is operator-initiated. Neither reuses the `run_id`; a retry enqueues a new ledger row.
+
+### Status vs. outcome
+
+The `status` and `outcome` columns are complementary, not redundant:
+
+| Column | Purpose | When set |
+|---|---|---|
+| `status` | Lifecycle state of the ledger row | On every transition |
+| `outcome` | Authoritative business result of the run | On terminal `status` only |
+| `verdict` (in `benchmark_results`) | Per-suite score interpretation | By the suite evaluator, inside a completed run |
+
+Before MNE-5703, the RG driver had to infer business result from `status` + per-row `verdict` in `benchmark_results`. The `outcome` field collapses that into a single column the driver reads without joining to `benchmark_results`.
+
+### Outcome values
+
+| Value | Meaning | `status` on write |
+|---|---|---|
+| `pass` | The run completed and the agent met the benchmark threshold for this suite. | `completed` |
+| `fail` | The run completed but the agent did not meet the threshold. | `completed` |
+| `error` | The run completed but the harness encountered an evaluation error (e.g., malformed agent response, evaluator exception). The `benchmark_results` row is written but marked accordingly; the RG driver should not incorporate this run into the RG dataset. | `completed` |
+| `inconclusive` | The run completed but the evaluator could not reach a confident verdict (e.g., too few samples, high variance). | `completed` |
+| `timeout` | The run exceeded the per-suite wall-clock budget. | `failed` |
+| `aborted` | The run was stopped by an operator before or during execution. | `aborted` |
+
+**RG driver rule:** Incorporate a run into the RG dataset only when `outcome = 'pass' OR outcome = 'fail'`. Treat `error`, `inconclusive`, `timeout`, and `aborted` as non-contributing runs.
+
+---
+
+## Snapshot manifest format
+
+The harness captures a `benchmark_snapshots` row at submission time. This snapshot pins the agent's card versions, posture, and environment fingerprint — the RG driver uses it to verify that a run's conditions match what was declared.
+
+### JSON shape
+
+```jsonc
+{
+  "snapshot_id": "bss-a3f8c14e9d02",   // bss-{12-hex}
+  "schema_version": 1,                  // increments on breaking changes
+  "captured_at": "2026-08-16T10:22:05Z",
+  "agent_id": "agt_...",
+  "benchmark_id": "integrity-v2",
+  "harness_version": "2.4.1",
+
+  // Agent card state at capture time
+  "agent_card_hash": "a3f8...c14e",     // SHA-256 hex of the canonical alignment card body
+  "alignment_card_version": 42,
+  "protection_card_version": 7,
+
+  // Posture state at capture time
+  "posture_id": "pst_...",
+  "posture_revision": 3,
+
+  // Reputation state at capture time (informational; not used for scoring)
+  "trust_rating_at_capture": 847,
+
+  // Harness environment fingerprint
+  "env_fingerprint": "b7d2...99af"      // SHA-256 hex of harness config + dependency manifest
+}
+```
+
+### Field reference
+
+| Field | Type | Notes |
+|---|---|---|
+| `snapshot_id` | string | `bss-{12-hex}`. Primary key in `benchmark_snapshots`. |
+| `schema_version` | integer (≥ 1) | Schema version of this manifest. v1 is frozen for the current harness major version. |
+| `captured_at` | string (ISO-8601 UTC) | Wall clock at submission time, not run start time. |
+| `agent_id` | string | Mnemom agent identifier. |
+| `benchmark_id` | string | Benchmark definition slug. |
+| `harness_version` | string | Semver of the harness at capture time. |
+| `agent_card_hash` | string (`^[0-9a-f]{64}$`) | SHA-256 hex of the canonical alignment card body at capture time. Matches [transparency log](/specifications/transparency-log-schema) `content_hash` semantics. |
+| `alignment_card_version` | integer (≥ 1) | Card version number at capture time. |
+| `protection_card_version` | integer (≥ 1) | Card version number at capture time. |
+| `posture_id` | string | Posture identifier at capture time. |
+| `posture_revision` | integer (≥ 1) | Posture revision at capture time. |
+| `trust_rating_at_capture` | integer (0–1000) | [Mnemom Trust Rating](/concepts/reputation-scores) at submission time. Informational; not factored into benchmark scoring. |
+| `env_fingerprint` | string (`^[0-9a-f]{64}$`) | SHA-256 hex of the harness configuration and pinned dependency manifest. Identical across runs that share the same harness version and config; changes on any harness config bump. |
+
+---
+
+## Isolation guarantees
+
+The harness provides the following isolation properties to the RG driver. These are invariants the driver may rely on; they are not best-effort.
+
+### 1. Namespace isolation
+
+Each run executes in a dedicated, ephemeral namespace. No shared mutable state exists between runs — file system, memory, and IPC surfaces are fully disjoint. A run cannot read or write another run's working directory.
+
+### 2. Credential isolation
+
+The agent under test is provisioned ephemeral, scoped credentials for the duration of the run. No run has access to the agent's production API keys or long-lived service credentials. Credentials are provisioned immediately before `status → running` and revoked unconditionally on any terminal transition (`completed`, `failed`, `aborted`).
+
+### 3. Network isolation
+
+Outbound network access from within a run is restricted to the harness control plane endpoints. Cross-agent communication and arbitrary external network calls are blocked at the namespace boundary. The agent under test cannot reach other agents' endpoints during a run.
+
+### 4. Deterministic replay
+
+Given the same `snapshot_ref`, the harness guarantees identical input conditions for a replay run: same card versions, same posture revision, same `env_fingerprint`. Output differences between a run and its replay reflect non-determinism in the agent under test, not in the harness environment.
+
+### 5. Clean-room teardown
+
+All per-run ephemeral state (namespace, credentials, working directory, in-flight network connections) is destroyed on terminal `status`. The `harness_ledger` row and `benchmark_results` row are the only durable artifacts the harness retains after teardown.
+
+### 6. Clock monotonicity
+
+`benchmark_results.ran_at` is set by the harness clock, not reported by the agent. The harness guarantees `ran_at ≥ harness_ledger.started_at` for every completed run. Clock skew between the harness and the agent under test does not affect `ran_at`.
+
+### Non-guarantees
+
+The following are explicitly outside this contract:
+
+- **Run ordering**: The harness makes no guarantee about the order in which queued runs are dequeued. The RG driver must not depend on FIFO ordering.
+- **Retry behaviour**: The harness does not automatically retry failed or aborted runs. The submitter is responsible for re-enqueueing.
+- **Score stability across harness versions**: A `harness_version` bump may change scoring logic. Runs from different `harness_version` values should not be directly compared without consulting the benchmark definition changelog.
+- **`trust_rating_at_capture` accuracy**: The rating is captured at submission time on a best-effort basis and may lag the live rating by up to the recompute interval.
