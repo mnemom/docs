@@ -326,13 +326,54 @@ jobs:
           # from the fleet-controlled App installation, verified by login pattern; every
           # other sender (a human, or any non-fleet bot) still goes through the real
           # permission check exactly as before.
+          #
+          # MNE-5813: this lookup must distinguish "the API says this actor has no
+          # access" from "the API could not be reached". The previous
+          # `|| echo "none"` collapsed both into a silent `skip`, so ONE transient
+          # 503 dropped a legitimate dispatch with no trace anywhere: the run went
+          # green (gate success, zte skipped, steps=0), no comment was posted, and
+          # the adw:* label stayed on the issue — so a dispatcher counted the seat
+          # as occupied and stopped refilling it. Measured 2026-08-17: three
+          # consecutive 503s from this endpoint dropped an admin's `adw:zte` label
+          # and two `adw run` comments on mnemom-test#505. `resolve_perm` therefore
+          # returns non-zero ONLY for an indeterminate answer, and an indeterminate
+          # answer after retries fails the gate LOUDLY rather than skipping. The
+          # trust decision itself is unchanged in strictness: a determinate "not a
+          # collaborator" (404) still resolves to `none` and still skips silently,
+          # so a stranger commenting `adw run` cannot paint a repo's Actions red.
+          # The retry is written INLINE rather than as a shell function on purpose:
+          # a function would have to be defined ahead of the trusted-App bypass
+          # below, putting the `collaborators/` call text before it in the script
+          # and defeating the check that the bypass short-circuits BEFORE any API
+          # call is made (MNE-2952).
           case "$EVENT_NAME" in
             issues|issue_comment|pull_request)
               [ -n "$SENDER_LOGIN" ] || skip
               case "$SENDER_LOGIN" in
                 mnemom-adw-*"[bot]") ;;
                 *)
-                  PERM=$(gh api "repos/$REPO/collaborators/$SENDER_LOGIN/permission" --jq '.permission' 2>/dev/null || echo "none")
+                  # PERM stays empty until a DETERMINATE answer arrives; `-i` is what
+                  # makes the HTTP status readable, since gh's exit code alone cannot
+                  # tell a 404 (a real "no") from a 503 (no answer at all).
+                  PERM=""
+                  for attempt in 1 2 3 4 5; do
+                    resp=$(gh api "repos/$REPO/collaborators/$SENDER_LOGIN/permission" -i 2>/dev/null) || true
+                    code=$(printf '%s\n' "$resp" | head -n1 | awk '{print $2}')
+                    case "$code" in
+                      200)
+                        PERM=$(printf '%s\n' "$resp" \
+                          | awk 'body { print } /^\r?$/ { body=1 }' \
+                          | jq -r '.permission // "none"')
+                        break
+                        ;;
+                      404) PERM="none"; break ;;
+                    esac
+                    if [ "$attempt" -lt 5 ]; then sleep $((attempt * 5)); fi
+                  done
+                  if [ -z "$PERM" ]; then
+                    echo "::error title=ADW gate: permission lookup unavailable::Could not resolve $SENDER_LOGIN's permission on $REPO after 5 attempts (GitHub API unreachable). Failing the gate rather than silently skipping a dispatch that may well be authorized — re-run this job once the API recovers."
+                    exit 1
+                  fi
                   case "$PERM" in
                     admin|write) ;;
                     *) skip ;;
@@ -441,7 +482,33 @@ jobs:
           # instead. Untrusted → silent no-op (same as before: no reply, no signal
           # to a non-collaborator about the trust boundary). Unchanged by MNE-3341 —
           # this check is identical in strictness for an issue or a PR comment.
-          PERM=$(gh api "repos/$REPO/collaborators/$SENDER_LOGIN/permission" --jq '.permission' 2>/dev/null || echo "none")
+          #
+          # MNE-5813: same retry + determinate/indeterminate split as the gate, but
+          # the terminal behaviour DIVERGES on purpose. This job's only effect is a
+          # courtesy reply about unrecognized grammar; an unreachable API must not
+          # turn it red, because that would paint a failure on the repo for every
+          # stranger's typo during an outage. So an indeterminate answer here warns
+          # and no-ops, where the gate fails loudly — the gate is dropping WORK,
+          # this job is dropping a REPLY.
+          PERM=""
+          for attempt in 1 2 3 4 5; do
+            resp=$(gh api "repos/$REPO/collaborators/$SENDER_LOGIN/permission" -i 2>/dev/null) || true
+            code=$(printf '%s\n' "$resp" | head -n1 | awk '{print $2}')
+            case "$code" in
+              200)
+                PERM=$(printf '%s\n' "$resp" \
+                  | awk 'body { print } /^\r?$/ { body=1 }' \
+                  | jq -r '.permission // "none"')
+                break
+                ;;
+              404) PERM="none"; break ;;
+            esac
+            if [ "$attempt" -lt 5 ]; then sleep $((attempt * 5)); fi
+          done
+          if [ -z "$PERM" ]; then
+            echo "::warning title=ADW feedback: permission lookup unavailable::Could not resolve $SENDER_LOGIN's permission on $REPO after 5 attempts; no unrecognized-command reply posted."
+            exit 0
+          fi
           case "$PERM" in
             admin|write) ;;
             *) echo "untrusted actor ($SENDER_LOGIN: $PERM) — no feedback posted"; exit 0 ;;
