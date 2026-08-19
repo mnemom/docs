@@ -140,7 +140,7 @@ Review the event stream for 7-14 days. Adjust thresholds based on false-positive
 
 ### Performance-sensitive agent (tight tool-response window)
 
-If an agent's tool responses contain large payloads and per-request latency matters:
+Tool-response scanning is not free, and it is not amortized across the turn: the front door runs the detector pipeline once per tool result, synchronously, inside the request that carries those results back to the model. A request returning three large tool results pays for three screens before it is forwarded upstream. If an agent's tool responses contain large payloads and per-request latency matters:
 
 ```yaml
 screen_surfaces:
@@ -153,6 +153,10 @@ mode: enforce
 ```
 
 Every detection event logs which surfaces were inspected, so auditors can see what was *not* scanned. Document the reason in your internal runbook.
+
+<Warning>
+`tool_responses: false` is the only thing standing between an injected tool result and the model. With it off, nothing downstream re-screens that content — AIP reads the model's *reasoning* afterwards, on the response path, and by then the payload has been read. Trade the latency knowingly. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
+</Warning>
 
 <Note>
 If your org requires `tool_responses: true`, you cannot turn it off at agent scope (strictest wins). You'll need a section-specific [exemption](/guides/card-composition#granting-an-exemption) with a documented reason.

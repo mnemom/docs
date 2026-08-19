@@ -28,6 +28,8 @@ Safe House detects eight threat categories via its L1 pattern library, L2 LLM an
 | Data exfiltration | `data_exfiltration` | Back door |
 | Privilege escalation | `privilege_escalation` | Front door + back door |
 
+"Front door" here does not mean "once, at the start of the turn." The front door runs on every inbound surface a request carries, including each tool result the agent is handing back to the model in that same request — which is where `indirect_injection` is caught. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
+
 ---
 
 ## Pattern-to-OWASP mapping
@@ -37,7 +39,7 @@ Each Safe House pattern maps to one or more OWASP ASI entries. A pattern can map
 | Safe House pattern | OWASP entry | Coverage level | Enforcement mechanism |
 |---|---|---|---|
 | `prompt_injection` | **ASI01** Agent Goal Hijack | Full — direct variant | L1 regex families (override phrases, role reassignment, jailbreak openers, authority spoofing); L2 compound confidence scoring; L3 session model. Direct injection is the canonical goal-hijack vector |
-| `indirect_injection` | **ASI01** Agent Goal Hijack | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
+| `indirect_injection` | **ASI01** Agent Goal Hijack | Partial — indirect variant | L1 instruction-delimiter detection; MinHash similarity against known payloads; L2 instruction-structure detection in tool results. Each tool result is screened at the front door in the request that carries it, before the model reads it — a flagged one is withheld or decorated in that same request body. Novel payloads with no similarity to known patterns score lower — see [limits](#gaps-and-limits) |
 | `hijack_attempt` | **ASI01** Agent Goal Hijack | Partial — multi-turn variant | L3 session model: topic coherence tracking, escalating action scope, identity drift, pivot detection after a trust-building sequence. Substantial multi-turn coverage, with a known residual on novel multi-turn and multi-vector sequences (active recall work). Threshold: ≥ 0.7 confidence (routes to human review — see [calibration note](#asi01--multi-turn-hijack-human-escalation-at-default-threshold)) |
 | `bec_fraud` | **ASI09** Human-Agent Trust Exploitation, **ASI01** Agent Goal Hijack | Full — conjunction detection | Requires co-occurring: financial action term + authority claim + urgency marker + secrecy instruction. The authority/urgency/secrecy manipulation is trust exploitation; the intent to redirect the agent into an unauthorized action is goal hijack |
 | `social_engineering` | **ASI09** Human-Agent Trust Exploitation | Full | Authority + urgency signal pair, absent the financial-action component. Regulatory threat framing, role-authority claims, urgency escalation — manipulating the agent's trust to change its behavior |
@@ -84,9 +86,13 @@ Mnemom screens per-agent message content and surfaces individual-agent drift (AA
 
 ### ASI01 — indirect injection, novel payloads
 
-Indirect injection via tool results is partially covered. MinHash similarity matching compares tool results against a library of known injection payloads. Sufficiently novel payloads that bear no structural or semantic similarity to known patterns will score below L1 thresholds. L2 analysis provides a second pass, but detection accuracy is bounded by the analysis model's capability.
+Indirect injection via tool results is partially covered. The placement is not the gap: a screened tool result is screened at the front door in the request that carries it back to the model — synchronously, before that body is forwarded upstream — with `block`/`quarantine` withholding the payload and `warn` delivering it decorated as untrusted. Two gaps remain. The first is **coverage**: the acting path screens the first three tool results in a request body, so a request that hands back more than three carries the remainder unscreened. The second is **accuracy**. MinHash similarity matching compares tool results against a library of known injection payloads. Sufficiently novel payloads that bear no structural or semantic similarity to known patterns will score below L1 thresholds. L2 analysis runs on the same tool-result surface immediately after L1, but detection accuracy is bounded by the analysis model's capability.
 
-The arena flywheel closes this gap over time: canary credentials and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns promote to active detection. For high-sensitivity environments, consider adding application-layer validation of tool results before they re-enter the agent context.
+<Note>
+**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` (`gateway/src/index.ts:7683`) is invoked with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` (the synchronous acting chain whose per-tool decisions the request path applies before dispatch), `gateway/src/index.ts:7990` (the `waitUntil` shadow chain — recording only), and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). Requires `screen_surfaces.tool_responses` on the [protection card](/concepts/protection-card).
+</Note>
+
+The arena flywheel closes this gap over time: canary credentials and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns promote to active detection. For high-sensitivity environments, add application-layer validation of tool results as a *second* control behind the gateway's front-door screen — not as a substitute for it, and not on the assumption that the gateway waits until the next turn to look.
 
 ### ASI01 — multi-turn hijack, human escalation at default threshold
 

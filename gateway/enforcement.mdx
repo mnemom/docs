@@ -287,6 +287,26 @@ See [Policy Engine](/concepts/policy-engine) for full details on how policies ar
 In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode. This applies to both alignment and policy violations.
 </Note>
 
+## Safe House front-door enforcement
+
+The modes above govern the agent's *own* behaviour — alignment, integrity, and policy. [Safe House](/concepts/safe-house) is a third, parallel enforcement system, and it acts on the request on the way **in** rather than on the response on the way out. Its enforcement point is worth stating explicitly here, because it is the one place where the gateway intervenes between the provider response and the next inbound request.
+
+**The front door does not fire once per turn.** It fires once per inbound surface a request carries. When `screen_surfaces.tool_responses` is enabled on the [protection card](/concepts/protection-card), a request that hands tool results back to the model is screened for the message *and* for each of those tool results — synchronously, in the request path, before anything is forwarded upstream.
+
+Enforcement on a flagged tool result is turn-internal and does not fail the request:
+
+| Per-tool verdict | Enforcement action, applied to the request body before dispatch |
+|---|---|
+| `pass` | Tool result forwarded unchanged. |
+| `warn` | Tool result **decorated** — delivered to the model, annotated as untrusted. |
+| `quarantine` / `block` | Tool result **withheld** — content replaced with a quarantine notice; the model never sees the payload. The rest of the request still goes through, so the caller gets a 200 with `front=enforced` on `X-Mnemom-Verdict`, not a 403. |
+
+This is a front-door check, not an AIP check, and it is not deferred to the agent's next turn. AIP (the `integrity_mode` pipeline documented above) runs afterwards on the model's *reasoning*; by then the model has already read whatever the front door let through.
+
+<Note>
+**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` is defined at `gateway/src/index.ts:7683` and is called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` (the synchronous acting chain that produces the per-tool decisions applied in the table above), `gateway/src/index.ts:7990` (the `waitUntil` shadow chain — recording only, never changes acting behaviour), and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run inside the lifecycle of the request that carried the tool results.
+</Note>
+
 ## Conscience timeline
 
 All enforcement actions are tracked in the conscience timeline, accessible via the API and the web dashboard at [mnemom.ai](https://mnemom.ai). The timeline records:
@@ -314,13 +334,14 @@ Enforce gates same-turn on both streaming and non-streaming across all three pro
 - [Mnemom Gateway Overview](/gateway/overview) — Architecture and how it works
 - [CLI Reference](/gateway/cli) — CLI commands for monitoring enforcement
 - [Observability](/guides/observability) — Export enforcement data to your observability platform
+- [Safe House](/concepts/safe-house#when-the-front-door-runs) — When the front door runs, and why it runs more than once per turn
 
 ---
 
 ## Agent containment
 
 <Note>
-Agent containment is a separate enforcement layer that operates above the per-request enforcement modes. While enforcement modes (observe/nudge/enforce) control individual request handling, containment controls whether the agent can make requests at all.
+Agent containment is a separate enforcement layer that operates above the per-request enforcement modes. While enforcement modes (observe/nudge/enforce) control individual request handling — including the per-surface front-door screening described above, which can fire several times within one request — containment controls whether the agent can make requests at all.
 </Note>
 
 ### Containment states

@@ -88,13 +88,15 @@ screen_surfaces:
 | `incoming` | `true` | Inbound prompts: user messages, webhook triggers, queue messages, API calls — anything entering the agent. |
 | `outgoing` | `true` | The agent's generated response leaving the agent. |
 | `tool_calls` | `true` | Arguments the agent sends to tool invocations (outbound tool side). |
-| `tool_responses` | `true` | Return values from tool calls reaching the agent (inbound tool side). |
+| `tool_responses` | `true` | Return values from tool calls reaching the agent (inbound tool side). Screened at the front door **in the request that carries them back to the model**, before that request is forwarded upstream — not on the agent's next turn. |
+
+**Surfaces are screening units, not a per-turn budget.** `incoming` and `tool_responses` are both front-door surfaces and the detector pipeline runs on each independently, within the same request: once for the inbound message, once more for each tool result the request carries. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
 **Validation:** Only the four named keys are accepted. Unknown keys are rejected at write time.
 
 **Composition: OR per field — true wins.** If any scope sets a surface to `true`, it's scanned. Agents cannot disable scanning that org or platform requires. Phrased in alignment-card vocabulary: **strictest wins** (with `true = scan` being the more restrictive choice).
 
-Direction-based naming is durable across transport changes: an agent receiving a webhook trigger is "incoming" whether it's a user message, an API event, or a queue payload. Differentiating `tool_calls` from `tool_responses` reflects that they have different threat models — outgoing tool args may exfiltrate; incoming tool responses may inject.
+Direction-based naming is durable across transport changes: an agent receiving a webhook trigger is "incoming" whether it's a user message, an API event, or a queue payload. Differentiating `tool_calls` from `tool_responses` reflects that they have different threat models — outgoing tool args may exfiltrate; incoming tool responses may inject. It also reflects a different enforcement shape: an `incoming` finding can fail the request, whereas a `tool_responses` finding is applied *inside* the request — the offending tool result is withheld or decorated in the body and the rest is forwarded.
 
 Turning off a surface emits a low-priority audit trace so reviewers can see what was *not* scanned. If you need to disable a surface for a specific agent, the recommended path is an [exemption](/concepts/card-composition#exemptions) with a documented reason rather than a raw `false` in the agent card.
 

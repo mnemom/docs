@@ -52,7 +52,9 @@ Which request surfaces Safe House inspects:
 - `incoming` — the user/principal prompt entering the agent
 - `outgoing` — the agent's response leaving the agent
 - `tool_calls` — tool-use invocations the agent makes
-- `tool_responses` — responses to those tool calls
+- `tool_responses` — responses to those tool calls, screened at the front door **in the request that carries them back to the model**, before that request is forwarded upstream
+
+`incoming` and `tool_responses` are both front-door surfaces, and the front door runs on each of them independently — enabling `tool_responses` means the detector pipeline runs again, inside the same request, once per tool result. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
 ```yaml
 screen_surfaces:
@@ -119,9 +121,11 @@ Exemptions replace the legacy boolean `org_card_exempt` flag — which waived th
 Every request hits:
 
 1. `canonical_protection_cards` read (KV-cached, 5-min TTL) to get the composed protection card.
-2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`.
-3. `mode` determines the action: observe (log only), nudge (advisory), enforce (block).
+2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`. This is **per surface, not per request** — the inbound message runs the pipeline once, and each tool result carried in the same request body runs it again on its own `tool_result` surface.
+3. `mode` determines the action: observe (log only), nudge (advisory), enforce (block, or — for a flagged tool result — withhold it from the body and forward the rest).
 4. `trusted_sources` short-circuits detectors for allowlisted upstreams (with trace entry).
+
+Step 3's rewrites land on the outbound body *before* it is forwarded to the provider. Nothing here is deferred to a background pass or to the agent's next request.
 
 The protection card is never fetched from the agent-scope row on the request path — it's always the canonical (pre-composed) version.
 

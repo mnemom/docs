@@ -8,7 +8,7 @@ icon: "shield-halved"
 This document describes the unified security and trust model across the full Mnemom stack: the [Agent Alignment Protocol (AAP)](/protocols/aap/specification), the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), and [Mnemom Gateway](/gateway/overview) -- the gateway that ties them together. It covers what data is stored, how authentication works, how data is encrypted, and what threats the system does and does not defend against.
 
 <Note>
-For the request-pipeline view of how inbound and outbound traffic is screened at the four checkpoints (front door, back door, inside.autonomy, inside.integrity), see [Safe House](/concepts/safe-house). This page focuses on the AAP / AIP protocol layer and the stack-wide trust assumptions.
+For the request-pipeline view of how inbound and outbound traffic is screened at the four checkpoints (front door, back door, inside.autonomy, inside.integrity), see [Safe House](/concepts/safe-house) — in particular [When the front door runs](/concepts/safe-house#when-the-front-door-runs), which covers why the front door fires once per inbound surface rather than once per turn, and why tool-result screening is a front-door check rather than an AIP one. This page focuses on the AAP / AIP protocol layer and the stack-wide trust assumptions.
 </Note>
 
 ---
@@ -184,6 +184,8 @@ Do not treat protocol compliance as evidence of alignment. A verified trace and 
 AIP detects injection patterns in thinking blocks. When an agent's reasoning reveals it is responding to injected instructions (e.g., instructions embedded in tool output rather than the user's original request), the analysis LLM flags the concern and the checkpoint verdict reflects it.
 
 However, AIP operates *after* the agent has already processed the injected content. The injection has occurred. AIP detects its effects on reasoning and can intervene before the *action* lands (in gateway or enforce mode), but it does not prevent the injected content from reaching the model in the first place.
+
+Preventing that is the Safe House front door's job, not AIP's — and it is not deferred to a later turn. Tool output is screened at the front door **in the request that carries it back to the model**: a flagged tool result is withheld (content replaced with a quarantine notice) or decorated as untrusted before the body is forwarded upstream. AIP is the layer behind that, catching what the front door scored below threshold. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
 ### Replay attacks
 

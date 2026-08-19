@@ -5,7 +5,7 @@ sidebarTitle: "Safe House Threat Model"
 icon: "shield-virus"
 ---
 
-Safe House operates as the inbound security layer for every message an agent receives. Before a turn is processed, Safe House evaluates it against a library of known attack patterns, a behavioral session model, and an LLM-based analysis layer. This document details what Safe House defends against, how each attack class is detected, and where the limits are.
+Safe House operates as the inbound security layer for every message an agent receives. Each inbound surface is evaluated against a library of known attack patterns, a behavioral session model, and an LLM-based analysis layer before it reaches the model — and that is not a single gate at the start of a turn. The front door runs again, inside the same turn, on each tool result travelling back to the model, before the model is allowed to read it. This document details what Safe House defends against, how each attack class is detected, and where the limits are.
 
 ---
 
@@ -18,13 +18,16 @@ Inbound sources                Safe House layers       Agent
 ─────────────────────          ──────────────          ────────
 User message ──────────────→   L1: Pattern match  →─┐
 Incoming email ────────────→   L2: LLM analysis   →─┤→ allowed → Agent turn
-Tool result (API/search) ──→   L3: Session model  →─┤
-Agent-to-agent message ────→   Canary tripwires   →─┘
-                                        │
-                                        └──→ quarantine / block
+Tool result (API/search) ──→   L3: Session model  →─┤                 │
+Agent-to-agent message ────→   Canary tripwires   →─┘                 │
+     ▲                                  │                             │
+     │                                  └──→ quarantine / block       │
+     └─────────────── tool call issued; result returns ───────────────┘
 ```
 
-**L1 (Pattern matching)** runs synchronously with near-zero latency — 19 regex families across override, jailbreak, and social engineering phrases. **L2 (LLM analysis)** runs a full threat classification when L1 produces a non-trivial signal or when the message touches sensitive action categories. **L3 (Session model)** tracks cross-turn behavioral trajectories to catch multi-turn attacks that no single turn would trigger.
+The loop at the bottom is the important part: a tool result does **not** wait for the next turn. It comes back inside the same request, re-enters the front door on its own `tool_result` surface, and is screened before the model is allowed to read it. A single turn therefore passes through the front door as many times as it has inbound surfaces — once for the message, once more for each tool result the request carries.
+
+**L1 (Pattern matching)** runs synchronously with near-zero latency — 19 regex families across override, jailbreak, and social engineering phrases. **L2 (LLM analysis)** runs a full threat classification when L1 produces a non-trivial signal or when the message touches sensitive action categories. Both run per screened surface, not once per turn. **L3 (Session model)** tracks cross-turn behavioral trajectories to catch multi-turn attacks that no single turn would trigger.
 
 ---
 
@@ -80,10 +83,15 @@ An agent browsing the web retrieves a page that contains, hidden in white text o
 Indirect injection embeds malicious instructions inside content the agent processes as data — email bodies, search results, web pages, API responses, document contents. The agent receives these as tool output, not as user messages, which makes them harder to attribute but no less dangerous.
 
 **Detection approach:**
-- Safe House evaluates tool results before they reach the agent's next-turn context window
+- Safe House screens tool results at the front door **in the same request that carries them**, before they are forwarded to the model — synchronously, each on its own `tool_result` surface, not on the agent's next turn. The acting path takes the first three tool results in the request body
+- A `block` or `quarantine` verdict **withholds** the offending tool result: its content is replaced with a quarantine notice in the outbound body, so the model never sees the payload. A `warn` verdict delivers it decorated as untrusted
 - MinHash similarity matching compares tool results against a library of known injection payloads
 - L2 analysis flags content that contains instruction-like imperative structures embedded in otherwise data-like content
 - Pattern matching targets instruction delimiters ("System:", "Assistant:", "Human:", XML/YAML tags used as instruction wrappers)
+
+<Note>
+**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` (`gateway/src/index.ts:7683`) is called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` — the synchronous acting chain whose per-tool decisions the request path applies before dispatch — and at `gateway/src/index.ts:7990` (the `waitUntil` shadow chain, recording only) and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run within the lifecycle of the request that carried the tool results. Tool-result screening requires `screen_surfaces.tool_responses` to be enabled on the [protection card](/concepts/protection-card).
+</Note>
 
 **Known limit:** Sufficiently novel indirect injection payloads that bear no similarity to known patterns will produce lower L1/L2 confidence scores. The arena flywheel addresses this over time — when a new pattern is observed and confirmed as malicious, it enters the candidate pool and can be promoted to active detection.
 
@@ -182,7 +190,9 @@ Being explicit about limits is as important as documenting what works.
 
 **Agent's own reasoning errors.** If the agent misinterprets a legitimate request and takes a harmful action, Safe House does not catch this. That is the domain of AIP (Agent Integrity Protocol), which analyzes the agent's thinking blocks and, in `enforce`, gates the response before the action lands (in `observe`/`nudge` the verdict is recorded post-hoc).
 
-**Deeply embedded indirect injection in tool output.** When injected instructions are semantically indistinguishable from legitimate content — e.g., embedded in a large document in natural language with no structural markers — L1 and L2 may not detect it. MinHash similarity matching reduces this gap, but novel, carefully crafted payloads remain a risk. Defense-in-depth via AIP thinking block analysis provides a second layer.
+**Deeply embedded indirect injection in tool output.** The gap here is *detection accuracy*, not placement: the tool result is screened at the front door in the request that carries it, but when injected instructions are semantically indistinguishable from legitimate content — e.g., embedded in a large document in natural language with no structural markers — L1 and L2 may score it below threshold and let it through. MinHash similarity matching reduces this gap, but novel, carefully crafted payloads remain a risk. AIP thinking-block analysis is the second layer *behind* that front-door screen — it catches the payloads the front door missed, by reading how the model reacted to them. It is not where tool results get screened.
+
+**Tool results beyond the first three in a request.** The acting path screens the first three tool results a request body carries. A turn that hands back more than three sends the remainder to the model unscreened. Where an agent fans out to many tools per turn, batch the results or split the turn so the payload-bearing ones fall inside the screened set.
 
 **Zero-day attack patterns.** New attack patterns not yet in the Safe House library will produce low confidence scores and may pass through. The arena flywheel mitigates this over time: the canary credential system and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns are promoted from candidate to active status.
 
