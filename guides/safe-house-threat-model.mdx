@@ -83,7 +83,7 @@ An agent browsing the web retrieves a page that contains, hidden in white text o
 Indirect injection embeds malicious instructions inside content the agent processes as data — email bodies, search results, web pages, API responses, document contents. The agent receives these as tool output, not as user messages, which makes them harder to attribute but no less dangerous.
 
 **Detection approach:**
-- Safe House screens tool results at the front door **in the same request that carries them**, before they are forwarded to the model — synchronously, each on its own `tool_result` surface, not on the agent's next turn
+- Safe House screens tool results at the front door **in the same request that carries them**, before they are forwarded to the model — synchronously, each on its own `tool_result` surface, not on the agent's next turn. This coverage is not unconditional: a request that fans out to many tool calls in a single turn is not guaranteed full coverage
 - A `block` or `quarantine` verdict **withholds** the offending tool result: its content is replaced with a quarantine notice in the outbound body, so the model never sees the payload. A `warn` verdict delivers it decorated as untrusted
 - MinHash similarity matching compares tool results against a library of known injection payloads
 - L2 analysis flags content that contains instruction-like imperative structures embedded in otherwise data-like content
@@ -191,6 +191,8 @@ Being explicit about limits is as important as documenting what works.
 **Agent's own reasoning errors.** If the agent misinterprets a legitimate request and takes a harmful action, Safe House does not catch this. That is the domain of AIP (Agent Integrity Protocol), which analyzes the agent's thinking blocks and, in `enforce`, gates the response before the action lands (in `observe`/`nudge` the verdict is recorded post-hoc).
 
 **Deeply embedded indirect injection in tool output.** The gap here is *detection accuracy*, not placement: the tool result is screened at the front door in the request that carries it, but when injected instructions are semantically indistinguishable from legitimate content — e.g., embedded in a large document in natural language with no structural markers — L1 and L2 may score it below threshold and let it through. MinHash similarity matching reduces this gap, but novel, carefully crafted payloads remain a risk. AIP thinking-block analysis is the second layer *behind* that front-door screen — it catches the payloads the front door missed, by reading how the model reacted to them. It is not where tool results get screened.
+
+**Full coverage of heavy tool-result fan-out.** Screening coverage for tool results is not unconditional: a request that fans out to many tool calls in a single turn is not guaranteed full coverage. Where an agent's turn is expected to fan out heavily, batch the results or split the turn to keep exposure down.
 
 **Zero-day attack patterns.** New attack patterns not yet in the Safe House library will produce low confidence scores and may pass through. The arena flywheel mitigates this over time: the canary credential system and cross-agent campaign detection surface novel attack infrastructure, and confirmed patterns are promoted from candidate to active status.
 
