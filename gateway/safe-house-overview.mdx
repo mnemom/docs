@@ -123,7 +123,7 @@ This is the recommended first step when enabling Safe House on an existing agent
 
 #### Tool results are screened here, in the same request
 
-When `screen_surfaces.tool_responses` is enabled, Phase 0.5 does not stop at the inbound message. The gateway extracts the tool results from the **inbound body of the request it is currently handling** (the first three) and screens each on its own `tool_result` surface — a separate L1 pass, a separate L2 judgement, a separate verdict per tool result. This is a bare `await` in the request path, not a background task.
+When `screen_surfaces.tool_responses` is enabled, Phase 0.5 does not stop at the inbound message. The gateway extracts the tool results from the **inbound body of the request it is currently handling** and screens each on its own `tool_result` surface — a separate L1 pass, a separate L2 judgement, a separate verdict per tool result. This is a bare `await` in the request path, not a background task.
 
 The per-tool verdicts are then applied to that same request body before Phase 3 dispatches it:
 
@@ -133,7 +133,7 @@ The per-tool verdicts are then applied to that same request body before Phase 3 
 | `warn` | The tool result is **decorated** — delivered to the model, annotated as untrusted. |
 | `quarantine` / `block` | The tool result is **withheld** — its content is replaced with a quarantine notice, so the model never sees the payload. |
 
-The request body is re-serialized after this rewrite and that serialization is what Phase 3 forwards. There is no path by which an unscreened tool result reaches the provider, and no part of this is handed off to the Phase 4 AIP pass or to the agent's next request.
+The request body is re-serialized after this rewrite and that serialization is what Phase 3 forwards. None of this is handed off to the Phase 4 AIP pass or to the agent's next request.
 
 <Note>
 **Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` is defined at `gateway/src/index.ts:7683` and called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` (the synchronous acting chain that produces the per-tool decisions applied above), `gateway/src/index.ts:7990` (the `waitUntil` shadow chain — recording only, never changes acting behaviour), and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run inside the lifecycle of the request that carried the tool results.
