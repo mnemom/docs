@@ -160,7 +160,7 @@ The front door is **not** a single pre-turn gate that input passes through once.
 
 For a request that carries tool results back to the model, that means:
 
-1. The gateway extracts the tool results from the **inbound body of that same request**, when `screen_surfaces.tool_responses` is enabled.
+1. The gateway extracts the tool results from the **inbound body of that same request**, when `screen_surfaces.tool_responses` is enabled. This extraction is not guaranteed to cover every tool result in a request that fans out to many tool calls in a single turn.
 2. Each one is screened on its own `tool_result` surface: its own L1 pass, its own L2 judgement, its own verdict. Synchronously, in the request path — not backgrounded, not queued.
 3. The per-tool verdicts act on **this** request, before dispatch. `block` and `quarantine` **withhold** the offending tool result — its content is replaced with a quarantine notice, so the model never sees the payload. `warn` **decorates** it: delivered, but annotated as untrusted. `pass` forwards it unchanged.
 4. Only then is the request body re-serialized and sent upstream. That re-serialization is the single choke point; whatever the front door decided is already baked into it.
