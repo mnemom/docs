@@ -1,0 +1,159 @@
+---
+title: "Cross-Dialect Egress"
+description: "Call the gateway with an Anthropic Messages request and route it to OpenAI — the gateway translates dialects in both directions, using your own OpenAI key for the upstream leg"
+sidebarTitle: "Cross-Dialect Egress"
+icon: "arrow-right-arrow-left"
+---
+
+The gateway's `/router` surface lets you keep writing requests in **one provider's dialect** while the gateway egresses to **a different provider**. You send an [Anthropic Messages](https://docs.anthropic.com/en/api/messages)-shaped request to `/router/anthropic`, select OpenAI as the egress target, and the gateway translates the request into OpenAI's format on the way out and translates the response back into Anthropic's format on the way in. Your code speaks Anthropic conventions end to end; the served model is OpenAI's.
+
+This is useful when your application is already built against the Anthropic Messages API — SDKs, prompt templates, response parsing — and you want to serve an OpenAI model without rewriting the integration to OpenAI's request/response shape.
+
+<Note>
+  Today the only covered cross-dialect pair is **Anthropic → OpenAI**: an Anthropic-shaped request routed to OpenAI. Other combinations are not substituted — the router fails closed rather than guessing at a translation it does not support.
+</Note>
+
+## How it differs from the provider doors
+
+The [provider doors](/quickstart/gateway) (`/anthropic`, `/openai`, `/gemini`) are passthrough: you speak each provider's native dialect at its own path, and the gateway forwards to that same provider. The `/router` surface adds dialect translation — you speak Anthropic, the gateway speaks OpenAI upstream — and it carries **its own egress-key contract**: you supply the OpenAI key for the upstream leg on the request.
+
+## Endpoint
+
+```
+POST https://gateway.mnemom.ai/router/anthropic/v1/messages
+```
+
+## Headers
+
+| Header | Required | Value |
+|---|---|---|
+| `x-api-key` | Yes | Your existing Mnemom gateway credential — the same one you use for the `/anthropic` door. It authenticates you **at the gateway** and is stripped before egress; it is never sent to OpenAI. |
+| `Content-Type` | Yes | `application/json` |
+| `x-mnemom-provider` | Yes | Routing directive selecting the egress provider. To egress to OpenAI: `{"only":["openai"]}`. |
+| `x-mnemom-egress-key` | Yes | Your OpenAI API key, used **only** for the upstream leg. The gateway injects it as `Authorization: Bearer <key>` to OpenAI. It is never logged. |
+
+<Warning>
+  `x-api-key` and `x-mnemom-egress-key` are two different credentials with two different jobs. `x-api-key` is your Mnemom gateway credential and authenticates the call to Mnemom — it never leaves the gateway. `x-mnemom-egress-key` is your OpenAI key and is used only to call OpenAI upstream. Do not swap them.
+</Warning>
+
+## Request body
+
+Send a standard Anthropic Messages body. Use Anthropic conventions throughout — `model`, `max_tokens`, `messages`, `system`, and so on. The gateway maps them to OpenAI's equivalents automatically (for example, `max_tokens` becomes OpenAI's `max_completion_tokens`).
+
+The `model` field must name a supported OpenAI model (see [Supported models](#supported-models)):
+
+```json
+{
+  "model": "gpt-5.6-sol",
+  "max_tokens": 256,
+  "messages": [
+    { "role": "user", "content": "Explain retrieval-augmented generation in two sentences." }
+  ]
+}
+```
+
+## Supported models
+
+The `model` in a cross-dialect request must be one of the supported OpenAI model IDs:
+
+- `gpt-5`
+- `gpt-5-codex`
+- `o3`
+- `o3-mini`
+- `gpt-5.6-sol`
+- `gpt-5.6-terra`
+- `gpt-5.6-luna`
+
+## Example
+
+<CodeGroup>
+
+```bash Non-streaming
+curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
+  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H 'x-mnemom-provider: {"only":["openai"]}' \
+  -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -d '{
+    "model": "gpt-5.6-sol",
+    "max_tokens": 256,
+    "messages": [
+      {"role": "user", "content": "Explain retrieval-augmented generation in two sentences."}
+    ]
+  }'
+```
+
+```bash Streaming
+curl -N https://gateway.mnemom.ai/router/anthropic/v1/messages \
+  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H 'x-mnemom-provider: {"only":["openai"]}' \
+  -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -d '{
+    "model": "gpt-5.6-sol",
+    "max_tokens": 256,
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "Explain retrieval-augmented generation in two sentences."}
+    ]
+  }'
+```
+
+</CodeGroup>
+
+## Response
+
+The gateway returns a standard **Anthropic Messages** response, regardless of the fact that an OpenAI model served it. You parse the same `content` blocks, `stop_reason`, and `usage` fields you already parse for the `/anthropic` door. The `model` field echoes the OpenAI model that served the request.
+
+```json
+{
+  "id": "msg_...",
+  "type": "message",
+  "role": "assistant",
+  "model": "gpt-5.6-sol",
+  "content": [
+    { "type": "text", "text": "Retrieval-augmented generation ..." }
+  ],
+  "stop_reason": "end_turn",
+  "usage": { "input_tokens": 18, "output_tokens": 42 }
+}
+```
+
+## Streaming
+
+Add `"stream": true` to the body and the gateway streams the response back as **Anthropic Server-Sent Events** — not raw OpenAI chunks. You receive the same event sequence the `/anthropic` door emits:
+
+- `message_start`
+- `content_block_start`
+- `content_block_delta`
+- `content_block_stop`
+- `message_delta`
+- `message_stop`
+
+Client code written to consume Anthropic streaming events works unchanged. The gateway translates OpenAI's streaming chunks into this Anthropic event shape for you.
+
+## Errors
+
+Errors surface in the **Anthropic error envelope** — the same shape the `/anthropic` door returns — so your existing error handling applies:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "...",
+    "message": "..."
+  }
+}
+```
+
+| Condition | Status | Detail |
+|---|---|---|
+| Missing `x-api-key` | `401` | The gateway credential is required to authenticate the request. |
+| Routing directive set but `x-mnemom-egress-key` missing | `400` | Error code `cross-dialect-egress-credential-required`. A cross-dialect egress needs your OpenAI key on the request. |
+| Upstream provider error | Upstream status preserved | The gateway wraps the upstream error in the Anthropic error envelope above and preserves the upstream HTTP status. |
+
+## Related
+
+- [Gateway Quickstart](/quickstart/gateway) — the passthrough provider doors (`/anthropic`, `/openai`, `/gemini`)
+- [Provider Support](/concepts/provider-support) — per-provider feature coverage across Anthropic, OpenAI, and Gemini
+- [Headers reference](/api-reference/headers) — the full set of gateway response headers
