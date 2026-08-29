@@ -38,7 +38,7 @@ POST https://gateway.mnemom.ai/router/anthropic/v1/messages
 
 ## Request body
 
-Send a standard Anthropic Messages body. Use Anthropic conventions throughout — `model`, `max_tokens`, `messages`, `system`, and so on. The gateway maps them to OpenAI's equivalents automatically (for example, `max_tokens` becomes OpenAI's `max_completion_tokens`).
+Send a standard Anthropic Messages body. Use Anthropic conventions throughout — `model`, `max_tokens`, `messages`, `system`, and so on. The gateway maps them to OpenAI's equivalents automatically (for example, `max_tokens` becomes OpenAI's `max_output_tokens`). Supported OpenAI models are served through OpenAI's [Responses API](https://platform.openai.com/docs/api-reference/responses), which lets a single request carry both function tools and a reasoning-depth setting — see [Reasoning effort](#reasoning-effort).
 
 The `model` field must name a supported OpenAI model (see [Supported models](#supported-models)):
 
@@ -63,6 +63,52 @@ The `model` in a cross-dialect request must be one of the supported OpenAI model
 - `gpt-5.6-sol`
 - `gpt-5.6-terra`
 - `gpt-5.6-luna`
+
+## Reasoning effort
+
+Every supported OpenAI model on the `/router` surface is a **reasoning-profile** model, egressed through OpenAI's [Responses API](https://platform.openai.com/docs/api-reference/responses) (`/v1/responses`). That endpoint accepts **function tools and a reasoning-effort setting in the same request**, so you can dial reasoning depth even on tool-calling turns.
+
+Set the depth with an `output_config.effort` field on the request body. The gateway forwards it **unchanged** to the served model's `reasoning.effort`:
+
+```json
+{
+  "model": "gpt-5.6-sol",
+  "max_tokens": 1024,
+  "output_config": { "effort": "high" },
+  "messages": [
+    { "role": "user", "content": "Prove there are infinitely many primes." }
+  ]
+}
+```
+
+| `output_config.effort` | Behavior |
+|---|---|
+| `low` · `medium` · `high` · `xhigh` · `max` | Forwarded **identity** to OpenAI's `reasoning.effort` — no bucketing, no clamp. Higher effort spends more reasoning tokens before the model answers. |
+| *omitted* | The gateway sends no `reasoning` field; the model applies its own server-side default (`medium`). |
+
+<Note>
+  Effort is **independent of the model** — pair any level with any model (a cheap model at `max`, the flagship at `low`). The `gpt-5.6-*` family accepts the full `low`–`max` range. Because the gateway passes the level straight through with no clamp, a level a given upstream model does not recognize surfaces as an upstream error rather than being silently downgraded.
+</Note>
+
+<CodeGroup>
+
+```bash effort:high
+curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
+  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H 'x-mnemom-provider: {"only":["openai"]}' \
+  -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -d '{
+    "model": "gpt-5.6-sol",
+    "max_tokens": 1024,
+    "output_config": { "effort": "high" },
+    "messages": [
+      {"role": "user", "content": "Prove there are infinitely many primes."}
+    ]
+  }'
+```
+
+</CodeGroup>
 
 ## Example
 
