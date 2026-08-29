@@ -52,6 +52,7 @@ Mnemom keys use a **capability-based** scope vocabulary. Each scope names what t
 ### Picking scopes for common patterns
 
 - **Local development on your laptop:** `gateway`, `api:read`, `api:write` (the default).
+- **Router-only client:** `gateway`. Send it as `X-Mnemom-Api-Key`; keep the provider BYOK credential separate.
 - **CI runner that publishes traces but doesn't mutate state:** `gateway`, `api:read`.
 - **Read-only analytics ingest into Snowflake/BQ:** `api:read`.
 - **Service account that manages org members from a script:** `admin:org` (plus `api:read` if it needs to read non-admin endpoints).
@@ -122,6 +123,8 @@ curl https://api.mnemom.ai/v1/agents \
 ```
 
 The `X-Mnemom-Api-Key` header is the canonical auth path for `mnm_*` keys. (Some legacy SDKs send the key as `Authorization: Bearer mnm_...` — that path is deprecated; migrate to `X-Mnemom-Api-Key`.)
+
+The gateway's `/router` surface requires this header and checks that the resolved key carries `gateway`. Provider-dialect credentials (`x-api-key`, `Authorization: Bearer <provider-key>`, and `x-goog-api-key`) do not authorize the router. Keep the upstream BYOK credential separate in `X-Mnemom-Egress-Key`; see [Cross-Dialect Egress](/gateway/router-cross-dialect#headers).
 
 ## Legacy keys (`["gateway", "api"]`)
 

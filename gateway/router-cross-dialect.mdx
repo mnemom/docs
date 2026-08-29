@@ -15,7 +15,7 @@ This is useful when your application is already built against the Anthropic Mess
 
 ## How it differs from the provider doors
 
-The [provider doors](/quickstart/gateway) (`/anthropic`, `/openai`, `/gemini`) are passthrough: you speak each provider's native dialect at its own path, and the gateway forwards to that same provider. The `/router` surface adds dialect translation — you speak Anthropic, the gateway speaks OpenAI upstream — and it carries **its own egress-key contract**: you supply the OpenAI key for the upstream leg on the request.
+The [provider doors](/quickstart/gateway) (`/anthropic`, `/openai`, `/gemini`) are passthrough: you speak each provider's native dialect at its own path, and the gateway forwards to that same provider. The `/router` surface adds dialect translation — you speak Anthropic, the gateway speaks OpenAI upstream — and separates authorization from provider egress: a scoped Mnemom API key authorizes use of the router, while your OpenAI key authenticates only the upstream leg.
 
 ## Endpoint
 
@@ -27,14 +27,24 @@ POST https://gateway.mnemom.ai/router/anthropic/v1/messages
 
 | Header | Required | Value |
 |---|---|---|
-| `x-api-key` | Yes | Your existing Mnemom gateway credential — the same one you use for the `/anthropic` door. It authenticates you **at the gateway** and is stripped before egress; it is never sent to OpenAI. |
+| `x-mnemom-api-key` | Yes | A Mnemom API key (`mnm_*`) with the `gateway` capability. It authorizes this request at Mnemom and is stripped before egress. |
 | `Content-Type` | Yes | `application/json` |
 | `x-mnemom-provider` | Yes | Routing directive selecting the egress provider. To egress to OpenAI: `{"only":["openai"]}`. |
 | `x-mnemom-egress-key` | Yes | Your OpenAI API key, used **only** for the upstream leg. The gateway injects it as `Authorization: Bearer <key>` to OpenAI. It is never logged. |
 
 <Warning>
-  `x-api-key` and `x-mnemom-egress-key` are two different credentials with two different jobs. `x-api-key` is your Mnemom gateway credential and authenticates the call to Mnemom — it never leaves the gateway. `x-mnemom-egress-key` is your OpenAI key and is used only to call OpenAI upstream. Do not swap them.
+  `x-mnemom-api-key` and `x-mnemom-egress-key` are two different credentials with two different jobs. The Mnemom key authorizes use of `/router` and never leaves the gateway. The egress key is your BYOK provider credential and is used only to call OpenAI upstream. Do not swap them, and do not send either in the request body.
 </Warning>
+
+Provider-dialect credentials such as Anthropic's `x-api-key`, OpenAI's `Authorization` header, or Gemini's `x-goog-api-key` do **not** authorize `/router`. Unlike the passthrough provider doors, the router initially accepts Mnemom API keys only; browser sessions and other bearer credentials are not router credentials.
+
+### Least-privilege router key
+
+Create or select a real Mnemom API key carrying the `gateway` capability. For a router-only integration, mint a gateway-only key rather than reusing a key with `api:read`, `api:write`, or admin capabilities. The full secret is shown once; store it in your secrets manager and inject it through an environment variable such as `MNEMOM_API_KEY`. See [API Keys](/guides/api-keys#creating-a-key) for personal and organization key creation.
+
+<Note>
+  A placeholder, provider key, or arbitrary string is not a Mnemom API key. Do not test a production cutover with a dummy value: provision a real scoped key, place it in the caller's secret store, and verify a request before removing the old route.
+</Note>
 
 ## Request body
 
@@ -94,7 +104,7 @@ Set the depth with an `output_config.effort` field on the request body. The gate
 
 ```bash effort:high
 curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
-  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "x-mnemom-api-key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
@@ -116,7 +126,7 @@ curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
 
 ```bash Non-streaming
 curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
-  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "x-mnemom-api-key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
@@ -131,7 +141,7 @@ curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
 
 ```bash Streaming
 curl -N https://gateway.mnemom.ai/router/anthropic/v1/messages \
-  -H "x-api-key: $MNEMOM_API_KEY" \
+  -H "x-mnemom-api-key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
@@ -194,9 +204,21 @@ Errors surface in the **Anthropic error envelope** — the same shape the `/anth
 
 | Condition | Status | Detail |
 |---|---|---|
-| Missing `x-api-key` | `401` | The gateway credential is required to authenticate the request. |
+| Missing, malformed, unknown, expired, or revoked `x-mnemom-api-key` | `401` | The request is not authenticated. Supplying a provider-dialect key instead does not satisfy router authentication. |
+| Valid Mnemom API key without the `gateway` capability | `403` | The caller is authenticated but not authorized for gateway traffic. Mint a least-privilege replacement with `gateway`; do not add admin capabilities. |
+| Router authentication service unavailable | `503` | Authorization could not be established. The router fails closed; honor `Retry-After` when present and retry rather than bypassing authentication. |
 | Routing directive set but `x-mnemom-egress-key` missing | `400` | Error code `cross-dialect-egress-credential-required`. A cross-dialect egress needs your OpenAI key on the request. |
 | Upstream provider error | Upstream status preserved | The gateway wraps the upstream error in the Anthropic error envelope above and preserves the upstream HTTP status. |
+
+## Coordinated cutover
+
+The authentication change must be coordinated with the router deployment and every caller that uses `/router`:
+
+1. Mint a separate Mnemom key with only the `gateway` capability and store it in each caller's secret manager.
+2. Update callers to send that value as `x-mnemom-api-key` while continuing to send the provider BYOK value separately as `x-mnemom-egress-key`.
+3. Deploy the router auth enforcement and caller configuration in one agreed window. A caller using only `x-api-key` will receive `401` after enforcement is live.
+4. Verify non-streaming and streaming requests, plus the expected negative cases (`401` with no Mnemom key and `403` with an authenticated key lacking `gateway`).
+5. Remove obsolete caller configuration only after production traffic is healthy. Never copy a provider key into the Mnemom-key slot as a fallback.
 
 ## Related
 
