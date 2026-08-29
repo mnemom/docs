@@ -31,12 +31,13 @@ POST https://gateway.mnemom.ai/router/anthropic/v1/messages
 | `Content-Type` | Yes | `application/json` |
 | `x-mnemom-provider` | Yes | Routing directive selecting the egress provider. To egress to OpenAI: `{"only":["openai"]}`. |
 | `x-mnemom-egress-key` | Yes | Your OpenAI API key, used **only** for the upstream leg. The gateway injects it as `Authorization: Bearer <key>` to OpenAI. It is never logged. |
+| `x-api-key` | Yes | Anthropic's native dialect field. The `/router/anthropic` door speaks the Anthropic Messages API, which requires this header to be present — but it does **not** authorize the router. Send a non-authorizing placeholder (e.g. `ph-not-real`); never put key material here. Authorization is carried solely by `x-mnemom-api-key`. |
 
 <Warning>
   `x-mnemom-api-key` and `x-mnemom-egress-key` are two different credentials with two different jobs. The Mnemom key authorizes use of `/router` and never leaves the gateway. The egress key is your BYOK provider credential and is used only to call OpenAI upstream. Do not swap them, and do not send either in the request body.
 </Warning>
 
-Provider-dialect credentials such as Anthropic's `x-api-key`, OpenAI's `Authorization` header, or Gemini's `x-goog-api-key` do **not** authorize `/router`. Unlike the passthrough provider doors, the router initially accepts Mnemom API keys only; browser sessions and other bearer credentials are not router credentials.
+A provider-dialect credential — each door's native provider auth field, such as Anthropic's `x-api-key` on the `/router/anthropic` door — does **not** authorize `/router`. Router authorization is carried solely by `x-mnemom-api-key`; browser sessions and other bearer credentials are not router credentials. But the field is not therefore optional: because `/router/anthropic` speaks the Anthropic Messages dialect, `x-api-key` must still be **present** on every request as a dialect field — send a non-authorizing placeholder (e.g. `ph-not-real`), never key material. A request that omits it is rejected with `401` even when the Mnemom key is valid.
 
 ### Least-privilege router key
 
@@ -108,6 +109,7 @@ curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -H "x-api-key: ph-not-real" \
   -d '{
     "model": "gpt-5.6-sol",
     "max_tokens": 1024,
@@ -130,6 +132,7 @@ curl https://gateway.mnemom.ai/router/anthropic/v1/messages \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -H "x-api-key: ph-not-real" \
   -d '{
     "model": "gpt-5.6-sol",
     "max_tokens": 256,
@@ -145,6 +148,7 @@ curl -N https://gateway.mnemom.ai/router/anthropic/v1/messages \
   -H "Content-Type: application/json" \
   -H 'x-mnemom-provider: {"only":["openai"]}' \
   -H "x-mnemom-egress-key: $OPENAI_API_KEY" \
+  -H "x-api-key: ph-not-real" \
   -d '{
     "model": "gpt-5.6-sol",
     "max_tokens": 256,
