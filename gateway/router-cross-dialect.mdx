@@ -5,7 +5,7 @@ sidebarTitle: "Cross-Dialect Egress"
 icon: "arrow-right-arrow-left"
 ---
 
-The gateway's `/router` surface lets you keep writing requests in **one provider's dialect** while the gateway egresses to **a different provider**. You send an [Anthropic Messages](https://docs.anthropic.com/en/api/messages)-shaped request to `/router/anthropic`, select OpenAI as the egress target, and the gateway translates the request into OpenAI's format on the way out and translates the response back into Anthropic's format on the way in. Your code speaks Anthropic conventions end to end; the served model is OpenAI's.
+The gateway's `/router` surface lets you keep writing requests in **one provider's dialect** while the gateway egresses to **a different provider**. You send an [Anthropic Messages](https://docs.anthropic.com/en/api/messages)-shaped request to `/router/anthropic` and select OpenAI as the egress target. The gateway translates the request into OpenAI's format on the way out and translates the response back into Anthropic's format on the way in. Your code speaks Anthropic conventions end to end; the served model is OpenAI's.
 
 This is useful when your application is already built against the Anthropic Messages API — SDKs, prompt templates, response parsing — and you want to serve an OpenAI model without rewriting the integration to OpenAI's request/response shape.
 
@@ -37,7 +37,7 @@ POST https://gateway.mnemom.ai/router/anthropic/v1/messages
   `x-mnemom-api-key` and `x-mnemom-egress-key` are two different credentials with two different jobs. The Mnemom key authorizes use of `/router` and never leaves the gateway. The egress key is your BYOK provider credential and is used only to call OpenAI upstream. Do not swap them, and do not send either in the request body.
 </Warning>
 
-A provider-dialect credential — each door's native provider auth field, such as Anthropic's `x-api-key` on the `/router/anthropic` door — does **not** authorize `/router`. Router authorization is carried solely by `x-mnemom-api-key`; browser sessions and other bearer credentials are not router credentials. But the field is not therefore optional: because `/router/anthropic` speaks the Anthropic Messages dialect, `x-api-key` must still be **present** on every request as a dialect field — send a non-authorizing placeholder (e.g. `ph-not-real`), never key material. A request that omits it is rejected with `401` even when the Mnemom key is valid.
+A provider-dialect credential — each door's native provider auth field, such as Anthropic's `x-api-key` on the `/router/anthropic` door — does **not** authorize `/router`. Router authorization is carried solely by `x-mnemom-api-key`; browser sessions and other bearer credentials are not router credentials. That does not make the field optional: because `/router/anthropic` speaks the Anthropic Messages dialect, `x-api-key` must still be **present** on every request as a dialect field — send a non-authorizing placeholder (e.g. `ph-not-real`), never key material. The router rejects a request that omits it with `401` even when the Mnemom key is valid.
 
 ### Least-privilege router key
 
@@ -163,7 +163,7 @@ curl -N https://gateway.mnemom.ai/router/anthropic/v1/messages \
 
 ## Response
 
-The gateway returns a standard **Anthropic Messages** response, regardless of the fact that an OpenAI model served it. You parse the same `content` blocks, `stop_reason`, and `usage` fields you already parse for the `/anthropic` door. The `model` field echoes the OpenAI model that served the request.
+The gateway returns a standard **Anthropic Messages** response, even though an OpenAI model served it. You parse the same `content` blocks, `stop_reason`, and `usage` fields you already parse for the `/anthropic` door. The `model` field echoes the OpenAI model that served the request.
 
 ```json
 {
@@ -216,7 +216,7 @@ Errors surface in the **Anthropic error envelope** — the same shape the `/anth
 
 ## Coordinated cutover
 
-The authentication change must be coordinated with the router deployment and every caller that uses `/router`:
+Coordinate the authentication change with the router deployment and every caller that uses `/router`:
 
 1. Mint a separate Mnemom key with only the `gateway` capability and store it in each caller's secret manager.
 2. Update callers to send that value as `x-mnemom-api-key` while continuing to send the provider BYOK value separately as `x-mnemom-egress-key`.
