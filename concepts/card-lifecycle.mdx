@@ -37,12 +37,14 @@ When you update an alignment card (via CLI, API, or dashboard), the system does 
 
 | Field | Description |
 |---|---|
-| `amendment_id` | Unique ID of the amendment record |
+| `id` | Unique ID of the amendment record |
 | `agent_id` | The agent whose card was amended |
-| `field_changed` | The card field that was modified (e.g., `autonomy.bounded_actions` in the [unified card](/specifications/alignment-card-schema); equivalently `autonomy_envelope.bounded_actions` at the AAP protocol level) |
-| `old_value` / `new_value` | The field's value before and after the change |
-| `reason` | Human-readable explanation for the change |
-| `triggered_by` | What initiated the amendment — `reclassification`, `policy_change`, or `manual` |
+| `amendment_type` | What kind of change this amendment records — `bounded_action_added`, `bounded_action_removed`, `value_modified`, or `other` |
+| `before_snapshot` / `after_snapshot` | The full alignment card before and after the change (tamper-evidence) |
+| `diff_summary` | Human-readable, auto-generated summary of what changed (nullable) |
+| `reason` | Human-readable explanation for the change, if one was supplied (nullable) |
+| `source` | What initiated the amendment — `ddr_auto`, `manual`, or `policy_enforcement` |
+| `created_by` | The user who made the change, if any (nullable) |
 | `created_at` | When the amendment was created (ISO 8601) |
 
 Amendments can be linked to reclassification requests, proving that a card gap existed at the time of a violation. This linkage is critical for trust recovery -- it provides auditable evidence that the violation was a configuration error, not agent misbehavior.
@@ -57,20 +59,38 @@ curl https://api.mnemom.ai/v1/agents/agent_abc123/card-amendments
 
 **API Response:**
 
+The response is wrapped in an `amendments` envelope:
+
 ```json
-[
-  {
-    "amendment_id": "amend-7f3a2b1c",
-    "agent_id": "agent_abc123",
-    "field_changed": "autonomy_envelope.bounded_actions",
-    "old_value": ["mcp__browser__navigate"],
-    "new_value": ["mcp__browser__navigate", "mcp__browser__web_fetch"],
-    "reason": "Added web_fetch capability after enabling browser MCP server",
-    "triggered_by": "reclassification",
-    "created_at": "2026-02-15T10:30:00Z"
-  }
-]
+{
+  "amendments": [
+    {
+      "id": "amend-7f3a2b1c",
+      "agent_id": "agent_abc123",
+      "amendment_type": "bounded_action_added",
+      "before_snapshot": {
+        "autonomy": {
+          "bounded_actions": ["mcp__browser__navigate"]
+        }
+      },
+      "after_snapshot": {
+        "autonomy": {
+          "bounded_actions": ["mcp__browser__navigate", "mcp__browser__web_fetch"]
+        }
+      },
+      "diff_summary": "Added bounded action: mcp__browser__web_fetch",
+      "reason": "Added web_fetch capability after enabling browser MCP server",
+      "source": "manual",
+      "created_by": "user_9f2e1a",
+      "created_at": "2026-02-15T10:30:00Z"
+    }
+  ]
+}
 ```
+
+<Note>
+  `before_snapshot` and `after_snapshot` hold the full alignment card, not just the field that changed -- they're shown trimmed above for readability. `diff_summary` is generated automatically from the diff between the two snapshots; `reason` is only populated when the caller supplies one.
+</Note>
 
 <Tip>
   Link amendments to reclassification requests whenever possible. An unlinked amendment is just a version bump. A linked amendment is evidence that the card was wrong -- and that the violation it caused should not count against the agent's trust score.
