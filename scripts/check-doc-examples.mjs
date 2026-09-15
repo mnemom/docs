@@ -265,6 +265,14 @@ const KNOWN_RESPONSE_DRIFT = [
   //   - guides/upgrading-to-0-5.mdx: trust-edges example aligned with
   //     canonical schema (agent_id, direction, count, edges[] with
   //     from_agent / to_agent fields).)
+
+  // concepts/card-lifecycle.mdx's GET /agents/{agent_id}/card-amendments
+  // example predates the mnemom-api #2898 (MNE-6375, merged 2026-08-31)
+  // reshape that wrapped the response in an `amendments` envelope and
+  // renamed fields. The spec is correct; the doc is stale. A follow-up
+  // PR is rewriting the doc's field table + example to match. Remove
+  // this entry once that lands.
+  { file: "concepts/card-lifecycle.mdx", method: "GET", path: "/agents/{agent_id}/card-amendments", keyword: "type", schemaPath: "#/type", owner: "keith" },
 ];
 
 function knownResponseDriftEntry(file, method, segments, keyword, schemaPath) {
