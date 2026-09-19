@@ -30,7 +30,7 @@ GET /v1/agents/{agent_id}/a2a-agent-card
   "schemaVersion": "1.0",
   "name": "support-agent",
   "description": "Mnemom-composed alignment card declaring deliberation_before_action, policy_attentiveness, evidence_grounded.",
-  "url": "https://mnemom.ai/v1/agents/smolt-e2ca60ef",
+  "url": "https://api.mnemom.ai/v1/agents/smolt-e2ca60ef",
   "version": "1.17.0",
   "capabilities": { "streaming": false, "pushNotifications": false },
   "skills": [
@@ -42,7 +42,7 @@ GET /v1/agents/{agent_id}/a2a-agent-card
       "required": false,
       "body": {
         "token": "<jws-compact>",
-        "jwks_uri": "https://mnemom.ai/v1/.well-known/jwks.json"
+        "jwks_uri": "https://api.mnemom.ai/v1/.well-known/jwks.json"
       }
     },
     {
@@ -57,6 +57,10 @@ GET /v1/agents/{agent_id}/a2a-agent-card
   }
 }
 ```
+
+<Note>
+The `extensions[].uri` values above are **namespace identifiers**, not fetchable endpoints — `aap.mnemom.ai` does not resolve to a live host. A2A's extension mechanism uses `uri` the way XML uses a namespace URI: a stable string that names the extension, not a URL you `GET`. To actually fetch the JWKS or the attestation body, use the `jwks_uri` and `token` fields inside the extension's `body`, or the documented endpoints linked above.
+</Note>
 
 | Field | Source |
 |---|---|
@@ -80,16 +84,7 @@ If you'd benefit from the full composed view including provenance, use `GET /v1/
 
 ## Opt-in
 
-Agents default to **opted out**. An org admin flips the per-agent flag:
-
-```bash
-curl -X PUT https://api.mnemom.ai/v1/agents/<agent_id>/settings \
-  -H "Authorization: Bearer $MNEMOM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"a2a_export_enabled": true}'
-```
-
-Once flipped, the AgentCard is live within seconds. Flipping back returns to 404 immediately (the per-request flag check happens on every fetch).
+Agents default to **opted out** (`agents.a2a_export_enabled` defaults to `false`) so no agent's alignment posture is exposed on the public surface without an explicit decision. There is currently no self-serve API or dashboard toggle for this flag — if you want an agent's AgentCard published for A2A discovery, contact Mnemom support to have it enabled. Once enabled, the AgentCard is live immediately (the per-request flag check happens on every fetch), and disabling it again returns the endpoint to 404 immediately.
 
 ## Verifying the embedded attestation
 

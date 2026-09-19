@@ -25,7 +25,7 @@ Every gateway and observer read hits the canonical table, not the raw scope rows
 |-------|---------|---------|-----------|---|
 | **Platform** | Defaults for all agents on Mnemom — the absolute floor | `platform_policies` row (one per card type, singleton) | Mnemom platform team | Yes |
 | **Org** | Defaults for all agents in an organization | `orgs.card_template` (alignment) + `orgs.protection_template` (protection) | Org owner / admin | Yes (personal-org-of-one for solo users) |
-| **Team** *(optional)* | Sub-org grouping for heterogeneous fleets | `teams.card_template` + `teams.protection_template` (per team) | Org owner / admin (Team Admin role lands later) | No — only when the agent is a team member |
+| **Team** *(optional)* | Sub-org grouping for heterogeneous fleets | `teams.card_template` + `teams.protection_template` (per team) | Org owner / admin, or a delegated [Team Admin](/concepts/team-admin-role) | No — only when the agent is a team member |
 | **Agent** | Per-agent specialization | `alignment_cards.card_json` (active) + `sh_configs.config_json` (protection) | Agent owner | Yes |
 
 Scope ordering is **platform → org → (team)? → agent**. The team layer is conditional: agents in zero teams compose under the 3-layer cascade; agents in one or more teams pick up a Team layer between Org and Agent. Multi-team agents fold strictest-wins across all their teams. See [Team Scope](./team-scope) for details.
@@ -41,19 +41,20 @@ Composition is not a single blended operation. Each card section has its own mer
 | `values.declared` | **Union** across scopes | Platform/org can require values; agent can add more |
 | `values.conflicts_with` | **Union** | Any scope can mark a value as conflicting; agent can add more |
 | `values.definitions` | **Agent wins** (with platform/org as defaults if agent is silent) | Definitions are local semantics |
-| `conscience.mode` | **`replace` beats `augment`** (if any scope says replace, replace wins) | Replace is the stronger commitment |
-| `conscience.values` | **Union with dedup by `content`**; `BOUNDARY` entries from platform/org are inviolable | Platform conscience floors are non-negotiable |
+| `conscience.mode` | **`replace` beats `augment`** — if the org or any team sets `replace`, replace wins | Replace is the stronger commitment |
+| `conscience.values` | **Mode-dependent.** `augment` (the default): union with dedup by `type:content` across platform + org + every team + agent. `replace`: union of **org + team values only** — platform's and the agent's own values are dropped. | An org/team declaring `replace` is asserting its own conscience values supersede the platform default set for this cascade, not merely adding to it — know this before setting `mode: replace` |
 | `integrity_mode` / `autonomy_mode` (top-level master switches) | **Strictest wins** (`enforce` > `nudge` > `observe` > `off`) | Org requires-enforce cannot be downgraded |
-| `autonomy.bounded_actions` | **Agent-scoped** (platform/org suggest defaults; agent card takes effect) | What the agent can do is agent-local |
+| `autonomy.bounded_actions` | **Union** across platform + org + every team + agent | Any scope can grant a bounded action; the agent's own declaration adds to, not replaces, what platform/org/team already granted |
 | `autonomy.forbidden_actions` | **Deny-overrides union** (forbidden at any scope = forbidden everywhere) | Platform/org deny cannot be un-denied by agent |
 | `autonomy.escalation_triggers` | **Union with dedup by `condition`** | Any scope can add a trigger |
 | `autonomy.max_autonomous_value` | **Min across scopes** (smallest cap wins) | Tightest cap applies |
-| `capabilities.*` | **Agent-scoped** (capabilities are local tool mappings) | Tools are per-agent |
+| `capabilities.<name>.tools[]` | **Union** across org + every team + agent, per capability name | A capability's grant only ever grows down the cascade |
+| `capabilities.<name>.severity_on_unmapped` | **Strictest wins** (`critical` > `high` > `medium` > `low`) | Any scope can raise the bar for an unmapped tool under this capability |
+| `capabilities.<name>.description` | **Agent wins**, falling back to the last team that defined it, then org | Descriptions are local, editorial context |
 | `enforcement.allow_unmapped_tools` | **Strictest wins (`false` over `true`)** | Any scope can require mapped tools |
-| `audit.retention_days` | **Max across scopes** (longest retention wins) | Any scope can require longer retention |
-| `audit.queryable` | **OR across scopes** (any `true` wins) | If any scope requires queryability, it's on |
-| `audit.tamper_evidence` | **Strongest wins** (`none` < `append_only` < `signed` < `merkle`) | Most rigorous evidence mechanism applies |
-| `audit.query_endpoint`, `audit.storage.*` | **Platform-scoped** (compliance floor) | Operational addresses come from the platform |
+| `audit.retention_days` | **Max across scopes** (longest retention wins) — the one exception to the platform-scoped rule below | A team/org/agent can promise *longer* retention than the platform floor |
+| `audit.trace_format`, `audit.queryable`, `audit.tamper_evidence`, `audit.query_endpoint` | **Platform-scoped** — org/team/agent values are accepted but ignored | Audit is the substrate every governance promise rests on; letting downstream scopes strengthen it on paper only would produce hollow promises |
+| `audit.storage.*` | **Dropped from the composed output entirely** — no consumer reads it | Authored `storage` config isn't preserved past composition today |
 | Protection `mode` | **Strictest wins** | Same as integrity |
 | Protection `thresholds.*` | **Floor + override** (org floor; agent may go stricter, not looser) | Org sets the alert ceiling |
 | Protection `screen_surfaces.*` | **Floor (true wins)** | Any scope can require scanning |

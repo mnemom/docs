@@ -168,7 +168,7 @@ The response reports the **resolved** org so you always know where the agent lan
 200 { "claimed": true, "agent_id": "mnm-…", "org_id": "<resolved>", "claimed_at": "…" }
 ```
 
-Claim is **idempotent for the same owner**: re-claiming an agent you already own returns `200` (the original `claimed_at` is preserved; pass a new `org_id` to re-home it). An agent already owned by *someone else* is **not** adoptable — that returns `403` (holding the proof lets you claim an unowned agent, never steal an owned one). There is no `409` on claim.
+Claim is **idempotent for the same owner**: re-claiming an agent you already own returns `200` (the original `claimed_at` is preserved; pass a new `org_id` to re-home it). An agent already owned by *someone else* is **not** adoptable — that returns `409 agent_cross_tenant` (holding a valid proof is necessary but not sufficient; the agent's ownership is a resource-state conflict, not a permission failure, so it's a conflict rather than a `403`).
 
 <Note>
 Don't know your org IDs? List them with `GET /v1/orgs` (or `mnemom org list`). `GET /v1/me/context` returns your active org plus your full membership list. The claimable subset is echoed in `details.claimable_orgs` when you try to claim into an org you're not a member of.
@@ -209,7 +209,8 @@ mnemom org list
 
 # Claim a gateway-provisioned agent into an org. Claim by its mnm-id — an
 # unclaimed agent isn't in your fleet yet, so it can't be resolved by name.
-# --org takes a slug or org_id; omit --org to land in your personal org.
+# --org takes a slug or org_id and defaults to your ACTIVE org (set via
+# `mnemom org use`); with no active org set, it falls back to your personal org.
 # Pass --name (the x-mnemom-agent name) so the CLI computes the *named* proof
 # SHA256(key|name); drop --name only for an unnamed singleton agent. Or pass a
 # precomputed --hash-proof <64hex> instead of --key/--name.

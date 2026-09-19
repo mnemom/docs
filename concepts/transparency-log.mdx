@@ -19,7 +19,7 @@ For any historic timestamp `t` and any `agent_id`:
 
 ## Endpoints
 
-All three are **unauthenticated** — the log is meant to be publicly verifiable.
+All of these are **unauthenticated** — the log is meant to be publicly verifiable.
 
 ### `GET /v1/transparency/root`
 
@@ -27,6 +27,7 @@ Returns the current signed Merkle root + tree size + published_at, signed by the
 
 ```json
 {
+  "typ": "AAP-TransparencyRoot/v1",
   "tree_size": 12345,
   "root_hash": "<sha256-hex>",
   "published_at": "2026-05-22T12:34:56Z",
@@ -42,6 +43,16 @@ Point-in-time query. Returns the row whose `composed_at ≤ at` is greatest, plu
 ### `GET /v1/transparency/log/{agent_id}/{log_index}`
 
 Direct by-index lookup; returns the row + an inclusion proof against the current root. Use this when you already know the `log_index` (e.g., from a previous response).
+
+### `GET /v1/transparency/log/{agent_id}/recent?limit=<n>[&card_kind=alignment|protection]`
+
+Returns the last N entries for an agent, newest first (`log_index` descending), each with a freshly-computed inclusion proof. `limit` defaults to 10 and is server-clamped to 100. An agent with no attestations returns `200 { "data": [] }`.
+
+### `GET /v1/transparency/consistency?first=<n>[&second=<n>]`
+
+Returns an [RFC 6962](https://datatracker.ietf.org/doc/html/rfc6962) / RFC 9162 §2.1.4 **consistency proof** that the tree of size `second` contains the tree of size `first` as a prefix — i.e. the first `first` entries were not reordered, altered, or removed. `second` defaults to the log's current size.
+
+This is the only endpoint that can distinguish "the log grew" from "the log was rewritten and re-signed": an inclusion proof verifies against whatever root it's given, so it can't detect a wholesale reissue. Chaining consistency proofs across successive signed roots from `GET /v1/transparency/root` is what makes the append-only claim checkable rather than promised. It does **not** prove Mnemom published every root it computed — detecting a "split view" (a consistent-but-different chain shown to someone else) requires gossip between independent monitors, which this log doesn't yet implement.
 
 ## Row shape
 
@@ -67,7 +78,7 @@ Mirrors the [schema](/specifications/transparency-log-schema). One row per canon
 
 ## Append discipline
 
-- **Append-only at the DB role level** — the application's service role has `SELECT, INSERT` grants on `card_attestations`. No `UPDATE`, no `DELETE`. Append-only is enforced at the role layer, not just at the application layer.
+- **Append-only in the database, not just the application** — the service role has only `SELECT, INSERT` grants on `card_attestations` (no `UPDATE`/`DELETE`/`TRUNCATE`), and a `BEFORE UPDATE OR DELETE` trigger additionally blocks mutation at the table level — including for the table owner, which a `REVOKE` alone doesn't cover.
 - **Idempotent** — unique index on `(agent_id, card_kind, content_hash, version)` makes re-append a no-op. The compose-hook and the 5-minute reconciler are both safe to retry.
 - **Best-effort from the compose path** — the canonical write commits first; the log append + signing happen post-commit. A 5-minute reconciler closes any gap that arose from a worker crash mid-flight.
 
@@ -78,7 +89,7 @@ Mirrors the [schema](/specifications/transparency-log-schema). One row per canon
 | **Leaf** | `SHA-256(0x00 \|\| canonical_json(...))` |
 | **Internal node** | `SHA-256(0x01 \|\| left \|\| right)` |
 | **Leaf ordering** | by `log_index ASC` |
-| **Odd-count** | last unpaired hash promoted unchanged (Bitcoin / Sigstore-compatible — **not** RFC 6962's duplicate-last) |
+| **Odd-count** | last unpaired hash promoted unchanged — this **is** RFC 6962's tree shape (root-equivalent to RFC 6962 §2.1's `MTH` split at every tree size), not Bitcoin's convention of duplicating the last leaf |
 | **Storage** | rebuilt on demand from rows; layer arrays cached in Wrangler KV for 60 seconds; cache busts on every append |
 
 ## Sigstore Rekor compatibility

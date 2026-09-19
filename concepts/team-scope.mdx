@@ -75,7 +75,7 @@ Settings → Organization → Teams → `<team>` → **Alignment template** or *
 - **Team** *(editable)* — your team's contribution, hybrid form + YAML editor.
 - **Composed preview** *(read-only)* — what the cascade resolves to for an agent in this team (combining org floor + your draft + platform ceiling).
 
-The save button is gated on **org owner / org admin** role today. (A dedicated Team Admin role lands in a later milestone, scoped to a single team within an org. Until then, all team-template authorization is purely org-level.)
+The save button is available to **org owner / org admin**, or to a user holding a [Team Admin](/concepts/team-admin-role) grant on that specific team.
 
 ### Via the API
 
@@ -98,7 +98,7 @@ POST /v1/alignment/team/{team_id}/preview-compose
 
 Same shape for protection (`/v1/protection/team/{team_id}`). Body size limits: 128 KiB for alignment, 64 KiB for protection (mirrors org-scope template limits).
 
-Authorization: `requireOrgRole(team.org_id, ['owner', 'admin'])` for writes; full member roster (owner / admin / member / viewer / auditor) can read.
+Authorization: writes require org owner/admin **or** an active [Team Admin](/concepts/team-admin-role) grant on that team; full member roster (owner / admin / member / viewer / auditor) can read.
 
 ### Via the CLI
 
@@ -116,7 +116,7 @@ The CLI walks every org you're a member of and lists teams across all of them; t
 
 ## What team scope does NOT do
 
-- **Team scope is not user-scope.** Users do not "belong to" a team in the composition sense. The user-team association comes only via the Team Admin role grant (a permissions concept, not a membership concept) — landing in a later milestone. Until then, all team-scope authorization is purely org-level.
+- **Team scope is not user-scope.** Users do not "belong to" a team in the composition sense — team membership (which agents inherit a team's templates) and the [Team Admin](/concepts/team-admin-role) role (which *user* may manage a team's templates/posture/roster) are two separate, orthogonal concepts.
 - **Team scope does not affect solo agents.** Agents in zero teams compose exactly as they did before team-scope shipped. No regression; no migration; no surprise.
 - **Team scope is not a recipe.** Recipes are an orthogonal data plane for detection rules. They will gain team scope on the same rationale as cards (cataloged as a follow-on); until then, recipes are platform/org/agent-scope only.
 
