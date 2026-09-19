@@ -1,14 +1,18 @@
 ---
 title: "Integración SDK Directo"
 description: "Integra la verificación de alineamiento, la comprobación de integridad y la gobernanza de políticas directamente en tu aplicación"
-sidebarTitle: "SDK Directo"
+sidebarTitle: "SDK Direct"
 icon: "code"
-source_fingerprint: sha256:40d76b472cea461839dc70fe7559368db33f09fdf0e6f8f2b6a9c3eb3e7bfbcd
+source_fingerprint: sha256:a7c8514c99ceb17dc449722a93b1270b1eb5bc7eed0a1c73eac74a6d23b902cb
 ---
 
 # Integración SDK directa
 
-Usa los SDK de AAP y AIP para añadir verificación de alineamiento y comprobación de integridad directamente al código de tu aplicación. Esto te da control total sobre cuándo se generan las trazas, cómo se ejecutan las comprobaciones de integridad y qué sucede ante las violaciones. Para las funciones de gobernanza (aplicación de políticas, reclasificación de violaciones, recuperación de confianza), usa la API Policy y la API Reclassification junto con los SDK.
+Usa los SDK de AAP y AIP para añadir verificación de alineamiento y comprobación de integridad directamente al código de tu aplicación. Esto te da control total sobre cuándo se generan las trazas, cómo se ejecutan las comprobaciones de integridad y qué sucede ante las violaciones. Para funciones de gobernanza (aplicación de políticas, reclasificación de violaciones, recuperación de confianza), usa la [API Policy](/api-reference/policy-overview) y la [API Reclassification](/api-reference/reclassification-overview) junto con los SDK.
+
+<Note>
+  Estos inicios rápidos están disponibles en [español (Español)](/es/quickstart/overview) y en [francés (Français)](/fr/quickstart/overview) — se han traducido seis páginas por idioma.
+</Note>
 
 ## Instalación
 
@@ -24,20 +28,23 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
 
 <Steps>
   <Step title="Definir una tarjeta de alineamiento">
-    Una tarjeta de alineamiento declara la identidad de tu agente, sus valores, sus límites de autonomía y sus compromisos de auditoría. Cada traza y comprobación de integridad se verifica frente a esta tarjeta.
+    Una tarjeta de alineamiento declara la identidad, los valores, los límites de autonomía y los compromisos de auditoría de tu agente. Cada traza y comprobación de integridad se verifica contra esta tarjeta.
 
     <CodeGroup>
     ```python Python
-    from aap import AlignmentCard, Principal, Values, AutonomyEnvelope, AuditCommitment
+    from aap import AlignmentCard, Principal, Values, Autonomy, Audit
 
     card = AlignmentCard(
-        aap_version="1.0.0",
+        card_version="unified/2026-04-26",
         card_id="ac-my-agent-001",
         agent_id="my-agent",
         issued_at="2026-01-31T12:00:00Z",
+        autonomy_mode="observe",
+        integrity_mode="observe",
 
         principal=Principal(
             type="human",
+            identifier="did:web:user.example.com",
             relationship="delegated_authority",
         ),
 
@@ -46,7 +53,7 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
             conflicts_with=["deceptive_marketing", "hidden_fees"],
         ),
 
-        autonomy_envelope=AutonomyEnvelope(
+        autonomy=Autonomy(
             bounded_actions=["search", "compare", "recommend", "add_to_cart"],
             escalation_triggers=[
                 {"condition": "action_type == \"purchase\"", "action": "escalate",
@@ -57,10 +64,11 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
             forbidden_actions=["share_credentials", "subscribe_to_services"],
         ),
 
-        audit_commitment=AuditCommitment(
+        audit=Audit(
             trace_format="ap-trace-v1",
             retention_days=90,
             queryable=True,
+            query_endpoint="https://my-agent.example.com/api/v1/traces",
         ),
     )
 
@@ -71,13 +79,16 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
     import type { AlignmentCard } from '@mnemom/agent-alignment-protocol';
 
     const card: AlignmentCard = {
-      aap_version: '1.0.0',
+      card_version: 'unified/2026-04-26',
       card_id: 'ac-my-agent-001',
       agent_id: 'my-agent',
       issued_at: '2026-01-31T12:00:00Z',
+      autonomy_mode: 'observe',
+      integrity_mode: 'observe',
 
       principal: {
         type: 'human',
+        identifier: 'did:web:user.example.com',
         relationship: 'delegated_authority',
       },
 
@@ -86,7 +97,7 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
         conflicts_with: ['deceptive_marketing', 'hidden_fees'],
       },
 
-      autonomy_envelope: {
+      autonomy: {
         bounded_actions: ['search', 'compare', 'recommend', 'add_to_cart'],
         escalation_triggers: [
           { condition: 'action_type == "purchase"', action: 'escalate',
@@ -97,22 +108,27 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
         forbidden_actions: ['share_credentials', 'subscribe_to_services'],
       },
 
-      audit_commitment: {
+      audit: {
         trace_format: 'ap-trace-v1',
         retention_days: 90,
         queryable: true,
+        query_endpoint: 'https://my-agent.example.com/api/v1/traces',
       },
     };
     ```
     </CodeGroup>
 
+    <Note>
+    **Los nombres de campos cambiaron en la forma de tarjeta unificada (AAP 2.0.0).** `aap_version` ahora es `card_version` (anclado a una fecha); `autonomy_envelope`/`AutonomyEnvelope` ahora es `autonomy`/`Autonomy`; `audit_commitment`/`AuditCommitment` ahora es `audit`/`Audit`; `autonomy_mode` e `integrity_mode` son nuevos campos de primer nivel; `principal.identifier` es obligatorio siempre que `principal.type` no sea `unspecified`; y `audit.queryable: true` requiere `audit.query_endpoint`. Consulta [la migración desde la forma de tarjeta heredada 0.5.0](/protocols/aap/specification#410-migrating-from-the-legacy-050-card-shape) para el mapeo completo.
+    </Note>
+
     <Tip>
-    La tarjeta de alineamiento es el fundamento de ambos protocolos. Defínela una vez y úsala para la verificación AAP, la comprobación de integridad AIP y las comprobaciones de coherencia de valores.
+    La tarjeta de alineamiento es la base de ambos protocolos. Defínela una vez y úsala para la verificación AAP, la comprobación de integridad AIP y las comprobaciones de coherencia de valores.
     </Tip>
   </Step>
 
   <Step title="Generar AP-Traces a partir de las acciones del agente">
-    Cada decisión importante que tome tu agente debe producir una AP-Trace. La traza registra la acción tomada, las alternativas consideradas, el razonamiento aplicado y si se evaluó una escalada.
+    Cada decisión significativa que tome tu agente debería producir una AP-Trace. La traza registra la acción tomada, las alternativas consideradas, el razonamiento aplicado, y si se evaluó la escalada.
 
     <CodeGroup>
     ```python Python
@@ -206,12 +222,12 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
     </CodeGroup>
 
     <Tip>
-    La verificación comprueba `action.name` contra `bounded_actions`, no `action.type`. Ambos campos tienen propósitos distintos: `type` es una categoría semántica; `name` es el identificador de operación específico que se compara con la lista `bounded_actions` de la tarjeta.
+    La verificación compara `action.name` con `bounded_actions`, no `action.type`. Ambos campos sirven propósitos distintos: `type` es una categoría semántica; `name` es el identificador de operación específico que se verifica contra la lista `bounded_actions` de la tarjeta.
     </Tip>
   </Step>
 
-  <Step title="Verificar las trazas frente a la tarjeta">
-    La verificación comprueba si el comportamiento del agente (registrado en la traza) es coherente con su alineamiento declarado (la tarjeta). Devuelve comprobaciones estructurales, una puntuación de similitud y cualquier violación o advertencia.
+  <Step title="Verificar trazas contra la tarjeta">
+    La verificación comprueba si el comportamiento del agente (registrado en la traza) es coherente con su alineamiento declarado (la tarjeta). Devuelve comprobaciones estructurales, una puntuación de similitud, y cualquier violación o advertencia.
 
     <CodeGroup>
     ```python Python
@@ -265,77 +281,95 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
     </CodeGroup>
 
     <Note>
-    El `similarity_score` (de 0.0 a 1.0) mide cuán semánticamente similar es el comportamiento de la traza al alineamiento declarado. Una traza puede pasar todas las comprobaciones estructurales y aun así recibir una advertencia `low_behavioral_similarity` si la puntuación cae por debajo de 0.50. Consulta la calibración para saber cómo se derivaron los umbrales.
+    El `similarity_score` (0,0 a 1,0) mide cuán semánticamente similar es el comportamiento de la traza al alineamiento declarado. Una traza puede pasar todas las comprobaciones estructurales pero aun así recibir una advertencia `low_behavioral_similarity` si la puntuación cae por debajo de 0,50. Consulta [la calibración](/protocols/aap/calibration) para saber cómo se derivaron los umbrales.
     </Note>
   </Step>
 
   <Step title="Añadir puntos de control de integridad">
-    La comprobación de integridad AIP analiza los bloques de pensamiento del LLM por turno para detectar inyección de prompt, deriva de valores y manipulación. Cada comprobación produce un veredicto: `clear`, `review_needed` o `boundary_violation`.
+    La comprobación de integridad AIP analiza los bloques de razonamiento del LLM por turno para detectar inyección de prompts, deriva de valores y manipulación. Cada comprobación produce un veredicto: `clear`, `review_needed`, o `boundary_violation`.
 
     <Warning>
-    **AIP usa por defecto el modo fail-open.** Si el LLM de análisis es inaccesible, las comprobaciones de integridad pasarán silenciosamente. Para los despliegues en producción que manejan operaciones sensibles, define `failure_policy: { mode: "fail_closed" }` en tu configuración AIP.
+    **AIP usa por defecto el modo fail-open.** Si el LLM de análisis no está disponible, las comprobaciones de integridad pasarán silenciosamente. Para despliegues en producción que manejan operaciones sensibles, define `failure_policy: { mode: "fail_closed" }` en tu configuración de AIP.
     </Warning>
+
+    Un cliente se encarga de la extracción, la llamada al LLM y la contabilidad de puntos de control/ventanas por ti — pásale el cuerpo de respuesta crudo del proveedor, no una cadena de razonamiento pre-extraída. El `card` aquí es la forma de tarjeta mínima propia de AIP (`card_id`, `values`, `autonomy_envelope`) — un pequeño subconjunto de campos, mantenido separado del `AlignmentCard` de AAP completo que construiste en el Paso 1, ya que `@mnemom/agent-alignment-protocol` es solo una dependencia peer opcional para AIP.
 
     <CodeGroup>
     ```python Python
-    from aip import check_integrity, build_signal
-
-    checkpoint = check_integrity(
-        thinking_block="The user wants product recommendations. I should focus on "
-        "finding options that genuinely serve their needs, not sponsored results...",
-        card=card_dict,
-        config={
-            "agent_id": "my-agent",
-            "analysis_llm": {
-                "model": "claude-haiku-4-5-20251001",
-                "base_url": "https://api.anthropic.com",
-                "api_key": "your-anthropic-api-key",
-                "max_tokens": 1024,
-            },
-        },
+    from aip import create_client
+    from aip.schemas.config import (
+        AIPConfig, AnalysisLLMConfig, WindowConfig,
+        AlignmentCard as AIPCard, AlignmentCardValue, AutonomyEnvelope,
     )
 
-    print(f"Verdict: {checkpoint.verdict}")       # "clear"
-    print(f"Concerns: {checkpoint.concerns}")     # []
+    client = create_client(AIPConfig(
+        card=AIPCard(
+            card_id="ac-my-agent-001",
+            values=[AlignmentCardValue(name="principal_benefit", priority=1)],
+            autonomy_envelope=AutonomyEnvelope(
+                bounded_actions=["search", "compare", "recommend", "add_to_cart"],
+            ),
+        ),
+        analysis_llm=AnalysisLLMConfig(
+            model="claude-haiku-4-5-20251001",
+            base_url="https://api.anthropic.com",
+            api_key="your-anthropic-api-key",
+            max_tokens=1024,
+        ),
+        window=WindowConfig(),
+        agent_id="my-agent",
+    ))
 
-    # Build signal for your host system
-    signal = build_signal(checkpoint, window_state)
-    print(f"Proceed: {signal.proceed}")           # True
-    print(f"Action: {signal.recommended_action}") # "continue"
+    # response_body is the raw JSON text of the provider response your agent
+    # just received (the one carrying the thinking block to be analyzed).
+    signal = await client.check(response_body)
+
+    print(f"Verdict: {signal.checkpoint.verdict}")   # "clear"
+    print(f"Concerns: {signal.checkpoint.concerns}") # []
+    print(f"Proceed: {signal.proceed}")              # True
+    print(f"Action: {signal.recommended_action}")    # "continue"
     ```
 
     ```typescript TypeScript
-    import { checkIntegrity, buildSignal } from '@mnemom/agent-integrity-protocol';
+    import { createClient } from '@mnemom/agent-integrity-protocol';
 
-    const checkpoint = await checkIntegrity({
-      thinkingBlock:
-        'The user wants product recommendations. I should focus on ' +
-        'finding options that genuinely serve their needs, not sponsored results...',
-      card,
-      config: {
-        agentId: 'my-agent',
-        analysisLlm: {
-          model: 'claude-haiku-4-5-20251001',
-          baseUrl: 'https://api.anthropic.com',
-          apiKey: 'your-anthropic-api-key',
-          maxTokens: 1024,
+    const client = createClient({
+      card: {
+        card_id: 'ac-my-agent-001',
+        values: [{ name: 'principal_benefit', priority: 1 }],
+        autonomy_envelope: {
+          bounded_actions: ['search', 'compare', 'recommend', 'add_to_cart'],
         },
       },
+      analysis_llm: {
+        model: 'claude-haiku-4-5-20251001',
+        base_url: 'https://api.anthropic.com',
+        api_key: 'your-anthropic-api-key',
+        max_tokens: 1024,
+      },
+      window: {},
+      agent_id: 'my-agent',
     });
 
-    console.log(`Verdict: ${checkpoint.verdict}`);     // "clear"
-    console.log(`Concerns: ${checkpoint.concerns}`);   // []
+    // responseBody is the raw JSON text of the provider response your agent
+    // just received (the one carrying the thinking block to be analyzed).
+    const signal = await client.check(responseBody);
 
-    const signal = buildSignal(checkpoint, windowState);
-    console.log(`Proceed: ${signal.proceed}`);         // true
-    console.log(`Action: ${signal.recommended_action}`); // "continue"
+    console.log(`Verdict: ${signal.checkpoint.verdict}`);   // "clear"
+    console.log(`Concerns: ${signal.checkpoint.concerns}`); // []
+    console.log(`Proceed: ${signal.proceed}`);              // true
+    console.log(`Action: ${signal.recommended_action}`);    // "continue"
     ```
     </CodeGroup>
 
-    ### Correspondencia veredicto → acción
+    <Tip>
+    `client.check()` ejecuta el pipeline completo en cada llamada: extraer el bloque de razonamiento del proveedor detectado, llamar al LLM de análisis, parsear el veredicto, actualizar la ventana deslizante y detectar la deriva. No hay una función de bajo nivel separada de "simplemente parsear esta respuesta de análisis" en la API pública — `check()` es el único punto de entrada.
+    </Tip>
 
-    | Veredicto | Continuar | Acción recomendada |
-    |-----------|-----------|-------------------|
+    ### Mapeo de veredicto a acción
+
+    | Veredicto | Proceed | Acción recomendada |
+    |---------|---------|-------------------|
     | `clear` | Sí | `continue` |
     | `review_needed` | Sí | `log_and_continue` |
     | `boundary_violation` | No | `pause_for_review` o `deny_and_escalate` |
@@ -432,7 +466,7 @@ def recommend_product(query: str) -> TracedResult:
 
 ## Detección de deriva
 
-Monitorea tu agente para detectar deriva de comportamiento a lo largo del tiempo:
+Monitoriza a tu agente en busca de deriva de comportamiento a lo largo del tiempo:
 
 <CodeGroup>
 ```python Python
@@ -465,12 +499,12 @@ for (const alert of alerts) {
 
 ## Próximos pasos
 
-- Descripción general de CLPI -- Capa de gobernanza: aplicación de políticas, recuperación de confianza, anclaje on-chain
-- API Policy -- Gestión programática de políticas para integraciones SDK
-- API Reclassification -- Reclasificación de violaciones y recuperación de la puntuación de confianza
-- Especificación AAP -- Detalles completos del protocolo para implementadores
-- Especificación AIP -- Detalles del protocolo de integridad
-- Limitaciones -- Qué puede y qué no puede garantizar AAP
-- Modelo de seguridad -- Modelo de amenaza y superficies de ataque
-- Integración A2A -- Añadir AAP a los flujos de trabajo de agentes A2A
-- Migración MCP -- Añadir rastreo de alineamiento a las herramientas MCP
+- [Descripción general de CLPI](/concepts/clpi) -- Capa de gobernanza: aplicación de políticas, recuperación de confianza, anclaje on-chain
+- [API Policy](/api-reference/policy-overview) -- Gestión programática de políticas para integraciones SDK
+- [API Reclassification](/api-reference/reclassification-overview) -- Reclasificación de violaciones y recuperación de puntuación de confianza
+- [Especificación AAP](/protocols/aap/specification) -- Detalles completos del protocolo para implementadores
+- [Especificación AIP](/protocols/aip/specification) -- Detalles del protocolo de integridad
+- [Limitaciones](/protocols/aap/limitations) -- Qué puede y no puede garantizar AAP
+- [Modelo de seguridad](/protocols/aap/security) -- Modelo de amenazas y superficies de ataque
+- [Integración A2A](/protocols/aap/a2a-integration) -- Añadir AAP a flujos de trabajo de agentes A2A
+- [Migración MCP](/protocols/aap/mcp-migration) -- Añadir rastreo de alineamiento a herramientas MCP

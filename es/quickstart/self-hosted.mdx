@@ -3,7 +3,7 @@ title: "Despliegue auto-alojado"
 description: "Ejecuta Mnemom Gateway en tu propia infraestructura con Docker o Kubernetes"
 sidebarTitle: "Auto-alojado"
 icon: "server"
-source_fingerprint: sha256:32e1c1d3c513ef24e95eec4a34f0e2d9def7ccccbef8a15c162508500338f497
+source_fingerprint: sha256:ad533de88502ef8597093a3ca1259be68424be17b0a934449a61ff38c8bd4a0c
 ---
 
 # Despliegue auto-alojado
@@ -66,15 +66,17 @@ La forma más rápida de poner en marcha una pasarela auto-alojada. Incluye Post
     Edita `.env` y establece los valores requeridos:
 
     ```bash
-    # Required
+    # Required by docker compose itself (the postgres/redis containers refuse to start without these)
     POSTGRES_PASSWORD=<strong-password>
     REDIS_PASSWORD=<strong-password>
+
+    # Required by the gateway process — it fails to boot (EnvValidationError) without these
     SUPABASE_URL=https://<your-project-ref>.supabase.co
     SUPABASE_SECRET_KEY=<your-supabase-service-role-key>
-    SUPABASE_JWT_SECRET=<your-supabase-jwt-secret>
-    INTERNAL_API_KEY=<strong-random-string>
-    MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
     ANTHROPIC_API_KEY=<your-anthropic-api-key>
+
+    # Enterprise license
+    MNEMOM_LICENSE_JWT=<your-enterprise-license-jwt>
 
     # Optional: additional providers
     OPENAI_API_KEY=<your-openai-key>
@@ -83,6 +85,10 @@ La forma más rápida de poner en marcha una pasarela auto-alojada. Incluye Post
     # Optional: heartbeat override (for EU/air-gapped deployments)
     # HEARTBEAT_URL=https://api.mnemom.ai/v1/deployments/heartbeat
     ```
+
+    <Warning>
+    `SUPABASE_URL` debe ser un endpoint compatible con REST — un proyecto Supabase alojado, o una stack auto-alojada que exponga la API PostgREST de Supabase — no una cadena de conexión Postgres en bruto. La pasarela le habla por HTTP (`GET <SUPABASE_URL>/rest/v1/...`), así que apuntarla a un host `postgres://` desnudo hará fallar cada llamada de datos, y también la comprobación de Supabase de `/health/ready`. El contenedor `postgres` incluido en este archivo compose proporciona el almacenamiento para que tu propio despliegue de Supabase/PostgREST se sitúe delante de él — no es en sí mismo un endpoint REST.
+    </Warning>
 
     <Note>
     Si tu `.env.example` muestra `SMOLTBOT_ROLE`, cámbiale el nombre a `MNEMOM_ROLE` — el archivo tiene un nombre de marca obsoleto, pero el punto de entrada lee `MNEMOM_ROLE`.
@@ -118,6 +124,8 @@ La forma más rápida de poner en marcha una pasarela auto-alojada. Incluye Post
       }
     }
     ```
+
+    `status` es `"degraded"` (HTTP 503) y la comprobación individual correspondiente es `{ "ok": false }` cuando Redis, `SUPABASE_URL` o la licencia no se pueden alcanzar/validar — el caso más común es que `supabase` falle porque `SUPABASE_URL` todavía no es un endpoint compatible con REST (ver la advertencia anterior).
   </Step>
 
   <Step title="Conectar un agente">
@@ -199,15 +207,15 @@ Para despliegues en producción con auto-escalado, alta disponibilidad y monitor
 
     ```bash
     kubectl create secret generic mnemom-secrets \
-      --from-literal=SUPABASE_URL=<your-supabase-url> \
+      --from-literal=SUPABASE_URL=<your-supabase-or-postgrest-url> \
       --from-literal=SUPABASE_SECRET_KEY=<your-service-role-key> \
-      --from-literal=SUPABASE_JWT_SECRET=<your-supabase-jwt-secret> \
-      --from-literal=INTERNAL_API_KEY=<strong-random-string> \
       --from-literal=ANTHROPIC_API_KEY=<your-anthropic-key> \
       --from-literal=MNEMOM_LICENSE_JWT=<your-license-jwt> \
       --from-literal=REDIS_URL=<your-redis-url> \
       --from-literal=DATABASE_URL=<your-postgres-url>
     ```
+
+    Estas son las claves que espera el `values.yaml` predeterminado del chart (`secrets.values`); añade otras solo si tu propio override de values las agrega.
   </Step>
 
   <Step title="Instalar el chart">
@@ -308,15 +316,15 @@ Las trazas, puntos de control de integridad y todo el contenido de prompts/respu
 
 ### Requerido
 
+El propio proceso de la pasarela solo valida estas tres — cualquier otra cosa que falte lo hace fallar cerrado en el arranque con un `EnvValidationError` que nombra la(s) variable(s) faltante(s):
+
 | Variable | Descripción |
 |---|---|
-| `SUPABASE_URL` | URL del proyecto Supabase (`https://<ref>.supabase.co`) o endpoint PostgREST auto-alojado |
+| `SUPABASE_URL` | Un endpoint compatible con REST — proyecto Supabase alojado (`https://<ref>.supabase.co`) o stack auto-alojada que expone PostgREST. No una cadena de conexión Postgres en bruto. |
 | `SUPABASE_SECRET_KEY` | Clave de rol de servicio de Supabase |
-| `SUPABASE_JWT_SECRET` | Secreto JWT para verificar tokens de autenticación de Supabase (el observer falla sin esto) |
-| `REDIS_PASSWORD` | Contraseña para la instancia de Redis (requerida cuando se usa Redis) |
-| `INTERNAL_API_KEY` | Secreto interno de servicio a servicio para las llamadas de creación de agentes |
-| `MNEMOM_LICENSE_JWT` | JWT de licencia Enterprise desde [mnemom.ai/dashboard](https://mnemom.ai/dashboard) |
 | `ANTHROPIC_API_KEY` | Clave API de Anthropic (requerida para el análisis AIP) |
+
+`REDIS_PASSWORD` y `POSTGRES_PASSWORD` se requieren en otra capa — el propio archivo Docker Compose se niega a iniciar esos contenedores sin ellos (ver la stack compose anterior). `MNEMOM_LICENSE_JWT` es tu licencia Enterprise desde [mnemom.ai/dashboard](https://mnemom.ai/dashboard); la pasarela igual arranca sin ella, pero la comprobación `license` de `/health/ready` la reporta como un despliegue sin licencia. `SUPABASE_JWT_SECRET` e `INTERNAL_API_KEY` no son leídos por los roles gateway/observer que ejecuta esta stack compose — déjalos sin definir a menos que también estés auto-alojando un rol que documente necesitarlos.
 
 ### Opcional: proveedores
 
@@ -356,7 +364,7 @@ Tres sondas estándar de Kubernetes:
 | Endpoint | Propósito | Comportamiento |
 |---|---|---|
 | `/health/live` | Sonda de liveness | Siempre 200 salvo bloqueo |
-| `/health/ready` | Sonda de readiness | Comprueba Redis, PostgreSQL y la validez de la licencia |
+| `/health/ready` | Sonda de readiness | Comprueba Redis, el endpoint Supabase/PostgREST y la validez de la licencia |
 | `/health/startup` | Sonda de startup | Devuelve 503 hasta que la inicialización se complete |
 
 ## Métricas de Prometheus
@@ -368,6 +376,10 @@ La pasarela expone un endpoint `/metrics` con:
 - `gateway_aip_checks_total{verdict}` — contador de comprobaciones de integridad
 - `gateway_cache_operations_total{operation,result}` — hit/miss de caché
 - Métricas estándar `process_*` y `nodejs_*`
+
+<Warning>
+`/metrics` está cerrado por defecto — define `METRICS_SCRAPE_KEY`, o el endpoint responderá a cada scrape como si la ruta no existiera (sin 401, solo un cuerpo genérico de tipo not-found, así que un scraper mal configurado ni siquiera aparecerá como un error de permisos). Preséntala como `X-Metrics-Key: <key>` o `Authorization: Bearer <key>`; esta última es la que permite que un `ServiceMonitor` de Prometheus Operator la adjunte vía `bearerTokenSecret`.
+</Warning>
 
 Para Kubernetes, habilita el ServiceMonitor en `values.yaml`:
 
@@ -444,7 +456,7 @@ Haz siempre una copia de seguridad de tu base de datos antes de actualizar. Para
 
 ## Próximos pasos
 
-- Descripción general de Mnemom Gateway — arquitectura y componentes
-- Modos de aplicación — observe, nudge y enforce
-- Guía de observabilidad — paneles y alertas
-- Modelo de seguridad — límites de confianza y modelo de amenaza
+- [Descripción general de Mnemom Gateway](/gateway/overview) — arquitectura y componentes
+- [Modos de aplicación](/gateway/enforcement) — observe, nudge y enforce
+- [Guía de observabilidad](/guides/observability) — paneles y alertas
+- [Modelo de seguridad](/guides/security-trust-model) — límites de confianza y modelo de amenaza

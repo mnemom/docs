@@ -3,20 +3,24 @@ title: "Inicio rápido de Mnemom Gateway"
 description: "Gobernanza completa de agentes — verificación, análisis de integridad y aplicación de políticas — en 5 minutos sin cambios de código"
 sidebarTitle: "Gateway"
 icon: "bolt"
-source_fingerprint: sha256:33616606cfdf22e275c64887f3d086c12649f843284696f052a0ef8a0fa825ed
+source_fingerprint: sha256:96fc728b72aa368597e68446b93218ae17071f636532f75f4462cc01380636a7
 ---
 
 # Mnemom Gateway
 
-Mnemom Gateway es una pasarela de IA transparente que se sitúa entre tu aplicación y cualquier proveedor LLM. Proporciona la stack de confianza completa de Mnemom desde el primer momento:
+Mnemom Gateway es una pasarela de IA transparente que se sitúa entre tu aplicación y cualquier proveedor de LLM. Proporciona toda la stack de confianza de Mnemom desde el primer momento:
 
-- AP-Traces verificables
-- Comprobaciones de integridad AIP por turno
+- [AP-Traces](/concepts/ap-traces) verificables
+- Comprobaciones de integridad [AIP](/concepts/integrity-checkpoints) por turno
 - Aplicación de políticas a partir de las secciones `capabilities` y `enforcement` de la tarjeta de alineamiento
-- Protección Safe House configurada mediante la tarjeta de protección
-- Verificación frente a la tarjeta de alineamiento del agente
+- Protección [Safe House](/concepts/safe-house) configurada mediante la [tarjeta de protección](/concepts/protection-card)
+- Verificación contra la [tarjeta de alineamiento](/concepts/agent-cards) del agente
 
 Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu máquina.
+
+<Note>
+  Estos inicios rápidos están disponibles en [español (Español)](/es/quickstart/overview) y en [francés (Français)](/fr/quickstart/overview) — se han traducido seis páginas por idioma.
+</Note>
 
 <Steps>
   <Step title="Instalar la CLI">
@@ -32,18 +36,18 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
     mnemom login
     ```
 
-    Esto abre un flujo de inicio de sesión en el navegador y almacena tu token de autenticación en `~/.mnemom/auth.json`.
+    Esto abre un flujo de inicio de sesión en el navegador y guarda tu token de autenticación en `~/.mnemom/auth.json`.
 
     <Note>
-    Tus claves API del proveedor **no** se envían a Mnemom. Solo se usan hashes SHA-256 para identificar tu agente. El hash no puede revertirse para recuperar tu clave.
+    Tus claves API de proveedor **no** se envían a Mnemom. Solo se usan hashes SHA-256 para identificar tu agente. El hash no se puede revertir para recuperar tu clave.
     </Note>
   </Step>
 
-  <Step title="Realizar una llamada API">
-    Usa la URL de la pasarela en lugar de la URL directa del proveedor. Incluye el encabezado `x-mnemom-agent` para nombrar tu agente — se creará automáticamente en la primera llamada en el Sandbox de Mnemom sin propietario. Antes de que los comandos de lectura (`mnemom status`, `logs`, `integrity`, `card show`) puedan resolverlo, debes reclamar el agente en tu cuenta (paso siguiente). Usa `-i` para imprimir los encabezados de respuesta y capturar el id `X-Mnemom-Agent` que necesitarás para la reclamación.
+  <Step title="Hacer una llamada a la API">
+    Usa la URL de la pasarela en lugar de la URL directa del proveedor. Incluye el encabezado `x-mnemom-agent` para nombrar a tu agente — se creará automáticamente en la primera llamada dentro del Sandbox de Mnemom, sin propietario. Antes de que los comandos de lectura (`mnemom status`, `logs`, `integrity`, `card show`) puedan resolverlo, debes reclamar el agente en tu cuenta (siguiente paso). Usa `-i` para imprimir los encabezados de respuesta y así capturar el id `X-Mnemom-Agent` que necesitarás para la reclamación.
 
     ```bash
-    # En lugar de https://api.anthropic.com/v1/messages
+    # Instead of https://api.anthropic.com/v1/messages
     curl -i https://gateway.mnemom.ai/anthropic/v1/messages \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -H "x-mnemom-agent: my-agent" \
@@ -56,28 +60,55 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
       }'
     ```
 
+    La misma llamada contra OpenAI usa la ruta `/openai` y el encabezado `Authorization: Bearer`:
+
+    ```bash
+    # Instead of https://api.openai.com/v1/chat/completions
+    curl -i https://gateway.mnemom.ai/openai/v1/chat/completions \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
+      -H "content-type: application/json" \
+      -d '{
+        "model": "gpt-5",
+        "messages": [{"role": "user", "content": "Hello"}]
+      }'
+    ```
+
+    Y contra Gemini, la ruta `/gemini` con el encabezado `x-goog-api-key`:
+
+    ```bash
+    # Instead of https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+    curl -i https://gateway.mnemom.ai/gemini/v1beta/models/gemini-2.5-flash:generateContent \
+      -H "x-goog-api-key: $GEMINI_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
+      -H "content-type: application/json" \
+      -d '{
+        "contents": [{"parts": [{"text": "Hello"}]}]
+      }'
+    ```
+
     La pasarela admite los tres proveedores en sus rutas estándar:
 
-    | Proveedor | Ruta de la pasarela | Equivalente directo |
-    |-----------|--------------------|--------------------|
+    | Proveedor | Ruta de la Gateway | Equivalente directo |
+    |----------|-------------|-------------------|
     | Anthropic | `gateway.mnemom.ai/anthropic/*` | `api.anthropic.com/*` |
     | OpenAI | `gateway.mnemom.ai/openai/*` | `api.openai.com/*` |
     | Gemini | `gateway.mnemom.ai/gemini/*` | `generativelanguage.googleapis.com/*` |
 
     <Tip>
-    La mayoría de los SDK y frameworks te permiten anular la URL base. Configúrala con la ruta de la pasarela para tu proveedor y todo lo demás funciona sin cambios.
+    La mayoría de los SDK y frameworks te permiten sobrescribir la URL base. Configúrala con la ruta de la pasarela para tu proveedor y todo lo demás funciona sin cambios.
     </Tip>
   </Step>
 
-  <Step title="Lo que querrás leer de vuelta">
-    La pasarela agrega encabezados de respuesta que llevan el veredicto de Safe House, metadatos de correlación de soporte y entradas de avisos. Una integración conforme debe analizar y observar estos encabezados — al menos mostrarlos cuando algo va mal.
+  <Step title="Lo que conviene leer a la vuelta">
+    La pasarela añade encabezados de respuesta que llevan el veredicto de Safe House, metadatos de correlación de soporte y entradas de aviso. Una integración conforme debería analizar y observar estos encabezados — como mínimo, mostrarlos cuando algo sale mal.
 
-    | Encabezado | Cuándo se emite | Qué hacer |
-    |-----------|----------------|-----------|
-    | `X-Mnemom-Request-Id` | Siempre | UUIDv4 por solicitud. **Siempre regístralo.** Pégalo en un ticket de soporte y podremos recuperar cada línea de log de la solicitud. |
-    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced \| unverified}`. Analízalo; el estado de cuatro puntos de control te indica qué observó Safe House (front+back), qué hizo CLPI en las llamadas a herramientas (autonomy) y qué hizo AIP en el razonamiento (integrity). `unverified` es exclusivo de integrity: el analizador falló, así que no existe un veredicto confiable — `enforce` retiene la respuesta (fail-closed, sigue siendo 2xx), `observe`/`nudge` la reenvían y registran el estado unverified. Nunca se reporta como `pass`. |
-    | `X-Mnemom-Advisory` | Cuando la pasarela tiene avisos | JSON compacto `[{source, text, severity?, id?}, …]`. Muestra las entradas en tu UI de operador / logs. Se omite por completo cuando está vacío. |
-    | `X-Mnemom-Agent` | Cuando la solicitud está vinculada a un agente nombrado | El identificador del agente que la pasarela resolvió para tu solicitud (p. ej., `mnm-a1b2c3d4…`). Útil para cruzar referencias con filas del panel de control. |
+    | Encabezado | Cuándo se emite | Qué hacer con él |
+    |---|---|---|
+    | `X-Mnemom-Request-Id` | Siempre | UUIDv4 por solicitud. **Regístralo siempre.** Pégalo en un ticket de soporte y podemos recuperar cada línea de log de la solicitud. |
+    | `X-Mnemom-Verdict` | Siempre (gateway) | Estructurado `front=…; autonomy=…; integrity=…; back=…` con cada valor en `{pass \| observed \| nudged \| enforced \| unverified}`. Analízalo; el estado de los cuatro puntos de control indica lo que Safe House observó (front+back), lo que CLPI hizo con las llamadas a herramientas (autonomy), y lo que AIP hizo con el razonamiento (integrity). `front` es un acumulado sobre cada superficie entrante que llevó la solicitud — el mensaje *y* cada resultado de herramienta filtrado dentro de esa misma solicitud — así que `front=enforced` en un `200` significa que un resultado de herramienta fue retenido o modificado antes de que el modelo lo viera. Consulta [Cuándo se activa la puerta de entrada](/concepts/safe-house#when-the-front-door-runs). `unverified` es exclusivo de integrity: el analizador falló, así que no existe un veredicto fiable — `enforce` retiene la respuesta (fail-closed, sigue siendo 2xx), `observe`/`nudge` la reenvían y registran el estado unverified. Nunca se reporta como `pass`. |
+    | `X-Mnemom-Advisory` | Cuando la gateway tiene avisos | JSON compacto `[{source, text, severity?, id?}, …]`. Muestra las entradas en tu UI de operador / logs. Se omite por completo cuando está vacío. |
+    | `X-Mnemom-Agent` | Cuando la solicitud está vinculada a un agente nombrado | El identificador de agente al que la gateway resolvió tu solicitud (p. ej., `mnm-a1b2c3d4…`). Útil para cruzar filas del panel de control. |
     | `X-Mnemom-Session` | En sesiones multi-turno | Token de correlación de sesión estable. Devuélvelo en el siguiente turno para mantener la continuidad de la sesión. |
     | `Retry-After` | En `429` y algunos `503` | Segundos a esperar antes de reintentar. **Respétalo.** |
 
@@ -89,21 +120,21 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
     // checkpoints.front, checkpoints.autonomy, checkpoints.integrity, checkpoints.back
 
     if (checkpoints.integrity === 'enforced') {
-      // Ocurrió un reemplazo AIP en el mismo turno — muéstralo en tu UI.
+      // Same-turn AIP replacement happened — surface that in your UI.
     }
     if (checkpoints.integrity === 'unverified') {
-      // El analizador falló — no hay veredicto confiable. En enforce esta
-      // respuesta ya fue retenida/reemplazada; en observe/nudge fue reenviada.
+      // Analyzer failed — no trustworthy verdict. In enforce this response
+      // was already withheld/replaced; in observe/nudge it was forwarded.
     }
     ```
 
-    Consulta la referencia de encabezados para el conjunto canónico completo + parsers por lenguaje, y la referencia de errores para el mapeo veredicto-a-estado (cuando `enforced` se convierte en cuarentena 422 o bloqueo 403).
+    Consulta la [referencia de encabezados](/api-reference/headers) para el conjunto canónico completo + parsers por lenguaje, y la [referencia de errores](/api-reference/errors) para el mapeo de veredicto a código de estado.
   </Step>
 
   <Step title="Reclamar tu agente">
     La pasarela creó tu agente en el Sandbox compartido de Mnemom (sin propietario). Reclamarlo demuestra que posees la clave del proveedor y lo mueve a tu cuenta para que todos los comandos de lectura puedan resolverlo.
 
-    Copia el valor `X-Mnemom-Agent` de los encabezados de respuesta anteriores y ejecuta:
+    Copia el valor `X-Mnemom-Agent` de los encabezados de respuesta anteriores, luego ejecuta:
 
     ```bash
     mnemom agents claim mnm-550e8400-e29b-41d4-a716-446655440000 --name my-agent --key $ANTHROPIC_API_KEY
@@ -111,65 +142,54 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
 
     Reemplaza `mnm-550e8400-e29b-41d4-a716-446655440000` con el id real de tu encabezado `X-Mnemom-Agent`.
 
-    - Pasa `--name` que coincida con el valor `x-mnemom-agent` que enviaste en la llamada a la pasarela (omite `--name` si hiciste esa llamada sin el encabezado). Si el id, `--name` o `--key` no resuelven a un agente real, la reclamación devuelve `404` — verifica el id `X-Mnemom-Agent` y que `--name`/`--key` coincidan con la llamada a la pasarela.
+    - Pasa `--name` coincidiendo con el valor `x-mnemom-agent` que enviaste en la llamada a la gateway (omite `--name` si hiciste esa llamada sin el encabezado). Si el id, `--name` o `--key` no resuelven a un agente real, la reclamación devuelve `404` — revisa el id `X-Mnemom-Agent` y que `--name`/`--key` coincidan con la llamada a la gateway.
     - La clave se hashea localmente (SHA-256) y nunca se envía a Mnemom.
-    - El agente llega a tu organización personal por defecto; pasa `--org <slug>` para reclamarlo en una organización compartida.
-    - La operación es idempotente — seguro ejecutarlo más de una vez.
+    - El agente cae en tu organización activa (definida con `mnemom org use <slug>`), o en tu organización personal si no has definido una; pasa `--org <slug>` para reclamarlo en una organización compartida específica.
+    - La operación es idempotente — es seguro ejecutarla más de una vez.
 
     <Note>
-      Una respuesta `503` significa que tu organización personal aún está siendo aprovisionada. Espera unos segundos y vuelve a intentarlo. Para errores `403` de inquilino cruzado o no-miembro, consulta la guía del flujo de reclamación de agentes.
+      Una respuesta `503` significa que tu organización personal todavía se está aprovisionando. Espera unos segundos y reintenta. Para errores `403` de cross-tenant o de no-miembro, consulta la [guía del flujo de reclamación de agentes](/guides/agent-claim-flow).
     </Note>
   </Step>
 
-  <Step title="Verificar el estado">
+  <Step title="Comprobar el estado">
     Verifica que la pasarela sea accesible y que tu agente esté conectado:
 
     ```bash
     mnemom status --agent my-agent
     ```
 
-    ```text Salida
-    Agent:    my-agent (mnm-550e8400-e29b-41d4-a716-446655440000)
-    Gateway:  https://gateway.mnemom.ai (healthy)
-    Status:   Connected
-    Providers: anthropic, openai
-    Last seen: just now
-    ```
+    Esto imprime una checklist de autenticación / gateway / conectividad API, luego el ID de tu agente, la URL de la gateway y un enlace al panel de control, seguido de un resumen de trazas una vez que el agente tenga tráfico.
   </Step>
 
-  <Step title="Ver las trazas">
-    Después de realizar llamadas API a través de la pasarela, consulta lo que se rastreó:
+  <Step title="Ver trazas">
+    Después de hacer llamadas API a través de la pasarela, mira lo que se rastreó:
 
     ```bash
     mnemom logs --agent my-agent
     ```
 
-    ```text Salida
-    2026-02-17T10:30:00Z  tr-abc123  recommend  bounded   verified  0.82
-    2026-02-17T10:30:05Z  tr-abc124  search     bounded   verified  0.76
-    2026-02-17T10:30:12Z  tr-abc125  respond    bounded   verified  0.91
-    ```
-
-    Usa `mnemom logs --agent my-agent -l 20` para mostrar más entradas.
+    Cada traza se imprime como su propio bloque — marca de tiempo, acción, tipo y (cuando está presente) el extracto de razonamiento y cualquier violación de política. Usa `mnemom logs --agent my-agent --limit 20` para mostrar más entradas.
   </Step>
 
-  <Step title="Comprobar la integridad">
-    Consulta las puntuaciones de integridad AIP para la actividad reciente de tu agente:
+  <Step title="Comprobar la actividad">
+    Consulta la actividad de comportamiento AAP de tu agente — total de trazas, cuántas se verificaron limpias, y cualquier violación:
 
     ```bash
-    mnemom integrity --agent my-agent
+    mnemom activity --agent my-agent
     ```
 
-    ```text Salida
-    Agent: mnm-550e8400-e29b-41d4-a716-446655440000
-    Checkpoints: 12
-    Verdicts:
-      clear: 11
-      review_needed: 1
-      boundary_violation: 0
-    Integrity score: 0.94
-    Drift: none detected
+    ```text Output
+    Agent Activity (AAP)
+      Score:      94.0% [█████████░]
+      Total:      12 traces
+      Verified:   11
+      Violations: 1
     ```
+
+    <Note>
+    `mnemom integrity` es un alias obsoleto de este mismo comando — `mnemom activity` es el nombre actual. A pesar del nombre, esto muestra la verificación de trazas AAP, no los [puntos de control de integridad](/concepts/integrity-checkpoints) AIP por turno; los datos de puntos de control AIP aún no se exponen a través de la CLI.
+    </Note>
   </Step>
 
   <Step title="Ver tu tarjeta de alineamiento">
@@ -199,7 +219,7 @@ Tus prompts y respuestas pasan sin cambios. Tus claves API nunca salen de tu má
 
 ## Agentes nombrados
 
-Si ejecutas múltiples agentes detrás de la misma clave API, usa el encabezado `x-mnemom-agent` para dar a cada uno una identidad distinta. La ruta del proveedor permanece sin cambios — la pasarela deriva un ID de agente único mediante `SHA256(apiKey + '|' + agentName)`. Consulta Identidad del agente para la derivación completa del ID, las rutas de creación automática vs registro programático y cómo la rotación de claves interactúa con la identidad del agente.
+Si ejecutas varios agentes detrás de la misma clave API, usa el encabezado `x-mnemom-agent` para darle a cada uno una identidad distinta. La ruta del proveedor permanece sin cambios — la pasarela aplica hash `SHA256(apiKey + '|' + agentName)` para derivar un ID de agente único. Consulta [Identidad de agente](/concepts/agent-identity) para la derivación completa del ID, las rutas de creación automática frente al registro programático, y cómo la rotación de claves interactúa con la identidad del agente.
 
 ```bash
 curl https://gateway.mnemom.ai/anthropic/v1/messages \
@@ -214,48 +234,48 @@ curl https://gateway.mnemom.ai/anthropic/v1/messages \
   }'
 ```
 
-Cada agente nombrado obtiene su propio historial de trazas, puntuaciones de integridad y detección de deriva — aunque compartan una clave API. Los agentes se crean automáticamente en la primera llamada API; reclama una vez (consulta el paso de reclamación anterior) para vincular el agente a tu cuenta.
+Cada agente nombrado obtiene su propio historial de trazas, puntuaciones de integridad y detección de deriva — incluso si comparten una clave API. Los agentes se crean automáticamente en la primera llamada API; reclámalos una vez (ver el paso de reclamación anterior) para vincular el agente a tu cuenta.
 
 <Tip>
-También puedes crear agentes de forma programática mediante la API CRUD de agentes si quieres pre-crearlos con metadatos antes de su primera solicitud.
+También puedes crear agentes de forma programática a través de la [API CRUD de Agentes](/api-reference/endpoint/post-agents) si quieres pre-crearlos con metadatos antes de su primera solicitud.
 </Tip>
 
 ## Proveedores compatibles
 
 | Proveedor | Modelos | Soporte Thinking / AIP | Encabezado de autenticación |
-|-----------|---------|------------------------|----------------------------|
-| Anthropic | Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 | Completo (bloques de pensamiento analizados directamente) | `x-api-key` |
-| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Mediante resúmenes de razonamiento (confianza reducida) | `Authorization: Bearer` |
-| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Completo (partes de pensamiento analizadas directamente) | `x-goog-api-key` |
+|----------|--------|----------------------|-------------|
+| Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Completo (bloques de razonamiento analizados directamente) | `x-api-key` |
+| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Mediante resúmenes de razonamiento (confianza reducida) | `Authorization: Bearer` |
+| Gemini | Gemini 3.8 Flash, Gemini 3.5 Flash-Lite, Gemini 2.5 Pro, Gemini 2.5 Flash | Completo (partes de pensamiento analizadas directamente) | `x-goog-api-key` |
 
 ### Compatibilidad AIP
 
 | Proveedor / Modelo | Soporte AIP | Método |
-|-------------------|-------------|--------|
-| Modelos de razonamiento Anthropic (Opus, Sonnet) | Completo | Bloques de pensamiento analizados directamente |
-| Serie GPT-5 Thinking de OpenAI | Parcial | Resúmenes de razonamiento (confianza reducida) |
+|-----------------|-------------|--------|
+| Modelos de razonamiento de Anthropic (Opus, Sonnet) | Completo | Bloques de razonamiento analizados directamente |
+| Serie OpenAI GPT-5 Thinking | Parcial | Resúmenes de razonamiento (confianza reducida) |
 | Gemini 2.5/3 con thinking | Completo | Partes de pensamiento analizadas directamente |
 | Modelos sin razonamiento | Solo rastreo | Veredicto clear sintético |
-| OpenAI legacy (o3/o4-mini) | No compatible | Razonamiento cifrado |
+| Serie OpenAI o (o3, o3-mini) | Parcial | Solo resúmenes de razonamiento — confianza reducida |
 
 <Note>
-**Elementos thinking en respuestas proxiadas.** Safe House / AIP habilita el thinking extendido para analizar el razonamiento del agente por turno. Las respuestas proxiadas incluyen por lo tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido de solo texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no puede desactivarse.
+**Elementos thinking en las respuestas proxied.** Safe House / AIP activa el thinking extendido para analizar el razonamiento del agente en cada turno. Las respuestas proxied incluyen por tanto un elemento de contenido `thinking` en el array `content` junto al bloque `text` estándar. Los clientes que asumen arrays de contenido solo de texto deben actualizarse para manejar o ignorar los bloques thinking. Los tokens de salida de thinking se facturan como tokens de salida estándar — este comportamiento es intencional y no se puede deshabilitar.
 </Note>
 
 ## Qué se rastrea
 
 Mnemom Gateway construye [AP-Traces](https://github.com/mnemom/aap) que registran:
 
-- **Acción** -- Lo que hizo el agente (tipo, nombre, categoría)
+- **Acción** -- Qué hizo el agente (tipo, nombre, categoría)
 - **Decisión** -- Qué alternativas se consideraron y por qué se seleccionó una
-- **Escalada** -- Si el agente escaló a un humano y por qué
+- **Escalamiento** -- Si el agente escaló a un humano y por qué
 - **Verificación** -- Si la traza es coherente con la tarjeta de alineamiento declarada del agente
-- **Integridad** -- Análisis AIP por turno de los bloques de pensamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
+- **Integridad** -- Análisis AIP por turno de los bloques de razonamiento, con veredicto (`clear` / `review_needed` / `boundary_violation`)
 
 ## Qué NO se almacena
 
 <Warning>
-Tus **prompts**, **respuestas** y **claves API** nunca son almacenados por Mnemom. La pasarela procesa las solicitudes en memoria y las reenvía al proveedor. Solo se persisten los metadatos de traza estructurados (acciones, decisiones, veredictos) y los resultados del análisis de bloques de pensamiento.
+Tus **prompts**, **respuestas** y **claves API** nunca son almacenados por Mnemom. La pasarela procesa las solicitudes en memoria y las reenvía al proveedor. Solo se conservan metadatos de traza estructurados (acciones, decisiones, veredictos) y los resultados del análisis de bloques de razonamiento.
 </Warning>
 
 ## Modos de aplicación
@@ -263,24 +283,24 @@ Tus **prompts**, **respuestas** y **claves API** nunca son almacenados por Mnemo
 Mnemom Gateway admite tres modos de aplicación cuando se detecta una violación de integridad:
 
 | Modo | Comportamiento |
-|------|---------------|
-| `observe` | Detecta violaciones, las registra, no actúa (predeterminado) |
-| `nudge` | Detecta violaciones, inyecta retroalimentación en la siguiente solicitud del agente mediante el prompt del sistema. El agente lo ve y puede auto-corregirse. |
-| `enforce` | Aplica el veredicto en el mismo turno tanto para solicitudes con streaming como sin streaming (HTTP 403 para las solicitudes sin streaming); en streaming esto añade latencia porque la respuesta se evalúa antes de entregarse. |
+|------|----------|
+| `observe` | Detecta violaciones, las registra, no toma ninguna acción (predeterminado) |
+| `nudge` | Detecta violaciones, inyecta retroalimentación en la siguiente solicitud del agente mediante el prompt del sistema. El agente lo ve y puede autocorregirse. |
+| `enforce` | Bloquea en el mismo turno tanto en solicitudes streaming como no streaming. La solicitud sigue completándose con un estado `2xx` — el cuerpo de la respuesta se reemplaza por un mensaje de intervención en voz del agente y `X-Mnemom-Verdict` reporta `integrity=enforced`. En streaming esto añade latencia porque la respuesta se evalúa antes de entregarse. |
 
-Establece el modo de aplicación actualizando la tarjeta de alineamiento del agente. `integrity_mode` y `autonomy_mode` son campos de nivel superior en la tarjeta de alineamiento; el endpoint legacy `/v1/agents/{id}/enforcement` fue retirado el 2026-05-14.
+Establece el modo de aplicación actualizando la tarjeta de alineamiento del agente. `integrity_mode` y `autonomy_mode` son campos de primer nivel en la tarjeta de alineamiento; el endpoint heredado `/v1/agents/{id}/enforcement` fue retirado el 2026-05-14.
 
-Tres caminos, elige el que se adapte a tu flujo de trabajo:
+Tres caminos, elige el que se ajuste a tu flujo de trabajo:
 
-- **Panel de control:** abre `https://mnemom.ai/dashboard/agents/{your-agent-id}/card`, activa `integrity_mode`, guarda. El camino más sencillo.
-- **CLI:** `mnemom card edit` abre el YAML de la tarjeta de alineamiento actual en `$EDITOR`; cambia `integrity_mode: nudge`, guarda, la CLI publica y recompone.
-- **Programático:** `PUT /v1/alignment/agent/{agent_id}` con la tarjeta canónica completa. Consulta la guía de gestión de tarjetas para el flujo leer-modificar-escribir y el esquema de tarjeta de alineamiento para los requisitos de campos.
+- **Panel de control:** abre `https://mnemom.ai/dashboard/agents/{your-agent-id}/card`, alterna `integrity_mode`, guarda. El camino más fácil.
+- **CLI:** `mnemom card edit` abre el YAML actual de la tarjeta de alineamiento en `$EDITOR`; cambia `integrity_mode: nudge`, guarda, la CLI publica y recompone.
+- **Programático:** [`PUT /v1/alignment/agent/{agent_id}`](/api-reference/endpoint/put-agents-agent-id-alignment-card) con la tarjeta canónica completa. Consulta la [guía de gestión de tarjetas](/guides/card-management) para el flujo de leer-modificar-escribir y el [esquema de tarjeta de alineamiento](/specifications/alignment-card-schema) para los requisitos de campos.
 
 ## Próximos pasos
 
-- Ver la descripción general del protocolo para entender cómo funcionan juntos AAP, AIP y CLPI
-- Configurar la aplicación de políticas para definir reglas de gobernanza para el uso de herramientas de tu agente
-- Explorar conceptos para entender las tarjetas de alineamiento, las trazas y la integridad
-- Descripción general de CLPI para entender la capa de gobernanza (aplicación de políticas, recuperación de confianza, anclaje on-chain)
-- Leer sobre la aplicación para documentación detallada de los modos de aplicación
+- [Ver la descripción general del protocolo](/protocols/overview) para entender cómo funcionan juntos AAP, AIP y CLPI
+- [Configurar la aplicación de políticas](/guides/policy-management) para definir reglas de gobernanza para el uso de herramientas de tu agente
+- [Explorar los conceptos](/concepts/alignment-cards) para entender las tarjetas de alineamiento, las trazas y la integridad
+- [Descripción general de CLPI](/concepts/clpi) para entender la capa de gobernanza (aplicación de políticas, recuperación de confianza, anclaje on-chain)
+- [Leer sobre la aplicación](/gateway/enforcement) para la documentación detallada de los modos de aplicación
 - [Auto-alojar](/es/quickstart/self-hosted) si necesitas control completo de residencia de datos
