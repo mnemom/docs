@@ -6,19 +6,19 @@ icon: "shield-halved"
 ---
 
 <Note>
-**Policy is now part of the alignment card.** In the [unified card model](/concepts/agent-cards), the standalone CLPI Policy YAML is absorbed into the alignment card's `capabilities` and `enforcement` sections. There is no separate `PUT /v1/agents/:id/policy` endpoint — publish the alignment card and the policy travels with it. The `mnemom policy …` CLI group is removed; use `mnemom card evaluate agent.card.yaml --tools tools.json` instead.
+**Policy is part of the alignment card.** In the [unified card model](/concepts/agent-cards), what used to be a standalone policy document lives in the alignment card's `capabilities` and `enforcement` sections. There is no separate `PUT /v1/agents/:id/policy` endpoint — publish the alignment card and the policy travels with it. The `mnemom policy …` CLI group has been removed in favor of `mnemom card validate` / `mnemom card evaluate` / `mnemom card publish`.
 
 This guide has been updated for the unified model. Sections that reference the AAP protocol shape describe the protocol-level interop surface; the unified card is what you write in production.
 </Note>
 
 Policies bridge [Alignment Cards](/concepts/alignment-cards) (abstract values and bounded actions) to concrete tool usage enforcement. An alignment card declares that an agent may perform `web_fetch`. The card's `capabilities` section defines that `web_fetch` means the agent can call `mcp__browser__navigate` and `mcp__browser__click`, but not `mcp__filesystem__delete`. The card declares intent. The `enforcement` section enforces it.
 
-A policy defines three things:
-- **Capability mappings** -- which concrete MCP tools satisfy which card-level actions
-- **Forbidden rules** -- which tools are always blocked, with reasons and severities
-- **Defaults** -- how unmapped tools are handled, what enforcement mode to use, and how long new tools get a grace period
+A policy is made of:
+- **Capability mappings** (`capabilities`) -- which concrete MCP tools satisfy which capability
+- **Forbidden rules** (`enforcement.forbidden_tools`) -- which tools are always blocked, with reasons and severities
+- **Enforcement defaults** (`enforcement`, plus the card's top-level `autonomy_mode`) -- how unmapped tools are handled and how long new tools get a grace period
 
-This guide walks through creating, testing, publishing, and managing policies using the CLI, API, and SDKs.
+This guide walks through creating, testing, publishing, and managing policies using the CLI and API.
 
 ## Quick start
 
@@ -26,85 +26,102 @@ This guide walks through creating, testing, publishing, and managing policies us
 
 ### Create your alignment card
 
-Policy is now defined directly in the alignment card. Create a YAML alignment card that includes capability mappings, forbidden rules, and enforcement defaults. Here is a fully annotated example for a customer support agent:
+Policy is defined directly in the alignment card's `capabilities` and `enforcement` sections. Here is a minimal but complete example for a customer support agent:
 
 ```yaml
-meta:
-  schema_version: "1.0"
-  name: "support-agent-policy"
-  description: "Policy for customer support agents"
-  scope: agent
+card_version: "unified/2026-04-26"
+card_id: "ac-support-agent-v2"
+agent_id: "mnm-550e8400-e29b-41d4-a716-446655440000"
+issued_at: "2026-03-04T00:00:00Z"
+autonomy_mode: observe
+integrity_mode: observe
 
-capability_mappings:
+principal:
+  type: human
+  relationship: delegated_authority
+  identifier: "you@example.com"
+
+values:
+  declared:
+    - transparency
+    - honesty
+
+autonomy:
+  bounded_actions:
+    - web_fetch
+    - web_search
+    - read
+    - write
+    - send_response
+  forbidden_actions:
+    - exfiltrate_data
+  escalation_triggers:
+    - condition: "tool_matches('mcp__payment__*')"
+      action: escalate
+      reason: "Payment operations require human approval"
+
+capabilities:
   web_browsing:
     description: "Browser-based research and navigation"
     tools:
       - "mcp__browser__*"
-    card_actions:
-      - "web_fetch"
-      - "web_search"
-
   file_operations:
     description: "Reading and writing local files"
     tools:
       - "mcp__filesystem__read*"
       - "mcp__filesystem__write*"
-    card_actions:
-      - "read"
-      - "write"
-
   communication:
     description: "Sending messages and notifications"
     tools:
       - "mcp__slack__post_message"
       - "mcp__email__send"
-    card_actions:
-      - "send_response"
 
-forbidden:
-  - pattern: "mcp__filesystem__delete*"
-    reason: "File deletion not permitted for support agents"
-    severity: critical
-  - pattern: "mcp__admin__*"
-    reason: "Administrative operations require escalation"
-    severity: high
-
-escalation_triggers:
-  - condition: "tool_matches('mcp__payment__*')"
-    action: escalate
-    reason: "Payment operations require human approval"
-
-defaults:
-  unmapped_tool_action: warn
-  unmapped_severity: medium
-  fail_open: true
-  enforcement_mode: warn
+enforcement:
+  allow_unmapped_tools: false
+  default_unmapped_severity: medium
   grace_period_hours: 24
+  forbidden_tools:
+    - pattern: "mcp__filesystem__delete*"
+      reason: "File deletion not permitted for support agents"
+      severity: critical
+    - pattern: "mcp__admin__*"
+      reason: "Administrative operations require escalation"
+      severity: high
+
+audit:
+  retention_days: 90
+  queryable: true
+  query_endpoint: "https://api.mnemom.ai/v1/traces"
+  tamper_evidence: append_only
 ```
 
 <Tip>
-  The `scope: agent` field means this policy layers on top of any org-level policy. Use `scope: org` for organization-wide baselines that apply to all agents. See [Policy Merge](#multi-environment-strategies) for how the two levels combine.
+  `autonomy_mode` and `integrity_mode` are the card's top-level master switches (`off` / `observe` / `nudge` / `enforce`) — the legacy `enforcement.mode` and `integrity.enforcement_mode` locations are rejected. Start at `observe` to see what the policy would catch before it can block anything.
 </Tip>
+
+<Note>
+  A capability can also bind to specific `autonomy.bounded_actions` via `capabilities.<name>.required_actions` (an array of action names) — this is what the API's coverage report and `_composition` metadata key off. That field is accepted by the server (`PUT` the card directly, as below) but the CLI's offline validator currently doesn't recognize it, so a card using it will fail `mnemom card validate`/`card evaluate` run without `--agent`. Validate with `--agent <name>` (the default, server-authoritative mode) instead of `--offline` if you rely on it.
+</Note>
 
 ### Validate locally
 
-Run local validation to check schema compliance before publishing. This is a local-only check with no API call -- safe for CI pipelines:
+Run local validation to check schema compliance before publishing. Without `--agent` set (and no `MNEMOM_AGENT` env var), this is a local-only check with no API call -- safe for CI pipelines:
 
 ```bash
 mnemom card validate card.yaml
 ```
 
-Exit code `0` means the card is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding.
+Exit code `0` means the card is valid. Exit code `1` means there are errors. Fix any reported issues before proceeding. Pass `--agent <name>` to validate server-side instead (composes against your org/platform floor, catching conflicts the offline check can't see); `--offline` forces the local-only path even when an agent is set.
 
 ### Evaluate against tools
 
-Test your card's policy against the tools your agent actually uses:
+Test your card's policy against the tools your agent actually uses. This runs entirely locally against the embedded policy engine -- no API call, no `--agent` needed:
 
 ```bash
-mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
+mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message
 ```
 
-This evaluates each tool against the card's capability mappings, forbidden rules, and defaults. Use this to verify coverage before publishing.
+This evaluates each tool against the card's capability mappings, forbidden rules, and defaults, and prints a coverage report. Pass `--tool-manifest tools.json` (a JSON array of tool names, or `{"name": "..."}` objects) instead of `--tools` for a larger tool set. Add `--strict` to also exit non-zero on warnings, not just failures -- useful for a CI gate.
 
 <Warning>
   Always run `card evaluate` before publishing. A card that looks correct in isolation can produce unexpected violations when evaluated against real agent tools. Testing first shows you the impact before it affects live traffic.
@@ -112,13 +129,13 @@ This evaluates each tool against the card's capability mappings, forbidden rules
 
 ### Publish
 
-Upload the validated card (with embedded policy) to your agent:
+Upload the validated card to your agent:
 
 ```bash
 mnemom card publish card.yaml --agent my-agent
 ```
 
-The CLI validates again before uploading, asks for confirmation, and archives the previous card version. Use `--yes` to skip the confirmation prompt in CI workflows.
+The CLI re-validates the card, and — when run interactively (a TTY) — asks for confirmation before uploading and archiving the previous card version. In a non-interactive CI run (no TTY) it skips the confirmation prompt automatically.
 
 </Steps>
 
@@ -160,20 +177,20 @@ This gives you the concrete tool names like `mcp__browser__navigate`, `mcp__brow
 
 ### Create the mappings
 
-For each card action, create a capability mapping that lists the concrete tools implementing it:
+For each bounded action, create a capability mapping that lists the concrete tools implementing it, and (optionally) the bounded actions it binds via `required_actions`:
 
 ```yaml
-capability_mappings:
+capabilities:
   web_browsing:
     description: "Browser-based research and navigation"
     tools:
       - "mcp__browser__*"
-    card_actions:
+    required_actions:
       - "web_fetch"
       - "web_search"
 ```
 
-In this example, the card declares `web_fetch` and `web_search` as bounded actions. The agent uses `mcp__browser__navigate`, `mcp__browser__click`, and `mcp__browser__screenshot` to perform those actions. The glob pattern `mcp__browser__*` covers all of them.
+In this example, the card declares `web_fetch` and `web_search` as bounded actions. The agent uses `mcp__browser__navigate`, `mcp__browser__click`, and `mcp__browser__screenshot` to perform those actions. The glob pattern `mcp__browser__*` covers all of them. Remember that `required_actions` is validated server-side only today — publish or validate with `--agent` to check it.
 
 ### Use glob patterns for tool families
 
@@ -192,13 +209,20 @@ Glob patterns let you match groups of related tools without listing each one:
 
 ### Verify coverage
 
-After writing your mappings, check that every card action is covered:
+After writing your mappings, check that every bounded action is covered. Because coverage depends on `required_actions`, which the offline validator doesn't yet recognize (see the note above), check it through the API instead of the local `card evaluate`:
 
 ```bash
-mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__read_file --agent my-agent
+curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
+    "tools": [{ "name": "mcp__browser__navigate" }, { "name": "mcp__filesystem__read_file" }],
+    "dry_run": true
+  }'
 ```
 
-The coverage report tells you which card actions are mapped and which are missing. Aim for 100% coverage in production cards.
+The response's `coverage` object tells you which bounded actions are mapped and which are missing. Aim for 100% coverage in production cards.
 
 ## API-based management
 
@@ -223,7 +247,7 @@ curl -X PUT https://api.mnemom.ai/v1/alignment/agent/{agent_id} \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d '{
-    "card_version": "unified/2026-04-15",
+    "card_version": "unified/2026-04-26",
     "card_id": "ac-support-agent-v2",
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
     "issued_at": "2026-03-04T00:00:00Z",
@@ -239,14 +263,14 @@ curl -X PUT https://api.mnemom.ai/v1/alignment/agent/{agent_id} \
     "capabilities": {
       "web_browsing": {
         "tools": ["mcp__browser__*"],
-        "card_actions": ["web_fetch", "web_search"]
+        "required_actions": ["web_fetch", "web_search"]
       }
     },
     "enforcement": {
-      "default_mode": "warn",
-      "unmapped_tool_action": "warn",
+      "allow_unmapped_tools": false,
+      "default_unmapped_severity": "medium",
       "grace_period_hours": 24,
-      "forbidden": [
+      "forbidden_tools": [
         {
           "pattern": "mcp__filesystem__delete*",
           "reason": "File deletion not permitted",
@@ -255,7 +279,6 @@ curl -X PUT https://api.mnemom.ai/v1/alignment/agent/{agent_id} \
       ]
     },
     "audit": {
-      "trace_format": "ap-trace-v1",
       "retention_days": 90,
       "queryable": true,
       "query_endpoint": "https://api.mnemom.ai/v1/traces",
@@ -285,47 +308,45 @@ YAML is the canonical content type; pass `Accept: application/json` to get JSON 
 
 ### Evaluate tools against the active policy
 
-Test a set of tools against the agent's current policy (the `capabilities` + `enforcement` sections of its canonical card) without making a real gateway request:
+Test a set of tools against the agent's current policy (the `capabilities` + `enforcement` sections of its canonical card) without making a real gateway request. The policy is derived server-side from the agent's published canonical alignment card — you don't pass a policy document, just the `agent_id` and the tools to check:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "policy": { "meta": { "schema_version": "1.0", "name": "support-agent", "scope": "agent" } },
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
     "tools": [{ "name": "mcp__browser__navigate" }, { "name": "mcp__filesystem__delete" }],
-    "context": "gateway"
+    "context": "cicd",
+    "dry_run": true
   }'
 ```
 
-The `policy` field is the policy document to evaluate against; pass the inline policy YAML (parsed into JSON) you want to test. See the [Policy DSL spec](/specifications/policy-dsl) for the canonical schema.
+`agent_id` and a non-empty `tools` array are required. `context` defaults to `"cicd"`. Set `dry_run: true` to skip persisting the result (useful when calling this repeatedly from CI). The agent must already have a published canonical alignment card (`PUT /v1/agents/{agent_id}/alignment-card` or `PUT /v1/alignment/agent/{agent_id}`) — otherwise the endpoint 404s.
 
-The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and per-tool detail: which capability each tool matched, which forbidden rule it tripped, or whether it fell through to `unmapped_tool_action`. Use this in CI to catch regressions before publishing a card — `POST /v1/policies/evaluate/historical` does the same thing against a date range of actual past traces.
+The evaluate endpoint returns a verdict (`pass`, `warn`, or `fail`) and per-tool detail: which capability each tool matched, which forbidden rule it tripped, or whether it fell through to `unmapped_tool_action`. Use this in CI to catch regressions before publishing a card — `POST /v1/policies/evaluate/historical` does the same thing against the agent's actual recent traces.
 
 ### Historical evaluation
 
-To evaluate against an actual trace window (rather than a hypothetical tool list), use the historical endpoint:
+To evaluate against actual recent traces (rather than a hypothetical tool list), use the historical endpoint:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/policies/evaluate/historical \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "policy": { "meta": { "schema_version": "1.0", "name": "support-agent", "scope": "agent" } },
     "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-    "from": "2026-02-01T00:00:00Z",
-    "to": "2026-03-01T00:00:00Z"
+    "limit": 100
   }'
 ```
 
-This replays every tool the agent actually used in the window against the current policy, surfacing any tool that would violate today's rules. It's the primary input for `card_gap` reclassification (see [Trust Recovery](/guides/trust-recovery)).
+This replays the agent's most recent `limit` traces (default 50, capped at 200) against the agent's current canonical card, surfacing any tool call that would violate today's rules. Pass an optional `card_json` to evaluate the traces against a hypothetical card instead of the agent's published one — useful for checking "would this candidate card have caught what actually happened." It's a useful input for `card_gap` reclassification (see [Trust Recovery](/guides/trust-recovery)).
 
 ## Multi-environment strategies
 
 ### Separate policies per environment
 
-Use different enforcement modes across environments to catch issues progressively:
+Use a different top-level `autonomy_mode` (and `enforcement` defaults) per environment's agent card to catch issues progressively:
 
 <Tabs>
   <Tab title="Development">
@@ -333,22 +354,10 @@ Use different enforcement modes across environments to catch issues progressivel
 In development, keep enforcement loose so agents can explore new tools without blocking:
 
 ```yaml
-defaults:
-  unmapped_tool_action: allow
-  enforcement_mode: warn
-  grace_period_hours: 168  # 7 days
-```
-
-  </Tab>
-  <Tab title="Staging">
-
-In staging, surface warnings so you can identify unmapped tools and policy gaps before production:
-
-```yaml
-defaults:
-  unmapped_tool_action: warn
-  enforcement_mode: warn
-  grace_period_hours: 24
+autonomy_mode: observe
+enforcement:
+  allow_unmapped_tools: true
+  grace_period_hours: 168 # 7 days
 ```
 
   </Tab>
@@ -357,9 +366,10 @@ defaults:
 In production, enforce strictly. Every tool should be explicitly mapped or explicitly forbidden:
 
 ```yaml
-defaults:
-  unmapped_tool_action: deny
-  enforcement_mode: enforce
+autonomy_mode: enforce
+enforcement:
+  allow_unmapped_tools: false
+  default_unmapped_severity: high
   grace_period_hours: 24
 ```
 
@@ -368,20 +378,20 @@ defaults:
 
 ### Org-level baseline, agent-level specialization
 
-Use `scope: org` for organization-wide security rules that apply to every agent. Use `scope: agent` for per-agent customizations that add capabilities on top of the org baseline.
+Publish an org-wide alignment card (`PUT /v1/alignment/org/{org_id}`) for security rules that apply to every agent in the org, and let each agent's own card (`PUT /v1/alignment/agent/{agent_id}`) add agent-specific capabilities on top of it. The server composes platform → org → team → agent into one canonical card for the agent (see [Card Composition](/concepts/card-composition)).
 
-The merge rules ensure agents can strengthen but never weaken org-level policy:
+The merge rules ensure an agent-level card can strengthen but never weaken the org baseline:
 
 | Section | Merge Strategy | Effect |
 |---|---|---|
-| `capability_mappings` | Union | Agent can add new mappings but cannot remove org mappings |
-| `forbidden` | Union | Both org and agent forbidden rules are enforced |
-| `defaults` | Org is floor | Agent can strengthen (e.g., `warn` to `deny`) but cannot weaken |
-| `escalation_triggers` | Union | Both org and agent triggers are evaluated |
+| `capabilities` | Union (per capability: `tools`/`required_actions` union, `severity_on_unmapped` strictest-wins) | Agent can add new mappings but cannot remove org mappings |
+| `enforcement.forbidden_tools` | Union | Both org and agent forbidden rules are enforced |
+| `autonomy_mode` / `integrity_mode` | Strictest wins (`enforce` > `nudge` > `observe` > `off`) | Agent can strengthen but cannot weaken the org's mode |
+| `autonomy.escalation_triggers` | Union | Both org and agent triggers are evaluated |
 
 ### Version control your policies
 
-Keep `policy.yaml` files alongside your agent code in version control. This gives you:
+Keep `card.yaml` alongside your agent code in version control. This gives you:
 
 - **Diff visibility** -- every policy change is reviewed in a pull request
 - **Rollback capability** -- revert to a previous policy by reverting the commit
@@ -396,12 +406,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: npm install -g @mnemom/mnemom
       - name: Validate card
-        run: npx mnemom card validate card.yaml
+        run: mnemom card validate card.yaml
       - name: Evaluate card policy
-        run: npx mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --format json
-        env:
-          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --strict
 ```
 
 ## Using policy recommendations
@@ -420,12 +429,14 @@ curl -X POST https://api.mnemom.ai/v1/teams/recommend-policy \
   }'
 ```
 
-The response includes a complete policy YAML with:
+The response's `recommended_policy` is a complete policy document with:
 
-- Capability mappings derived from observed tool usage patterns
-- Forbidden rules based on detected violations and near-misses
-- Escalation triggers from historical escalation patterns
-- Recommended enforcement mode based on team maturity
+- `capability_mappings` derived from observed tool usage patterns (each entry's `tools` + `card_actions`)
+- `forbidden` rules based on detected violations and near-misses
+- `escalation_triggers` from historical escalation patterns
+- `defaults` (recommended enforcement mode) based on team maturity
+
+alongside a top-level `rationale` array explaining each recommended field, and `expected_coverage` / `fault_lines_addressed` summary numbers.
 
 <Note>
   Policy recommendations are a starting point, not a final policy. Always review the generated policy, adjust mappings to match your specific agent architecture, and test against historical traces before publishing.
@@ -433,33 +444,35 @@ The response includes a complete policy YAML with:
 
 ### Review and customize
 
-The recommendation includes confidence scores for each section. Focus your review on low-confidence mappings where the system was uncertain about the correct card action mapping:
+`rationale` gives you a `field` + `reason` + `confidence` (0-1) for each recommended section. Focus your review on the low-confidence entries, where the system was less certain about the correct mapping:
 
 ```json
 {
-  "recommendation": {
+  "recommended_policy": {
     "capability_mappings": {
-      "web_browsing": {
-        "confidence": 0.95,
-        "tools": ["mcp__browser__*"],
-        "card_actions": ["web_fetch", "web_search"]
-      },
-      "data_export": {
-        "confidence": 0.62,
-        "tools": ["mcp__csv__export", "mcp__sheets__write"],
-        "card_actions": ["write"],
-        "review_note": "Mapped to 'write' but may warrant a separate card action"
-      }
-    }
-  }
+      "web_browsing": { "tools": ["mcp__browser__*"], "card_actions": ["web_fetch", "web_search"] },
+      "data_export": { "tools": ["mcp__csv__export", "mcp__sheets__write"], "card_actions": ["write"] }
+    },
+    "forbidden": [],
+    "escalation_triggers": [],
+    "defaults": { "enforcement_mode": "warn" }
+  },
+  "rationale": [
+    { "field": "capability_mappings.web_browsing", "reason": "Matches 94% of observed browser tool calls", "confidence": 0.95 },
+    { "field": "capability_mappings.data_export", "reason": "Mapped to 'write' but may warrant a separate card action", "confidence": 0.62 }
+  ],
+  "expected_coverage": 0.88,
+  "fault_lines_addressed": 2
 }
 ```
+
+`recommended_policy` comes back in this capability-mapping shape (`card_actions`), not the alignment card's own `capabilities`/`enforcement` shape. Before publishing, fold it into your card: each `capability_mappings.<name>` becomes `capabilities.<name>` with `card_actions` renamed to `required_actions`, `forbidden` entries become `enforcement.forbidden_tools`, and `defaults.enforcement_mode` maps to the card's top-level `autonomy_mode`.
 
 ## Best practices
 
 <CardGroup cols={2}>
-  <Card title="Start with warn mode" icon="triangle-exclamation">
-    Begin with `enforcement_mode: warn` to observe what your policy catches without blocking agent traffic. Graduate to `enforce` after testing confirms the policy matches your expectations.
+  <Card title="Start in observe mode" icon="triangle-exclamation">
+    Begin with `autonomy_mode: observe` to see what your policy would catch without blocking agent traffic. Graduate to `nudge` and then `enforce` after testing confirms the policy matches your expectations.
   </Card>
   <Card title="Evaluate before publishing" icon="flask-vial">
     Always run `mnemom card evaluate` before `mnemom card publish`. Evaluating against your agent's tools shows you the real-world impact of your policy before it affects live requests.
@@ -470,18 +483,18 @@ The recommendation includes confidence scores for each section. Focus your revie
   <Card title="Aim for >90% coverage" icon="chart-line">
     Review coverage reports regularly. Unmapped card actions fall through to defaults, which may not match your intent. Target 100% coverage in production policies.
   </Card>
-  <Card title="Use the grace period" icon="clock">
-    The default 24-hour grace period prevents new tools from immediately becoming violations. This gives you time to update the policy after adding new MCP servers or tools.
+  <Card title="Set a grace period" icon="clock">
+    `enforcement.grace_period_hours` prevents newly-added tools from immediately becoming violations. When your card composes with an org/platform floor, the shortest grace period across all layers wins.
   </Card>
-  <Card title="Version control policies" icon="code-branch">
-    Store `policy.yaml` in your repository alongside agent code. Use CI validation to catch policy issues before deploy and maintain a clear audit trail of every change.
+  <Card title="Version control your cards" icon="code-branch">
+    Store `card.yaml` in your repository alongside agent code. Use CI validation to catch policy issues before deploy and maintain a clear audit trail of every change.
   </Card>
 </CardGroup>
 
 ## See also
 
 - [Policy Engine](/concepts/policy-engine) -- How the policy engine evaluates tools against policies
-- [Policy DSL Specification](/specifications/policy-dsl) -- Full normative schema for policy YAML files
+- [Policy DSL Specification](/specifications/policy-dsl) -- The underlying capability-mapping schema the policy engine compiles your card's `capabilities`/`enforcement` sections into (also the shape returned by `POST /v1/teams/recommend-policy`)
 - [CLI Reference](/gateway/cli) -- CLI commands including `card validate`, `card evaluate`, and `card publish`
 - [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- Integrating card evaluation into your deployment pipeline
 - [Alignment Card Management](/guides/card-management) -- Creating and managing alignment cards with embedded policy

@@ -45,7 +45,7 @@ Every successful mutation writes exactly one row to `governance_audit_log`
 in the same request lifecycle as the mutation itself. The audit row
 includes:
 
-- `actor_user_id`, `actor_auth_method`, `actor_api_key_id?`, `actor_org_id?`
+- `actor_user_id`, `actor_auth_method`, `actor_api_key_id?`, `actor_org_id?`, `actor_role`
 - `action` (e.g. `alignment_card.put`, `exemption.granted`)
 - `target_type` + `target_id`
 - `request_id` (Cloudflare ray)
@@ -60,7 +60,8 @@ without its audit trail.
 
 This log is distinct from the HTTP-request-level `api_audit_log` (which
 records every authenticated write). `governance_audit_log` is the
-domain-level record used for SOC 2 Article 12 / HIPAA BAA compliance.
+domain-level, before/after record of *what changed* -- the shape auditors
+ask for under SOC 2 and HIPAA BAA change-control requirements.
 
 ## 4. Webhook events on every mutation
 
@@ -100,11 +101,7 @@ intentionally hard to create:
 ## API version header
 
 ```
-X-Mnemom-Version: 2026-04-15
+X-Mnemom-Version: 2026-08-17
 ```
 
-Present on every response. At current install base we run a single
-supported version; older version dates are no longer deprecated through
-this header because the legacy endpoints were deleted rather than
-deprecated. See [API versioning](/guides/api-versioning) for the deprecation
-doctrine that applies once there is a non-zero external install base.
+Present on every response, echoing back the version the request resolved to (the value you sent, or the current version if you sent none). This is independent of the `X-Mnemom-Schema` value above -- a version bump changes request/response *behavior* (for example, `2026-08-17` made a toolless `explain` call a `400` instead of a vacuous `pass`), while the unified card wire schema has stayed `unified/2026-04-15` throughout. A request pinned to a deprecated version date gets `Deprecation: true` and a `Sunset` header instead of an error. See [API versioning](/guides/api-versioning) for the full deprecation doctrine and supported version list.
