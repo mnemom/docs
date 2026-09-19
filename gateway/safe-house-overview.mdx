@@ -75,28 +75,28 @@ The gateway resolves the `Authorization` header to an agent record and loads the
 Behavior depends on the configured mode (`off` / `observe` / `nudge` / `enforce` — the same four-value vocabulary as `autonomy_mode`/`integrity_mode`; see [Safe House concept](/concepts/safe-house#modes)):
 
 <Tabs>
-  <Tab title="enforce">
+<Tab title="enforce">
 
 Safe House runs **synchronously**. The gateway awaits the L1→L2→L3 verdict for the inbound message (and for each screened tool result) before deciding whether to continue.
 
 - `pass`/`warn`: the pipeline continues; the request body is forwarded unchanged (`warn` decorates a flagged tool result as untrusted first).
 - `quarantine`/`block`: the flagged content is withheld from what's forwarded, and the response carries `front=enforced` on `X-Mnemom-Verdict`. For a quarantined message, `X-Mnemom-Advisory` carries a `source: "safe_house.quarantine"` entry naming the quarantine id.
 
-  </Tab>
-  <Tab title="observe">
+</Tab>
+<Tab title="observe">
 
 Safe House runs **asynchronously** via `waitUntil`. The inbound request is forwarded to the AI provider immediately — the Safe House analysis runs in parallel and does not add any latency to the request path. `X-Mnemom-Verdict.front` reports `observed` rather than `pass` when a signal fired, even though nothing was withheld.
 
 Results are logged and available for review within a few seconds of the request completing.
 
-  </Tab>
-  <Tab title="nudge">
+</Tab>
+<Tab title="nudge">
 
 Safe House runs **synchronously**, produces a verdict, and attaches an advisory (`X-Mnemom-Advisory`) — but nothing is withheld or decorated; the request proceeds as sent. `X-Mnemom-Verdict.front` reports `nudged`.
 
 This is a reasonable first step when turning on Safe House for an existing agent: it surfaces what would fire without changing any request or response content, before you move to `enforce`.
 
-  </Tab>
+</Tab>
 </Tabs>
 
 #### Tool results are screened here, in the same request
