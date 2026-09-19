@@ -1,81 +1,68 @@
 ---
 title: "On-Chain API"
-description: "API reference for on-chain Merkle root anchoring, score publishing, and verification on Base L2"
-sidebarTitle: "On-Chain API"
+description: "API reference for the three public, read-only on-chain verification endpoints."
+sidebarTitle: "On-Chain Overview"
 icon: "link"
 ---
 
-# On-Chain API
+The On-Chain API exposes three **public, read-only** endpoints for checking an agent's Base L2 anchor status. See [On-Chain Verification](/concepts/on-chain-verification) for the conceptual background and [the guide](/guides/on-chain-verification) for a walkthrough with examples.
 
 <Note>
-  Part of **[CLPI](/concepts/clpi) Phase 4: On-Chain Verification**. The On-Chain API anchors reputation data to Base L2 for immutable, third-party-verifiable trust records.
-</Note>
-
-The On-Chain API provides programmatic access to Mnemom's on-chain verification system -- anchoring Merkle roots, publishing reputation scores, and verifying agent trust data on Base L2. All on-chain operations are submitted via Mnemom's relayer; you do not need to hold ETH or interact with smart contracts directly.
-
-**Base URL:** `https://api.mnemom.ai/v1/on-chain`
-
----
-
-<Note>
-Anchoring and score publishing are Mnemom-operated cron jobs, not customer-callable endpoints. Customers consume on-chain data through the three read endpoints below, or by querying the smart contracts on Base L2 directly. See the [On-Chain Verification guide](/guides/on-chain-verification) for the operational details.
+Anchoring Merkle roots and publishing score batches are **not customer-callable**. Mnemom runs them internally on a 6-hour cron under a service credential; those write paths are excluded from this reference.
 </Note>
 
 ## Authentication
 
-| Endpoint | Auth Required | Notes |
-|----------|--------------|-------|
-| `GET /v1/on-chain/verify-proof/{agent_id}` | API key | Verifies an agent's on-chain score |
-| `GET /v1/on-chain/status/{agent_id}` | API key | Checks on-chain status for an agent |
-| `GET /v1/on-chain/history` | API key | Retrieves anchoring and publishing history |
+| Endpoint | Auth Required | Notes | Reference |
+|----------|--------------|-------|-----------|
+| `GET /v1/on-chain/verify-proof/{agent_id}` | No | Recomputes and verifies an agent's Merkle proof | [↗](/api-reference/endpoint/get-on-chain-verify-proof-agent-id) |
+| `GET /v1/on-chain/status/{agent_id}` | No | Latest publication, anchor, and tree summary for an agent | [↗](/api-reference/endpoint/get-on-chain-status-agent-id) |
+| `GET /v1/on-chain/history` | No | Paginated list of Merkle-root anchoring events | [↗](/api-reference/endpoint/get-on-chain-history) |
 
-**API key authentication:** Pass in the `Authorization` header:
-
-```
-Authorization: Bearer {api_key}
-```
-
-API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
-
----
-
-## Rate limits
-
-| Endpoint | Rate Limit | Window |
-|----------|-----------|--------|
-| `GET /on-chain/verify-proof/{agent_id}` | 30 requests | per minute |
-| `GET /on-chain/status/{agent_id}` | 30 requests | per minute |
-| `GET /on-chain/history` | 30 requests | per minute |
-
-Rate-limited responses return HTTP `429` with a `Retry-After` header.
+All three are public and require no `Authorization` header.
 
 ---
 
 ## Endpoints
 
-
 ### GET /v1/on-chain/verify-proof/{agent_id}
 
-Verify an agent's on-chain reputation score and retrieve the cryptographic proof linking the on-chain record to the underlying integrity data.
+Recomputes the agent's Merkle root from its stored leaf hashes, checks the stored leaf count against the actual number of leaves, optionally verifies a single leaf's inclusion proof, and looks up the confirming anchor by the **recomputed** root.
 
 **Parameters:**
 
 | Parameter | In | Type | Required | Description |
 |-----------|----|------|----------|-------------|
 | `agent_id` | path | string | Yes | Agent identifier |
+| `leaf_index` | query | integer | No | Zero-based leaf index to generate and verify an inclusion proof for |
 
 **Response:** `200 OK`
 
 ```json
 {
+  "verified": true,
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "on_chain_score": 782,
-  "grade": "A",
-  "metadata_hash": "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba",
-  "published_at": "2026-02-26T10:35:00.000Z",
-  "block_number": 18234589,
-  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  "verified": true
+  "merkle_root": "0x3a8c...",
+  "leaf_count": 347,
+  "inclusion_proof": {
+    "leaf_hash": "0x91fe...",
+    "leaf_index": 3,
+    "tree_size": 347,
+    "siblings": [{ "hash": "0x02aa...", "position": "left" }]
+  },
+  "verification": {
+    "root_recomputed_from_leaves": true,
+    "leaf_count": 347,
+    "leaf_count_checked": true,
+    "inclusion_proof_verified": true,
+    "anchored_root_source": "mnemom_database"
+  },
+  "anchor": {
+    "tx_hash": "0x1234...",
+    "block_number": 18234567,
+    "chain": "base",
+    "anchored_at": "2026-02-26T10:30:00.000Z"
+  }
 }
 ```
 
@@ -83,93 +70,88 @@ Verify an agent's on-chain reputation score and retrieve the cryptographic proof
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `verified` | boolean | `true` only when the root recomputes from stored leaves, the leaf count matches, any requested inclusion proof verifies, AND a confirmed anchor exists for the recomputed root |
 | `agent_id` | string | Agent identifier |
-| `on_chain_score` | number | Score as recorded on-chain (0-1000) |
-| `grade` | string | Letter grade as recorded on-chain |
-| `metadata_hash` | string | keccak256 hash of the off-chain metadata at time of publication |
-| `published_at` | string | ISO 8601 timestamp of when the score was published on-chain |
-| `block_number` | number | Block number containing the publication transaction |
-| `tx_hash` | string | Transaction hash of the publication |
-| `verified` | boolean | Whether the on-chain score matches the current off-chain score and the proof is valid |
+| `reason` | string | Present only when `verified` is `false` -- see below |
+| `merkle_root` | string | The agent's stored root (absent if no checkpoint exists yet) |
+| `recomputed_root` | string | Present only on `root_mismatch`, for inspecting the discrepancy |
+| `leaf_count` | integer | Present on `leaf_count_mismatch` / `leaf_index_out_of_range` |
+| `leaf_hashes_length` | integer | Present only on `leaf_count_mismatch` |
+| `inclusion_proof` | object \| null | The verified proof for `leaf_index`; `null` when no `leaf_index` was supplied |
+| `verification` | object | What was actually checked (see below) |
+| `anchor` | object | The confirming anchor; present only when `verified` is `true` |
 
-**Error responses:**
+`reason` (present only when `verified` is `false`): `no_merkle_tree`, `no_checkpoint`, `no_leaf_hashes`, `root_mismatch`, `leaf_count_mismatch`, `leaf_index_out_of_range`, `inclusion_proof_failed`, or `not_anchored`.
 
-| Status | Meaning |
-|--------|---------|
-| `401` | API key required or invalid |
-| `404` | Agent not found or no on-chain score exists for this agent |
-| `429` | Rate limit exceeded |
+**`verification` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `root_recomputed_from_leaves` | boolean | Whether the stored root was successfully rebuilt from stored leaves |
+| `leaf_count` | integer | Stored leaf count |
+| `leaf_count_checked` | boolean | Whether the stored leaf count was available to compare against the leaf array |
+| `inclusion_proof_verified` | boolean \| null | `true`/`false` if `leaf_index` was supplied and checked; `null` if not supplied |
+| `anchored_root_source` | `"mnemom_database"` \| null | Where the anchored root was read from -- **Mnemom's own record, not a live Base RPC read**. Null when no confirmed anchor was found. |
+
+**`anchor` object:** `tx_hash`, `block_number`, `chain` (`"base"` or `"base-sepolia"`), `anchored_at`.
+
+**Error responses:** `400` malformed `agent_id`, `401` (reserved), `404` agent not found, `429` rate limited, `500` internal error.
 
 ---
 
 ### GET /v1/on-chain/status/{agent_id}
 
-Check whether an agent has an on-chain score and retrieve the current on-chain state, including the latest score and anchor information.
-
-**Parameters:**
-
-| Parameter | In | Type | Required | Description |
-|-----------|----|------|----------|-------------|
-| `agent_id` | path | string | Yes | Agent identifier |
+A lighter-weight summary assembled from three tables; each nested object is `null` when no matching row exists.
 
 **Response:** `200 OK`
 
 ```json
 {
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "has_on_chain_score": true,
-  "latest_score": {
+  "latest_score_publication": {
+    "id": "pub-abc123",
     "score": 782,
     "grade": "A",
+    "tx_hash": "0xabcd...",
     "block_number": 18234589,
+    "chain": "base",
+    "status": "confirmed",
     "published_at": "2026-02-26T10:35:00.000Z"
   },
   "latest_anchor": {
-    "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+    "tx_hash": "0x1234...",
     "block_number": 18234567,
+    "chain": "base",
     "anchored_at": "2026-02-26T10:30:00.000Z"
   },
-  "last_updated": "2026-02-26T10:35:00.000Z"
+  "merkle_tree": {
+    "merkle_root": "0x3a8c...",
+    "leaf_count": 347,
+    "tree_depth": 9,
+    "updated_at": "2026-02-26T10:25:00.000Z"
+  }
 }
 ```
 
-**Response fields:**
+`latest_anchor` is filtered to `status: confirmed` anchors only. `latest_score_publication.status` can be `pending`, `confirmed`, or `failed`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `agent_id` | string | Agent identifier |
-| `has_on_chain_score` | boolean | Whether this agent has at least one published on-chain score |
-| `latest_score` | object \| null | Latest on-chain score record, or `null` if no score exists |
-| `latest_score.score` | number | Most recent on-chain score |
-| `latest_score.grade` | string | Most recent on-chain grade |
-| `latest_score.block_number` | number | Block number of the latest publication |
-| `latest_score.published_at` | string | Timestamp of the latest publication |
-| `latest_anchor` | object \| null | Latest Merkle root anchor relevant to this agent, or `null` |
-| `latest_anchor.merkle_root` | string | The anchored Merkle root |
-| `latest_anchor.block_number` | number | Block number of the anchor transaction |
-| `latest_anchor.anchored_at` | string | Timestamp of the anchor |
-| `last_updated` | string | Most recent on-chain activity timestamp for this agent |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `401` | API key required or invalid |
-| `404` | Agent not found |
-| `429` | Rate limit exceeded |
+**Error responses:** `400`, `401` (reserved), `404` agent not found, `429`, `500`.
 
 ---
 
 ### GET /v1/on-chain/history
 
-Retrieve the paginated history of on-chain anchoring and score publishing events for your account.
+A paginated list of Merkle-root anchoring events (not score-publication events -- there is no publication-history endpoint).
 
 **Query parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `page` | number | No | Page number (default: 1) |
-| `per_page` | number | No | Results per page (default: 20, max: 100) |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `chain` | string | -- | Filter to `base` or `base-sepolia` |
+| `agent_id` | string | -- | Filter to anchors that included this agent |
+| `from` / `to` | date-time | -- | Time range filter |
+| `limit` | integer | 50 | 1--100 (values above 100 are clamped) |
+| `offset` | integer | 0 | Pagination offset |
 
 **Response:** `200 OK`
 
@@ -177,152 +159,54 @@ Retrieve the paginated history of on-chain anchoring and score publishing events
 {
   "anchors": [
     {
-      "anchor_id": "anc-7f8a9b2c",
-      "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
-      "leaf_count": 347,
-      "tree_depth": 9,
-      "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "tx_hash": "0x1234...",
       "block_number": 18234567,
+      "chain": "base",
       "anchored_at": "2026-02-26T10:30:00.000Z"
     }
   ],
-  "publications": [
-    {
-      "publication_id": "pub-3e4f5a6b",
-      "agent_count": 2,
-      "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-      "block_number": 18234589,
-      "published_at": "2026-02-26T10:35:00.000Z"
-    }
-  ],
-  "page": 1,
-  "per_page": 20,
-  "total_anchors": 42,
-  "total_publications": 18
+  "limit": 50,
+  "offset": 0
 }
 ```
 
-**Response fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `anchors` | array | List of Merkle root anchor events |
-| `anchors[].anchor_id` | string | Unique anchor identifier |
-| `anchors[].merkle_root` | string | The anchored Merkle root hash |
-| `anchors[].leaf_count` | number | Number of leaves in the tree |
-| `anchors[].tree_depth` | number | Depth of the Merkle tree |
-| `anchors[].tx_hash` | string | Transaction hash |
-| `anchors[].block_number` | number | Block number |
-| `anchors[].anchored_at` | string | ISO 8601 timestamp |
-| `publications` | array | List of score publication events |
-| `publications[].publication_id` | string | Unique publication identifier |
-| `publications[].agent_count` | number | Number of agents in the batch |
-| `publications[].tx_hash` | string | Transaction hash |
-| `publications[].block_number` | number | Block number |
-| `publications[].published_at` | string | ISO 8601 timestamp |
-| `page` | number | Current page number |
-| `per_page` | number | Results per page |
-| `total_anchors` | number | Total anchor events across all pages |
-| `total_publications` | number | Total publication events across all pages |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `401` | API key required or invalid |
-| `429` | Rate limit exceeded |
+**Error responses:** `400`, `401` (reserved), `404`, `429`, `500`.
 
 ---
 
 ## Error codes
 
-| Status | Code | Description |
-|--------|------|-------------|
-| `400` | `invalid_request` | Missing or invalid parameters (e.g., malformed Merkle root, score out of range, invalid grade) |
-| `401` | `unauthorized` | API key required but not provided or invalid |
-| `404` | `not_found` | Agent not found or no on-chain data exists for the specified agent |
-| `409` | `already_anchored` | The specified Merkle root has already been anchored on-chain |
-| `422` | `ineligible_agent` | Agent does not have a computed reputation score (below 50-checkpoint minimum) |
-| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
-| `500` | `internal_error` | Server error; retry with exponential backoff |
-| `502` | `chain_unavailable` | Base L2 network is temporarily unavailable; retry after a short delay |
-
-All error responses follow the standard envelope:
-
-```json
-{
-  "error": {
-    "code": "invalid_request",
-    "message": "Merkle root must be a 32-byte hex string prefixed with 0x"
-  }
-}
-```
-
----
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid query parameter (e.g. malformed `agent_id`, bad `chain` value) |
+| `404` | Agent (or resource) not found |
+| `429` | Rate limit exceeded |
+| `500` | Internal server error |
 
 ## SDK usage
 
-### TypeScript
+There is no dedicated on-chain SDK; call the endpoints directly.
 
 ```typescript
-import {
-  verifyOnChainScore,
-  getOnChainStatus,
-  getOnChainHistory,
-} from '@mnemom/on-chain';
+const result = await fetch(
+  'https://api.mnemom.ai/v1/on-chain/verify-proof/agent-xyz',
+).then((r) => r.json());
 
-// Verify an agent's on-chain score
-const proof = await verifyOnChainScore('mnm-550e8400-e29b-41d4-a716-446655440000');
-console.log(`Verified: ${proof.verified}, Score: ${proof.on_chain_score}`);
-
-// Check on-chain status
-const status = await getOnChainStatus('mnm-550e8400-e29b-41d4-a716-446655440000');
-console.log(`Has on-chain score: ${status.has_on_chain_score}`);
-
-// View history
-const history = await getOnChainHistory({ page: 1, perPage: 20 });
-console.log(`Total anchors: ${history.total_anchors}`);
-console.log(`Total publications: ${history.total_publications}`);
+if (result.verified) {
+  console.log('Anchored at', result.anchor.chain, result.anchor.block_number);
+}
 ```
-
-### Python
 
 ```python
 import httpx
 
-API_BASE = "https://api.mnemom.ai"
-HEADERS = {"Authorization": f"Bearer {api_key}"}
-
-# Verify an agent's on-chain score
-proof = httpx.get(
-    f"{API_BASE}/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000",
-    headers=HEADERS,
-).json()
-print(f"Verified: {proof['verified']}, Score: {proof['on_chain_score']}")
-
-# Check on-chain status
-status = httpx.get(
-    f"{API_BASE}/v1/on-chain/status/mnm-550e8400-e29b-41d4-a716-446655440000",
-    headers=HEADERS,
-).json()
-print(f"Has on-chain score: {status['has_on_chain_score']}")
-
-# View history
-history = httpx.get(
-    f"{API_BASE}/v1/on-chain/history",
-    headers=HEADERS,
-    params={"page": 1, "per_page": 20},
-).json()
-print(f"Total anchors: {history['total_anchors']}")
-print(f"Total publications: {history['total_publications']}")
+result = httpx.get("https://api.mnemom.ai/v1/on-chain/verify-proof/agent-xyz").json()
+if result["verified"]:
+    print("Anchored at", result["anchor"]["chain"], result["anchor"]["block_number"])
 ```
-
----
 
 ## See also
 
-- [On-Chain Verification Concepts](/concepts/on-chain-verification) -- How on-chain anchoring and publishing work
-- [On-Chain Verification Guide](/guides/on-chain-verification) -- Step-by-step usage guide
-- [Mnemom Trust Rating](/concepts/reputation-scores) -- Understanding reputation scores
-- [Trust Rating API](/api-reference/reputation-overview) -- API reference for off-chain reputation endpoints
-- [Integrity Checkpoints](/concepts/integrity-checkpoints) -- The data source for Merkle trees
+- [On-Chain Verification Concepts](/concepts/on-chain-verification) -- why anchoring exists, what it does and doesn't guarantee
+- [On-Chain Verification Guide](/guides/on-chain-verification) -- full walkthrough with examples
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- how the anchored scores are computed

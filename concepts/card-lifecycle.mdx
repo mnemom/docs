@@ -169,7 +169,7 @@ Card gaps also affect [proving costs](/protocols/aip/verifiable-verdicts#deferre
   <Step title="Recompute">
     After reclassification, the agent's trust scores are automatically recomputed. Card gap violations are excluded from the Compliance and Drift Stability components of the [Mnemom Trust Rating](/concepts/reputation-scores).
 
-    Recomputation happens on the next hourly cycle. The agent's score recovers without manual intervention.
+    Recomputation happens on the next 6-hour cycle. The agent's score recovers without manual intervention.
   </Step>
 
   <Step title="Re-proof">
@@ -189,20 +189,15 @@ Card gaps also affect [proving costs](/protocols/aip/verifiable-verdicts#deferre
 
 When reclassification triggers a score recomputation, the effects can propagate through the trust graph. Agents do not exist in isolation -- they operate in [fleets](/concepts/fleet-coherence), teams, and delegation chains. A score change for one agent can affect trust assessments for related agents.
 
-Propagation uses breadth-first traversal from the reclassified agent with the following bounds:
+A recurring sweep looks back over reclassifications from the last 6 hours and, for each reclassified agent, walks outward through `trust_edges` (explicit trust relationships, e.g. team membership) using breadth-first traversal with the following bounds:
 
 | Parameter | Value | Purpose |
 |---|---|---|
 | **Maximum depth** | 3 hops | Prevents unbounded propagation across large fleets |
-| **Maximum agents affected** | 50 | Caps the blast radius of any single reclassification |
-| **Decay factor** | 0.85 per hop | Score impact diminishes with distance from the source agent |
-| **Eligibility** | Existing trust relationships only | Only affects team members and fleet peers with prior interactions |
+| **Maximum agents affected** | 50 | Caps the blast radius of any single sweep |
+| **Eligibility** | Existing trust-edge relationships only | Only reaches agents connected to a reclassified agent through a recorded trust edge |
 
-**Example:** Agent A is reclassified, gaining +40 points. Agent B (1 hop away, same team) sees a propagated impact of `40 * 0.85 = 34` points in the Coherence Compatibility component. Agent C (2 hops away) sees `40 * 0.85^2 = 28.9` points. Agent D (4 hops away) is beyond the maximum depth and is unaffected.
-
-<Note>
-  Propagation only affects the Coherence Compatibility component (10% of total score). It does not modify other agents' Integrity Ratio, Compliance, Drift Stability, or Trace Completeness scores. Those components are based solely on each agent's own behavioral data.
-</Note>
+Every agent reached this way has its own [Mnemom Trust Rating](/concepts/reputation-scores) fully recomputed from its own checkpoint data -- the same recomputation the regular 6-hour cron would run for it. This is a coarse mechanism: it does not inject a decayed delta into any single component, and because [Coherence Compatibility is currently a fixed 750 for every agent](/concepts/reputation-scores#coherence-compatibility-10), a connected agent's own score will typically only move if its own underlying checkpoint or violation data has changed in the meantime.
 
 ---
 
@@ -225,7 +220,7 @@ Reclassification enables trust recovery by excluding card gap violations from th
 Score recovery is bounded and specific:
 
 - Only the specific reclassified violations are excluded, not all violations
-- The agent's score recovers on the next hourly recomputation cycle
+- The agent's score recovers on the next 6-hour recomputation cycle
 - Recovery is proportional to how much the reclassified violations were depressing the score
 - If the agent has other `behavior_gap` violations, those continue to count against the score
 
@@ -256,49 +251,6 @@ When a reclassification includes a card amendment, affected sessions are re-veri
 <Tip>
   Re-proofing is automatic when a reclassification includes a `card_amendment_id`. If you submit a reclassification without linking it to an amendment, re-proofing does not run -- only the score is recomputed. Always link amendments to reclassifications to get the full benefit.
 </Tip>
-
----
-
-## OTel reclassification events
-
-Reclassification emits [OpenTelemetry](https://opentelemetry.io/) spans for observability integration. These spans provide structured data about every reclassification event for monitoring dashboards, alerting pipelines, and audit systems.
-
-### Span: `reclassification.process`
-
-Emitted when a reclassification is processed:
-
-| Attribute | Type | Description |
-|---|---|---|
-| `reclassification.agent_id` | string | The agent whose violation was reclassified |
-| `reclassification.checkpoint_id` | string | The integrity checkpoint containing the violation |
-| `reclassification.original_type` | string | Original violation type (e.g., `UNMAPPED_TOOL`, `CAPABILITY_MISMATCH`) |
-| `reclassification.new_type` | string | Reclassified type: `card_gap` or `behavior_gap` |
-| `reclassification.reason` | string | Operator-provided reason for the reclassification |
-| `reclassification.card_amendment_id` | string | Linked card amendment ID (empty if not linked) |
-| `reclassification.score_before` | int | Agent's trust score before recomputation |
-| `reclassification.score_after` | int | Agent's trust score after recomputation |
-
-### Example OTel export
-
-```json
-{
-  "name": "reclassification.process",
-  "traceId": "abc123def456",
-  "spanId": "span789",
-  "attributes": {
-    "reclassification.agent_id": "agent_abc123",
-    "reclassification.checkpoint_id": "chk-violation-id",
-    "reclassification.original_type": "UNMAPPED_TOOL",
-    "reclassification.new_type": "card_gap",
-    "reclassification.reason": "web_fetch missing from bounded_actions",
-    "reclassification.card_amendment_id": "amend-7f3a2b1c",
-    "reclassification.score_before": 612,
-    "reclassification.score_after": 738
-  }
-}
-```
-
-These spans integrate with any OTel-compatible backend (Grafana, Datadog, Honeycomb, etc.) and can be used to build dashboards tracking reclassification frequency, score recovery trends, and card gap patterns across your fleet.
 
 ---
 

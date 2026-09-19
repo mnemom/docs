@@ -60,15 +60,14 @@ signal = await aip.check(response, "anthropic")
 </Step>
 
 <Step title="Reach 50 analyzed checkpoints">
-Once 50 checkpoints have been analyzed, your score is automatically computed and published. During the build phase, your agent displays a "Building... N/50" progress badge.
+Once 50 checkpoints have been analyzed, your score is automatically computed and published. During the build phase, your agent displays a "Building N/50" progress badge.
 
 <Tip>
-At typical usage, reaching 50 checkpoints takes 1-3 days. You can track progress on your agent's dashboard or via the API:
+At typical usage, reaching 50 checkpoints takes 1-3 days. Track progress via the reputation endpoint's `checkpoint_count` field, or via the [badge](/guides/reputation-badges):
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  https://api.mnemom.ai/v1/agents/{agent_id}/integrity/aip
-# Look at "analyzed_checks" field
+curl https://api.mnemom.ai/v1/reputation/{agent_id}
+# Look at "checkpoint_count" and "is_eligible" -- is_eligible flips to true at 50
 ```
 </Tip>
 </Step>
@@ -355,7 +354,7 @@ Subscribe to reputation events for automated monitoring:
 
 | Event | Trigger |
 |-------|---------|
-| `reputation.score_changed` | Score changed by more than 10 points in a single recomputation |
+| `reputation.score_changed` | Score changed by any amount in a recomputation (fires once per real change, not on a no-op recompute) |
 | `reputation.grade_changed` | Letter grade changed (e.g., A to AA, or BBB to BB) |
 
 ```bash
@@ -374,12 +373,13 @@ Build reputation monitoring into your agent's health checks:
 
 <CodeGroup>
 ```typescript TypeScript
-import { fetchReputation } from '@mnemom/reputation';
+import { getReputation } from '@mnemom/reputation';
 
 async function healthCheck(agentId: string) {
-  const rep = await fetchReputation(agentId);
-
-  if (!rep) {
+  let rep;
+  try {
+    rep = await getReputation(agentId);
+  } catch {
     console.warn('Reputation data unavailable');
     return;
   }
@@ -501,12 +501,12 @@ Look for `violation_detected`, `drift_detected`, or `grade_changed` events. Comm
 </Accordion>
 
 <Accordion title="My agent has 100+ checkpoints but still shows NR">
-The minimum is 50 **analyzed** checkpoints. Checkpoints where the thinking block was below 100 tokens receive a synthetic clear verdict and are not counted toward the 50-checkpoint minimum. Check `analyzed_checks` in the integrity stats:
+The minimum is 50 **analyzed** checkpoints. Checkpoints where the thinking block was below 100 tokens receive a synthetic clear verdict and are not counted toward the 50-checkpoint minimum. Fetch the reputation endpoint and check `checkpoint_accounting`:
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  https://api.mnemom.ai/v1/agents/{agent_id}/integrity/aip
-# Check "analyzed_checks" — this must be >= 50
+curl https://api.mnemom.ai/v1/reputation/{agent_id}
+# checkpoint_accounting.analyzed must be >= 50; checkpoint_accounting.excluded
+# breaks out how many were synthetic, below the thinking-token minimum, or quarantined
 ```
 </Accordion>
 

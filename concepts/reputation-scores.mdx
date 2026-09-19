@@ -12,7 +12,7 @@ The Mnemom Trust Rating™ is a **composite trust metric for AI agents** — the
 Unlike self-reported trust claims or capability benchmarks, the Mnemom Trust Rating is:
 
 - **Independently verified** — Scores are computed from [AIP integrity checkpoints](/concepts/integrity-checkpoints), not self-assessments
-- **Continuous** — Updated hourly from live behavioral data, not point-in-time audits
+- **Continuous** — Updated every 6 hours from live behavioral data, not point-in-time audits
 - **Transparent** — Every component, weight, and data source is published and inspectable
 - **Cryptographically provable** — The underlying checkpoints are [signed and Merkle-attested](/protocols/aip/certificates)
 - **Multi-dimensional** — Five weighted components capture different aspects of trustworthiness
@@ -82,7 +82,7 @@ The power curve degrades meaningfully but never craters to zero from moderate vi
 After [reclassification](/concepts/card-lifecycle), violations classified as `card_gap` are **excluded** from the compliance calculation. Only `behavior_gap` violations (genuine behavioral errors) count. This enables [trust recovery](/guides/trust-recovery) when violations were caused by configuration drift rather than agent misbehavior.
 
 - **Data source:** AIP checkpoints with `boundary_violation` verdict, grouped by `session_id`
-- **Update frequency:** Hourly
+- **Update frequency:** Every 6 hours
 - **Improvement lever:** Time without new violations; resolve root causes to prevent recurrence; [reclassify card-gap violations](/guides/trust-recovery)
 
 ### Drift stability (20%)
@@ -110,22 +110,22 @@ trace_completeness = (logged_decisions / expected_decisions) * 1000
 Agents that log every decision create a complete audit trail. Gaps in trace coverage reduce this component.
 
 - **Data source:** AAP traces
-- **Update frequency:** Hourly
+- **Update frequency:** Every 6 hours
 - **Improvement lever:** Ensure all agent decisions are logged via AAP
 
 ### Coherence compatibility (10%)
 
-The mean [coherence score](/concepts/value-coherence) across fleet interactions, normalized to the 0 -- 1000 scale.
+Reserved for the mean [coherence score](/concepts/value-coherence) across fleet interactions, normalized to the 0 -- 1000 scale. As of this writing the scoring function has not yet wired in live fleet-coherence data: every agent's Coherence Compatibility component is a **fixed 750**, with the score row's own factor text reporting `"Default score — fleet coherence data not yet integrated"`.
 
 ```
-coherence_compatibility = mean_coherence_score * 1000
+coherence_compatibility = 750  # fixed, pending fleet-coherence integration
 ```
 
-Defaults to **750** if the agent has no fleet interaction data. This default ensures new agents are not penalized for operating solo.
+Because this component is currently constant across all agents, it does not yet differentiate scores — the effective composite today is driven by the other four components. Once fleet-coherence data is wired in, this section will describe the live formula.
 
-- **Data source:** [Fleet coherence](/concepts/fleet-coherence) analysis
-- **Update frequency:** After each coherence check
-- **Improvement lever:** Align values with fleet peers, resolve value conflicts
+- **Data source:** [Fleet coherence](/concepts/fleet-coherence) analysis (not yet integrated into the score)
+- **Update frequency:** N/A (fixed value today)
+- **Improvement lever:** None today -- this component cannot currently be moved above 750
 
 ---
 
@@ -152,7 +152,7 @@ The 50-checkpoint minimum is a hard gate for score publication. Agents below thi
 
 ### Frequency
 
-- **Hourly recomputation:** Scores are recalculated every hour from the latest behavioral data
+- **6-hour recomputation:** Scores are recalculated every 6 hours from the latest behavioral data
 - **Weekly snapshots:** A frozen snapshot is saved each week for historical trend tracking. Snapshots are created every Monday at 00:00 UTC.
 - **On-demand:** The API always returns the most recently computed score
 
@@ -179,28 +179,39 @@ Every `ReputationScore` includes a `trend_30d` field -- a signed delta comparing
 
 ### TypeScript
 
+The [`@mnemom/reputation`](https://www.npmjs.com/package/@mnemom/reputation) package wraps the public endpoint and adds a reputation gate helper. It does not currently export a history helper or grade/confidence formatters -- fetch history with a plain request.
+
 ```typescript
-import { fetchReputation, fetchReputationHistory } from '@mnemom/reputation';
-import { scoreToGrade, confidenceLevel, confidenceLabel } from '@mnemom/reputation';
+import { getReputation, createReputationGate } from '@mnemom/reputation';
 
 // Get current reputation for any agent
-const reputation = await fetchReputation('agent-xyz');
+const reputation = await getReputation('agent-xyz');
 
-if (reputation) {
-  console.log(`Score: ${reputation.score}`);
-  console.log(`Grade: ${reputation.grade} (${reputation.tier})`);
-  console.log(`Confidence: ${confidenceLabel(reputation.confidence)}`);
-  console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
+console.log(`Score: ${reputation.score}`);
+console.log(`Grade: ${reputation.grade} (${reputation.tier})`);
+console.log(`Confidence: ${reputation.confidence}`);
+console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
 
-  // Inspect components
-  for (const component of reputation.components) {
-    console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
-  }
+// Inspect components
+for (const component of reputation.components) {
+  console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
 }
 
-// Get weekly history for trend analysis
-const history = await fetchReputationHistory('agent-xyz');
-for (const snapshot of history) {
+// Gate a decision on a minimum score or grade
+const gate = createReputationGate({ minScore: 600, minGrade: 'BBB' });
+const result = await gate.check('agent-xyz');
+if (!result.allowed) {
+  console.log('Denied:', result.reason);
+}
+```
+
+Weekly history has no dedicated SDK helper today -- call the endpoint directly:
+
+```typescript
+const history = await fetch('https://api.mnemom.ai/v1/reputation/agent-xyz/history')
+  .then(r => r.json());
+
+for (const snapshot of history.snapshots) {
   console.log(`${snapshot.week_start}: ${snapshot.score} (${snapshot.grade})`);
 }
 ```
@@ -247,9 +258,9 @@ No authentication required. Returns the full score with all components.
 ```json
 {
   "agent_id": "agent-xyz",
-  "score": 782,
-  "grade": "A",
-  "tier": "Reliable",
+  "score": 818,
+  "grade": "AA",
+  "tier": "Established",
   "is_eligible": true,
   "checkpoint_count": 347,
   "confidence": "medium",
@@ -289,10 +300,10 @@ No authentication required. Returns the full score with all components.
     {
       "key": "coherence_compatibility",
       "label": "Coherence Compatibility",
-      "score": 390,
+      "score": 750,
       "weight": 0.10,
-      "weighted_score": 39,
-      "factors": ["Mean coherence 0.39 across 3 fleet interactions"]
+      "weighted_score": 75,
+      "factors": ["Default score — fleet coherence data not yet integrated"]
     }
   ],
   "computed_at": "2026-02-21T14:00:00.000Z",
@@ -312,7 +323,14 @@ For the complete API reference including batch, search, compare, and benchmark e
 Before delegating a task to another agent via A2A, check their reputation:
 
 ```typescript
-const reputation = await fetchReputation(theirAgentId);
+import { getReputation } from '@mnemom/reputation';
+
+let reputation;
+try {
+  reputation = await getReputation(theirAgentId);
+} catch {
+  // not found, private, or unreachable -- treat as insufficient
+}
 
 if (!reputation || reputation.grade === 'CCC' || reputation.grade === 'NR') {
   return escalateToPrincipal({
@@ -427,7 +445,7 @@ Agent A ──[embeds trust block]──→ A2A Agent Card
                                       │
 Agent B ──[reads trust block]──→ Delegation decision
                                       │
-Agent B ──[verifies via verify_url]──→ Independent confirmation
+Agent B ──[verifies via verified_url]──→ Independent confirmation
 ```
 
 When Agent A fetches its own reputation from `GET /v1/reputation/{agent_id}`, the response includes:
@@ -438,24 +456,23 @@ When Agent A fetches its own reputation from `GET /v1/reputation/{agent_id}`, th
     "provider": "mnemom",
     "score": 782,
     "grade": "A",
-    "verified_url": "https://api.mnemom.ai/v1/reputation/agent-xyz",
+    "verified_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/verify",
     "badge_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/badge.svg",
-    "verify_url": "https://api.mnemom.ai/v1/reputation/agent-xyz/verify"
+    "extension_uri": "https://mnemom.ai/ext/agent-trust/v1",
+    "confidence": "medium",
+    "methodology_url": "https://www.mnemom.ai/methodology",
+    "last_updated": "2026-02-21T14:00:00.000Z"
   }
 }
 ```
 
 Agent A embeds this as the `trust` block in its A2A Agent Card. When Agent B discovers Agent A through A2A, it can:
 
-1. Read the static `score` and `grade` for a quick trust check
-2. Fetch `verified_url` for the latest real-time score
-3. Fetch `verify_url` for cryptographic proof that the score is genuine
+1. Read the static `score`, `grade`, and `confidence` for a quick trust check
+2. Fetch `verified_url` -- the [verification endpoint](#cryptographic-verification) -- for the latest score plus its cryptographic proof chain in one call
+3. Render `badge_url` for a visual trust signal
 
-### SDK helpers
-
-Both SDKs provide helpers to fetch and embed the trust extension:
-
-**TypeScript:**
+### SDK helper
 
 ```typescript
 import { getA2AReputationExtension } from '@mnemom/reputation';
@@ -464,17 +481,10 @@ const trustBlock = await getA2AReputationExtension('my-agent-id');
 agentCard.trust = trustBlock;
 ```
 
-**Python:**
-
-```python
-from mnemom_reputation import get_a2a_reputation_extension
-
-trust_block = get_a2a_reputation_extension(agent_id="my-agent-id")
-agent_card["trust"] = trust_block
-```
+There is no dedicated reputation SDK for Python; call the endpoint directly and read `a2a_trust_extension` from the JSON response.
 
 <Warning>
-The trust block is a snapshot. Agent B SHOULD verify via `verified_url` or `verify_url` before making high-stakes delegation decisions. The `badge_url` always returns the current score for display purposes.
+The trust block is a snapshot. Agent B SHOULD fetch `verified_url` before making high-stakes delegation decisions. The `badge_url` always returns the current score for display purposes.
 </Warning>
 
 For the full A2A integration guide including value coherence handshakes and reputation gates, see [A2A Integration](/protocols/aap/a2a-integration).
@@ -490,28 +500,28 @@ Trust Ratings are not just internal metrics — they power public-facing trust s
 Every agent with a published score gets a public page at:
 
 ```
-https://mnemom.ai/agents/{agent_id}/reputation
+https://www.mnemom.ai/agents/{agent_id}/reputation
 ```
 
-The page includes full component breakdown, trend chart, grade badge, and a cryptographic verification link. No authentication required — anyone can inspect an agent's trust history.
+The page includes full component breakdown, trend chart, and grade badge. No authentication required — anyone can inspect an agent's trust history.
 
 ### Trust directory
 
 A searchable directory of all publicly rated agents at:
 
 ```
-https://mnemom.ai/trust-directory
+https://www.mnemom.ai/directory
 ```
 
-Filter by grade, confidence level, and trend direction. Sort by score or checkpoint count. The directory enables discovery of trusted agents across the ecosystem.
+Filter and sort the directory to find trusted agents across the ecosystem.
 
 ### Embeddable badges
 
-Dynamic SVG badges that display an agent's current Trust Rating anywhere — GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries. Four variants available: `score`, `score_tier`, `score_trend`, and `compact`. See [Embeddable Badges](/guides/reputation-badges) for embed code.
+Dynamic SVG badges that display an agent's current Trust Rating anywhere — GitHub READMEs, websites, documentation, A2A Agent Cards, and package registries. See [Embeddable Badges](/guides/reputation-badges) for the full list of variants and embed code.
 
-### GitHub action
+### GitHub Action
 
-The `mnemom/reputation-check@v1` GitHub Action gates CI/CD pipelines on minimum reputation scores. Fail builds when agent scores drop below a configurable threshold — integrating trust checks directly into deployment workflows.
+[`mnemom/reputation-check`](https://github.com/mnemom/reputation-check) is a GitHub Action that gates CI/CD pipelines on minimum reputation scores. See the repository for current usage.
 
 ### A2A trust extension
 
@@ -524,7 +534,7 @@ Pre-built trust blocks for inter-agent reputation sharing via Google's A2A proto
 | Dimension | Mnemom Reputation | Self-Reported Trust | Capability Benchmarks |
 |-----------|-------------------|--------------------|-----------------------|
 | **Evidence source** | Independently verified behavioral data | Agent's own claims | Synthetic test suites |
-| **Update frequency** | Continuous (hourly) | Manual updates | Periodic re-evaluation |
+| **Update frequency** | Continuous (every 6 hours) | Manual updates | Periodic re-evaluation |
 | **Verifiability** | Cryptographically provable via Merkle proofs | Unverifiable | Reproducible but narrow |
 | **Scope** | Alignment, drift, completeness, coherence | Whatever the agent declares | Task-specific accuracy |
 | **Gaming resistance** | Minimum thresholds, synthetic detection, independent analysis | Trivially gameable | Benchmark contamination |
@@ -553,9 +563,9 @@ When violations are caused by **card gaps** (configuration errors) rather than g
 2. Submit a reclassification request marking the violation as `card_gap`
 3. Amend the alignment card to include the missing capability
 4. Trigger score recomputation — `card_gap` violations are excluded from Compliance and Drift Stability components
-5. Score recovers on the next hourly recomputation cycle
+5. Score recovers on the next 6-hour recomputation cycle
 
-Trust graph propagation ensures related agents (team members, fleet peers) also benefit from the correction, with a 0.85 decay factor per hop up to 3 hops deep.
+A reclassification also triggers a bounded trust-graph propagation: related agents reachable within 3 hops (capped at 50 agents per run) have their own scores recomputed, so a corrected card gap can improve trust for connected agents too, not just the one whose card was fixed.
 
 See the [Trust Recovery Guide](/guides/trust-recovery) for step-by-step instructions and the [Reclassification API](/api-reference/reclassification-overview) for endpoint details.
 

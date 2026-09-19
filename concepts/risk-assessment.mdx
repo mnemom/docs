@@ -51,6 +51,10 @@ A critical violation yesterday contributes nearly 1.0. The same violation 30 day
 
 Agents with limited behavioral history receive an uncertainty premium: `insufficient` data adds 0.30, `low` adds 0.20, `medium` adds 0.10, and `high` confidence adds nothing.
 
+### Amount scaling
+
+When `context.amount` is supplied (e.g. for a `financial_transaction`), the composite `R` is multiplied by a log10-based scale that grows with transaction size: roughly 1.0x at $100, 1.1x at $1,000, 1.2x at $10,000, 1.3x at $100,000, and 1.4x at $1,000,000, capped at 1.5x. No `amount` (or an amount ≤ 0) leaves the score unscaled.
+
 ### Risk levels and recommendations
 
 The composite score maps to four risk levels. Thresholds shift based on the caller's risk tolerance:
@@ -118,29 +122,24 @@ Hard safety floors override the continuous score when conditions are extreme:
 
 ## Zero-knowledge proofs
 
-Every risk assessment can be cryptographically proven correct without revealing the underlying reputation data. The entire risk computation is implemented in both TypeScript (for fast online use) and Rust (for ZK proof generation inside SP1 zkVM).
-
-All arithmetic in the proving guest uses Q16.16 fixed-point integers — no floating-point operations exist in the proof circuit. This ensures perfect determinism across substrates.
-
-Proofs are generated asynchronously: the risk score is returned immediately, and the proof follows. Once available, any third party can verify the proof without seeing the input data.
+Every risk assessment can optionally be backed by a cryptographic proof. Immediately after `/risk/assess` or `/risk/assess/team` computes a score, the risk service fires an asynchronous, fire-and-forget request to a separate proving service and links the resulting `proof_id` to the assessment. The risk score and recommendation are returned synchronously and are always valid regardless of proof status -- an absent or failed proof never invalidates the assessment.
 
 ### Proof lifecycle and fail-open behavior
 
-Proof generation is best-effort. The risk score and recommendation are always valid regardless of proof status — an absent or failed proof does not invalidate the assessment.
+`proof_status` (on the assessment) and `status` (on the proof object returned by `GET /v1/risk/proofs/:proof_id`) share the same lifecycle:
 
-`proof_status` on the assessment object progresses through four states:
+| Status | Meaning |
+|--------|---------|
+| `none` | No proof was dispatched for this assessment (`proof_id` is unset). |
+| `pending` | A proof request was dispatched to the proving service; computation has not started. |
+| `proving` | The proving service is actively computing the proof. |
+| `verified` | The proof completed and was verified. Retrieve the full record via `GET /v1/risk/proofs/:proof_id`. |
+| `failed` | Proof generation failed. The risk score remains valid; only the proof could not be produced. |
 
-| `proof_status` | Meaning |
-|----------------|---------|
-| `none` | No proof was dispatched. Either the caller is on the Free tier (proofs not included) or the async dispatch did not complete. `proof_id` is `null`. |
-| `pending` | Proof request dispatched to the ZK proving cluster; computation has not yet begun. |
-| `completed` | Proof is available and verified. Retrieve the full receipt via `GET /v1/risk/proofs/:proof_id`. |
-| `failed` | Proof generation failed. The risk score remains valid; the computation could not be proven for this assessment. |
-
-The proof object itself carries a finer-grained `status` field (`pending` → `proving` → `completed` or `failed`) that tracks computation progress inside the proving cluster. That field is distinct from the assessment's `proof_status` — see [Get proof](/api-reference/risk-overview#get-proof) in the API reference.
+Proofs typically complete within tens of seconds. Poll `GET /v1/risk/proofs/:proof_id` to follow a proof from `pending` through to `verified` or `failed`; see [Get proof](/api-reference/risk-overview#get-proof) in the API reference.
 
 <Note>
-  ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier assessments do not include proofs.
+  Proof availability depends on the feature entitlements active on the caller's account -- see [Feature gating](/api-reference/risk-overview#feature-gating). Current μ-based usage pricing has no fixed plan tiers; check your account settings for which entitlements are active.
 </Note>
 
 ## Authorization model

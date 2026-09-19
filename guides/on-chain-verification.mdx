@@ -1,323 +1,198 @@
 ---
-title: "On-Chain Verification"
-description: "Verify agent and team reputation scores, inspect Merkle anchors, and audit the on-chain trail — all via read-only Mnemom API calls or direct Base L2 RPC."
+title: "Using On-Chain Verification"
+description: "The three read-only endpoints for checking an agent's on-chain anchor status, verifying its Merkle proof, and browsing anchor history."
 sidebarTitle: "On-Chain Verification"
 icon: "link"
 ---
 
-**Anyone can verify a Mnemom agent's reputation without trusting Mnemom's infrastructure.** Scores and Merkle roots are published to Base L2 contracts by Mnemom on a cron schedule; you read them back either through the Mnemom API or directly via any Ethereum-compatible client.
-
-For the conceptual overview — why on-chain anchoring exists, how the Merkle tree maps to integrity checkpoints, and what ERC-8004 means for interop — see [On-Chain Verification](/concepts/on-chain-verification).
+For the conceptual background -- why Mnemom anchors data on-chain, what gets published, and the honest scope limits of what "verified" means -- see [On-Chain Verification](/concepts/on-chain-verification).
 
 <Note>
-Anchoring and score publishing are **not customer-callable endpoints**. Mnemom's backend runs them on a 6-hour cron under an internal service key. Customers consume on-chain data through the three read endpoints below, or by querying the contracts directly.
+All three endpoints below are public and require no authentication. Anchoring and score publishing themselves are **not customer-callable** -- Mnemom runs them on an internal 6-hour cron.
 </Note>
 
 ---
 
-## Prerequisites
-
-Before using on-chain verification features, ensure you have:
-
-1. **A Mnemom API key** — created in your dashboard or via `POST /v1/api-keys`. Read-only access is enough.
-2. **Agents with published reputation scores** — agents need at least 50 analyzed integrity checkpoints and a public [Mnemom Trust Rating](/concepts/reputation-scores) before they appear on-chain.
-
-**API key authentication:** pass your key in the `X-Mnemom-Api-Key` header:
+## Verify an agent's Merkle proof
 
 ```
-X-Mnemom-Api-Key: {api_key}
+GET /v1/on-chain/verify-proof/{agent_id}
 ```
 
-(Bearer JWTs from `/v1/auth/login` work too.)
-
----
-
-## Verifying a score against the chain
-
-Confirm that the score Mnemom reports off-chain matches what's published on-chain, and that the underlying Merkle root has been anchored.
-
-**Endpoint:** `GET /v1/on-chain/verify-proof/{agent_id}` — public, no auth required.
+Recomputes the agent's Merkle root from its stored leaves, checks the leaf count, optionally verifies a single leaf's inclusion proof, and looks up the confirming anchor by the recomputed root.
 
 <CodeGroup>
 ```bash cURL
-curl https://api.mnemom.ai/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000
+curl "https://api.mnemom.ai/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000"
 ```
 
 ```typescript TypeScript
-const response = await fetch(
-  'https://api.mnemom.ai/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000',
+const res = await fetch(
+  'https://api.mnemom.ai/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000?leaf_index=3',
 );
-const proof = await response.json();
+const result = await res.json();
 
-if (proof.verified) {
-  console.log(`On-chain score: ${proof.on_chain_score} (${proof.grade})`);
-  console.log(`Anchored at block: ${proof.block_number}`);
-  console.log(`Tx: ${proof.tx_hash}`);
+if (result.verified) {
+  console.log('Anchored at:', result.anchor.chain, result.anchor.block_number);
 } else {
-  console.warn('Score could not be verified against the chain');
+  console.log('Not verified:', result.reason);
 }
 ```
 
 ```python Python
 import httpx
 
-resp = httpx.get(
+result = httpx.get(
     "https://api.mnemom.ai/v1/on-chain/verify-proof/mnm-550e8400-e29b-41d4-a716-446655440000",
-)
-proof = resp.json()
+    params={"leaf_index": 3},
+).json()
 
-if proof["verified"]:
-    print(f"On-chain score: {proof['on_chain_score']} ({proof['grade']})")
-    print(f"Anchored at block: {proof['block_number']}")
+if result["verified"]:
+    print("Anchored at:", result["anchor"]["chain"], result["anchor"]["block_number"])
+else:
+    print("Not verified:", result["reason"])
 ```
 </CodeGroup>
 
-**Response:** `200 OK`
+**Response (verified):**
 
 ```json
 {
+  "verified": true,
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "on_chain_score": 782,
-  "grade": "A",
-  "metadata_hash": "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba",
-  "published_at": "2026-02-26T10:35:00.000Z",
-  "block_number": 18234589,
-  "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  "verified": true
+  "merkle_root": "0x3a8c...",
+  "inclusion_proof": {
+    "leaf_hash": "0x91fe...",
+    "leaf_index": 3,
+    "tree_size": 347,
+    "siblings": [{ "hash": "0x02aa...", "position": "left" }]
+  },
+  "verification": {
+    "root_recomputed_from_leaves": true,
+    "leaf_count": 347,
+    "leaf_count_checked": true,
+    "inclusion_proof_verified": true,
+    "anchored_root_source": "mnemom_database"
+  },
+  "anchor": {
+    "tx_hash": "0x1234...",
+    "block_number": 18234567,
+    "chain": "base",
+    "anchored_at": "2026-02-26T10:30:00.000Z"
+  }
 }
 ```
 
-`verified: true` means the off-chain Merkle root matches the anchored root and the off-chain score matches the `ScoreRecord` in the registry. Any `false` is a tamper signal — open a support ticket.
+`leaf_index` is optional; omit it to run only the root-recomputation and leaf-count checks. When `verified` is `false`, a `reason` explains which step failed: `no_merkle_tree`, `no_checkpoint`, `no_leaf_hashes`, `root_mismatch`, `leaf_count_mismatch`, `leaf_index_out_of_range`, `inclusion_proof_failed`, or `not_anchored`.
+
+<Warning>
+`anchored_root_source: "mnemom_database"` means the anchored root this check compares against was read from Mnemom's own record of what it anchored, not from a live Base RPC call. See [the scope-limit note](/concepts/on-chain-verification#verifying-against-the-anchor) before treating `verified: true` as a fully trust-minimized result.
+</Warning>
 
 ---
 
-## Checking on-chain status
+## Check an agent's on-chain status
 
-Lightweight "does this agent have any on-chain data?" check — useful before calling `verify-proof` in workflows where the agent may be new or pre-eligible.
+```
+GET /v1/on-chain/status/{agent_id}
+```
 
-**Endpoint:** `GET /v1/on-chain/status/{agent_id}` — public.
+A lighter-weight summary: the agent's most recent score publication, its latest confirmed anchor, and its current Merkle tree metadata. Each of the three is `null` when no matching row exists yet.
 
 <CodeGroup>
 ```bash cURL
-curl https://api.mnemom.ai/v1/on-chain/status/mnm-550e8400-e29b-41d4-a716-446655440000
+curl "https://api.mnemom.ai/v1/on-chain/status/mnm-550e8400-e29b-41d4-a716-446655440000"
 ```
 
 ```typescript TypeScript
-const response = await fetch(
+const status = await fetch(
   'https://api.mnemom.ai/v1/on-chain/status/mnm-550e8400-e29b-41d4-a716-446655440000',
-);
-const status = await response.json();
+).then((r) => r.json());
 
-if (status.has_on_chain_score) {
-  console.log(`Latest on-chain score: ${status.latest_score.score}`);
-  console.log(`Last updated: ${status.last_updated}`);
-} else {
-  console.log('Agent has no on-chain score yet.');
+if (status.latest_anchor) {
+  console.log('Last anchored at block', status.latest_anchor.block_number);
 }
-```
-
-```python Python
-import httpx
-
-resp = httpx.get(
-    "https://api.mnemom.ai/v1/on-chain/status/mnm-550e8400-e29b-41d4-a716-446655440000",
-)
-status = resp.json()
-if status["has_on_chain_score"]:
-    print(f"Latest on-chain score: {status['latest_score']['score']}")
 ```
 </CodeGroup>
 
-**Response:** `200 OK`
+**Response:**
 
 ```json
 {
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "has_on_chain_score": true,
-  "latest_score": {
+  "latest_score_publication": {
     "score": 782,
     "grade": "A",
+    "tx_hash": "0xabcd...",
     "block_number": 18234589,
+    "chain": "base",
+    "status": "confirmed",
     "published_at": "2026-02-26T10:35:00.000Z"
   },
   "latest_anchor": {
-    "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
+    "tx_hash": "0x1234...",
     "block_number": 18234567,
+    "chain": "base",
     "anchored_at": "2026-02-26T10:30:00.000Z"
   },
-  "last_updated": "2026-02-26T10:35:00.000Z"
+  "merkle_tree": {
+    "merkle_root": "0x3a8c...",
+    "leaf_count": 347,
+    "tree_depth": 9,
+    "updated_at": "2026-02-26T10:25:00.000Z"
+  }
 }
 ```
 
 ---
 
-## Viewing history
+## Browse anchor history
 
-Retrieve the full history of anchoring and publishing events across all agents in your org — useful for compliance audits and trend dashboards.
+```
+GET /v1/on-chain/history
+```
 
-**Endpoint:** `GET /v1/on-chain/history` — auth required.
+A paginated list of Merkle-root anchoring events (not score publications -- there is no publication history endpoint).
 
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `page` | number | No | Page number (default: 1) |
-| `per_page` | number | No | Results per page (default: 20, max: 100) |
+**Query parameters:** `chain` (`base` or `base-sepolia`), `agent_id` (filter to anchors that included this agent), `from` / `to` (ISO 8601 date-time range), `limit` (1-100, default 50), `offset`.
 
 <CodeGroup>
 ```bash cURL
-curl "https://api.mnemom.ai/v1/on-chain/history?page=1&per_page=10" \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
+curl "https://api.mnemom.ai/v1/on-chain/history?chain=base&limit=10"
 ```
 
 ```typescript TypeScript
 const history = await fetch(
-  'https://api.mnemom.ai/v1/on-chain/history?page=1&per_page=10',
-  { headers: { 'X-Mnemom-Api-Key': process.env.MNEMOM_API_KEY! } },
+  'https://api.mnemom.ai/v1/on-chain/history?limit=10',
 ).then((r) => r.json());
 
 for (const anchor of history.anchors) {
-  console.log(`Root anchored at block ${anchor.block_number}: ${anchor.merkle_root}`);
+  console.log(`block ${anchor.block_number}: ${anchor.merkle_root}`);
 }
-for (const pub of history.publications) {
-  console.log(`${pub.agent_count} scores published at block ${pub.block_number}`);
-}
-```
-
-```python Python
-import httpx
-
-history = httpx.get(
-    "https://api.mnemom.ai/v1/on-chain/history",
-    headers={"X-Mnemom-Api-Key": api_key},
-    params={"page": 1, "per_page": 10},
-).json()
-
-for anchor in history["anchors"]:
-    print(f"Root anchored at block {anchor['block_number']}: {anchor['merkle_root']}")
-for pub in history["publications"]:
-    print(f"{pub['agent_count']} scores published at block {pub['block_number']}")
 ```
 </CodeGroup>
 
-**Response:** `200 OK`
+**Response:**
 
 ```json
 {
   "anchors": [
     {
-      "anchor_id": "anc-7f8a9b2c",
-      "merkle_root": "0xabc123def456789012345678901234567890123456789012345678901234abcd",
-      "leaf_count": 347,
-      "tree_depth": 9,
-      "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "tx_hash": "0x1234...",
       "block_number": 18234567,
+      "chain": "base",
       "anchored_at": "2026-02-26T10:30:00.000Z"
     }
   ],
-  "publications": [
-    {
-      "publication_id": "pub-3e4f5a6b",
-      "agent_count": 2,
-      "tx_hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-      "block_number": 18234589,
-      "published_at": "2026-02-26T10:35:00.000Z"
-    }
-  ],
-  "page": 1,
-  "per_page": 10,
-  "total_anchors": 42,
-  "total_publications": 18
+  "limit": 10,
+  "offset": 0
 }
 ```
 
 ---
 
-## How anchoring + publishing actually happen
-
-Mnemom's backend runs a **6-hour cron** that:
-
-1. Computes agent-level Merkle trees from the latest integrity checkpoints.
-2. Aggregates agent-level roots into a global root.
-3. Calls `MnemoMerkleAnchor.anchorRoot(root, leafCount, treeDepth)` on Base.
-4. Publishes eligible agents' reputation scores in a batch to `MnemoReputationRegistry.publishBatch(records)` (up to 200 agents per tx per contract limit).
-
-This runs under an internal service key — customers never call the underlying anchor or publish endpoints themselves; those are gated behind `X-Service-Key` and reject any other auth. Gas is paid from the Mnemom operational wallet; there is no customer-facing billing line for on-chain operations. You do not need to hold ETH on Base to use any part of this system.
-
-If you need an off-cycle anchor or publish (e.g., for a time-critical compliance filing), contact support — the backend team can run the cron manually.
-
----
-
-## Verifying directly against Base L2
-
-Everything above goes through the Mnemom API. If you prefer a fully trust-minimized path, read the contracts directly.
-
-**Deployed addresses (Base mainnet, chain ID 8453):**
-
-| Contract | Address | Basescan |
-|----------|---------|----------|
-| `MnemoReputationRegistry` | `0xfba717a6c4eb481a74f6911954a625242a048425` | [view](https://basescan.org/address/0xfba717a6c4eb481a74f6911954a625242a048425) |
-| `MnemoMerkleAnchor` | `0xdfdbc9374907d5adea8f100a0d1e07e16c99816d` | [view](https://basescan.org/address/0xdfdbc9374907d5adea8f100a0d1e07e16c99816d) |
-
-**Agent ID encoding:** human-readable IDs like `mnm-550e8400-...` are stored on-chain as `keccak256(abi.encodePacked(agentId))`. Compute the hash client-side before querying:
-
-```typescript
-import { keccak256, toUtf8Bytes } from 'ethers';
-
-const agentId = 'mnm-550e8400-e29b-41d4-a716-446655440000';
-const agentIdBytes32 = keccak256(toUtf8Bytes(agentId));
-// → 0x3a8c...
-```
-
-**Query the registry:**
-
-```typescript
-import { Contract, JsonRpcProvider } from 'ethers';
-
-const provider = new JsonRpcProvider('https://mainnet.base.org');
-const registryAbi = [
-  'function getScore(bytes32 agentId) view returns (tuple(uint16 score, bytes3 grade, uint64 publishedAt, uint64 blockNumber, bytes32 metadataHash))',
-  'function getScoreHistory(bytes32 agentId) view returns (tuple(uint16,bytes3,uint64,uint64,bytes32)[])',
-];
-const registry = new Contract(
-  '0xfba717a6c4eb481a74f6911954a625242a048425',
-  registryAbi,
-  provider,
-);
-
-const latest = await registry.getScore(agentIdBytes32);
-console.log('score:', latest.score, 'grade:', decodeGrade(latest.grade));
-```
-
-**Query the Merkle anchor:**
-
-```typescript
-const anchorAbi = [
-  'function isRootAnchored(bytes32 merkleRoot) view returns (bool)',
-  'function getLatestRoot() view returns (tuple(bytes32 merkleRoot, uint64 anchoredAt, uint64 blockNumber, uint32 leafCount, uint16 treeDepth))',
-];
-const anchor = new Contract(
-  '0xdfdbc9374907d5adea8f100a0d1e07e16c99816d',
-  anchorAbi,
-  provider,
-);
-
-const latestRoot = await anchor.getLatestRoot();
-const anchored = await anchor.isRootAnchored(latestRoot.merkleRoot);
-```
-
-Both `getScore` and `isRootAnchored` are view calls — zero gas, no wallet required. Any public Base RPC endpoint works.
-
-<Tip>
-Use the API path when possible — it's cached and doesn't hit the RPC on every request. Drop to direct RPC when you need trust-minimized verification or are composing with other smart contracts.
-</Tip>
-
----
-
 ## See also
 
-- [On-Chain Verification Concepts](/concepts/on-chain-verification) — ERC-8004 framing, Merkle tree structure, cost model
-- [On-Chain API Reference](/api-reference/on-chain-overview) — Full API reference for all on-chain endpoints
-- [Mnemom Trust Rating](/concepts/reputation-scores) — How reputation scores are computed
-- [Cryptographic Verification](/concepts/reputation-scores#cryptographic-verification) — Off-chain proof chain structure
-- [Improving Your Score](/guides/improving-reputation) — Strategies for improving your Trust Rating
+- [On-Chain Verification Concepts](/concepts/on-chain-verification) -- why anchoring exists, what it does and doesn't guarantee
+- [On-Chain API Reference](/api-reference/on-chain-overview) -- full schema reference
+- [Mnemom Trust Rating](/concepts/reputation-scores) -- how the anchored scores are computed
