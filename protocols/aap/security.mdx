@@ -5,9 +5,6 @@ sidebarTitle: "Security"
 icon: "shield-halved"
 ---
 
-**Version**: 0.1.0
-**Date**: 2026-01-31
-**Author**: Mnemon Research
 **Status**: Normative
 
 ---
@@ -18,12 +15,16 @@ This document defines the security model for the Agent Alignment Protocol (AAP).
 
 1. What AAP protects against (and what it doesn't)
 2. Trust assumptions and their failure modes
-3. Cryptographic requirements
+3. Cryptographic requirements for implementers who add them
 4. Attack scenarios and mitigations
 5. Implementation security guidance
 6. Operational security requirements
 
-**Critical Framing**: AAP is a transparency protocol, not a security protocol. Its security model is about ensuring *accurate transparency*--that what agents declare and log is authentic and unmodified--not about ensuring that agents are trustworthy or that outcomes are safe.
+**Critical framing**: AAP is a transparency protocol, not a security protocol. Its security model is about ensuring *accurate transparency*--that what agents declare and log is authentic and unmodified--not about ensuring that agents are trustworthy or that outcomes are safe.
+
+<Note>
+**What the reference SDKs actually do today.** `verify_trace()` in both the Python and TypeScript SDKs performs **structural verification only** -- it checks a trace against a card's declared fields. It does not sign, hash-chain, or otherwise cryptographically attest cards or traces. Everything in this document phrased as "cards SHOULD be signed," "traces SHOULD be signed," etc. is a recommendation for implementers layering security on top of AAP, not a description of built-in SDK behavior. If you need an out-of-the-box cryptographic integrity guarantee over an agent's actual reasoning, pair AAP with [AIP](/protocols/aip/specification), whose checkpoints are signed, hash-chained, and Merkle-attested by the hosted platform.
+</Note>
 
 The goal: make lying harder, not impossible.
 
@@ -551,9 +552,11 @@ Each handshake message includes:
 
 **Request Security:**
 
+This example layers a `nonce` and mandatory `signature` onto the base `value_coherence_check` message (Section 6.3.3 of the [specification](/protocols/aap/specification#6-value-coherence-handshake)) as a security hardening recommendation -- neither field is part of the base schema today:
+
 ```json
 {
-  "message_type": "coherence_request",
+  "message_type": "value_coherence_check",
   "request_id": "req-uuid4",
   "timestamp": "2026-01-31T12:00:00Z",
   "nonce": "base64-encoded-32-bytes",
@@ -782,22 +785,7 @@ def adaptive_threshold(
 
 ### 9.3 cryptographic agility
 
-AAP supports algorithm upgrades through versioning:
-
-```json
-{
-  "aap_version": "1.0.0",
-  "crypto_suite": {
-    "signature": "ed25519",
-    "hash": "sha256"
-  }
-}
-```
-
-Future versions MAY support additional algorithms. Implementations MUST:
-- Support at least the algorithms specified for each version
-- Negotiate algorithm selection during handshakes
-- Reject unknown or deprecated algorithms
+The card schema does not pin a signature algorithm -- `value_coherence.schema.json`'s optional `signature` block carries an `algorithm` field (Section 6, `"Ed25519"` in the reference examples) precisely so implementations can name whichever algorithm they actually used. If you introduce a new algorithm, verifiers MUST reject a signature whose declared algorithm they don't recognize rather than assume Ed25519.
 
 ---
 
@@ -1158,6 +1146,4 @@ The goal is not perfect security. The goal is to make misalignment harder to hid
 
 ---
 
-*AAP Security Model v0.1.0*
-*Author: Mnemon Research*
 *This document is normative for AAP implementations.*

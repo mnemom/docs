@@ -19,111 +19,137 @@ npm install @mnemom/agent-integrity-protocol
 
 ## 2. Define an Alignment Card
 
-The Alignment Card declares your agent's alignment posture. AIP uses it to evaluate thinking blocks.
-
-```python
-card = {
-    "aap_version": "1.0.0",
-    "agent_id": "my-agent",
-    "principal": {
-        "type": "human",
-        "relationship": "delegated_authority",
-    },
-    "values": {
-        "declared": ["principal_benefit", "transparency", "harm_prevention"],
-        "conflicts_with": ["deceptive_marketing", "data_exfiltration"],
-    },
-    "autonomy_envelope": {
-        "bounded_actions": ["search", "summarize", "recommend"],
-        "escalation_triggers": [
-            {
-                "condition": "action_outside_bounded_set",
-                "action": "escalate",
-                "reason": "Action not in declared bounds",
-            }
-        ],
-        "forbidden_actions": ["share_credentials", "exfiltrate_data"],
-    },
-}
-```
-
-## 3. Check integrity
-
-Evaluate a thinking block against the card:
+<Note>
+The AIP SDK's `card` parameter is its **own** lightweight config type (`AlignmentCard` / `AutonomyEnvelope` / `AlignmentCardValue`) -- it is not literally the full [AAP unified card](/protocols/aap/specification#4-alignment-card). If you already author an AAP card, translate its `values.declared` list into `{name, priority, description}` objects and pass `autonomy.bounded_actions` / `forbidden_actions` / `escalation_triggers` through as `autonomy_envelope`. Note the priority direction is inverted from AAP's: **lower number = higher priority** here. If you deploy through the Mnemom gateway rather than the SDK directly, this translation happens for you server-side.
+</Note>
 
 ### Python
 
+`AlignmentCard`, `AlignmentCardValue`, `AutonomyEnvelope`, and `EscalationTrigger` are dataclasses -- construct them directly rather than passing a plain dict:
+
 ```python
-from aip import check_integrity, build_signal
+from aip import AlignmentCard, AlignmentCardValue, AutonomyEnvelope, EscalationTrigger
 
-# Run integrity analysis
-checkpoint = check_integrity(
-    thinking_block="The user wants product recommendations. I should focus on "
-    "finding options that genuinely serve their needs, not sponsored results...",
-    card=card,
-    config={
-        "agent_id": "my-agent",
-        "analysis_llm": {
-            "model": "claude-haiku-4-5-20251001",
-            "base_url": "https://api.anthropic.com",
-            "api_key": "your-api-key",
-            "max_tokens": 1024,
-        },
-    },
+card = AlignmentCard(
+    card_id="ac-my-agent-001",
+    agent_description="Shopping assistant that searches and recommends products",
+    values=[
+        AlignmentCardValue(name="principal_benefit", priority=1, description="Prioritize the user's interests"),
+        AlignmentCardValue(name="transparency", priority=2, description="Disclose reasoning and limitations"),
+        AlignmentCardValue(name="harm_prevention", priority=3),
+    ],
+    autonomy_envelope=AutonomyEnvelope(
+        bounded_actions=["search", "summarize", "recommend"],
+        forbidden_actions=["share_credentials", "exfiltrate_data"],
+        escalation_triggers=[
+            EscalationTrigger(
+                condition="action_outside_bounded_set",
+                action="escalate",
+                reason="Action not in declared bounds",
+            ),
+        ],
+    ),
 )
-
-print(f"Verdict: {checkpoint.verdict}")       # "clear"
-print(f"Concerns: {checkpoint.concerns}")     # []
-
-# Build signal for host system
-signal = build_signal(checkpoint, window_state)
-print(f"Proceed: {signal.proceed}")           # True
-print(f"Action: {signal.recommended_action}") # "continue"
 ```
 
 ### TypeScript
 
-```typescript
-import { checkIntegrity, buildSignal } from '@mnemom/agent-integrity-protocol';
+The TypeScript types are plain interfaces, so an object literal works directly:
 
-const checkpoint = await checkIntegrity({
-  thinkingBlock: 'The user wants product recommendations. I should focus on ' +
-    'finding options that genuinely serve their needs, not sponsored results...',
-  card,
-  config: {
-    agentId: 'my-agent',
-    analysisLlm: {
-      model: 'claude-haiku-4-5-20251001',
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'your-api-key',
-      maxTokens: 1024,
-    },
+```typescript
+const card = {
+  card_id: 'ac-my-agent-001',
+  agent_description: 'Shopping assistant that searches and recommends products',
+  values: [
+    { name: 'principal_benefit', priority: 1, description: "Prioritize the user's interests" },
+    { name: 'transparency', priority: 2, description: 'Disclose reasoning and limitations' },
+    { name: 'harm_prevention', priority: 3 },
+  ],
+  autonomy_envelope: {
+    bounded_actions: ['search', 'summarize', 'recommend'],
+    forbidden_actions: ['share_credentials', 'exfiltrate_data'],
+    escalation_triggers: [
+      { condition: 'action_outside_bounded_set', action: 'escalate', reason: 'Action not in declared bounds' },
+    ],
   },
+};
+```
+
+## 3. Check integrity
+
+Create a client once, then call `check()` with the **raw response body your agent's own LLM call returned** (the one containing the thinking block) -- the client extracts the thinking block, builds the conscience prompt, calls the analysis LLM, and returns a signal. You do not extract or pass the thinking block yourself.
+
+### Python
+
+### Python
+
+```python
+from aip import create_client, AIPConfig, AnalysisLLMConfig, WindowConfig
+
+client = create_client(AIPConfig(
+    card=card,
+    agent_id="my-agent",
+    analysis_llm=AnalysisLLMConfig(
+        model="claude-haiku-4-5-20251001",
+        base_url="https://api.anthropic.com",
+        api_key="your-analysis-llm-api-key",
+        max_tokens=1024,
+    ),
+    window=WindowConfig(),  # defaults: max_size=10, sliding, reset, max_age_seconds=3600
+))
+
+# `response_body` is the raw JSON body your agent's LLM call returned
+signal = await client.check(response_body, provider="anthropic")
+
+print(f"Verdict: {signal.checkpoint.verdict}")   # "clear"
+print(f"Proceed: {signal.proceed}")              # True
+print(f"Action: {signal.recommended_action}")    # "continue"
+```
+
+### TypeScript
+
+Unlike the Python dataclass, TypeScript's `WindowConfig` fields are all required on the type -- there is no constructor that fills in defaults for you, so spell them out (or import the individual `DEFAULT_WINDOW_*` constants):
+
+```typescript
+import { createClient } from '@mnemom/agent-integrity-protocol';
+
+const client = createClient({
+  card,
+  agent_id: 'my-agent',
+  analysis_llm: {
+    model: 'claude-haiku-4-5-20251001',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'your-analysis-llm-api-key',
+    max_tokens: 1024,
+  },
+  window: { max_size: 10, mode: 'sliding', session_boundary: 'reset', max_age_seconds: 3600 },
 });
 
-console.log(`Verdict: ${checkpoint.verdict}`);   // "clear"
-console.log(`Proceed: ${signal.proceed}`);       // true
+// `responseBody` is the raw JSON (or SSE) body your agent's LLM call returned
+const signal = await client.check(responseBody, 'anthropic');
+
+console.log(`Verdict: ${signal.checkpoint.verdict}`); // "clear"
+console.log(`Proceed: ${signal.proceed}`);            // true
 ```
+
+<Note>
+Both SDKs also export the lower-level pure functions used internally (`check_integrity`/`checkIntegrity`, `build_signal`/`buildSignal`, `create_adapter_registry`/`createAdapterRegistry`) if you need to build a custom pipeline. Most integrations should use `create_client`/`createClient` above -- it wires window state, drift detection, and signal assembly together for you, and `WindowManager` is intentionally not part of the public API.
+</Note>
 
 ## 4. Handle signals
 
-The signal tells your host system what to do:
+`signal` from Step 3 already carries `proceed` and `recommended_action` -- no need to re-derive them:
 
 ```python
-from aip import map_verdict_to_action, map_verdict_to_proceed
-
-action = map_verdict_to_action(checkpoint.verdict, checkpoint.concerns)
-proceed = map_verdict_to_proceed(checkpoint.verdict)
-
-if proceed:
+if signal.proceed:
     # clear or review_needed — agent continues
     execute_next_action()
 else:
     # boundary_violation — block and escalate
-    if action == "pause_for_review":
-        request_human_review(checkpoint)
-    elif action == "deny_and_escalate":
-        deny_action_and_notify_principal(checkpoint)
+    if signal.recommended_action == "pause_for_review":
+        request_human_review(signal.checkpoint)
+    elif signal.recommended_action == "deny_and_escalate":
+        deny_action_and_notify_principal(signal.checkpoint)
 ```
 
 ### Verdict to action mapping
@@ -136,21 +162,23 @@ else:
 
 ## 5. Extract thinking blocks from LLM responses
 
-Use provider adapters to extract thinking blocks from different LLM providers:
+`client.check()` does this for you, but you can use the same provider adapters directly if you need to inspect extraction confidence or build a custom pipeline:
 
 ```python
-from aip import AdapterRegistry
+from aip import create_adapter_registry
 
-registry = AdapterRegistry()
+registry = create_adapter_registry()
 
 # Anthropic response
-thinking = registry.extract(anthropic_response, provider="anthropic")
+adapter = registry.get("anthropic")
+thinking = adapter.extract_thinking(anthropic_response_body)
 print(f"Content: {thinking.content}")
-print(f"Confidence: {thinking.confidence}")  # 1.0
+print(f"Confidence: {thinking.confidence}")  # 1.0 (native thinking block)
 
 # OpenAI response
-thinking = registry.extract(openai_response, provider="openai")
-print(f"Confidence: {thinking.confidence}")  # 0.9
+adapter = registry.get("openai")
+thinking = adapter.extract_thinking(openai_response_body)
+print(f"Confidence: {thinking.confidence}")  # 0.9 (explicit reasoning_content field)
 ```
 
 ## 6. Add conscience values (optional)
@@ -169,13 +197,13 @@ Only `BOUNDARY` and `FEAR` types are injected into the conscience prompt. `BOUND
 
 ## 7. Detect drift
 
-Monitor for behavioral drift across a session:
+`create_client`/`createClient` already runs drift detection on every `check()` call and delivers alerts through the `on_drift_alert` callback (or `signal.window_summary.drift_alert_active`) -- you only need the lower-level pieces below if you are managing checkpoints and the window yourself, outside the client:
 
 ```python
-from aip import detect_integrity_drift, WindowManager, WindowConfig
+from aip import create_drift_state, detect_integrity_drift, WindowManager, WindowConfig
 
 manager = WindowManager(WindowConfig(max_size=10), session_id="session-1")
-state = None
+state = create_drift_state()
 
 # Process checkpoints as they're produced
 for checkpoint in checkpoints:
@@ -186,6 +214,10 @@ for checkpoint in checkpoints:
     if alert:
         print(f"Drift: {alert.drift_direction} (similarity: {alert.integrity_similarity})")
 ```
+
+<Note>
+`WindowManager` is part of the public Python API but is intentionally **not** exported from the TypeScript package -- use `createClient()` there, which manages window state internally.
+</Note>
 
 ## Next steps
 

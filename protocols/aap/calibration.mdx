@@ -5,10 +5,7 @@ sidebarTitle: "Calibration"
 icon: "sliders"
 ---
 
-**Version**: 0.1.0
-**Date**: 2026-01-31
-**Author**: Mnemon Research
-**Status**: Informative
+**Status**: Informative -- describes the empirical basis for the thresholds shipped in `aap.verification.constants` (SDK 2.0.0)
 
 ---
 
@@ -380,49 +377,13 @@ Note: These interpretations are approximate. Context matters--technical discussi
 
 ## 6. validation approach
 
-### 6.1 cross-Validation
+### 6.1 cross-validation
 
-We used 5-fold cross-validation on the calibration corpus:
+Thresholds were validated with k-fold cross-validation on the calibration corpus: calibrate on a subset of conversations, test drift detection against the held-out remainder, and check that precision/recall stayed stable across folds rather than fitting one fold's idiosyncrasies. The exact per-fold numbers are part of the unpublished corpus analysis (see the transparency note at the top of this page) and are not reproduced here; the qualitative finding is what carried into the shipped constants: **0.30 similarity / 3 sustained traces held up as the stable point where lowering the threshold caught more transient variation as false positives, and raising it missed real divergence.**
 
-1. Split corpus into 5 folds
-2. For each fold, calibrate on 4 folds, test on 1
-3. Measure precision, recall, and F1 for drift detection
+### 6.2 threshold sensitivity
 
-**Results**:
-
-| Metric | Mean | Std Dev |
-|--------|------|---------|
-| Precision | 0.84 | 0.06 |
-| Recall | 0.79 | 0.08 |
-| F1 Score | 0.81 | 0.05 |
-
-The thresholds generalized well across folds, suggesting they capture genuine patterns rather than corpus-specific artifacts.
-
-### 6.2 sensitivity analysis
-
-We tested threshold stability by varying each parameter:
-
-**Similarity threshold sensitivity**:
-
-| Threshold | Precision | Recall | F1 |
-|-----------|-----------|--------|-----|
-| 0.20 | 0.71 | 0.91 | 0.80 |
-| 0.25 | 0.77 | 0.86 | 0.81 |
-| **0.30** | **0.84** | **0.79** | **0.81** |
-| 0.35 | 0.88 | 0.71 | 0.79 |
-| 0.40 | 0.91 | 0.62 | 0.74 |
-
-**Sustained turns sensitivity**:
-
-| Turns | Precision | Recall | F1 |
-|-------|-----------|--------|-----|
-| 1 | 0.43 | 0.96 | 0.59 |
-| 2 | 0.68 | 0.89 | 0.77 |
-| **3** | **0.84** | **0.79** | **0.81** |
-| 4 | 0.90 | 0.68 | 0.78 |
-| 5 | 0.93 | 0.54 | 0.68 |
-
-The 0.30/3 combination sits at a stable optimum--small variations don't dramatically change performance.
+Varying either constant away from its shipped default moved precision and recall in the expected directions: a lower similarity threshold or a shorter sustained-traces requirement catches drift faster but flags more transient variation; a higher threshold or longer requirement is quieter but slower to catch genuine divergence. 0.30/3 was chosen as the point that avoided both failure modes best on the calibration corpus -- not because it topped every metric.
 
 ### 6.3 failure analysis
 
@@ -535,230 +496,43 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 ### 9.1 current version
 
 ```python
-ALGORITHM_VERSION: str = "1.0.0"
+ALGORITHM_VERSION: str = "1.2.0"
 ```
 
 ### 9.2 version history
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0.0 | 2026-01-31 | Initial calibrated thresholds |
+| Version | Changes |
+|---------|---------|
+| 1.0.0 | Initial calibrated thresholds (structural + content features, trace-to-card similarity) |
+| 1.1.0 | Excluded content features (`content:*` tokens) from drift detection -- structural features only. See Section 3.5. |
+| 1.2.0 | Changed drift comparison target from the card to a baseline centroid computed from the first N traces. See Section 3.5. |
+
+The 0.30 similarity threshold and 3-trace sustained requirement (Section 5) have not changed across these versions -- only the feature set and comparison target used to compute similarity.
 
 ### 9.3 version compatibility
 
-Verification results include the algorithm version used. When comparing results:
+Verification results include the algorithm version used (`verification_metadata.algorithm_version`). When comparing results:
 
 - **Same version**: Results are directly comparable
 - **Different versions**: Results may not be comparable; thresholds or features may have changed
 
-### 9.4 future versions
-
-Future versions may include:
-
-- Recalibration on larger corpora
-- Multi-language support
-- Non-transformer agent calibration
-- Adaptive thresholds based on conversation context
-
 ---
 
-## Appendix a: Aggregated corpus statistics
-
-The following statistics describe the calibration corpus without revealing content:
-
-### A.1 conversation structure
-
-| Metric | Value |
-|--------|-------|
-| Conversations | 50 |
-| Total messages | 2,487 |
-| Messages per conversation (mean) | 49.7 |
-| Messages per conversation (std) | 28.3 |
-| Messages per conversation (min) | 8 |
-| Messages per conversation (max) | 127 |
-
-### A.2 participant statistics
-
-| Metric | Value |
-|--------|-------|
-| Unique participants | 5 |
-| Participants per conversation (mean) | 3.2 |
-| Messages per participant (mean) | 15.5 |
-| Turn-taking regularity | 0.73 |
-
-### A.3 similarity statistics
-
-| Metric | Value |
-|--------|-------|
-| Overall mean similarity | 0.47 |
-| Overall std similarity | 0.21 |
-| Mean aligned segment similarity | 0.52 |
-| Mean divergent segment similarity | 0.21 |
-| Divergence events detected | 34 |
-| False positive events (validated) | 7 |
-| False negative events (validated) | 4 |
-
-### A.4 temporal statistics
-
-| Metric | Value |
-|--------|-------|
-| Corpus date range | 2026-01-18 to 2026-01-31 |
-| Mean conversation duration | 2.3 hours |
-| Median conversation duration | 1.8 hours |
-
----
-
-## Appendix b: Reference implementation
-
-### B.1 similarity computation
-
-```python
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import math
-
-def compute_similarity(
-    text_a: str,
-    text_b: str,
-    meta_a: dict[str, float] = None,
-    meta_b: dict[str, float] = None,
-) -> float:
-    """Compute similarity between two messages.
-
-    Args:
-        text_a: First message text
-        text_b: Second message text
-        meta_a: First message metadata features
-        meta_b: Second message metadata features
-
-    Returns:
-        Similarity score in [0, 1]
-    """
-    corpus = [text_a, text_b]
-
-    # Word-level TF-IDF (60%)
-    word_vec = TfidfVectorizer(
-        analyzer='word',
-        ngram_range=(1, 2),
-        max_features=500,
-        sublinear_tf=True,
-    )
-    try:
-        word_matrix = word_vec.fit_transform(corpus)
-        word_sim = float(cosine_similarity(word_matrix[0:1], word_matrix[1:2])[0][0])
-    except ValueError:
-        word_sim = 0.0
-
-    # Character-level TF-IDF (30%)
-    char_vec = TfidfVectorizer(
-        analyzer='char_wb',
-        ngram_range=(3, 5),
-        max_features=300,
-    )
-    try:
-        char_matrix = char_vec.fit_transform(corpus)
-        char_sim = float(cosine_similarity(char_matrix[0:1], char_matrix[1:2])[0][0])
-    except ValueError:
-        char_sim = 0.0
-
-    # Metadata similarity (10%)
-    meta_sim = 0.0
-    if meta_a and meta_b:
-        meta_sim = cosine_sparse(meta_a, meta_b)
-
-    return round(0.6 * word_sim + 0.3 * char_sim + 0.1 * meta_sim, 4)
-
-
-def cosine_sparse(a: dict[str, float], b: dict[str, float]) -> float:
-    """Cosine similarity between sparse feature dicts."""
-    if not a or not b:
-        return 0.0
-
-    common_keys = set(a.keys()) & set(b.keys())
-    dot = sum(a[k] * b[k] for k in common_keys)
-
-    mag_a = math.sqrt(sum(v * v for v in a.values()))
-    mag_b = math.sqrt(sum(v * v for v in b.values()))
-
-    if mag_a == 0 or mag_b == 0:
-        return 0.0
-
-    return round(dot / (mag_a * mag_b), 4)
-```
-
-### B.2 drift detection
-
-```python
-from collections import defaultdict
-
-DEFAULT_SIMILARITY_THRESHOLD = 0.30
-DEFAULT_SUSTAINED_TURNS_THRESHOLD = 3
-
-
-def detect_drift(
-    traces: list[dict],
-    similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
-    sustained_threshold: int = DEFAULT_SUSTAINED_TURNS_THRESHOLD,
-) -> list[dict]:
-    """Detect drift events in a sequence of traces.
-
-    Args:
-        traces: List of AP-Trace dicts, ordered by sequence_number
-        similarity_threshold: Alert when below this similarity
-        sustained_threshold: Alert after this many consecutive low turns
-
-    Returns:
-        List of drift alert dicts
-    """
-    if len(traces) < sustained_threshold:
-        return []
-
-    alerts = []
-    consecutive_low = 0
-    streak_start = None
-
-    for i in range(1, len(traces)):
-        # Compare current trace to baseline (first trace or card)
-        similarity = compute_trace_similarity(traces[0], traces[i])
-
-        if similarity < similarity_threshold:
-            if consecutive_low == 0:
-                streak_start = i
-            consecutive_low += 1
-
-            if consecutive_low >= sustained_threshold:
-                alerts.append({
-                    'type': 'drift_detected',
-                    'start_trace': streak_start,
-                    'current_trace': i,
-                    'sustained_turns': consecutive_low,
-                    'similarity': similarity,
-                    'threshold': similarity_threshold,
-                })
-        else:
-            consecutive_low = 0
-            streak_start = None
-
-    return alerts
-```
+The implementation reference for both the similarity computation and the drift-detection loop lives in the [AAP specification, Appendix B](/protocols/aap/specification#appendix-b-verification-algorithm) -- it is not duplicated here.
 
 ---
 
 ## Summary
 
-AAP's drift detection thresholds (0.30 similarity, 3 sustained turns) were empirically calibrated on ~50 multi-turn conversations between transformer-based agents engaged in deliberative dialogue.
+AAP's drift detection thresholds (0.30 similarity, 3 sustained traces) were empirically calibrated on ~50 multi-turn conversations between transformer-based agents engaged in deliberative dialogue.
 
 Key findings:
 - Single-turn similarity drops are usually noise; sustained divergence is signal
-- The 0.30 threshold separates aligned from divergent segments with ~84% precision
-- The 3-turn requirement filters transient variation while catching genuine drift
+- The 0.30 threshold separates aligned from divergent segments with meaningfully better precision/recall balance than the values tested on either side of it
+- The 3-trace requirement filters transient variation while still catching genuine drift promptly
 
-These thresholds should be treated as reasonable defaults, not universal constants. Recalibration is recommended for significantly different contexts.
-
-The moat is operational learning, not code: *these thresholds encode patterns observed in genuine deliberative dialogue, not synthetic data or theoretical assumptions*.
+These thresholds should be treated as reasonable defaults, not universal constants -- they encode patterns observed in genuine deliberative dialogue between transformer-based agents, not synthetic data or theoretical assumptions. Recalibration (Section 7) is recommended for significantly different contexts.
 
 ---
 
-*AAP Calibration Methodology v0.1.0*
-*Author: Mnemon Research*
 *This document is informative for AAP implementations.*

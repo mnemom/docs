@@ -20,24 +20,19 @@ This extension enables agents to verify value coherence *before* delegating task
 
 ## Where A2A and AAP fit
 
-A2A and AAP are complementary protocols in the agentic AI stack, both part of the [Agentic AI Foundation (AAIF)](https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation):
+A2A and AAP are complementary, independently-governed protocols that answer different questions in the agentic AI stack:
 
 ```
-+---------------------------------------------------------------+
-|                  Agentic AI Foundation (AAIF)                   |
-+---------------+---------------+---------------+----------------+
-|      MCP      |      A2A      |   AAP / AIP   |  AGENTS.md     |
-|  Agent<->Tools|  Agent<->Agent|    Trust &     |   Project      |
-|               |               |   Integrity    |  Guidance      |
-+---------------+---------------+---------------+----------------+
-| "What tools   | "What can we  | "Should we     | "How should    |
-|  can I use?"  |  do together?"|  work together |  I behave      |
-|               |               |  and can we    |  here?"        |
-|               |               |  prove it?"    |                |
-+---------------+---------------+---------------+----------------+
++---------------+---------------+---------------------------+
+|      MCP      |      A2A      |         AAP / AIP         |
+|  Agent<->Tools|  Agent<->Agent|   Alignment & Integrity   |
++---------------+---------------+---------------------------+
+| "What tools   | "What can we  | "Should we work together, |
+|  can I use?"  |  do together?"|  and can we prove it?"    |
++---------------+---------------+---------------------------+
 ```
 
-**MCP + A2A + AAP/AIP = the complete trust stack.** MCP connects agents to tools. A2A connects agents to each other. AAP verifies that coordinating agents share compatible values and produces auditable decision trails. AIP adds real-time integrity monitoring of agent reasoning.
+MCP connects agents to tools. A2A connects agents to each other. AAP verifies that coordinating agents share compatible values and produces auditable decision trails. AIP adds real-time integrity monitoring of agent reasoning. AAP is designed to extend A2A Agent Cards (this guide) and MCP tool manifests ([MCP migration guide](/protocols/aap/mcp-migration)) rather than compete with either.
 
 ## The Alignment Card as superset of the A2A Agent Card
 
@@ -47,14 +42,14 @@ An A2A Agent Card tells other agents *what you can do*. An Alignment Card tells 
 |---|---|---|
 | `id`, `name` | `agent_id`, `card_id` | Stable identity for audit trails with issuance/expiry |
 | `description` | `values.declared` | Machine-verifiable intent, not just prose |
-| `skills` | `autonomy_envelope.bounded_actions` | Which skills are safe to execute autonomously |
-| `capabilities` | `autonomy_envelope` | Escalation triggers, forbidden actions, spending limits |
+| `skills` | `autonomy.bounded_actions` | Which skills are safe to execute autonomously |
+| `capabilities` | `autonomy` | Escalation triggers, forbidden actions, spending limits |
 | `securitySchemes` | *(complementary)* | A2A handles auth; AAP handles behavioral trust |
 | `extensions` | `extensions.aap` | URI-based extension linking to alignment metadata |
 | `signature` | `issued_at`, `expires_at` | Both support signed, time-bound artifacts |
 | *(no equivalent)* | `principal` | Who the agent serves and their relationship |
 | *(no equivalent)* | `values.conflicts_with` | Explicit declaration of incompatible values |
-| *(no equivalent)* | `audit_commitment` | Trace format, retention, queryability guarantees |
+| *(no equivalent)* | `audit` | Trace format, retention, queryability guarantees |
 
 The Alignment Card doesn't replace the A2A Agent Card -- it extends it:
 
@@ -66,8 +61,9 @@ The Alignment Card doesn't replace the A2A Agent Card -- it extends it:
 |                                                   |
 |  +---------------------------------------------+ |
 |  |          AAP Alignment Block                | |
-|  |  principal, values, autonomy_envelope,      | |
-|  |  audit_commitment, extensions               | |
+|  |  principal, values, autonomy,               | |
+|  |  audit, autonomy_mode, integrity_mode,      | |
+|  |  extensions                                  | |
 |  +---------------------------------------------+ |
 +-------------------------------------------------+
 ```
@@ -186,13 +182,16 @@ Extend your Agent Card with an `alignment` block and declare AAP support via the
   ],
 
   "alignment": {
-    "aap_version": "1.0.0",
+    "card_version": "unified/2026-04-26",
+    "autonomy_mode": "observe",
+    "integrity_mode": "observe",
     "card_id": "ac-shopping-assistant-001",
     "agent_id": "shopping-assistant",
     "issued_at": "2026-01-31T12:00:00Z",
 
     "principal": {
       "type": "human",
+      "identifier": "shopping-assistant-owner",
       "relationship": "delegated_authority"
     },
 
@@ -201,7 +200,7 @@ Extend your Agent Card with an `alignment` block and declare AAP support via the
       "conflicts_with": ["deceptive_marketing", "hidden_fees", "dark_patterns"]
     },
 
-    "autonomy_envelope": {
+    "autonomy": {
       "bounded_actions": ["product-search", "compare-products"],
       "escalation_triggers": [
         {
@@ -218,7 +217,7 @@ Extend your Agent Card with an `alignment` block and declare AAP support via the
       "forbidden_actions": ["share_payment_info", "auto_subscribe"]
     },
 
-    "audit_commitment": {
+    "audit": {
       "trace_format": "ap-trace-v1",
       "retention_days": 90,
       "queryable": true
@@ -304,23 +303,21 @@ def delegate_task(my_card: dict, their_agent_card: dict, task: dict):
     result = check_coherence(my_alignment, their_alignment)
 
     if result.compatible:
-        # Values are compatible, proceed
+        # Values are compatible (zero conflicts, score >= 0.70), proceed.
+        # Note: result.proceed always mirrors result.compatible -- it is
+        # not an independent "minor vs. major conflict" signal.
         return execute_delegation(their_agent_card, task)
 
-    # Handle conflicts
+    # Not compatible: either a direct conflict, or the score fell short
+    # of MIN_COHERENCE_FOR_PROCEED. Surface what was found and escalate.
     for conflict in result.value_alignment.conflicts:
         print(f"Value conflict: {conflict.description}")
 
-    if result.proceed:
-        # Minor conflicts, can proceed with logging
-        return execute_delegation(their_agent_card, task, log_conflicts=True)
-    else:
-        # Significant conflicts, escalate to principal
-        return escalate_to_principal(
-            task=task,
-            conflicts=result.value_alignment.conflicts,
-            recommendation=result.proposed_resolution
-        )
+    return escalate_to_principal(
+        task=task,
+        conflicts=result.value_alignment.conflicts,
+        recommendation=result.proposed_resolution,
+    )
 ```
 
 **TypeScript:**
@@ -345,6 +342,8 @@ function delegateTask(myCard: A2AAgentCard, theirCard: A2AAgentCard, task: unkno
 
   const result = checkCoherence(myAlignment, theirAlignment);
 
+  // result.proceed always mirrors result.compatible -- checking one is
+  // checking the other, not an independent "minor vs. major" signal.
   if (result.compatible) {
     return executeDelegation(theirCard, task);
   }
@@ -353,15 +352,11 @@ function delegateTask(myCard: A2AAgentCard, theirCard: A2AAgentCard, task: unkno
     console.log(`Value conflict: ${conflict.description}`);
   }
 
-  if (result.proceed) {
-    return executeDelegation(theirCard, task, { logConflicts: true });
-  } else {
-    return escalateToPrincipal({
-      task,
-      conflicts: result.value_alignment.conflicts,
-      recommendation: result.proposed_resolution,
-    });
-  }
+  return escalateToPrincipal({
+    task,
+    conflicts: result.value_alignment.conflicts,
+    recommendation: result.proposed_resolution,
+  });
 }
 ```
 
@@ -390,7 +385,7 @@ def search_products_with_trace(card_id: str, query: str, preferences: dict):
         timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
 
         action=Action(
-            type="search",
+            type="recommend",  # ActionType has no "search" value
             name="product-search",  # Matches A2A skill ID
             category="bounded",
         ),
@@ -443,7 +438,7 @@ function searchProductsWithTrace(cardId: string, query: string, preferences: Rec
     timestamp: new Date().toISOString(),
 
     action: {
-      type: 'search',
+      type: 'recommend', // ActionType has no "search" value
       name: 'product-search', // Matches A2A skill ID
       category: 'bounded',
     },
@@ -507,7 +502,7 @@ def coherence_check():
         "proceed": result.proceed,
         "matched_values": result.value_alignment.matched,
         "conflicts": [
-            {"description": c.description, "severity": c.severity}
+            {"description": c.description, "conflict_type": c.conflict_type}
             for c in result.value_alignment.conflicts
         ],
     })
@@ -557,44 +552,48 @@ from aap import check_coherence
 USER_AGENT_CARD = {
     "name": "user-shopping-agent",
     "alignment": {
-        "aap_version": "1.0.0",
+        "card_version": "unified/2026-04-26",
+        "autonomy_mode": "observe",
+        "integrity_mode": "observe",
         "card_id": "ac-user-agent-001",
         "agent_id": "user-shopping-agent",
         "issued_at": "2026-01-31T12:00:00Z",
-        "principal": {"type": "human", "relationship": "delegated_authority"},
+        "principal": {"type": "human", "identifier": "user-shopping-agent-owner", "relationship": "delegated_authority"},
         "values": {
             "declared": ["principal_benefit", "transparency", "minimal_data"],
             "conflicts_with": ["deceptive_marketing", "hidden_fees"],
         },
-        "autonomy_envelope": {
+        "autonomy": {
             "bounded_actions": ["search", "compare", "recommend"],
             "escalation_triggers": [
                 {"condition": "action == \"purchase\"", "action": "escalate", "reason": "Requires approval"}
             ],
             "forbidden_actions": ["share_payment_info"],
         },
-        "audit_commitment": {"trace_format": "ap-trace-v1", "retention_days": 30, "queryable": True},
+        "audit": {"trace_format": "ap-trace-v1", "retention_days": 30, "queryable": True},
     }
 }
 
 VENDOR_AGENT_CARD = {
     "name": "vendor-deals-agent",
     "alignment": {
-        "aap_version": "1.0.0",
+        "card_version": "unified/2026-04-26",
+        "autonomy_mode": "observe",
+        "integrity_mode": "observe",
         "card_id": "ac-vendor-agent-001",
         "agent_id": "vendor-deals-agent",
         "issued_at": "2026-01-31T12:00:00Z",
-        "principal": {"type": "organization", "relationship": "delegated_authority"},
+        "principal": {"type": "organization", "identifier": "vendor-deals-agent-org", "relationship": "delegated_authority"},
         "values": {
             "declared": ["customer_satisfaction", "transparency", "upselling"],
             "conflicts_with": [],
         },
-        "autonomy_envelope": {
+        "autonomy": {
             "bounded_actions": ["search", "recommend", "apply_discount"],
             "escalation_triggers": [],
             "forbidden_actions": [],
         },
-        "audit_commitment": {"trace_format": "ap-trace-v1", "retention_days": 90, "queryable": True},
+        "audit": {"trace_format": "ap-trace-v1", "retention_days": 90, "queryable": True},
     }
 }
 
@@ -616,7 +615,7 @@ def coordinate_with_vendor():
             print(f"  - {conflict.description}")
 
     if result.proceed:
-        print("Proceeding with coordination (minor conflicts logged)")
+        print("Proceeding with coordination (compatible: zero conflicts, score >= 0.70)")
     else:
         print("Escalating to principal for approval")
 
@@ -644,24 +643,24 @@ Both SDKs include presets for EU AI Act Article 50 compliance (enforcement Augus
 **Python:**
 
 ```python
-from aap import EU_COMPLIANCE_AUDIT_COMMITMENT, EU_COMPLIANCE_VALUES
+from aap import EU_COMPLIANCE_AUDIT, EU_COMPLIANCE_VALUES
 
 alignment = AlignmentCard(
     # ...
     values=EU_COMPLIANCE_VALUES,
-    audit_commitment=EU_COMPLIANCE_AUDIT_COMMITMENT,  # 365-day retention, queryable
+    audit=EU_COMPLIANCE_AUDIT,  # 90-day retention, queryable (per compliance.py)
 )
 ```
 
 **TypeScript:**
 
 ```typescript
-import { EU_COMPLIANCE_AUDIT_COMMITMENT, EU_COMPLIANCE_VALUES } from '@mnemom/agent-alignment-protocol';
+import { EU_COMPLIANCE_AUDIT, EU_COMPLIANCE_VALUES } from '@mnemom/agent-alignment-protocol';
 
 const alignment = {
   // ...
   values: EU_COMPLIANCE_VALUES,
-  audit_commitment: EU_COMPLIANCE_AUDIT_COMMITMENT, // 365-day retention, queryable
+  audit: EU_COMPLIANCE_AUDIT, // 90-day retention, queryable
 };
 ```
 

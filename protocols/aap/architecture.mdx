@@ -83,31 +83,33 @@ The schemas module provides Pydantic models for the three core AAP components:
 #### Alignment Card (`alignment_card.py`)
 
 ```
-AlignmentCard
-+-- aap_version: str ("1.0.0")
+AlignmentCard  (unified / ADR-039 shape, SDK 2.0.0)
++-- card_version: str ("unified/2026-04-26")
 +-- card_id: str (unique identifier)
 +-- agent_id: str (agent DID or identifier)
 +-- issued_at: datetime
 +-- expires_at: datetime (optional)
++-- autonomy_mode: AlignmentMode (off | observe | nudge | enforce)
++-- integrity_mode: AlignmentMode (off | observe | nudge | enforce)
 +-- principal: Principal
-|   +-- type: PrincipalType (human | organization | agent)
-|   +-- identifier: str (optional, e.g., DID)
-|   +-- relationship: RelationshipType (delegated_authority | supervised | autonomous)
+|   +-- type: PrincipalType (human | organization | agent | unspecified)
+|   +-- identifier: str (required unless type == "unspecified")
+|   +-- relationship: RelationshipType (delegated_authority | advisory | autonomous)
 |   +-- escalation_contact: str (optional, mailto: or https:)
 +-- values: Values
 |   +-- declared: list[str] (e.g., ["principal_benefit", "transparency"])
 |   +-- conflicts_with: list[str] (optional)
-|   +-- hierarchy: str (optional, "lexicographic" | "weighted")
+|   +-- hierarchy: str (optional, "lexicographic" | "weighted" | "contextual")
 |   +-- definitions: dict[str, ValueDefinition] (optional, custom values)
-+-- autonomy_envelope: AutonomyEnvelope
++-- autonomy: Autonomy   (renamed from legacy `autonomy_envelope`)
 |   +-- bounded_actions: list[str] (allowed without escalation)
 |   +-- escalation_triggers: list[EscalationTrigger]
 |   +-- forbidden_actions: list[str] (never allowed)
 |   +-- max_autonomous_value: MonetaryValue (optional)
-+-- audit_commitment: AuditCommitment
++-- audit: Audit   (renamed from legacy `audit_commitment`; `storage` sub-object removed)
 |   +-- retention_days: int
 |   +-- queryable: bool
-|   +-- tamper_evidence: str (optional, "merkle" | "blockchain")
+|   +-- tamper_evidence: str (optional, "append_only" | "signed" | "merkle")
 +-- extensions: dict (optional, protocol-specific extensions)
 ```
 
@@ -120,38 +122,41 @@ APTrace
 +-- card_id: str (references Alignment Card)
 +-- timestamp: datetime
 +-- action: Action
-|   +-- type: ActionType (recommend | execute | delegate | escalate)
+|   +-- type: ActionType (recommend | execute | escalate | deny)
 |   +-- name: str (action identifier)
 |   +-- category: ActionCategory (bounded | escalation_trigger | forbidden)
 |   +-- target: ActionTarget (optional)
 |   +-- parameters: dict (optional)
 +-- decision: Decision
-|   +-- alternatives_considered: list[Alternative]
+|   +-- alternatives_considered: list[Alternative]  (minimum 1)
 |   |   +-- option_id: str
 |   |   +-- description: str
-|   |   +-- score: float (0.0-1.0)
+|   |   +-- score: float (0.0-1.0, optional)
 |   +-- selected: str (option_id of chosen alternative)
 |   +-- selection_reasoning: str (human-readable explanation)
 |   +-- values_applied: list[str] (must be subset of declared values)
 |   +-- confidence: float (optional, 0.0-1.0)
-+-- escalation: Escalation
+|   +-- value_scores: dict[str, ValueScore] (optional, SDK >= 1.3.0)
++-- escalation: Escalation (optional)
 |   +-- evaluated: bool (was escalation logic run?)
 |   +-- required: bool (did triggers fire?)
 |   +-- reason: str
 |   +-- escalation_status: str (optional: "pending" | "approved" | "denied" | "timeout")
 |   +-- principal_response: dict (optional)
 +-- context: TraceContext (optional)
-    +-- session_id: str
-    +-- parent_trace_id: str (for delegation chains)
-    +-- custom: dict
+    +-- session_id: str (optional)
+    +-- conversation_turn: int (optional)
+    +-- prior_trace_ids: list[str] (optional)
+    +-- environment: dict (optional)
+    +-- metadata: dict (optional)
 ```
 
 #### Value Coherence (`value_coherence.py`)
 
 ```
 ValueCoherenceCheck
-+-- initiator_card: AlignmentCard (partial)
-+-- responder_card: AlignmentCard (partial)
++-- initiator_card_id: str
++-- responder_card_id: str
 +-- task_values: list[str] (optional, values required for task)
 +-- result: CoherenceResult
     +-- compatible: bool
@@ -161,6 +166,7 @@ ValueCoherenceCheck
     |   +-- unmatched: list[str]
     |   +-- conflicts: list[ValueConflict]
     +-- proceed: bool
+    +-- conditions: list[str]
     +-- proposed_resolution: dict (optional)
 ```
 
@@ -170,21 +176,23 @@ The verification engine implements the three core operations:
 
 #### `verify_trace(trace, card) -> VerificationResult`
 
-Performs six verification checks (SPEC Section 7.3):
+Performs seven verification checks (SPEC Section 7.3), tracked in `verification_metadata.checks_performed`:
 
 ```
-1. card_reference    -> Does trace.card_id match card.card_id?
-2. card_expiration   -> Is card still valid (not expired)?
-3. autonomy          -> Is action.name in bounded_actions?
-4. forbidden         -> Is action.name NOT in forbidden_actions?
-5. escalation        -> If trigger matched, was escalation.required=true?
-6. values            -> Are values_applied subset of declared values?
+1. card_reference        -> Does trace.card_id match card.card_id?
+2. card_expiration       -> Is card still valid (not expired)?
+3. autonomy              -> Is action.name in bounded_actions?
+4. forbidden             -> Is action.name NOT in forbidden_actions?
+5. escalation            -> If trigger matched, was escalation.required=true?
+6. values                -> Are values_applied subset of declared values?
+7. behavioral_similarity -> Is the trace semantically similar to the card (SSM analysis)?
 ```
 
 Returns `VerificationResult`:
 - `verified: bool` -- True if no violations
+- `recommended_action: "proceed" | "review" | "deny"` -- Derived from violations/warnings
 - `violations: list[Violation]` -- Type, description, severity
-- `warnings: list[Warning]` -- Near-boundary conditions
+- `warnings: list[Warning]` -- Near-boundary and low-similarity conditions
 - `verification_metadata` -- Algorithm version, checks performed, duration
 
 #### `check_coherence(my_card, their_card) -> CoherenceResult`
@@ -193,27 +201,27 @@ Computes value compatibility score (SPEC Section 6.4):
 
 ```
 score = (matched / required) * (1 - conflict_penalty)
-where conflict_penalty = 0.5 * (conflicts / required)
+where conflict_penalty = min(1.0, 0.5 * (conflicts / required))
 ```
 
 Returns `CoherenceResult`:
-- `compatible: bool` -- No conflicts AND score >= 0.5
+- `compatible: bool` -- Zero conflicts AND score >= 0.70 (`MIN_COHERENCE_FOR_PROCEED`)
 - `score: float` -- Coherence score [0, 1]
 - `value_alignment` -- Matched, unmatched, conflicts
-- `proceed: bool` -- Safe to collaborate
+- `proceed: bool` -- Mirrors `compatible`
 - `proposed_resolution` -- If incompatible, suggests escalation
 
 #### `detect_drift(card, traces, thresholds) -> list[DriftAlert]`
 
-Analyzes trace sequence for behavioral drift (SPEC Section 8):
+Analyzes trace sequence for behavioral drift (SPEC Section 8, v1.2.0 methodology):
 
 ```
-For each trace:
-    1. Extract features (TF-IDF on values, actions)
-    2. Compare to card features via cosine similarity
-    3. Track low-similarity streak
-    4. If streak >= sustained_threshold:
-       -> Generate DriftAlert with direction inference
+1. Extract structural features per trace (action, values applied, escalation, confidence)
+2. Compute a baseline centroid from the first N traces
+3. For each subsequent trace, compare to the baseline centroid via cosine similarity
+4. Track low-similarity streak
+5. If streak >= sustained_threshold:
+   -> Generate DriftAlert with direction inference
 ```
 
 Drift directions:
@@ -224,15 +232,15 @@ Drift directions:
 
 ### Feature extraction (`features.py`)
 
-TF-IDF-based feature extraction for drift detection:
+Structural feature extraction for drift detection (not TF-IDF -- see [calibration](/protocols/aap/calibration) for why content tokens are excluded from drift scoring). TF-IDF weighting is used separately, for text-to-text SSM similarity:
 
 ```python
 class FeatureExtractor:
     def extract_card_features(card: dict) -> dict[str, float]:
-        # Returns feature vector from declared values, bounded/forbidden actions
+        # Returns structural feature vector from declared values, bounded/forbidden actions
 
     def extract_trace_features(trace: dict) -> dict[str, float]:
-        # Returns feature vector from applied values, action, escalation
+        # Returns structural feature vector from applied values, action, escalation, confidence
 
 def cosine_similarity(features1: dict, features2: dict) -> float:
     # Computes similarity between feature vectors
@@ -243,12 +251,13 @@ def cosine_similarity(features1: dict, features2: dict) -> float:
 Calibrated thresholds derived from corpus analysis (see [calibration](/protocols/aap/calibration)):
 
 ```python
-ALGORITHM_VERSION = "0.1.0"
+ALGORITHM_VERSION = "1.2.0"
 DEFAULT_SIMILARITY_THRESHOLD = 0.30      # Alert below this
-DEFAULT_SUSTAINED_TURNS_THRESHOLD = 3    # Alert after N consecutive low traces
-NEAR_BOUNDARY_THRESHOLD = 0.35           # Warn when confidence below
-CONFLICT_PENALTY_MULTIPLIER = 0.5        # Coherence penalty per conflict
-MIN_COHERENCE_FOR_PROCEED = 0.5          # Minimum score to proceed
+DEFAULT_SUSTAINED_TURNS_THRESHOLD = 3    # Alert after N consecutive low traces (Python name;
+                                          # TypeScript SDK: DEFAULT_SUSTAINED_CHECKS_THRESHOLD)
+NEAR_BOUNDARY_THRESHOLD = 0.35           # Warn when confidence/score below
+CONFLICT_PENALTY_MULTIPLIER = 0.50       # Coherence penalty per conflict
+MIN_COHERENCE_FOR_PROCEED = 0.70         # Minimum score to proceed
 ```
 
 ## Data flow
@@ -492,7 +501,7 @@ pip install agent-alignment-protocol
 - **Dependencies**: None (zero runtime deps)
 
 ```bash
-npm install agent-alignment-protocol
+npm install @mnemom/agent-alignment-protocol
 ```
 
 ### JSON schemas
@@ -508,9 +517,9 @@ Schemas can be used for:
 
 ### Browser (Playground)
 
-- **Location**: `docs/playground/`
+- **Live**: [mnemom.github.io/aap/playground](https://mnemom.github.io/aap/playground/)
 - **Runtime**: Pyodide (Python in WASM)
-- **API**: `window.AAP.verifyTrace()`, etc.
+- **API**: `window.AAP.verifyTrace()`, `window.AAP.checkCoherence()`, `window.AAP.detectDrift()`
 - **No server**: All verification runs client-side
 
 ## Security considerations
