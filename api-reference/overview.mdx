@@ -21,21 +21,21 @@ The API is versioned at two levels:
 ```bash
 curl https://api.mnemom.ai/v1/agents \
   -H "X-Mnemom-Api-Key: <key>" \
-  -H "X-Mnemom-Version: 2026-04-13"
+  -H "X-Mnemom-Version: 2026-08-17"
 ```
 
 If you omit `X-Mnemom-Version`, the **latest** behavior is used — fine for new integrations, but production systems (including AI agents) should pin to a specific date. Every response echoes the version used:
 
 ```
-X-Mnemom-Version: 2026-04-13
+X-Mnemom-Version: 2026-08-17
 ```
 
-Current version: **`2026-04-13`**. Support window: 18 months per version.
+Current version: **`2026-08-17`**. Support window: 18 months per version.
 See the [Versioning Policy](/policy/versioning) for the canonical commitment (what we'll and won't change, deprecation cadence, the support-window contract), or the [API Versioning guide](/guides/api-versioning) for integration how-to.
 
 ## Authentication
 
-The Mnemom API supports three authentication patterns. Pick the one that matches the caller, not the endpoint.
+The Mnemom API resolves the calling principal from one of three sources, checked in this order: the session cookie, then an `Authorization: Bearer` token, then an API key. Pick the one that matches the caller, not the endpoint.
 
 For end-user sign-in (passkey, password + MFA, SSO), session lifecycle, and API-key rotation, see the [Authentication guide](/guides/authentication). Passkeys are the default dashboard sign-in method — see [Passkeys](/guides/passkeys) for browser support and enrollment.
 
@@ -58,9 +58,9 @@ curl https://api.mnemom.ai/v1/agents \
 
 The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. Passkey (WebAuthn / FIDO2) sign-in endpoints live at `/v1/auth/passkey/*` and return the same session cookie; MFA step-up and SSO are carried through `/v1/auth/mfa/*` and `/v1/auth/sso/*`. Sensitive operations require **AAL2 step-up** — a fresh user-verification gesture within the session's AAL2 window; see the [Authentication guide](/guides/authentication#aal2-step-up) for the list of protected actions. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
 
-### Bearer token (CLI)
+### Bearer token (CLI and OAuth/MCP clients)
 
-The Mnemom CLI and anything mimicking it use the classic `Authorization: Bearer <token>` header. The CLI obtains its token via a one-time browser → localhost handoff at login time (exchanged through `POST /v1/auth/cli-exchange`, which requires an already-authenticated session cookie); the raw token never leaves the CLI's local auth file after that.
+The Mnemom CLI and anything mimicking it use the classic `Authorization: Bearer <token>` header, carrying a signed JWT. The CLI obtains its token via a one-time browser → localhost handoff at login time (exchanged through `POST /v1/auth/cli-exchange`, which requires an already-authenticated session cookie); the raw token never leaves the CLI's local auth file after that.
 
 ```bash
 curl https://api.mnemom.ai/v1/agents \
@@ -68,6 +68,8 @@ curl https://api.mnemom.ai/v1/agents \
 ```
 
 **How to get a Bearer token outside the CLI**: run `mnemom login` and read `~/.mnemom/auth.json`. Generating your own Bearer tokens from scratch is not supported — use an API key (below) for programmatic access.
+
+The same `Authorization: Bearer` header also carries opaque OAuth access tokens (prefixed `mcp_at_…`) minted for MCP clients through the OAuth 2.1 authorization-code + PKCE flow. The API tells the two apart by the token's shape, so no separate header is needed.
 
 ### API key
 
@@ -80,9 +82,9 @@ curl https://api.mnemom.ai/v1/agents \
 
 **How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time. Creating or rotating a key requires AAL2 step-up; see [Authentication — API keys](/guides/authentication#api-keys) for the rotation procedure.
 
-API keys are accepted on **all agent management endpoints** — agent CRUD, card and policy management, integrity operations, webhooks, enforcement, reviews, and deployments. This lets enterprise customers manage agent fleets programmatically without a user session.
+API keys are accepted on the great majority of endpoints — agent management, card and policy operations, integrity, webhooks, enforcement, reviews, teams, and deployments. This lets enterprise customers manage agent fleets programmatically without a user session.
 
-The only endpoints that require an end-user identity (cookie or Bearer) are account self-service operations: `GET /v1/auth/me`, `DELETE /v1/auth/delete-account`, `POST /v1/agents/:id/link`, and billing management.
+Billing management (`/v1/billing/*`) and account self-service operations (`GET /v1/auth/me`, `DELETE /v1/auth/delete-account`) are the notable exceptions: they require an end-user identity (cookie or Bearer) and do not accept an API key.
 
 <Warning>
 API keys are hashed on our servers and cannot be retrieved after creation. Store your key securely when it is first displayed.
@@ -116,26 +118,22 @@ Branch on `error.code`, not `error.message` — codes are stable contract; messa
 
 ## Rate limits
 
-API requests are rate-limited across three tiers, evaluated in order:
+`/v1/*` requests are rate-limited **per client IP**, 100 requests/minute by default, in a 1-minute window. `/v1/internal/*` (service-to-service traffic) is exempt.
 
-| Tier | Scope | Default Limit | Configurable |
-|------|-------|---------------|-------------|
-| **Per-IP** | Client IP address | 100 requests/minute | No |
-| **Per-agent** | Agent hash (API key identity) | 100 requests/minute | Yes (per-org) |
-| **Per-org** | Billing account | 1,000 requests/minute | Yes (per-org) |
+The `/v1/auth/*` surface (sign-in, passkey, MFA, SSO) is metered on an **independent** per-IP counter of the same default ceiling, so a burst of unrelated data-endpoint traffic from one IP can never starve that same IP's ability to authenticate.
 
-Enterprise organizations can request custom per-org and per-agent limits via their account settings or by contacting support.
+A small number of LLM-backed endpoints additionally enforce a per-user and per-org **hourly** budget on top of the per-minute ceiling above; their own documentation calls this out where it applies.
+
+Contact support to raise your rate-limit ceiling.
 
 ### Rate limit response
 
-When any tier is exceeded, the API returns HTTP `429` with these headers:
+Every `/v1/*` response carries `X-RateLimit-Limit` (the current per-minute ceiling) and `X-RateLimit-Reset` (Unix timestamp when the window resets). When the ceiling is exceeded, the API returns HTTP `429` with those two headers plus:
 
 | Header | Description |
 |--------|-------------|
 | `Retry-After` | Seconds to wait before retrying |
-| `X-RateLimit-Limit` | Maximum requests allowed in the window |
-| `X-RateLimit-Remaining` | Requests remaining (always `0` on a 429) |
-| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+| `X-RateLimit-Remaining` | Always `0` on a 429 (not set on a successful response) |
 
 ```json
 {
@@ -146,7 +144,28 @@ When any tier is exceeded, the API returns HTTP `429` with these headers:
 }
 ```
 
-The `tier` that was hit (`ip`, `agent`, or `org`) and the window details are in the response headers listed above. Rate limit windows are 1 minute.
+## Idempotency
+
+Mutation endpoints accept an `Idempotency-Key` header. Send the same key on a retried request (network timeout, uncertain response, safe automatic retry after a `429`/`5xx`) and, if the original request already completed, you get back the exact same cached response instead of a second execution — the replayed response carries `Idempotent-Replay: true`.
+
+```bash
+curl -X POST https://api.mnemom.ai/v1/teams \
+  -H "X-Mnemom-Api-Key: <key>" \
+  -H "Idempotency-Key: 3d4f7a2c-…" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Pipeline Alpha"}'
+```
+
+Reusing a key with a **different** request body is a conflict, not a replay. A concurrent in-flight request with the same key returns a retryable status rather than double-executing.
+
+## Pagination
+
+List endpoints paginate with an opaque `cursor` query parameter and a `limit` query parameter (each endpoint documents its own default and maximum). The response includes a `next_cursor` field — pass it back as `cursor` to fetch the next page; omit `cursor` to start from the first page. A `null`/absent `next_cursor` means there are no more pages.
+
+```bash
+curl "https://api.mnemom.ai/v1/teams/{team_id}/roster-history?limit=50" \
+  -H "X-Mnemom-Api-Key: <key>"
+```
 
 ## Endpoint documentation
 
@@ -164,8 +183,12 @@ All endpoint documentation below is auto-generated from our OpenAPI specificatio
 | Reclassification | [Reclassification API](/api-reference/reclassification-overview) | Violation reclassification, score recomputation, compliance export |
 | Intelligence | [Intelligence API](/api-reference/intelligence-overview) | Fault lines, risk forecasting, policy recommendations, transactions |
 | On-Chain | [On-Chain API](/api-reference/on-chain-overview) | Merkle root anchoring, score publishing, on-chain verification |
-| Containment | Containment endpoints | Pause, kill, resume agents — kill-switch for rogue agents |
+| Safe House | [Safe House API](/api-reference/safe-house-overview) | Threat detection, quarantine management, canary credentials |
+| Unified Cards | [Unified Cards](/api-reference/unified-cards-overview) | Alignment and protection card CRUD across platform/org/team/agent scope |
+| Governance | [Governance guarantees](/api-reference/governance) | Audit, idempotency, schema identity, and webhook contracts shared across card mutations |
+| Agent Containment | Containment endpoints | Pause, kill, resume agents — kill-switch for rogue agents |
 | Teams | [Teams API](/api-reference/team-overview) | Team management, team reputation, team cards |
+| Webhooks | [Webhook event catalog](/api-reference/webhook-events) | Every event type your org's webhook endpoints can subscribe to |
 
 <Note>
   The Policy, Reclassification, Intelligence, and On-Chain APIs form the **[CLPI governance layer](/concepts/clpi)** — governance-as-code with policy enforcement, trust recovery, risk intelligence, and on-chain reputation anchoring.
