@@ -11,10 +11,6 @@ When an agent routes its first request through the Mnemom gateway, the gateway a
 gateway first-traffic  →  Mnemom Sandbox (unclaimed)  →  claim  →  your org
 ```
 
-<Note>
-This is the **EN-only** doc by design — every page under `docs/api-reference/*` and this claim guide stay English to match the convention every major API platform (Stripe, GitHub, AWS, GCP) ships. Localized translations of the conceptual + tutorial docs are in flight as part of T7; the API-shaped surfaces are not in scope.
-</Note>
-
 ## Self-register vs. claim — one question decides
 
 > **Are you the agent, or are you adopting a pre-existing one?**
@@ -166,7 +162,7 @@ Think of claim as a **declarative assertion**: *"this agent is mine, and it live
 - **Re-claim with the same (or no) `org_id`** → no-op success; `claimed_at` is preserved.
 - **Re-claim with a new `org_id`** → the agent is moved to that org. Claim is also how you *move* an agent between your orgs.
 
-There is no `409` on claim. An agent already owned by a *different* principal returns `403 agent_cross_tenant` — `hash_proof` lets you claim an unowned agent; it never lets you take over one that already has an owner.
+An agent already owned by a *different* principal returns `409 agent_cross_tenant` — a resource-state conflict, not a permission failure, since the proof you presented is valid. `hash_proof` lets you claim an unowned agent; it never lets you take over one that already has an owner.
 
 ### Two ways to move an agent between orgs
 
@@ -206,11 +202,12 @@ Revoking ownership ([`DELETE /v1/agents/{id}`](/api-reference/endpoint/delete-ag
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `401` | No credentials presented, or JWT expired | Add `Authorization: Bearer <jwt>`, `X-Mnemom-Api-Key: <mnm_key>`, or a valid session cookie |
-| `400 hash_proof_required` | Body missing `hash_proof` | Compute and include `hash_proof` |
-| `400 invalid_key_hash_format` | `hash_proof` is not 64 lowercase hex characters | Recompute using SHA256 and verify output length |
+| `400` — "hash_proof is required" | Body missing `hash_proof` | Compute and include `hash_proof` |
+| `403 invalid_hash_proof` | `hash_proof` doesn't match the agent's stored proof (wrong key, wrong name, or malformed hex) | Recompute `SHA256(providerApiKey + '|' + agentName)` and verify the agent name matches exactly |
 | `403 agent_org_not_member` | `org_id` is one you don't belong to | Use an org from `details.claimable_orgs`, or omit `org_id` to land in personal org |
-| `403 agent_cross_tenant` | Agent already owned by a different principal | Cannot adopt another owner's agent |
+| `409 agent_cross_tenant` | Agent already owned by a different principal | Cannot adopt another owner's agent |
 | `404` | `agent_id` doesn't exist, or doesn't exist yet | Verify the `mnm-*` ID from the `x-mnemom-agent` response header |
+| `503` | Your personal org is still provisioning (only when `org_id` is omitted) | Safe to retry shortly |
 | Network 5xx during claim | Transient gateway issue | Safe to retry — claim is idempotent for the same owner |
 
 ---

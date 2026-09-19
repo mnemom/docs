@@ -81,14 +81,14 @@ Every field you omit falls through to the platform default. Every field you incl
 - For large orgs (1000+ agents), the background worker paces the batch. Until recompose finishes, reads serve the previous canonical with the `needs_recompose: true` flag set.
 - The gateway respects the flag: when serving a `needs_recompose` canonical, it bypasses its 5-minute KV cache so changes are picked up as soon as recompose finishes.
 
-To see recompose progress:
+To see whether a given agent's recompose has landed, re-fetch its canonical card and check `_composition.composed_at`:
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.mnemom.ai/v1/orgs/{org_id}/agents?needs_recompose=true"
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/alignment/agent/{agent_id}?include_composition=true"
 ```
 
-Empty response = recompose is done.
+A `composed_at` at or after your template publish time means that agent has recomposed. The `X-Card-Version` response header also increments on every recompose, so a simple poll loop can watch for it to change.
 
 ## Managing an org protection template
 
@@ -142,19 +142,20 @@ curl -X POST https://api.mnemom.ai/v1/agents/{agent_id}/exemptions \
     "exempt_section": "autonomy.forbidden_actions",
     "exempt_patterns": ["modify_audit_logs"],
     "reason": "Audit agent requires modify_audit_logs for its compaction job; platform exemption granted by audit team 2026-04-17",
-    "granted_by": "audit-team@acme.example",
     "expires_at": "2026-07-17T00:00:00Z"
   }'
 ```
+
+`exempt_section` must be one of `autonomy.forbidden_actions`, `enforcement.forbidden_tools`, or `autonomy.max_autonomous_value`. `granted_by` is not a request field — the API stamps it from your authenticated identity, so you can't grant an exemption on someone else's behalf.
 
 ### Rules
 
 | Rule | Why |
 |------|-----|
-| Exemption expires (default 90 days). Set `expires_at: null` for permanent — rare and audit-flagged. | Exemptions are narrow, contextual, and time-bounded by design. |
-| `granted_by` and `reason` are required. Length minimums enforced. | Audit trail is the whole point. |
-| `BOUNDARY`-typed conscience entries cannot be exempted. | Inviolable commitments are inviolable. |
-| Exemptions on forbidden-action `modify_audit_logs` + `exfiltrate_data` are owner-only. | Platform-critical deny can only be waived by platform-level authorization. |
+| Exemption expires (default 90 days from grant). Set `expires_at: null` for permanent — omit `expires_at` for the default. | Exemptions are narrow, contextual, and time-bounded by design. |
+| `reason` is required, 20–500 characters. | Audit trail is the whole point. |
+| Only the three sections above can be exempted — `conscience.values` (including `BOUNDARY`-typed entries) is not an exemptable section at all. | Inviolable commitments are inviolable. |
+| Granting or revoking an exemption requires org `owner` or `admin`. | Waiving an org floor is an org-admin decision. |
 | Every grant + revocation writes a `governance_audit_log` row synchronously. | Non-repudiable. |
 
 ### Listing active exemptions for an agent

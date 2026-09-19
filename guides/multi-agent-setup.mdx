@@ -29,51 +29,63 @@ Here are two agents with different value sets and operational scopes:
 
 <CodeGroup>
 ```python Python
+from datetime import datetime, timezone
 from aap import AlignmentCard
 
 shopping_agent = AlignmentCard(
+    card_id="ac-shopping-001",
     agent_id="did:web:shopping.agent.example.com",
+    issued_at=datetime.now(timezone.utc),
     principal={"type": "human", "relationship": "delegated_authority"},
     values={
-        "declared": ["principal_benefit", "transparency", "honesty"],
+        "declared": ["principal_service", "transparency", "honesty"],
         "definitions": {
-            "principal_benefit": "Recommendations optimize for the user's stated needs, not commission.",
-            "transparency": "Disclose reasoning behind every product recommendation.",
+            "principal_service": {"description": "Recommendations optimize for the user's stated needs, not commission."},
+            "transparency": {"description": "Disclose reasoning behind every product recommendation."},
         },
         "conflicts_with": ["deceptive_marketing"],
     },
-    autonomy_envelope={
+    autonomy={
         "bounded_actions": ["search_products", "compare_prices", "recommend"],
         "forbidden_actions": ["purchase_without_confirmation", "store_payment_info"],
-        "escalation_triggers": ["price_above_budget", "out_of_stock_substitution"],
+        "escalation_triggers": [
+            {"condition": "price_above_budget", "action": "escalate", "reason": "Over-budget purchase needs approval"},
+            {"condition": "out_of_stock_substitution", "action": "escalate", "reason": "Substitutions need user sign-off"},
+        ],
     },
-    audit_commitment={
+    audit={
         "retention_days": 90,
         "queryable": True,
+        "query_endpoint": "https://shopping.agent.example.com/traces",
         "tamper_evidence": "append_only",
         "trace_format": "ap-trace-v1",
     },
 )
 
 data_analyst = AlignmentCard(
+    card_id="ac-analyst-001",
     agent_id="did:web:analyst.agent.example.com",
+    issued_at=datetime.now(timezone.utc),
     principal={"type": "human", "relationship": "advisory"},
     values={
-        "declared": ["accuracy", "minimal_data", "transparency"],
+        "declared": ["accuracy", "transparency"],
         "definitions": {
-            "accuracy": "Report findings exactly as computed, flag uncertainty explicitly.",
-            "minimal_data": "Request only the data fields necessary for the analysis.",
+            "accuracy": {"description": "Report findings exactly as computed, flag uncertainty explicitly."},
         },
         "conflicts_with": ["data_hoarding", "selective_reporting"],
     },
-    autonomy_envelope={
+    autonomy={
         "bounded_actions": ["query_database", "compute_statistics", "generate_report"],
         "forbidden_actions": ["export_raw_pii", "modify_source_data"],
-        "escalation_triggers": ["anomaly_detected", "data_quality_below_threshold"],
+        "escalation_triggers": [
+            {"condition": "anomaly_detected", "action": "escalate", "reason": "Anomalies need human review"},
+            {"condition": "data_quality_below_threshold", "action": "escalate", "reason": "Low-confidence results need review"},
+        ],
     },
-    audit_commitment={
+    audit={
         "retention_days": 90,
         "queryable": True,
+        "query_endpoint": "https://analyst.agent.example.com/traces",
         "tamper_evidence": "append_only",
         "trace_format": "ap-trace-v1",
     },
@@ -83,55 +95,69 @@ data_analyst = AlignmentCard(
 ```typescript TypeScript
 import { AlignmentCard } from '@mnemom/agent-alignment-protocol';
 
+// The interface mirrors the wire shape directly (snake_case field names).
 const shoppingAgent: AlignmentCard = {
-  agentId: 'did:web:shopping.agent.example.com',
+  card_id: 'ac-shopping-001',
+  agent_id: 'did:web:shopping.agent.example.com',
+  issued_at: new Date().toISOString(),
   principal: { type: 'human', relationship: 'delegated_authority' },
   values: {
-    declared: ['principal_benefit', 'transparency', 'honesty'],
+    declared: ['principal_service', 'transparency', 'honesty'],
     definitions: {
-      principal_benefit: 'Recommendations optimize for the user\'s stated needs, not commission.',
-      transparency: 'Disclose reasoning behind every product recommendation.',
+      principal_service: { description: "Recommendations optimize for the user's stated needs, not commission." },
+      transparency: { description: 'Disclose reasoning behind every product recommendation.' },
     },
-    conflictsWith: ['deceptive_marketing'],
+    conflicts_with: ['deceptive_marketing'],
   },
-  autonomyEnvelope: {
-    boundedActions: ['search_products', 'compare_prices', 'recommend'],
-    forbiddenActions: ['purchase_without_confirmation', 'store_payment_info'],
-    escalationTriggers: ['price_above_budget', 'out_of_stock_substitution'],
+  autonomy: {
+    bounded_actions: ['search_products', 'compare_prices', 'recommend'],
+    forbidden_actions: ['purchase_without_confirmation', 'store_payment_info'],
+    escalation_triggers: [
+      { condition: 'price_above_budget', action: 'escalate', reason: 'Over-budget purchase needs approval' },
+      { condition: 'out_of_stock_substitution', action: 'escalate', reason: 'Substitutions need user sign-off' },
+    ],
   },
-  auditCommitment: {
-    retentionDays: 90,
+  audit: {
+    retention_days: 90,
     queryable: true,
-    tamperEvidence: 'append_only',
-    traceFormat: 'ap-trace-v1',
+    query_endpoint: 'https://shopping.agent.example.com/traces',
+    tamper_evidence: 'append_only',
+    trace_format: 'ap-trace-v1',
   },
 };
 
 const dataAnalyst: AlignmentCard = {
-  agentId: 'did:web:analyst.agent.example.com',
+  card_id: 'ac-analyst-001',
+  agent_id: 'did:web:analyst.agent.example.com',
+  issued_at: new Date().toISOString(),
   principal: { type: 'human', relationship: 'advisory' },
   values: {
-    declared: ['accuracy', 'minimal_data', 'transparency'],
+    declared: ['accuracy', 'transparency'],
     definitions: {
-      accuracy: 'Report findings exactly as computed, flag uncertainty explicitly.',
-      minimal_data: 'Request only the data fields necessary for the analysis.',
+      accuracy: { description: 'Report findings exactly as computed, flag uncertainty explicitly.' },
     },
-    conflictsWith: ['data_hoarding', 'selective_reporting'],
+    conflicts_with: ['data_hoarding', 'selective_reporting'],
   },
-  autonomyEnvelope: {
-    boundedActions: ['query_database', 'compute_statistics', 'generate_report'],
-    forbiddenActions: ['export_raw_pii', 'modify_source_data'],
-    escalationTriggers: ['anomaly_detected', 'data_quality_below_threshold'],
+  autonomy: {
+    bounded_actions: ['query_database', 'compute_statistics', 'generate_report'],
+    forbidden_actions: ['export_raw_pii', 'modify_source_data'],
+    escalation_triggers: [
+      { condition: 'anomaly_detected', action: 'escalate', reason: 'Anomalies need human review' },
+      { condition: 'data_quality_below_threshold', action: 'escalate', reason: 'Low-confidence results need review' },
+    ],
   },
-  auditCommitment: {
-    retentionDays: 90,
+  audit: {
+    retention_days: 90,
     queryable: true,
-    tamperEvidence: 'append_only',
-    traceFormat: 'ap-trace-v1',
+    query_endpoint: 'https://analyst.agent.example.com/traces',
+    tamper_evidence: 'append_only',
+    trace_format: 'ap-trace-v1',
   },
 };
 ```
 </CodeGroup>
+
+`autonomy` and `audit` are the current (unified) field names — the AAP 0.5.0 names `autonomy_envelope` and `audit_commitment` are retired. A value's `definitions` entry is an object (`{description, name?, priority?}`), not a bare string.
 
 <Tip>
   Each agent's `values.definitions` field is optional but recommended. Definitions remove ambiguity when two agents declare the same value name but mean different things by it.
@@ -145,54 +171,59 @@ Before two agents coordinate on a task, run a coherence check to verify their va
 ```python Python
 from aap import check_coherence
 
+# Positional: (my_card, their_card, task_values=None)
 result = check_coherence(
-    initiator_card=shopping_agent.to_dict(),
-    responder_card=data_analyst.to_dict(),
-    required_values=["transparency"],
+    shopping_agent.to_dict(),
+    data_analyst.to_dict(),
+    ["transparency"],
 )
 
-print(f"Compatible: {result.compatible}")   # True
-print(f"Score: {result.score}")             # 0.82
-print(f"Matched: {result.matched}")         # ["transparency"]
-print(f"Conflicts: {result.conflicts}")     # []
+print(f"Compatible: {result.compatible}")                    # True
+print(f"Score: {result.score}")                               # 0.82
+print(f"Proceed: {result.proceed}")                            # True
+print(f"Matched: {result.value_alignment.matched}")            # ["transparency"]
+print(f"Conflicts: {result.value_alignment.conflicts}")        # []
 
 if result.compatible:
     print("Agents can coordinate on this task.")
 else:
-    print(f"Blocked: {result.conflicts}")
+    print(f"Blocked: {result.value_alignment.conflicts}")
 ```
 
 ```typescript TypeScript
 import { checkCoherence } from '@mnemom/agent-alignment-protocol';
 
-const result = checkCoherence({
-  initiatorCard: shoppingAgent,
-  responderCard: dataAnalyst,
-  requiredValues: ['transparency'],
-});
+// Positional: (myCard, theirCard, taskValues?)
+const result = checkCoherence(shoppingAgent, dataAnalyst, ['transparency']);
 
-console.log(`Compatible: ${result.compatible}`);   // true
-console.log(`Score: ${result.score}`);             // 0.82
-console.log(`Matched: ${result.matched}`);         // ["transparency"]
-console.log(`Conflicts: ${result.conflicts}`);     // []
+console.log(`Compatible: ${result.compatible}`);                  // true
+console.log(`Score: ${result.score}`);                            // 0.82
+console.log(`Proceed: ${result.proceed}`);                        // true
+console.log(`Matched: ${result.value_alignment.matched}`);        // ["transparency"]
+console.log(`Conflicts: ${result.value_alignment.conflicts}`);    // []
 
 if (result.compatible) {
   console.log('Agents can coordinate on this task.');
 } else {
-  console.log('Blocked:', result.conflicts);
+  console.log('Blocked:', result.value_alignment.conflicts);
 }
 ```
 </CodeGroup>
 
 ### Understanding the result
 
-The coherence result contains three key fields:
+`CoherenceResult` carries:
 
 | Field | Type | Description |
 |---|---|---|
-| `compatible` | boolean | Whether the agents can safely coordinate. `false` if any declared value conflicts with the other agent's `conflicts_with` list. |
-| `score` | float (0-1) | Numeric coherence score. Higher means more value overlap. Scores below 0.70 trigger a `proceed: false` recommendation. |
-| `conflicts` | list | Specific value conflicts found -- e.g., one agent declares a value the other explicitly opposes. |
+| `compatible` | boolean | `true` only when there are zero value conflicts AND `score >= 0.70`. |
+| `score` | float (0-1) | Numeric coherence score. Higher means more value overlap, penalized for conflicts. |
+| `proceed` | boolean | Currently identical to `compatible`. |
+| `value_alignment.matched` | list | Values declared by both agents. |
+| `value_alignment.unmatched` | list | Values declared by only one of the two agents. |
+| `value_alignment.conflicts` | list | Specific value conflicts found -- e.g., one agent declares a value the other explicitly opposes. |
+| `conditions` | list | Conditions for proceeding, when any apply. |
+| `proposed_resolution` | object or null | A suggested way to resolve a conflict, when one exists. |
 
 <Note>
   Coherence checks operate on **declared** values only. They verify that two agents' claims are compatible, not that either agent actually acts on those values. Behavioral verification happens through [AP-Traces](/concepts/ap-traces) and [integrity checkpoints](/concepts/integrity-checkpoints).
@@ -205,7 +236,7 @@ For the full protocol exchange and advanced options, see [Value Coherence](/conc
 When you run multiple agents through the [Mnemom gateway](/gateway/overview), each agent gets its own:
 
 - **Trace history** -- Every AP-Trace and integrity checkpoint is stored per agent, queryable by agent ID.
-- **Integrity scores** -- Rolling integrity ratio computed from recent checkpoints. A healthy agent stays above 0.90.
+- **Integrity scores** -- Rolling integrity ratio computed from recent checkpoints.
 - **Drift alerts** -- Automated alerts when behavioral patterns shift away from the agent's declared alignment.
 
 The Mnemom dashboard shows fleet-wide status at a glance: which agents are healthy, which are drifting, and which have active violations.
@@ -217,7 +248,7 @@ Agent                     Integrity   Drift    Mode
 ────────────────────────────────────────────────────
 shopping.agent            0.97        none     enforce
 analyst.agent             0.94        none     enforce
-staging.recommender       0.81        warning  observe
+canary.recommender        0.81        warning  observe
 ────────────────────────────────────────────────────
 ```
 
@@ -309,8 +340,8 @@ for agent in shopping.agent checkout.agent; do
   mnemom card publish "/tmp/$agent.card.yaml" --agent "$agent"
 done
 
-# Staging agents → observe
-for agent in staging.recommender staging.support; do
+# Canary agents → observe
+for agent in canary.recommender canary.support; do
   mnemom card show --agent "$agent" \
     | yq '.integrity_mode = "observe" | .autonomy_mode = "observe"' \
     > "/tmp/$agent.card.yaml"
@@ -323,7 +354,7 @@ The programmatic SDK path mirrors the same shape — fetch the alignment card, u
 A common fleet pattern:
 
 - **Production agents** on `enforce` -- violations are blocked before reaching end users.
-- **Staging agents** on `observe` -- violations are recorded for review during testing without blocking development workflows.
+- **Canary agents** on `observe` -- violations are recorded for review during testing without blocking development workflows.
 - **New agents** on `nudge` -- the agent gets feedback and a chance to self-correct while you build confidence in its alignment.
 
 For full details on each mode, see [Enforcement Modes](/gateway/enforcement).

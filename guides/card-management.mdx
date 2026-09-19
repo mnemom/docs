@@ -102,20 +102,9 @@ audit:
 
 ### Choose values
 
-Select from the standard value identifiers and add custom values as needed:
+`values.declared` accepts any value identifier — validation is shape-only (a non-empty string or `{id, ...params}`), so nothing stops you from inventing one. What actually belongs there, the recommended baseline, and the distinction between a value and a role/capability descriptor are covered in [Alignment Cards § What belongs in values.declared](/concepts/alignment-cards#what-belongs-in-valuesdeclared) — read that before picking your list.
 
-| Standard Identifier | Description |
-|---|---|
-| `principal_benefit` | Prioritize principal's interests |
-| `transparency` | Disclose reasoning and limitations |
-| `minimal_data` | Collect only necessary information |
-| `harm_prevention` | Avoid actions causing harm |
-| `honesty` | Do not deceive or mislead |
-| `user_control` | Respect user autonomy and consent |
-| `privacy` | Protect personal information |
-| `fairness` | Avoid discriminatory outcomes |
-
-For custom values, add a `definitions` entry:
+For a value outside that baseline, add a `definitions` entry so it's self-documenting:
 
 ```json
 {
@@ -371,7 +360,7 @@ This checks required blocks (principal, values, autonomy, audit), value definiti
 Before publishing, evaluate the card's policy against the tools your agent uses:
 
 ```bash
-mnemom card evaluate my-card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
+mnemom card evaluate my-card.yaml --tools mcp__browser__navigate,mcp__slack__post_message
 ```
 
 This checks that every tool maps to a declared bounded action and that no forbidden rules are violated. See [CI/CD Policy Gates](/guides/ci-cd-policy-gates) for integrating this into your pipeline.
@@ -419,7 +408,7 @@ Add validation to your CI pipeline to catch card issues before deploy:
 - name: Validate alignment card
   run: npx mnemom card validate card.yaml
 - name: Evaluate card policy
-  run: npx mnemom card evaluate card.yaml --tools mcp__browser__navigate --agent my-agent
+  run: npx mnemom card evaluate card.yaml --tools mcp__browser__navigate
   env:
     MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
 ```
@@ -555,61 +544,29 @@ curl -X PUT https://api.mnemom.ai/v1/alignment/agent/{agent_id} \
 
 The response is the **canonical** card — your agent-scope input composed with platform + org scopes. Pass `?include_composition=true` to include the `_composition` metadata block showing which scope contributed which fields.
 
-## Organization card templates (Enterprise)
+## Organization card templates
 
-<Info>
-  Organization card templates require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
-</Info>
-
-Org card templates let you define a base alignment card that all agents in your organization inherit. This ensures consistent alignment policy across your fleet -- every agent shares the same core values, forbidden actions, and audit requirements.
-
-### How composition works
-
-When an org template is active, the canonical card for each agent is computed by composing the org template with the agent's individual card:
-
-- **Values**: Org values are always included. Agent values are added on top. Agents cannot remove org values.
-- **Forbidden actions**: Org forbidden actions are always included. Agents can add more but cannot remove any.
-- **Bounded actions**: Agent-specific. The org template does not restrict which actions an agent can take.
-- **Escalation triggers**: Org triggers are always included. Agents can add more.
-- **Audit commitment**: Org audit commitment is the floor. Agents can increase retention or add capabilities but cannot weaken audit requirements.
-
-### Setting up
-
-1. Navigate to **Organization Settings** in the dashboard
-2. Open the **Alignment Card Template** section
-3. Enable the org template toggle
-4. Configure your base card using the visual or JSON editor
-5. Save -- all agents in the org immediately inherit the template
-
-### Agent exemptions
-
-In rare cases, an agent may need to be exempt from the org template. Exemptions require:
-
-1. A double-confirm flow in the dashboard (confirm intent, then confirm again with reason)
-2. A written reason that is stored in the audit trail
-3. Owner or admin role
-
-Exempted agents operate with only their individual card. Use exemptions sparingly -- they weaken organizational alignment guarantees.
-
-See the [Organization Card Templates guide](/gateway/org-card-templates) for the full setup walkthrough.
+Your card composes with your org's alignment template (if one is set) and the platform floor to produce your agent's canonical card — org values and forbidden actions always apply on top of what you declare here. For setting up an org template, granting per-agent exemptions from it, and debugging why a composed field has a value you didn't set, see [Managing Card Composition](/guides/card-composition).
 
 ## Validation rules
 
-Reference table of all validation checks performed during `mnemom card validate` and on publish:
+`mnemom card validate` runs every check below; any failure exits non-zero (there's no separate warning tier — a failed check blocks validation):
 
-| Check | Rule | Severity |
-|---|---|---|
-| Valid JSON/YAML | Must parse without errors | Error |
-| Required blocks | `principal`, `values`, `autonomy`, `audit` must be present | Error |
-| Non-empty values | `values.declared` must have at least one entry | Error |
-| Custom definitions | Every non-standard value must have a `definitions` entry | Warning |
-| Bounded actions | Must list at least one action | Error |
-| Evaluable triggers | Condition must be a single-token identifier or comparison expression | Warning |
-| Expiry | `expires_at` must be in the future | Error |
+| Check | Rule |
+|---|---|
+| Valid JSON/YAML | Must parse without errors. |
+| `card_version`, `agent_id` | Required, non-empty strings. |
+| `autonomy_mode`, `integrity_mode` | Required top-level fields, one of `off \| observe \| nudge \| enforce`. |
+| `principal` | Required object with `type` and `relationship` from their respective enums; `identifier` required unless `type` is `unspecified`. |
+| `values.declared` | Required, non-empty array of strings (or `{id, ...params}` objects). |
+| `values.definitions` | If present, every key must match an entry actually in `values.declared` — a definition for an undeclared value fails. |
+| `autonomy.bounded_actions` | Required, non-empty array of strings; must be disjoint from `forbidden_actions`. |
+| `autonomy.escalation_triggers` | If present, each entry needs a non-empty `condition`, an `action` from a fixed enum, and a non-empty `reason`. |
+| `audit` | Required; `retention_days` and `queryable` required, `query_endpoint` required when `queryable` is `true`. |
+| Legacy fields | `integrity.enforcement_mode`, `enforcement.mode`, `enforcement.unmapped_tool_action`, `enforcement.fail_open`, and `audit.storage` are all rejected — use the current top-level/unified fields instead. |
+| `_composition` | Rejected on an inbound card — it's a server-assigned response field. |
 
-<Note>
-  Warnings do not prevent publishing but are reported in validation output. Fix warnings to improve verification quality.
-</Note>
+When you're online with an agent to validate against, `mnemom card validate` runs the same check server-side (composed against your org/platform floor) instead of this offline check set — pass `--offline` to force the local rules.
 
 ## Policy integration
 
@@ -620,7 +577,7 @@ Policy is now part of the alignment card itself. The unified schema includes cap
 3. **Card defines enforcement**: The `enforcement` section sets the mode (observe/warn/enforce) and defaults for unmapped tools
 4. **Evaluation bridges all three**: `mnemom card evaluate` checks that every tool maps to a declared bounded action
 
-When adding new tools, update the card to add both the capability to `bounded_actions` and the tool-to-capability mapping in `capabilities`. The 24-hour grace period gives you time to make these updates after new tools are first observed.
+When adding new tools, update the card to add both the capability to `bounded_actions` and the tool-to-capability mapping in `capabilities`. The `enforcement` section's `grace_period_hours` field, if you set one, gives you time to make these updates after new tools are first observed before its `default_unmapped_severity` starts applying.
 
 ### Amendment tracking
 
@@ -654,6 +611,6 @@ Every card update creates a formal amendment with version history and diffs. Ame
 - [Alignment Cards concept](/concepts/alignment-cards) -- Full specification of card structure and semantics
 - [Card Lifecycle](/concepts/card-lifecycle) -- Amendment tracking, reclassification, and trust recovery
 - [Policy Management](/guides/policy-management) -- Policy setup alongside card management
+- [Managing Card Composition](/guides/card-composition) -- Org templates, exemptions, and debugging composed fields
 - [CLI Reference](/gateway/cli) -- `mnemom card show`, `card publish`, and `card validate` commands
-- [Organization Card Templates](/gateway/org-card-templates) -- Org-level card policies (Enterprise)
 - [AAP Specification](/protocols/aap/specification) -- Normative protocol specification
