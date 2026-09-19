@@ -5,8 +5,6 @@ sidebarTitle: "CLI"
 icon: "terminal"
 ---
 
-# CLI reference
-
 The `mnemom` CLI manages authentication, alignment cards, protection cards, and agent diagnostics for the Mnemom trust stack.
 
 ## Installation
@@ -61,6 +59,10 @@ Logged in as alex@example.com (org: mnemom)
 
 ## Organizations
 
+<Note>
+`mnemom login` binds no org — the session carries no org context. Org-scoped commands (like `agents claim`) target your **active** org, set with `mnemom org use`, defaulting to your personal org when none is set.
+</Note>
+
 <Steps>
 
 ### `mnemom org list`
@@ -71,6 +73,17 @@ List every org you belong to. Your personal org is tagged `(personal)`.
 mnemom org list
 ```
 
+**Options:** `--json`
+
+### `mnemom org use [slug-or-id]`
+
+Set the active org — the default for org-scoped commands like `agents claim`. No argument prints the current setting.
+
+```bash
+mnemom org use acme
+mnemom org use --clear   # forget the active org; org-scoped commands revert to your personal org
+```
+
 ### `mnemom org show [org_id]`
 
 Print details for one org (`--personal` for your personal-org-of-one).
@@ -78,6 +91,8 @@ Print details for one org (`--personal` for your personal-org-of-one).
 ```bash
 mnemom org show --personal
 ```
+
+**Options:** `--personal`, `--json`
 
 </Steps>
 
@@ -97,9 +112,11 @@ mnemom card show --agent my-coder
 
 ```yaml
 card_id: ac-a4c12709-v2
-schema: unified-card/1.0
+card_version: unified/2026-04-15
 issued_at: "2026-02-21"
 expires_at: "2026-08-21"
+autonomy_mode: observe
+integrity_mode: observe
 
 principal:
   type: human
@@ -134,7 +151,7 @@ autonomy:
       action: escalate
 
 enforcement:
-  mode: warn
+  allow_unmapped_tools: false
 
 audit:
   trace_format: ap-trace-v1
@@ -225,14 +242,14 @@ mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__d
 
 | Option | Description |
 |--------|-------------|
-| `--agent <name>` | Target agent |
 | `--tools <tools>` | Comma-separated list of tool names to evaluate |
-| `--format <json\|text>` | Output format (default: text) |
+| `--tool-manifest <file>` | Path to a tool manifest JSON file, as an alternative to `--tools` |
+| `--strict` | Exit `1` on warnings too (not just hard failures) |
 
 **Exit codes:**
 
-- `0` -- All evaluations pass
-- `1` -- One or more evaluations fail
+- `0` -- No hard policy violations (without `--strict`, warnings don't affect this)
+- `1` -- One or more evaluations fail (or, with `--strict`, any warning)
 
 **Example output:**
 
@@ -246,6 +263,114 @@ Evaluating card.yaml against 2 tools...
   Verdict: FAIL
   1 pass, 1 fail
 ```
+
+</Steps>
+
+## Policy commands (removed)
+
+The standalone `mnemom policy` command group has been removed — policy (capability mappings, forbidden rules, enforcement defaults) is now authored directly in the alignment card and evaluated with `mnemom card evaluate`, per the table above.
+
+| Old command | Replacement |
+|-------------|-------------|
+| `mnemom policy init` | Author `capabilities`/`enforcement` directly in a YAML alignment card. See [Card Management](/guides/card-management). |
+| `mnemom policy validate <file>` | `mnemom card validate <file>` |
+| `mnemom policy publish <file>` | `mnemom card publish <file>` |
+| `mnemom policy list` | `mnemom card show --agent <name>` |
+| `mnemom policy test <file>` | `mnemom card evaluate <file> --tools <tools>` |
+| `mnemom policy evaluate` | `mnemom card evaluate <file> --tools <tools>` |
+
+See [Policy Engine](/concepts/policy-engine) for how the card's `capabilities` + `enforcement` sections work.
+
+## Posture commands
+
+Manage [Trust Postures](/concepts/trust-posture) (team-scoped oversight policy — not to be confused with the per-agent alignment/protection cards above).
+
+<Steps>
+
+### `mnemom posture list`
+
+List visible postures — the three Mnemom-shipped defaults plus your org's own.
+
+```bash
+mnemom posture list --org org-acme
+```
+
+**Options:** `--org <id>`, `--no-include-platform` (hide the Mnemom defaults), `--json`
+
+### `mnemom posture show <posture_id>`
+
+Show one posture's metadata and body summary.
+
+```bash
+mnemom posture show tp-platform-standard
+```
+
+### `mnemom posture create`
+
+Create a new org-scope posture from a JSON file.
+
+```bash
+mnemom posture create --org org-acme --slug acme-standard --name "Acme Standard" \
+  --from body.json --summary "Initial revision"
+```
+
+**Options:** `--org <id>`, `--slug <slug>`, `--name <name>`, `--from <file>`, `--description <text>`, `--summary <text>`, `--json`
+
+### `mnemom posture update <posture_id>`
+
+Write a new revision (forward-only — old revisions stay queryable).
+
+```bash
+mnemom posture update tp-acme123 --from v2-body.json --summary "tighten coherence to 0.6"
+```
+
+**Options:** `--from <file>`, `--summary <text>`, `--name <text>`, `--description <text>`, `--json`
+
+### `mnemom posture clone <posture_id>`
+
+Clone any visible posture (including a Mnemom default) into an org as a customization starting point.
+
+```bash
+mnemom posture clone tp-platform-standard --org org-acme --slug acme-standard --name "Acme Standard"
+```
+
+**Options:** `--org <id>`, `--slug <slug>`, `--name <name>`, `--description <text>`, `--json`
+
+### `mnemom posture revisions <posture_id>`
+
+List the posture's revision history, newest first. **Options:** `--json`
+
+### `mnemom posture diff <posture_id>`
+
+Structural diff between two revisions.
+
+```bash
+mnemom posture diff tp-acme123 --from 1 --to 3
+```
+
+**Options:** `--from <N>`, `--to <M>`, `--json`
+
+### `mnemom posture assign <posture_id>`
+
+Assign a posture to a team, replacing any prior assignment for that team.
+
+```bash
+mnemom posture assign tp-acme123 --team <team-uuid>
+```
+
+**Options:** `--team <team_id>`, `--pin-revision <N>` (default: float against current)
+
+### `mnemom posture unassign <posture_id>`
+
+Remove a posture's assignment from a team. **Options:** `--team <team_id>`
+
+### `mnemom posture preview-compose <posture_id>`
+
+Preview the effective composed posture for a team, if assigned. **Options:** `--team <team_id>`, `--json`
+
+### `mnemom posture delete <posture_id>`
+
+Soft-delete an org-scope posture. Refuses if the posture is currently assigned to any team.
 
 </Steps>
 
@@ -286,11 +411,26 @@ mnemom protection publish protection.yaml --agent my-coder
 
 ### `mnemom protection validate <file>`
 
-Local-only validation of a protection card. CI-friendly exit codes.
+Validate a protection card. Server-authoritative when `--agent` is set; pass `--offline` to force local-only validation.
 
 ```bash
 mnemom protection validate protection.yaml
 ```
+
+### `mnemom protection drift <file>`
+
+Compare a committed protection-card snapshot against the live canonical card (read-only).
+
+```bash
+mnemom protection drift protection.yaml --agent my-coder
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--strict` | Also fail on live fields the snapshot does not record |
+| `--json` | Emit the drift result as JSON |
 
 </Steps>
 
@@ -298,7 +438,7 @@ mnemom protection validate protection.yaml
 
 ### `mnemom agents`
 
-List all agents associated with your authenticated account.
+List agents across the orgs you belong to. Pass `--org <id>` to scope to a single org (default: all orgs you belong to).
 
 ```bash
 mnemom agents
@@ -334,15 +474,14 @@ lifecycle.
 mnemom agents claim mnm-... --key "$AGENT_PROVIDER_KEY" --org mnemom
 ```
 
-- `--org <slug|id>` — destination org. Defaults to your personal org (with a
-  loud notice) when omitted.
+- `--org <slug|id>` — destination org. Defaults to your **active** org (set via `mnemom org use`), falling back to your personal org when none is active.
 - `--key <key>` — the agent's provider API key; the CLI derives the
   `hash_proof` locally. Alternatively pass `--hash-proof <64-hex>` directly.
+- `--name <name>` — provisioned agent name for proof derivation; auto-resolved from the agent id when possible, pass only to override.
+- `--json` — output JSON instead of human-readable text.
 
 <Note>
-To re-home an agent, re-`claim` it with a new `--org` (possession-based:
-requires the agent's key). The destination org's template can floor/cap the
-agent's composed card — its effective posture may change. See
+To re-home an agent by proving you hold its provider key, re-`claim` it with a new `--org` (possession-based). To move an agent without its key, use `mnemom agents move <id-or-name> --to <slug-or-id>` instead — it requires owner/admin in both the current and destination org, role-based, no agent key needed. Either way, the destination org's template can floor/cap the agent's composed card — its effective posture may change. See
 [Idempotency and re-homing](/guides/agent-claim-flow#idempotency-and-re-homing).
 </Note>
 
@@ -470,6 +609,83 @@ mnemom license deactivate
 
 </Steps>
 
+## Team commands
+
+Manage teams and their scope-cascade templates (`mnemom team ...`).
+
+| Command | Description | Key options |
+|---|---|---|
+| `team list` | List every team across all orgs you belong to | `--json` |
+| `team show <team_id>` | Show details of a single team | `--json` |
+| `team alignment-template <team_id>` | Read, or write with `--set <file>`, the team's alignment template | `--set <file>`, `--clear`, `--json` |
+| `team protection-template <team_id>` | Read, or write with `--set <file>`, the team's protection template | `--set <file>`, `--clear`, `--json` |
+| `team preview-compose <team_id>` | Dry-run the composer with a draft template (alignment by default) | `--protection`, `--from <file>`, `--json` |
+| `team admin grant <team_id>` | Grant `team_admin` role to a user on this team | `--user <user_id>`, `--json` |
+| `team admin revoke <team_id>` | Revoke a `team_admin` grant (admin or self) | `--user <user_id>`, `--json` |
+| `team admin list <team_id>` | List active `team_admin` grants on a team | `--json` |
+| `team coverage <team_id>` | Show last-30-day sideband sweep coverage for a team | `--rows`, `--json` |
+
+## Advisories & governance
+
+`mnemom advisories ...` lists and inspects the [sideband advisories](/concepts/posture-vs-cards#2-carryover-bridge) postures write:
+
+| Command | Description | Key options |
+|---|---|---|
+| `advisories list` | List recent advisories scoped to one agent or one team | `--agent <id>`, `--team <id>`, `--source <s>`, `--limit <n>`, `--since <iso>`, `--json` |
+| `advisories show <advisory_id>` | Show one advisory's full content | `--agent <id>`, `--team <id>`, `--json` |
+
+`mnemom governance ...` is the operator workflow for `governance_signals`:
+
+| Command | Description | Key options |
+|---|---|---|
+| `governance signals list` | List signals at platform/org/team/agent scope | `--org`, `--team`, `--agent`, `--source`, `--severity`, `--status`, `--scope`, `--pattern-type`, `--since`, `--limit`, `--json` |
+| `governance signals show <signal_id>` | Show one signal in detail | `--json` |
+| `governance signals ack <signal_id>` | Acknowledge an open signal (org admin/owner) | `--action <text>`, `--json` |
+| `governance signals resolve <signal_id>` | Resolve with a resolution status (`action_taken`\|`wont_fix`\|`duplicate`\|`false_positive`\|`self_resolved`) | `--status <s>`, `--action <text>`, `--json` |
+| `governance signals dismiss <signal_id>` | Dismiss a signal as not actionable | `--reason <text>`, `--json` |
+| `governance destinations list` \| `add` \| `remove <id>` \| `test <id>` | Manage notification destinations (webhook/slack/email/pagerduty) | `--org`, `--channel`, `--config`, `--name`, `--filter`, `--json` |
+| `governance rules list` \| `add` \| `remove <id>` | Manage escalation rules (predicate → destinations) | `--org`, `--name`, `--predicate`, `--destinations`, `--json` |
+
+## API keys & webhooks
+
+`mnemom api-key ...` manages capability-scoped personal API keys:
+
+| Command | Description | Key options |
+|---|---|---|
+| `api-key list` | List your active keys with their scope sets | `--json` |
+| `api-key create` | Mint a new key. Default scopes: `gateway`, `api:read`, `api:write`; admin scopes are role-gated | `--name <name>`, `--scopes <list>`, `--json` |
+| `api-key rotate <key_id>` | Atomic mint-new + revoke-old; returns the new secret once | `--json` |
+| `api-key revoke <key_id>` | Soft-revoke an active key immediately and irreversibly | — |
+
+`mnemom webhooks ...` manages org webhook endpoints, deliveries, and replay; `mnemom listen <org_id>` streams live events:
+
+| Command | Description | Key options |
+|---|---|---|
+| `webhooks list <org_id>` / `get <org_id> <endpoint_id>` | List or inspect endpoints | `--json` |
+| `webhooks create <org_id>` | Create an endpoint (signing secret shown once) | `--url`, `--events`, `--description`, `--json` |
+| `webhooks update <org_id> <endpoint_id>` | Update url/events/description/active state | `--url`, `--events`, `--description`, `--active`, `--json` |
+| `webhooks delete <org_id> <endpoint_id>` | Permanently delete an endpoint | — |
+| `webhooks rotate-secret <org_id> <endpoint_id>` | Mint a new signing secret (shown once) | `--json` |
+| `webhooks trigger <org_id> <endpoint_id>` | Fire a synthetic test event through the full pipeline | `--json` |
+| `webhooks list-deliveries <org_id>` | List recent deliveries, optionally scoped to one endpoint | `--endpoint`, `--limit`, `--offset`, `--json` |
+| `webhooks redeliver <org_id> <delivery_id>` | Retry one previous delivery | `--json` |
+| `webhooks replay <org_id> <event_id>` | Re-fan-out a historical event to current (or specified) endpoints | `--endpoint` (repeatable), `--json` |
+| `listen <org_id>` | Stream live webhook events for an org | `--forward-to`, `--secret`, `--filter`, `--since`, `--json` |
+
+## Other commands
+
+| Command | Description | Key options |
+|---|---|---|
+| `recipes report-fn <recipe-id>` | File a false-negative report against a recipe (it should have caught something and didn't) | `--summary`, `--evidence`, `--agent`, `--checkpoint`, `--json` |
+| `recipes report-fp <recipe-id>` | File a false-positive report (a recipe fired on legitimate behavior) | `--summary`, `--evidence`, `--agent`, `--checkpoint`, `--json` |
+| `verify-card <agent_id>` | Verify a published canonical card's AAP attestation + Merkle inclusion proof offline | `--at`, `--card-kind`, `--api`, `--strict`, `--jwks-cache`, `--no-cache` |
+| `usage` | Show per-person token/request consumption for an org | `--org`, `--days <7\|30\|90>`, `--person`, `--provider`, `--model`, `--limit`, `--cursor`, `--json` |
+| `validate safe-house` | Render Safe House harness state per lane — a promotion-readiness signal, mainly used in CI | `--against`, `--max-age`, `--lane`, `--strict`, `--json` |
+| `try-me <token>` | Run the guided Dojo onboarding for a `/try-me` token (born → claim → declare → spar) | `--dry-run`, `--json`, `--yes`, `--name`, `--resume`, `--no-open`, `--poll-timeout` |
+| `wrap` | Instrument an existing agent through the gateway (born → cards → integration snippet) | `--provider`, `--framework`, `--name`, `--provider-key`, `--yes`, `--json` |
+| `onboard` | Self-onboard the calling agent (scan → claim → declare → rating → badge) | `--json`, `--yes`, `--key`, `--hash-proof`, `--no-open` |
+| `skills list` / `skills describe <name>` | List or describe the Mnemom CLI's own skills | `--json` |
+
 ## Global options
 
 | Option | Description |
@@ -487,16 +703,6 @@ Commands that operate on an agent use this priority to determine which agent:
 
 There is no default agent concept. If neither `--agent` nor `MNEMOM_AGENT` is set, the CLI will prompt you to specify one (or error in non-interactive mode).
 
-**Environment:**
-
-Set `MNEMOM_ENV` to control which environment the CLI targets:
-
-| Value | Description |
-|-------|-------------|
-| `production` | Production environment (default) |
-| `staging` | Staging environment |
-| `local` | Local development environment |
-
 **Example:**
 
 ```bash
@@ -505,9 +711,6 @@ mnemom status --agent my-coder
 
 # Use environment variable
 MNEMOM_AGENT=my-coder mnemom logs
-
-# Target staging environment
-MNEMOM_ENV=staging mnemom status --agent my-coder
 ```
 
 ## Workflow

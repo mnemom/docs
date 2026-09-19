@@ -5,10 +5,8 @@ sidebarTitle: "Org Card Templates"
 icon: "building"
 ---
 
-# Organization card templates
-
 <Info>
-  Organization card templates require an Enterprise plan. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
+  Organization card templates require the `org_card_template` entitlement, enabled on enterprise agreements. Contact [sales](https://mnemom.ai/pricing) to enable this feature.
 </Info>
 
 Org card templates let you define base policies that every agent in your organization inherits across two separate cards:
@@ -79,19 +77,19 @@ When the org template is active, each field in the canonical card is computed ac
 
 | Card Field | Composition Rule | Example |
 |---|---|---|
-| `values.declared` | Union of org + agent values | Org: `[honesty, transparency]` + Agent: `[editorial_independence]` = `[honesty, transparency, editorial_independence]` |
-| `values.definitions` | Merged. Agent definitions cannot override org definitions | Org defines `honesty`; agent can define `editorial_independence` but not redefine `honesty` |
-| `values.hierarchy` | Org hierarchy takes precedence if defined | Org sets `lexicographic`; agent cannot change to `weighted` |
+| `values.declared` | Union across platform → org → team → agent | Org: `[honesty, transparency]` + Agent: `[editorial_independence]` = `[honesty, transparency, editorial_independence]` |
+| `values.definitions` | Merged; **later layers win on a shared key** — the agent's own definition of a value overrides the org's for that same value | Org defines `honesty`; agent can add `editorial_independence` **and** override the org's `honesty` text if it writes its own |
+| `values.hierarchy` | **Agent-only.** Platform/org/team `hierarchy` is not read at all — whatever the agent's own card sets is what lands on the canonical card | The org cannot force a hierarchy on agents via the template |
 | `values.conflicts_with` | Union of org + agent conflicts | Org: `[deception]` + Agent: `[upsell_pressure]` = `[deception, upsell_pressure]` |
-| `autonomy_envelope.bounded_actions` | Agent-specific (org does not restrict) | Agent defines its own bounded actions |
-| `autonomy_envelope.forbidden_actions` | Union of org + agent forbidden actions | Org: `[exfiltrate_data]` + Agent: `[delete_records]` = `[exfiltrate_data, delete_records]` |
-| `autonomy_envelope.escalation_triggers` | Union of org + agent triggers | Org triggers always apply; agent adds more |
-| `audit_commitment.retention_days` | Maximum of org and agent value | Org: 180 days, Agent: 365 days = 365 days |
-| `audit_commitment.queryable` | Org `true` cannot be overridden to `false` | If org requires queryable, all agents are queryable |
-| `audit_commitment.tamper_evidence` | Strongest mechanism wins (`merkle` > `signed` > `append_only`) | Org: `signed`, Agent: `merkle` = `merkle` |
+| `autonomy.bounded_actions` | **Union** across platform → org → team → agent — the org template can *add* to what an agent may declare, not just the agent | Org: `[web_search]` + Agent: `[read_file]` = `[web_search, read_file]` |
+| `autonomy.forbidden_actions` | Union across every scope (then exemptions applied) | Org: `[exfiltrate_data]` + Agent: `[delete_records]` = `[exfiltrate_data, delete_records]` |
+| `autonomy.escalation_triggers` | Union across every scope | Org triggers always apply; agent adds more |
+| `audit.retention_days` | Maximum across platform, org, team, and agent (agent floor: 30 days if unset) | Org: 180 days, Agent: 365 days = 365 days |
+| `audit.queryable` | **Platform-scoped only.** Org, team, and agent values are not read for this field at all — only the platform default applies | An org or agent card cannot change whether traces are queryable |
+| `audit.tamper_evidence` | **Platform-scoped only**, same as `queryable` — org/team/agent proposals are ignored, not merged | An org card cannot request `merkle` if the platform default is `append_only` |
 
 <Warning>
-  Composition is always additive from the agent's perspective. Agents can strengthen alignment requirements but never weaken them below the org floor.
+  Composition is additive from the agent's perspective for most fields — agents can strengthen alignment requirements but never weaken them below the org floor. `values.hierarchy` is the one field the org template cannot touch at all, and the `audit.queryable`/`audit.tamper_evidence` pair is platform-only regardless of what any org or agent card proposes — don't rely on an org template to change either.
 </Warning>
 
 ## Protection card template and `protected_surface`
@@ -154,7 +152,7 @@ Navigate to the agent's page in the dashboard. In the Alignment Card section, cl
 
 ### Provide a reason
 
-Enter a written reason for the exemption. This is required and stored in the audit trail. Be specific -- "for testing" is less useful than "this agent runs adversarial alignment tests and needs to declare conflicting values."
+Enter a written reason for the exemption. This is required (at least 20 characters) and stored in the audit trail. Be specific -- "for testing" is less useful than "this agent runs adversarial alignment tests and needs to declare conflicting values."
 
 ### Confirm
 
