@@ -1,83 +1,40 @@
 ---
 title: "SLA and Incident Response"
-description: "Tier-based uptime targets, recovery objectives, and the incident communication process across Free, Developer, Team, and Enterprise plans."
+description: "The public status page, incident severity classification, and how Mnemom communicates during an incident. Contractual uptime/RTO/RPO numbers live in your Enterprise MSA."
 sidebarTitle: "SLA & Incident Response"
 icon: "gauge-high"
 ---
 
-Mnemom's availability commitments scale with plan tier. The free tier is best-effort; paid tiers carry contractual targets, with Enterprise escalating to custom terms. This page documents the public position. The authoritative numbers for any given contract live in the MSA and its SLA exhibit.
+Mnemom's pricing is usage-based with no plan tiers (see [pricing](https://www.mnemom.ai/pricing)) — the Service is used on a Free Tier by default, or under an Enterprise contract. This page documents what's public today. A contractual uptime/RTO/RPO commitment is a matter negotiated in an Enterprise MSA's SLA exhibit, not a standing public promise; if you have one, its numbers govern over anything on this page.
 
 <Note>
-A public status page is live at [`status.mnemom.ai`](https://status.mnemom.ai). It shows per-service operational state and 90-day uptime history. Incident communications go through the status page and email (for contractual customers).
+A public status page is live at [`status.mnemom.ai`](https://status.mnemom.ai). It shows per-service operational state and uptime history. Incident communications go through the status page and, for Enterprise contract contacts, email.
 </Note>
 
 ---
 
-## Uptime targets by tier
+## Availability
 
-Uptime is measured monthly against the gateway control plane — the endpoints under `api.mnemom.ai/v1`. Data-plane components in the Safe House (front-door checkpoint, back-door checkpoint, AIP) inherit the control-plane target; when the gateway is up, enforcement is up.
+Mnemom publishes a rolling-30-day availability target of **≥ 99.9%** (≈ 43 minutes of downtime budget per month) for each of five core scenarios, measured by independent synthetic probes against the live endpoints and reviewed regularly: platform availability (mnemom.ai and the core API), sign-up/login, agent claim, AI gateway inference, and trust/reputation reads. A sustained miss opens an incident automatically on the status page. See the full, current commitments at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos).
 
-| Tier | Monthly uptime target | Monthly error-budget equivalent |
-|---|---|---|
-| Free / OpenClaw | Best-effort — no SLA | — |
-| Developer | 99.9% | ~43 minutes |
-| Team | 99.95% | ~22 minutes |
-| Enterprise | 99.99% target, contract-specific | ~4 minutes |
-
-**Scheduled maintenance** is excluded from uptime calculation on Developer and Team tiers with at least 72 hours advance notice. Enterprise contracts negotiate maintenance windows individually. Emergency security patches are never excluded.
-
-**Measurement basis.** Uptime is computed as `(total minutes in the month − unavailable minutes) ÷ total minutes`. A minute is "unavailable" when the synthetic monitors that exercise the public API return a non-success status from at least two geographic probes simultaneously.
+This is Mnemom's standing public commitment, applying regardless of contract. Enterprise customers with an SLA exhibit in their MSA may have additional or different contractual terms and remedies; ask your account team for the current terms.
 
 ---
 
 ## Recovery objectives
 
-| Tier | RTO (target restore time) | RPO (max acceptable data loss window) |
-|---|---|---|
-| Free / OpenClaw | Best-effort | Best-effort |
-| Developer | 4 hours | 1 hour |
-| Team | 1 hour | 15 minutes |
-| Enterprise | 1 hour, contract-specific | 5 minutes, contract-specific |
-
-The primary data store (Supabase Postgres) runs continuous point-in-time recovery (PITR), which sets the platform RPO at **5 minutes** and a database recovery RTO of **1 hour**. The stateless API and website layers redeploy from version control in **≤ 15 minutes** with no data loss of their own. The per-tier objectives above are contractual commitments and are never tighter than this underlying technical capability; Enterprise contracts may negotiate custom terms within it.
-
-RTO and RPO apply to the control plane (dashboard, API, Supabase-backed state). Proof-chain commitments (Tier 1) are hash-chained and append-only — once anchored, they are not lost even under full-region failure; they become temporarily unretrievable, not corrupted.
-
----
-
-## Incident severity
-
-Incidents are classified on declaration and re-classified as facts change.
-
-| Severity | Definition | First notification target |
-|---|---|---|
-| **SEV-1** | Full outage of the gateway or dashboard, OR a confirmed data exposure, OR a canary leak indicating agent compromise for any Enterprise customer. | ≤ 15 minutes |
-| **SEV-2** | Partial outage (single endpoint class, single region), OR degraded performance > 3× baseline latency, OR enforcement falling back to observe mode. | ≤ 30 minutes |
-| **SEV-3** | Background job failures (billing, observer, async AIP / back-door checkpoint) that do not affect synchronous enforcement or dashboard access. | ≤ 2 hours |
-| **SEV-4** | Cosmetic or minor functional degradation. | Next business day |
-
-SEV-1 and SEV-2 invoke the on-call runbook within minutes of detection; remediation and communication run in parallel.
+Mnemom does not publish a standing RTO/RPO commitment for the self-service tier. Enterprise contracts that include recovery objectives negotiate them individually as part of the MSA.
 
 ---
 
 ## Incident communication
 
-Who hears what, when, and through which channel.
+A sustained miss against any of the availability commitments above opens an incident on the status page automatically. Beyond that:
 
-| Audience | Channel | First update | Cadence |
-|---|---|---|---|
-| All customers | [Status page](https://status.mnemom.ai) | ≤ 30 minutes after SEV-1/SEV-2 declaration | Every 30 minutes until mitigated, then on resolution |
-| Enterprise contract contacts | Email to the designated security / operational contact | ≤ 15 minutes after SEV-1 declaration | Every 30 minutes until mitigated, then on resolution and at post-mortem |
-| Team plan customers | Email to the primary org owner | ≤ 30 minutes after SEV-1/SEV-2 | Every hour until mitigated, then on resolution |
-| Developer plan customers | [Status page](https://status.mnemom.ai) | Same as all-customers cadence | Same |
-| Free / OpenClaw | [Status page](https://status.mnemom.ai) | Best-effort | Best-effort |
+- **All customers** are notified through the [status page](https://status.mnemom.ai), which carries a live update log until the incident is mitigated, then a resolution note.
+- **Enterprise contract contacts** additionally receive email to their designated contact, per the notification terms in their MSA.
 
-**Security-impacting incidents** (confirmed exposure, canary leak, credential compromise, supply-chain event) also trigger:
-
-- **Dashboard enforcement-mode downgrade notice** if Safe House falls back to observe mode during the incident.
-- **Breach-notification support** for customers with a regulator obligation under GDPR Article 33, HIPAA Breach Notification Rule, or sector-specific law. Mnemom provides the timeline, technical detail, and attestations needed for the customer's notification; the customer is the reporting party. See [Compliance — shared-responsibility boundaries](/guides/compliance#shared-responsibility-boundaries).
-
-**Post-mortems** are published within 5 business days of SEV-1 resolution for Enterprise customers (private, under NDA) and within 10 business days of SEV-1 resolution for all customers in summary form.
+**Breach-notification support.** For a security-impacting incident that triggers a regulator obligation under GDPR Article 33, the HIPAA Breach Notification Rule, or sector-specific law, Mnemom provides the timeline, technical detail, and attestations needed for the customer's own notification — the customer is the reporting party. See [Compliance — shared-responsibility boundaries](/guides/compliance#shared-responsibility-boundaries).
 
 ---
 
@@ -85,60 +42,24 @@ Who hears what, when, and through which channel.
 
 | Need | Where to send it |
 |---|---|
-| Suspected security vulnerability | Email `security@mnemom.ai` (PGP key available on request). For the open protocol repos you may also file a GitHub Security Advisory: [aap](https://github.com/mnemom/aap), [aip](https://github.com/mnemom/aip). Do **not** file public issues. See [SECURITY.md](https://github.com/mnemom/docs/blob/main/SECURITY.md). |
-| Active incident affecting your traffic | Dashboard → **Support** → **Incident** (SEV-1/SEV-2 tag). Enterprise customers use the dedicated incident email on file. |
+| Suspected security vulnerability | Email `security@mnemom.ai`. For the open protocol repos you may also file a GitHub Security Advisory: [aap](https://github.com/mnemom/aap), [aip](https://github.com/mnemom/aip). Do **not** file public issues. Full policy at [trust.mnemom.ai](https://trust.mnemom.ai). |
+| Active incident affecting your traffic | Your Enterprise account owner, or `security@mnemom.ai` for a security-impacting incident. |
 | Regulator-driven breach-notification assistance | Your Enterprise account owner or `security@mnemom.ai`. |
-| Non-urgent product or billing question | Dashboard → **Support** → **Question**. |
 
-Responsible disclosure is acknowledged within 48 hours; fix or mitigation target is 7 days for high-severity findings.
+Responsible disclosure is acknowledged within 3 business days; reproduction is confirmed within 14 days; a fix or mitigation is targeted within 90 days of acknowledgment. See [SECURITY.md](https://github.com/mnemom/docs/blob/main/SECURITY.md) for the full policy.
 
 ---
 
 ## Status page
 
-[`status.mnemom.ai`](https://status.mnemom.ai) is live and publishes:
-
-- Current operational state for each service (gateway, dashboard, proof-chain anchoring) per region.
-- Active incidents with a live update log.
-- 90-day uptime history.
-
-Scheduled maintenance windows are announced on the status page in advance. Contractual customers also receive email notification per the incident communication table above.
-
----
-
-## SLA credits
-
-Enterprise and Team contracts include SLA credits against the subscription fee when monthly uptime misses the contractual target. The credit schedule is in the MSA's SLA exhibit; typical structure:
-
-- Below target but ≥ 99.0%: 10% credit on the monthly subscription.
-- Below 99.0% but ≥ 95.0%: 25% credit.
-- Below 95.0%: 50% credit.
-
-Credits are applied to the next invoice after the customer raises the claim with evidence. Free and Developer tiers do not accrue credits.
-
-{/* TODO(Wassim/Alex): binding contractual value — confirm the SLA credit schedule above matches the credit schedule in current MSAs before GA. */}
+[`status.mnemom.ai`](https://status.mnemom.ai) is live and is the same signal the availability commitments above are measured against. It publishes current operational state, active incidents with a live update log, and uptime history.
 
 ---
 
 ## See also
 
-- [Launch SLOs & Deferrals](/guides/launch-slos-and-deferrals) — Per-scenario SLO commitments (S1–S10) and the explicit deferral list
 - [Compliance posture](/guides/compliance) — Regulatory status and shared-responsibility boundaries
-- [Safe House](/concepts/safe-house) — the per-customer perimeter the uptime target covers
-- [AEGIS](/concepts/aegis) — the cross-tenant Protection Network and its published SLOs
-- [Managed Rules](/concepts/managed-rules) — the signed rule pipeline whose propagation latency is published as an SLO
+- [Safe House](/concepts/safe-house) — the per-customer detection and enforcement pipeline
 - [Observability](/guides/observability) — Customer-side signals for detecting degradation early
 - [API reference overview](/api-reference/overview) — Error codes, rate limits, and timeouts
-
-## AEGIS SLO commitments
-
-AEGIS publishes Protection-Network SLOs at [`/trust/slos`](https://trust.mnemom.ai/slos):
-
-| SLO | Target |
-|---|---|
-| Managed Rule propagation | P95 ≤ 30 seconds (target; first 30-day window publishes 30 days post-GA) |
-| Rule-set freshness under normal operation | P99 ≤ 5 minutes |
-| Failover availability | 99.99% |
-| Staleness alert threshold | 24 hours (P0 page) |
-
-The KV → R2 → in-isolate read pipeline + the three independent signing chains (`RECIPE_PROMOTION_SIGNING_KEY`, `RECIPE_KV_SIGNING_KEY`, `RECIPE_R2_SIGNING_KEY`) are the mechanisms behind these commitments. See [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) for the failover behavior and alert tags.
+- [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos) — The current, canonical SLO commitments

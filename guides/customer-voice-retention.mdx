@@ -1,66 +1,27 @@
 ---
 title: "Aletheia Customer Voice — Retention Policy"
-description: "Retention schedule, deletion phases, and audit trail for Aletheia Customer Voice data (90d/180d)"
+description: "Retention settings, on-request deletion, and audit trail for Aletheia Customer Voice data"
 sidebarTitle: "Customer Voice Retention"
 icon: "clock-rotate-left"
 ---
 
-This page documents the retention schedule and deletion policy for data collected by Aletheia Customer Voice. The baseline schedule — 90 days standard, 180 days extended — applies across all plan tiers as defined in the Customer Voice data governance policy.
+This page documents retention and deletion for data collected by Aletheia Customer Voice (in-product feedback). Retention is a per-org setting, not a plan-tier default — see below for exactly what it does and does not do today.
 
 <Note>
 This document describes the technical retention implementation. It does not constitute legal advice. Consult qualified legal counsel for your specific obligations under GDPR or other applicable data-protection regulations.
 </Note>
 
-## Retention periods
+## Retention setting
 
-| Data category | Standard retention | Extended retention |
-|---|---|---|
-| Feedback responses | 90 days | 180 days |
-| Session identifiers | 90 days | 180 days |
-| Agent context snapshots | 90 days | 180 days |
-| Submission metadata | 90 days | 180 days |
-| **Deletion audit records** | Indefinite | Indefinite |
+Every org has a `retention_days` value for its Customer Voice submissions: an integer from 1 to 3,650, or `null`. **The default is `null` — retain indefinitely** — until an org owner or admin sets a value.
 
-Standard retention (90 days) applies to Free, Starter, and Pro plans. Extended retention (180 days) is available on Pro (opt-in) and is the default on Enterprise. The retention clock starts from the **submission timestamp** (`submitted_at`).
-
-Deletion audit records are the tombstone entries created when a record is deleted. They contain no feedback content — see [Deletion phases](#deletion-phases) below.
-
-## Deletion phases
-
-When a Customer Voice record reaches its retention boundary, or when an operator issues an early deletion request, it passes through the following cascade:
-
-| Phase | Timing | What happens |
-|---|---|---|
-| **Expiry / request** | At `submitted_at + retention_days`, or on demand | Record flagged for deletion |
-| **Hard delete** | Within 24 hours of scheduled expiry; within 5 minutes (p99) for on-request | Feedback response, session identifier, and agent context snapshot permanently deleted from primary database |
-| **Cache clear** | Within 24 hours | Cloudflare KV entries for the record cleared |
-| **Tombstone written** | Simultaneously with hard delete | Deletion audit record written: record ID, deletion timestamp, org ID, and deletion reason. No feedback content. |
-
-Tombstone records are retained indefinitely as the Article 30 record of processing. They confirm that erasure was performed without retaining what was erased.
-
-## On-request deletion (early)
-
-Operators may delete Customer Voice data before its scheduled expiry. These org-scoped operator endpoints authenticate with a bearer token — the same scheme as the [GDPR deletion cascade](/guides/gdpr-data-subject-rights). The request shapes are shown below.
-
-Delete all Customer Voice submissions for an org:
-
-```http
-DELETE /v1/orgs/{org_id}/customer-voice
-Authorization: Bearer $TOKEN
-```
-
-Delete a single submission:
-
-```http
-DELETE /v1/orgs/{org_id}/customer-voice/{submission_id}
-Authorization: Bearer $TOKEN
-```
-
-Both endpoints return `202 Accepted`. The deletion cascade completes within 5 minutes (p99).
+<Warning>
+Setting `retention_days` records the org's retention policy, but **nothing currently reads it to automatically delete aged submissions.** There is no scheduled job that enforces this setting yet. The API reports this honestly: the settings response includes `"enforcement_active": false`. If you need a submission gone, delete it explicitly — see **On-request deletion** below.
+</Warning>
 
 ## Configuring retention
 
-Retention is managed through the org-scoped Customer Voice settings endpoint, which authenticates with a bearer token.
+The org-scoped settings endpoint authenticates with a bearer token and is available to the owner/admin (write) or owner/admin/auditor (read) roles.
 
 Check the current retention setting for an org:
 
@@ -69,17 +30,17 @@ GET /v1/orgs/{org_id}/customer-voice/settings
 Authorization: Bearer $TOKEN
 ```
 
-Set extended retention (Pro opt-in / Enterprise):
-
-```http
-PATCH /v1/orgs/{org_id}/customer-voice/settings
-Authorization: Bearer $TOKEN
-Content-Type: application/json
-
-{"retention_days": 180}
+```json
+{
+  "org_id": "...",
+  "retention_days": null,
+  "updated_by": null,
+  "updated_at": null,
+  "enforcement_active": false
+}
 ```
 
-Restore standard retention:
+Set a retention period:
 
 ```http
 PATCH /v1/orgs/{org_id}/customer-voice/settings
@@ -89,40 +50,51 @@ Content-Type: application/json
 {"retention_days": 90}
 ```
 
+Restore indefinite retention:
+
+```http
+PATCH /v1/orgs/{org_id}/customer-voice/settings
+Authorization: Bearer $TOKEN
+Content-Type: application/json
+
+{"retention_days": null}
+```
+
+## On-request deletion
+
+Because automatic expiry is not yet enforced, deletion today is always explicit — issued by an org owner or admin. Both endpoints erase the matching rows synchronously (the erasure is complete by the time the response returns) and return `200 OK`.
+
+Delete all Customer Voice submissions for an org:
+
+```http
+DELETE /v1/orgs/{org_id}/customer-voice
+Authorization: Bearer $TOKEN
+```
+
+```json
+{ "deleted": 42, "org_id": "..." }
+```
+
+Delete a single submission:
+
+```http
+DELETE /v1/orgs/{org_id}/customer-voice/{submission_id}
+Authorization: Bearer $TOKEN
+```
+
+```json
+{ "deleted": 1, "submission_id": "..." }
+```
+
+A submission ID that doesn't exist, or belongs to another org, returns `404` either way — the response never discloses which.
+
 <Warning>
-Reducing `retention_days` from 180 to 90 schedules immediate deletion of all records older than 90 days. The next scheduled deletion run (within 24 hours) will permanently remove those records. This action is irreversible.
+Deletion is irreversible. There is no tombstone or recovery window once a submission is erased.
 </Warning>
 
 ## Audit trail
 
-Every deletion — scheduled or on-request — is recorded in the org governance audit log:
-
-| Audit field | Value |
-|---|---|
-| `event_type` | `customer_voice.record_deleted` (single) or `customer_voice.bulk_deleted` (org-wide) |
-| `submission_id` | The deleted record's ID (omitted for bulk) |
-| `record_count` | Number of records deleted (bulk only) |
-| `deletion_reason` | `retention_expiry`, `operator_request`, or `subject_request` |
-| `org_id` | The org that owned the records |
-| `deleted_at` | ISO 8601 timestamp |
-
-Query the audit log:
-
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.mnemom.ai/v1/orgs/{org_id}/audit-log?event_type=customer_voice.record_deleted"
-```
-
-The audit log entry serves as the GDPR Article 30 record of processing for the deletion and is available to data protection officers conducting compliance reviews.
-
-## Plan availability
-
-| Plan | `retention_days` default | Maximum | Configurable |
-|---|---|---|---|
-| Free | 90 | 90 | No |
-| Starter | 90 | 90 | No |
-| Pro | 90 | 180 | Yes (opt-in) |
-| Enterprise | 180 | 180 | Yes (can be reduced to 90) |
+Every export, deletion, and settings change is recorded internally in Mnemom's governance audit log against the acting user and the org. This is a separate log from the general request-level `GET /v1/orgs/{org_id}/audit-log` endpoint (which covers HTTP-request metadata, not this feedback-specific governance trail) — there is currently no dedicated customer-facing endpoint to query these particular records directly.
 
 ## Related
 

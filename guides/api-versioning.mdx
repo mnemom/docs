@@ -12,14 +12,14 @@ Send the `X-Mnemom-Version` header with every request:
 ```http
 GET /v1/alignment/agent/mnm-550e8400-e29b-41d4-a716-446655440000
 X-Mnemom-Api-Key: your-api-key
-X-Mnemom-Version: 2026-04-13
+X-Mnemom-Version: 2026-08-17
 ```
 
 Every response echoes the version used:
 
 ```http
 HTTP/2 200
-X-Mnemom-Version: 2026-04-13
+X-Mnemom-Version: 2026-08-17
 Content-Type: application/json
 ```
 
@@ -27,29 +27,25 @@ If you don't send the header, the **latest** behavior is used. For production sy
 
 ## Current version
 
-The current stable version is **`2026-04-13`** (the baseline). This is the version to pin to for new integrations.
+The current stable version is **`2026-08-17`**. This is the version to pin to for new integrations.
 
 ```bash
 curl https://api.mnemom.ai/v1/alignment/agent/$AGENT_ID \
   -H "X-Mnemom-Api-Key: $API_KEY" \
-  -H "X-Mnemom-Version: 2026-04-13"
+  -H "X-Mnemom-Version: 2026-08-17"
 ```
 
 ## SDK defaults
 
-The official SDKs pin to the latest stable version automatically:
+The TypeScript SDK (`@mnemom/sdk`) does not currently expose a version-pinning option — every request goes through with no `X-Mnemom-Version` header, so it always gets the latest behavior:
 
 ```typescript
-// @mnemom/agent-integrity-protocol — pins to latest stable by default
-import { MnemomClient } from '@mnemom/agent-integrity-protocol';
+import { Mnemom } from '@mnemom/sdk';
 
-const client = new MnemomClient({ apiKey: process.env.MNEMOM_API_KEY });
-// Optionally override:
-const client = new MnemomClient({
-  apiKey: process.env.MNEMOM_API_KEY,
-  apiVersion: '2026-04-13',
-});
+const client = new Mnemom({ apiKey: process.env.MNEMOM_API_KEY });
 ```
+
+If your integration needs to pin to a specific date, set the header yourself on raw HTTP calls to the API rather than relying on an SDK option.
 
 ## Support window
 
@@ -63,20 +59,15 @@ The 18-month standard window is longer than most APIs. This reflects mnemom's se
 
 ## Deprecation signals
 
-When a version you are using is deprecated, you will see:
+When a version you are using is deprecated, responses carry ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594)):
 
 ```http
 Deprecation: true
 Sunset: Mon, 13 Oct 2027 00:00:00 GMT
 Link: <https://docs.mnemom.ai/guides/api-versioning>; rel="deprecation"
-X-Mnemom-Deprecation-Note: Version 2026-04-13 deprecated; migrate to 2026-10-01 by Oct 2027
 ```
 
-You will also receive email notifications at:
-- T+0 (deprecation announcement)
-- T+12 months
-- T+16 months
-- T+17 months (last warning)
+No version is currently deprecated — every supported version date is fully live. When a version does enter its sunset window, these headers appear on every response made with that version pinned.
 
 ## Breaking vs. non-breaking changes
 
@@ -102,10 +93,10 @@ The `/v1/` URL prefix represents the current API generation. A `/v2/` would only
 
 Date header versioning handles all evolution within `/v1/`.
 
-## Migration guides
+## Version history
 
-Migration guides for each breaking version will appear here as they are introduced.
-
-| Version date | What changed | Migration guide |
-|-------------|-------------|----------------|
-| `2026-04-13` | Initial baseline | — |
+| Version date | What changed |
+|-------------|-------------|
+| `2026-04-13` | Initial baseline |
+| `2026-04-15` | Unified card schema — alignment and protection card responses moved to a single schema identity (`unified/2026-04-15`) across all card endpoints |
+| `2026-08-17` | `POST /v1/alignment/agent/{agent_id}/explain` now rejects a request that names no tool with `400 missing_tool_name`, instead of returning a `pass` verdict for a check that evaluated nothing. Callers pinned to an earlier date keep the old response shape, but a toolless request on that shape now reports the empty tool list explicitly in `reasoning` rather than silently passing |

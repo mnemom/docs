@@ -57,8 +57,8 @@ The Alignment Card's `bounded_actions` array declares the agent's permitted func
 
 | WEF Concept | AAP Field | Type |
 |-------------|-----------|------|
-| Agent function/task | `autonomy_envelope.bounded_actions` | String array |
-| Function constraints | `autonomy_envelope.forbidden_actions` | String array |
+| Agent function/task | `autonomy.bounded_actions` | String array |
+| Function constraints | `autonomy.forbidden_actions` | String array |
 
 The WEF describes function; AAP also describes *anti-function* — what the agent must never do, regardless of context. The `forbidden_actions` field has no WEF equivalent. A violation of `forbidden_actions` generates a `FORBIDDEN_ACTION` violation at `CRITICAL` severity.
 
@@ -81,10 +81,10 @@ The WEF explicitly identifies "behavioural drift" as a novel risk that tradition
 
 | WEF Concept | AAP/AIP Field | Function |
 |-------------|---------------|----------|
-| Behavioral predictability | `audit_commitment.trace_format` | Structured logging of non-deterministic decisions |
+| Behavioral predictability | `audit.trace_format` | Structured logging of non-deterministic decisions |
 | Non-deterministic monitoring | AIP Integrity Checkpoints | Per-turn analysis of thinking blocks (enforce gates same-turn; observe/nudge post-hoc) |
 | Behavioral change over time | AIP `IntegrityDriftAlert` | Cross-session behavioral divergence detection |
-| Tamper evidence | `audit_commitment.tamper_evidence` | `append_only`, `signed`, or `merkle` trail integrity |
+| Tamper evidence | `audit.tamper_evidence` | `append_only`, `signed`, or `merkle` trail integrity |
 
 AAP and AIP assume non-determinism is the default and provide infrastructure to *observe* it. The question shifts from "is it predictable?" to "is its unpredictability observable and characterized?"
 
@@ -96,10 +96,10 @@ This is the most direct mapping. AAP's autonomy envelope is a formal, machine-re
 
 | WEF Concept | AAP Field | Function |
 |-------------|-----------|----------|
-| Autonomy level | `autonomy_envelope` (composite) | Complete autonomy specification |
-| What agent can do independently | `autonomy_envelope.bounded_actions` | Permitted autonomous actions |
-| When agent must stop and ask | `autonomy_envelope.escalation_triggers` | Condition-based escalation rules |
-| Financial limits on autonomy | `autonomy_envelope.max_autonomous_value` | Currency-denominated ceiling |
+| Autonomy level | `autonomy` (composite) | Complete autonomy specification |
+| What agent can do independently | `autonomy.bounded_actions` | Permitted autonomous actions |
+| When agent must stop and ask | `autonomy.escalation_triggers` | Condition-based escalation rules |
+| Financial limits on autonomy | `autonomy.max_autonomous_value` | Currency-denominated ceiling |
 | Who to escalate to | `principal.escalation_contact` | Endpoint for escalation notifications |
 | Per-turn calibration | AIP `recommended_action` | `continue`, `log_and_continue`, `pause_for_review`, `deny_and_escalate` |
 
@@ -109,9 +109,9 @@ This is the most direct mapping. AAP's autonomy envelope is a formal, machine-re
 
 | WEF Concept | AAP Field | Function |
 |-------------|-----------|----------|
-| System permissions | `autonomy_envelope.bounded_actions` | What the agent is permitted to do |
-| Permission boundaries | `autonomy_envelope.forbidden_actions` | Hard limits regardless of context |
-| Data access scope | `autonomy_envelope.escalation_triggers` | Conditions that constrain data access |
+| System permissions | `autonomy.bounded_actions` | What the agent is permitted to do |
+| Permission boundaries | `autonomy.forbidden_actions` | Hard limits regardless of context |
+| Data access scope | `autonomy.escalation_triggers` | Conditions that constrain data access |
 | Delegation chain | `principal.type` + `principal.relationship` | Who delegated authority and how |
 | Permission expiry | `expires_at` | Authority has a time limit |
 | Authority verification | `verify_trace` returns `UNBOUNDED_ACTION` | Detects actions outside granted authority |
@@ -171,10 +171,10 @@ The WEF's Evaluation pillar establishes four evaluation principles and specific 
 
 | WEF Audit Requirement | AAP Field | Implementation |
 |----------------------|-----------|----------------|
-| Structured records | `audit_commitment.trace_format` | `"ap-trace-v1"` — standardized, schema-validated |
-| Retention policy | `audit_commitment.retention_days` | Explicit retention period |
-| Queryable logs | `audit_commitment.queryable` + `query_endpoint` | API-accessible trace history |
-| Tamper resistance | `audit_commitment.tamper_evidence` | `append_only`, `signed`, or `merkle` |
+| Structured records | `audit.trace_format` | `"ap-trace-v1"` — standardized, schema-validated |
+| Retention policy | `audit.retention_days` | Explicit retention period |
+| Queryable logs | `audit.queryable` + `query_endpoint` | API-accessible trace history |
+| Tamper resistance | `audit.tamper_evidence` | `append_only`, `signed`, or `merkle` |
 | Rationale capture | AP-Trace `alternatives_considered` + `selection_reasoning` | Why the agent chose what it chose |
 
 ## 4. Risk assessment: lifecycle mapping
@@ -219,7 +219,7 @@ AIP implements progressive monitoring intensity based on this mapping: `advisory
 | WEF Governance Area | WEF Mechanism | AAP/AIP Implementation |
 |---------------------|---------------|------------------------|
 | **Access control** | Enforce least-privilege access; define task boundaries | `bounded_actions` (permitted), `forbidden_actions` (denied), `max_autonomous_value` (financial ceiling) |
-| **Legal and compliance** | Data protection impact assessments; privacy and regulation compliance | `values.declared` encodes compliance values; `extensions` namespace for regulatory metadata; `audit_commitment` enables DPIA evidence |
+| **Legal and compliance** | Data protection impact assessments; privacy and regulation compliance | `values.declared` encodes compliance values; `extensions` namespace for regulatory metadata; `audit` enables DPIA evidence |
 | **Testing and validation** | Sandbox runs, controlled pilots, third-party audits | `verify_trace` against Alignment Card is the validation engine; AIP input analysis acts as input filter |
 | **Monitoring and logging** | Logging for all agent actions; anomaly alerts and dashboards | AP-Traces, AIP Integrity Checkpoints, `IntegrityDriftAlert`, OTel export via [aip-otel-exporter](/guides/observability) |
 | **Human oversight** | Define HITL/HOTL models; set supervisory triggers | `principal.relationship`, `escalation_triggers`, `principal.escalation_contact` |

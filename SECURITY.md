@@ -1,8 +1,10 @@
 # Security Policy
 
+Mnemom's full Vulnerability Disclosure Policy — scope, safe harbor, and the hall of fame — is published at **[trust.mnemom.ai](https://trust.mnemom.ai)**. This page summarizes it.
+
 ## Reporting a vulnerability
 
-Email **security@mnemom.ai**. A PGP key is available on request for sensitive reports. Please do **not** open public GitHub issues for security reports.
+Email **security@mnemom.ai** with a clear description and reproduction steps. Please do **not** open public GitHub issues for security reports.
 
 For the open protocol repositories you may also use GitHub's private Security Advisory flow:
 
@@ -19,7 +21,8 @@ The managed-product and API source repositories are private; route reports affec
 
 ## Response targets
 
-- **Acknowledgement:** within 48 hours.
-- **Fix or mitigation:** 7 days for high-severity findings.
+- **Acknowledgement:** within 3 business days.
+- **Reproduction confirmed:** within 14 days.
+- **Fix or mitigation:** within 90 days of acknowledgment, or sooner once a fix ships and customers are protected (coordinated disclosure).
 
 We will keep you updated through remediation and credit reporters who wish to be named once a fix has shipped.

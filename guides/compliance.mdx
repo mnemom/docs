@@ -22,25 +22,24 @@ This document reflects our technical and process posture. It is not legal advice
 | Framework | Status | What that means today | Evidence / reference |
 |---|---|---|---|
 | EU AI Act Article 50 (transparency) | **Supported** | AP-Traces and Integrity Checkpoints satisfy the Article 50 logging, marking, and transparency obligations. SDK presets wire the recommended configuration. | [EU AI Act compliance](/guides/eu-compliance) |
-| EU AI Act Article 19 (automatic logging) | **Supported** | Tier-1 commitments are append-only, hash-chained, and retained permanently without PII. | [Safe House](/concepts/safe-house) |
-| GDPR | **Supported** | Three-tier storage with defined TTLs, pseudonymized Tier 2, encrypted Tier 3, Article 17 erasure path. | [GDPR data subject rights](/guides/gdpr-data-subject-rights) |
-| HIPAA | **Supported** | Back-door DLP is extended to the 18 PHI identifiers; PHI is tokenized before any LLM-assisted analysis; BAA available on Enterprise engagements. See caveats below. | [Safe House](/concepts/safe-house) |
+| EU AI Act Article 19 (automatic logging) | **Supported** | Integrity checkpoints and AP-Traces are append-only and hash-chained. | [Safe House](/concepts/safe-house) |
+| GDPR | **Supported** | Automated Article 17 erasure cascade, with a documented pseudonymization carve-out for specific audit/evidence records. | [GDPR data subject rights](/guides/gdpr-data-subject-rights) |
+| HIPAA | **Partial** | Detection includes common PHI-adjacent identifier patterns (email, phone, SSN, IP address, among others); BAA available on Enterprise engagements. See caveats below. | [Safe House](/concepts/safe-house) |
 | SOC 2 Type II | **Readiness assessment in progress** | Control mapping, evidence collection, and gap remediation are underway. A Type I report is the first milestone; a Type II period follows. | SOC 2 readiness |
 | SOC 3 | **Not on roadmap** | We will revisit with the first Enterprise customer who makes it a contractual requirement. Treat as unsupported until that time. | — |
 | FedRAMP (any impact level) | **Not on roadmap** | We will revisit with the first US federal engagement that requires authorization. Treat as unsupported until that time. | — |
 | GxP (FDA / EMA validated-system regimes) | **Not on roadmap** | Same policy as FedRAMP — revisit with a specific regulated customer engagement. | — |
-| SEC / FINRA (investment-advice guardrails) | **Partial** | The back-door `RegComplianceChecker` detector flags investment-advice output on Sovereign / Regulated tiers. Not a substitute for a registered entity's own supervisory program. | [Safe House](/concepts/safe-house) |
-| COPPA (under-13 data minimization) | **Supported** | If age ≤ 13 is detected, Tier 3 storage is prohibited, Tier 2 TTL shrinks to 24 hours, and async LLM analysis is suppressed. | [Safe House](/concepts/safe-house) |
-| PCI DSS | **Not in scope** | Mnemom does not process, store, or transmit cardholder data. DLP flags card numbers inbound and outbound as a defensive measure. | — |
+| SEC / FINRA (investment-advice guardrails) | **Partial** | Detection can flag suspected investment-advice content in output as one of its checks. Not a substitute for a registered entity's own supervisory program. | [Safe House](/concepts/safe-house) |
+| COPPA (under-13 data minimization) | **Partial** | Content flagged as inappropriate for minors is one of the checks the detection pipeline runs. This is a detection signal, not a dedicated age-verification or data-minimization control. | [Safe House](/concepts/safe-house) |
+| PCI DSS | **Not in scope** | Mnemom does not process, store, or transmit cardholder data. Detection flags card-number-shaped content inbound and outbound as a defensive measure. | — |
 
 ---
 
 ## HIPAA caveats
 
-HIPAA support covers the technical controls (DLP on the 18 PHI identifiers, encryption at rest and in transit, Tier-3 tokenization before any LLM analysis, audit logging). A customer seeking a BAA must:
+HIPAA support is partial: detection covers several PHI-adjacent identifier patterns and standard technical controls (encryption at rest and in transit, audit logging) apply, but this is not a purpose-built, complete implementation of all 18 HIPAA Safe Harbor identifiers. A customer seeking a BAA must:
 
 - Be on an Enterprise contract that includes the BAA as an exhibit.
-- Use the Enforce or Sovereign tier so that DLP runs synchronously on outbound responses.
 - Operate under an Alignment Card that restricts bounded actions to HIPAA-appropriate scopes.
 
 See the [Safe House concept page](/concepts/safe-house) for the detection modalities that apply to PHI.
@@ -67,7 +66,7 @@ A few obligations are shared between Mnemom and the customer. Mnemom's controls 
 - **Data subject requests.** Mnemom provides the erasure path (see [GDPR data subject rights](/guides/gdpr-data-subject-rights)). The customer decides when to invoke it and maintains the legal basis for processing.
 - **Incident notification to regulators.** If a breach triggers a regulator-notification obligation under GDPR, HIPAA, or sector-specific law, the customer is the reporting party. Mnemom supports with timelines, forensic detail, and attestations under the terms of the MSA. See [SLA and incident response](/guides/sla-and-incident-response).
 - **Acceptable-use enforcement.** Mnemom's Safe House enforces technical guardrails against well-known attack classes. The customer is responsible for the content policy of their agents and for investigating anomalous legitimate behavior surfaced by the platform.
-- **Regulated advice.** `RegComplianceChecker` flags suspected investment / medical / legal advice in output. It does not replace the customer's supervisory or licensing program.
+- **Regulated advice.** Safe House detection can flag suspected investment advice or content inappropriate for minors in output. It does not replace the customer's supervisory or licensing program.
 
 ---
 
@@ -96,5 +95,5 @@ Reach out via the dashboard's **Enterprise contact** form or your account owner.
 - [EU AI Act compliance](/guides/eu-compliance) — Article 50 obligation mapping in detail
 - [GDPR data subject rights](/guides/gdpr-data-subject-rights) — Access, rectification, erasure, portability
 - [NIST CSF / 800-53 control mapping](/guides/nist-csf-800-53-mapping) — Mnemom's shipped controls mapped to CSF 2.0 functions and 800-53 families
-- [Safe House](/concepts/safe-house) — The enforcement pipeline compliance relies on (four checkpoints × four enforcement modes)
-- [SLA and incident response](/guides/sla-and-incident-response) — Uptime, RTO/RPO, breach process
+- [Safe House](/concepts/safe-house) — The detection and enforcement pipeline compliance relies on
+- [SLA and incident response](/guides/sla-and-incident-response) — Availability commitments, incident communication, and breach-notification support

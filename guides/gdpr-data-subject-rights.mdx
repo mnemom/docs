@@ -5,7 +5,7 @@ sidebarTitle: "GDPR Deletion"
 icon: "trash-can"
 ---
 
-Mnemom supports GDPR Article 17 (right to erasure) through a documented, auditable deletion cascade. When a deletion request is issued, all agent-identifiable data is removed from Mnemom's data stores within minutes, with cryptographic and regulatory audit trails preserved.
+Mnemom supports GDPR Article 17 (right to erasure) through a documented, auditable deletion cascade. When a deletion request is issued, the agent is immediately inaccessible and an automated cascade removes agent-identifiable data from Mnemom's data stores, with cryptographic and regulatory audit trails preserved.
 
 <Note>
 This document describes the technical deletion mechanism. It does not constitute legal advice. Consult qualified legal counsel for your specific GDPR obligations as a data controller or processor.
@@ -43,7 +43,17 @@ curl -X DELETE \
   https://api.mnemom.ai/v1/orgs/{org_id}
 ```
 
-Deletes the organization and cascades deletion to all agents belonging to the org. Returns `202 Accepted` with the count of affected agents.
+Only the org's owner can call this. Unlike agent deletion, org deletion does **not** cascade to the org's agents — it is refused with `409 Conflict` until every blocker is cleared:
+
+- Every agent in the org must already be deleted (or tombstoned).
+- The org must have no active subscription.
+- The org must have no remaining API keys.
+
+Once those are clear, the call revokes the org's API keys, deletes the org record, and returns `200 OK` with `{ "deleted": true }`.
+
+<Warning>
+Deleting an org does not delete its agents. To fully erase an org's data, delete each agent first (above), then delete the org.
+</Warning>
 
 ### Checking deletion status
 
@@ -66,31 +76,34 @@ All agent-specific data is permanently deleted from Mnemom's primary database:
 
 | Data category | Examples |
 |---|---|
-| **Identity & cards** | Agent record, alignment cards, protection cards, canonical composed cards, policies, exemptions |
-| **Integrity & reasoning** | Integrity checkpoints, verdict proofs, enforcement nudges, containment logs |
+| **Integrity & reasoning** | Integrity checkpoints, cryptographic verdict proofs, cross-turn advisories, containment logs, reclassification history |
+| **Cards & policies** | The agent's alignment card, protection card, policies, and policy evaluations |
 | **Reputation & trust** | Reputation scores, reputation events, trust edges, reputation snapshots |
-| **Detection & analysis** | Safe House evaluations, threat training traces, sideband analyses |
-| **Configuration** | Safe House configs, policy evaluations, card amendments, tool registrations |
-| **Webhooks** | Webhook registrations and delivery history |
-| **Cryptographic state** | Merkle tree state, score publication records |
+| **On-chain mapping** | Off-chain Merkle tree state and score-publication records that link the agent to its on-chain anchors (see [On-chain anchors](#on-chain-anchors) below) |
+| **Detection & session data** | Safe House evaluations and configs, drift alerts, session records, agent-authored content, feedback the agent filed |
+| **Agent record itself** | The agent record, its composed/canonical card, and any per-section exemptions are removed last, once every table that references the agent has been cleared |
 | **Cache** | All cached data across Cloudflare KV namespaces |
 
-### Pseudonymized (agent identity removed, structure retained)
+### Retained under a legal carve-out (Article 17(3))
 
-Certain records are retained for regulatory compliance but have all agent-identifying information replaced with an irreversible pseudonym:
+A small number of record types are **not** deleted or pseudonymized — they are kept exactly as-is because deleting them would conflict with another legal obligation:
 
 | Data category | Legal basis | What is retained |
 |---|---|---|
-| **Governance audit log** | SOC 2 audit trail, Art. 17(3)(e) legal claims | Timestamps, action types, actor IDs. Card snapshots scrubbed. |
-| **Usage and billing records** | Art. 17(3)(b) tax/accounting | Amounts, dates, plan types. Agent identifier replaced with pseudonym. |
-| **API audit log** | Art. 17(3)(e) security | Request metadata (method, path, status). Request/response bodies scrubbed. |
+| **Usage and billing records** | Art. 17(3)(b) tax/accounting | Retained verbatim, including the agent identifier — required for reproducible historical billing. |
+
+### Pseudonymized (person stripped, record retained)
+
+Two record types are scrubbed of agent- and person-identifying fields but kept for audit purposes:
+
+| Data category | Legal basis | What is retained |
+|---|---|---|
+| **Governance audit log** | SOC 2 audit trail, Art. 17(3)(e) legal claims | Timestamps and action types. The agent identifier is replaced with an irreversible pseudonym; before/after snapshots are cleared. |
+| **Card amendments** | Tamper-evidence / signed correction record | The signed amendment and its before/after diff are kept as evidence; only the requesting person's identifier is removed and the agent identifier is pseudonymized. |
 
 ### Naturally expiring (external stores)
 
-| Store | Retention | Treatment |
-|---|---|---|
-| **Observability traces** | 30 days (configurable via `audit_commitment.retention_days`) | A deletion denylist prevents traces from being surfaced in queries or API responses during the residual retention window. Traces expire naturally. |
-| **AI Gateway logs** | Per Cloudflare retention policy | Same denylist mechanism. Logs expire per platform policy. |
+Mnemom's own OpenTelemetry spans (distinct from the `traces` database rows removed in phase 7 above) are exported to the observability backend and age out under that platform's own retention window, independent of the deletion cascade.
 
 ### On-chain anchors
 
@@ -101,10 +114,10 @@ Mnemom anchors aggregate Merkle roots to Base L2 for tamper-evidence (see [On-Ch
 | Phase | Timing | What happens |
 |---|---|---|
 | **Immediate** (< 1 second) | On request | Agent tombstoned; all read endpoints return 404 |
-| **Cascade** (< 60 seconds typical) | Async | Database rows deleted across all tables; KV keys cleared |
-| **Pseudonymization** (< 60 seconds) | Async | Retained records scrubbed of agent identifiers |
-| **Complete** | < 5 minutes | Deletion request status transitions to `complete` |
-| **Trace expiry** | Up to 30 days | Observability traces age out naturally (denylist active) |
+| **Cascade** | Async, kicked off immediately; a cron sweep every 15 minutes resumes any interrupted cascade | Database rows deleted across all tables; KV keys cleared |
+| **Pseudonymization** | Async | Retained records scrubbed of agent identifiers |
+| **Complete** | Monitored against an internal 2-hour SLA — well inside GDPR's "without undue delay" standard | Deletion request status transitions to `complete` |
+| **Trace expiry** | Per the observability backend's own retention window | OpenTelemetry spans (separate from the `traces` database rows already removed above) age out naturally |
 
 <Warning>
 Deletion is irreversible. Once a deletion request completes, the agent and all associated data cannot be recovered. Ensure you have exported any needed data before requesting deletion.
@@ -117,23 +130,34 @@ Each deletion request transitions through a fixed sequence of `status` values as
 | Phase | `status` value | What happens |
 |---|---|---|
 | **Tombstone** | `tombstoned` | Agent immediately inaccessible; all read endpoints return `404`. Deletion cascade queued. |
-| **Phase 1** | `phase_1_complete` | Identity and cards deleted — agent record, alignment cards, protection cards, canonical composed cards, policies, exemptions. |
-| **Phase 2** | `phase_2_complete` | Integrity and reasoning deleted — integrity checkpoints, verdict proofs, enforcement nudges, containment logs. |
-| **Phase 3** | `phase_3_complete` | Reputation and trust deleted — reputation scores, reputation events, trust edges, reputation snapshots. |
-| **Phase 4** | `phase_4_complete` | Detection and analysis deleted — Safe House evaluations, threat training traces, sideband analyses. |
-| **Phase 5** | `phase_5_complete` | Configuration deleted — Safe House configs, policy evaluations, card amendments, tool registrations. |
-| **Phase 6** | `phase_6_complete` | Webhooks deleted — webhook registrations and delivery history. |
-| **Phase 7** | `phase_7_complete` | Cryptographic state deleted — Merkle tree state, score publication records. |
+| **Phase 1** | `phase_1_complete` | Cross-turn advisory history and cryptographic verdict proofs deleted. |
+| **Phase 2** | `phase_2_complete` | Integrity and reasoning deleted — integrity checkpoints, webhook registrations, containment logs, disagreement reviews. |
+| **Phase 3** | `phase_3_complete` | Cards and policies deleted — the agent's alignment card, protection card, policies, policy evaluations. |
+| **Phase 4** | `phase_4_complete` | Reputation and trust deleted — reputation scores, reputation events, trust edges, reputation snapshots. |
+| **Phase 5** | `phase_5_complete` | On-chain mapping deleted — off-chain Merkle tree state and score-publication records. |
+| **Phase 6** | `phase_6_complete` | Detection configs, drift alerts, session records, agent-authored content, and agent-filed feedback deleted. |
+| **Phase 7** | `phase_7_complete` | Behavioral traces and Safe House evaluations deleted, then the agent record itself — which also removes its composed/canonical card and any exemptions. |
 | **KV cleared** | `kv_cleared` | All cached data cleared across Cloudflare KV namespaces. |
 | **Pseudonymized** | `pseudonymized` | Retained records scrubbed of agent identifiers. See [Retained in pseudonymized form](#retained-in-pseudonymized-form) below. |
-| **Complete** | `complete` | Full cascade complete. All agent-identifiable data removed. |
+| **Complete** | `complete` | Full cascade complete. All agent-identifiable data removed except the Article 17(3) carve-outs above. |
 | **Failed** | `failed` | Cascade halted at a phase. The `failed_phase` field identifies where. Automatic retries apply. |
 
 ### Retained in pseudonymized form
 
-When the status transitions to `pseudonymized`, the records listed under [Pseudonymized (agent identity removed, structure retained)](#pseudonymized-agent-identity-removed-structure-retained) above have had agent identifiers replaced with a one-way hash. The pseudonym is irreversible — no re-identification from retained records is possible.
+When the status transitions to `pseudonymized`, the records listed under [Pseudonymized (person stripped, record retained)](#pseudonymized-person-stripped-record-retained) above have had agent and person identifiers replaced with a one-way hash. The pseudonym is irreversible — no re-identification from retained records is possible.
 
 See [Legal basis for retained data](#legal-basis-for-retained-data) below for the applicable Article 17(3) carve-outs.
+
+## Data export (access & portability)
+
+Before deleting an agent, you can export its full compliance record — checkpoints, reclassification history, card amendments, and score history:
+
+```bash
+curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  "https://api.mnemom.ai/v1/agents/{agent_id}/compliance-export?format=json"
+```
+
+Supports `format=json` or `format=csv`, and an optional `from`/`to` time window. This is the self-service path for the GDPR right of access (Art. 15) and data portability (Art. 20) — export before you erase.
 
 ## Verification
 
@@ -149,8 +173,9 @@ GDPR Article 17(3) permits continued processing where erasure conflicts with oth
 
 | Carve-out | Article 17(3) paragraph | Mnemom application |
 |---|---|---|
-| **Legal claims** | (e) | Governance audit log, API audit log, admin audit log — retained as pseudonymized records for legal defense |
-| **Legal obligation** | (b) | Billing and usage records — retained under tax/accounting law with agent identifier pseudonymized |
+| **Legal claims** | (e) | Governance audit log — retained as a pseudonymized record for legal defense |
+| **Tamper-evidence** | (e) | Card amendments — the signed correction record is retained with the person stripped and the agent identifier pseudonymized |
+| **Legal obligation** | (b) | Billing and usage records — retained verbatim, including the agent identifier, under tax/accounting law |
 | **Record of processing** | Art. 30 | Deletion request record itself — retained as proof that the erasure was performed |
 
 ## For data protection officers
@@ -158,7 +183,7 @@ GDPR Article 17(3) permits continued processing where erasure conflicts with oth
 If you are an enterprise customer's DPO conducting a compliance review:
 
 - **Technical specification:** Full deletion cascade architecture documentation is available on request, including the complete table inventory, FK cascade analysis, retention carve-outs with legal citations, and partial failure handling.
-- **Response time SLA:** Deletion requests are processed within 5 minutes (p99). The GDPR "without undue delay" obligation (Art. 17(1)) is satisfied by immediate tombstoning (< 1 second) and full cascade completion (< 5 minutes).
+- **Response time SLA:** Tombstoning (agent inaccessible from every read endpoint) is immediate — under 1 second. The full cascade to `complete` is monitored internally against a 2-hour SLA, well inside the GDPR "without undue delay" obligation (Art. 17(1)); an interrupted cascade is automatically resumed by a cron sweep every 15 minutes.
 - **Audit evidence:** Every deletion request is logged in `deletion_requests` with timestamps, status transitions, and the requesting user's identity.
 - **Scope confirmation:** To confirm that all agent data has been removed, request a deletion status check — the response confirms cascade completion across all stores.
 
