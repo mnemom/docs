@@ -5,364 +5,274 @@ sidebarTitle: "Changelog"
 icon: "clock-rotate-left"
 ---
 
-Track changes across the Mnemom ecosystem -- protocols, SDKs, infrastructure, and tooling.
+Track changes across the Mnemom ecosystem — protocols, SDKs, infrastructure, and tooling.
+
+---
+
+## Usage-based pricing: everything included, pay only for μ
+<sub>September 2026</sub>
+
+Mnemom moved from plan tiers to usage-based pricing. There's one unit — μ (1 μ = $0.01,
+immutable) — and every feature is available to every account regardless of spend. See
+[Pricing](/pricing/overview) for the full model.
+
+- The billing dashboard now shows your available μ balance, a full ledger of grants,
+  purchases, and spend, and configurable budget alerts.
+- If your org runs agents with enforcement on, requests pause automatically once your
+  balance is depleted rather than billing past zero, and the dashboard tells you why.
+- `GET /billing/mu`, `GET /billing/mu/ledger`, and `GET /billing/mu/statement` expose the
+  same balance, ledger, and monthly statement by API; `GET/PUT /billing/budget-alert` manages
+  alert thresholds; `GET /billing/payment-methods` and `GET /billing/receipts` cover payment
+  instruments and purchase history.
+
+---
+
+## Fewer false positives in integrity checks
+<sub>August 2026</sub>
+
+AIP 1.3.0 adds a tool-activity ledger that gives the integrity analyzer more context about
+what an agent's tools actually did, cutting false `boundary_violation` and `review_needed`
+verdicts caused by ambiguous tool output. Ships in both SDKs at version 1.3.0: TypeScript
+`@mnemom/agent-integrity-protocol` and Python `agent-integrity-proto`.
+
+See [Integrity checkpoints](/concepts/integrity-checkpoints).
+
+---
+
+## ResearchGrade: deep research reports on people and companies
+<sub>July 2026</sub>
+
+A new flat-priced report product: a governed research run that produces a full write-up on
+a person or a company, including probes and connector lookups. Priced per completed run —
+see [Pricing](/pricing/overview) for current rates.
+
+---
+
+## Try Mnemom with no account, and faster onboarding for existing agents
+<sub>June 2026</sub>
+
+[mnemom.ai/try-me](https://www.mnemom.ai/try-me) spins up a temporary sandbox agent with no
+sign-up: it registers itself, declares an alignment card, and sends it to spar against a
+live adversarial agent so you can see a real integrity verdict before creating an account.
+The same flow is available from the CLI as `mnemom try-me`.
+
+Two new CLI commands simplify onboarding a real agent: `mnemom wrap` instruments an existing
+agent through the gateway in one step, and `mnemom onboard` self-registers the calling
+agent, claims it, declares its card, and returns its Trust Rating and badge. `mnemom login`
+also gained `--no-browser`, which authenticates via a device code instead of opening a
+browser — useful for headless or remote environments.
+
+See the [CLI reference](/gateway/cli).
+
+## Model Context Protocol servers, and standard agent-discovery endpoints
+<sub>June 2026</sub>
+
+Two public MCP servers are now live: a control-plane server at `api.mnemom.ai/mcp` exposing
+the trust-plane API as tools (mirroring the CLI), and a read-only docs-search server at
+`docs.mnemom.ai/mcp`. Point any MCP client at either endpoint. See [Connecting over
+MCP](/mcp-clients).
+
+Standard discovery files at `www.mnemom.ai` now let an agent with no prior knowledge find
+the API and learn how to authenticate: `/.well-known/oauth-protected-resource` (RFC 9728),
+`/.well-known/oauth-authorization-server` (RFC 8414, with an `agent_auth` profile pointing
+at the real register/claim/rekey endpoints), and `/.well-known/agent-card.json`. See
+[Agent identity](/concepts/agent-identity#registration).
+
+## Alignment card schema unified across SDKs
+<sub>June 2026</sub>
+
+AAP 2.0.0 unifies the alignment card shape used by the TypeScript and Python SDKs. This is a
+**breaking change** for anything that reads raw card JSON/YAML directly — field and section
+names changed. AAP 2.0.1 followed with a fix for a cross-SDK scoring bug: the Python and
+TypeScript verifiers could compute different similarity scores for the same trace near the
+decision threshold; both SDKs now agree.
+
+See [Alignment cards](/concepts/alignment-cards).
 
 ---
 
 ## Claim-to-org — adopt a gateway-provisioned agent into your org
 <sub>May 2026</sub>
 
-`POST /v1/agents/{id}/claim` is now the first-class way to **adopt** a pre-existing agent (one the gateway auto-provisioned into the **Mnemom Sandbox** holding org) into an org you belong to. Mnemom now has two coherent paths to own an agent, decided by one question — *are you the agent, or adopting a pre-existing one?*: **self-register** with `POST /v1/agents` (your key is the identity), or **claim/adopt** with `POST /v1/agents/{id}/claim`.
+`POST /v1/agents/{id}/claim` adopts a pre-existing agent (one the gateway auto-provisioned)
+into an org you belong to. Provide `org_id` to place it in a specific org you're a member of,
+or omit it to land the agent in your personal org. Re-claiming an agent you already own with
+a new `org_id` moves it. **Breaking change:** claiming now requires authentication — the
+previous anonymous claim path was removed.
 
-**What's new:**
+See [Agent identity](/concepts/agent-identity#registration) and the [claim endpoint
+reference](/api-reference/endpoint/post-agents-agent-id-claim).
 
-- `claim` accepts an optional `org_id`. Provide it to place the agent in a specific org (you must be a member — `owner`, `admin`, or `member`); omit it and the agent lands in your **personal org** (the safe, smallest-audience default). The `200` response reports the resolved `org_id`.
-- **Re-home:** re-claiming an agent you own with a new `org_id` moves it; the call is idempotent for the same owner (`200`, no `409`).
-- Teaching errors: claiming into an org you're not in returns `403 agent_org_not_member` with `details.claimable_orgs` (`{org_id, name, is_personal}`); an unknown `org_id` returns `400`. Discover your orgs with `GET /v1/orgs` / `GET /v1/me/context` / `mnemom org list`.
+## Governance signals — an operator-facing alert surface
+<sub>May 2026</sub>
 
-<Warning>
-**Breaking change:** `claim` now **requires authentication** — the authenticated principal becomes the agent's owner. The previous anonymous (body-only `hash_proof`) claim path is removed; an unauthenticated call returns `401`. Add a session or API-key credential if you previously claimed anonymously. Self-register (`POST /v1/agents`) was always authenticated and is unaffected.
-</Warning>
+A new signal type, separate from the advisories an agent sees in its own prompt: fleet-shaped
+observations (like a coherence drop across a team) are now served only to humans and
+integrations — dashboard, webhooks, Slack, email, PagerDuty, or a generic signed webhook —
+never folded back into any agent's context.
 
-See [Agent identity](/concepts/agent-identity#registration) and the [claim endpoint reference](/api-reference/endpoint/post-agents-agent-id-claim).
+New webhook events (`governance.signal.*`, `governance.escalation.triggered`), a new
+`mnemom governance` CLI command group, and dashboard pages at the team and agent level.
 
----
-
-## Governance signals — operator-actionable observation surface
-<sub>May 2026 (amended 2026-05-07)</sub>
-
-Carved the architectural boundary between **agent-actionable carryover** (`pending_advisories`, runtime.* + manual.* sources) and **operator-actionable observation** (new `governance_signals` table, `sideband.*` + future `protection.*` / `posture.*` sources). Fleet-shaped governance signals are operator content. The platform serves them to operators only — humans, dashboards, webhooks, paging — and offers no path by which an operator-side signal becomes prompt content for any agent.
-
-The triggering symptom: an agent receiving the same `cluster_partition` paragraph 2× per turn for weeks. Root cause: cron-driven, fleet-shaped observations were mis-layered into per-turn agent context. The fix corrected the layering at the schema, producer, and consumer layers simultaneously.
-
-**What's new:**
-
-- New `governance_signals` table with partial-unique open-dedup index (kills the duplicate-emission symptom at the WRITE layer).
-- New REST surface at `/v1/{orgs,teams,agents}/.../governance/signals` plus state-transition endpoints.
-- New webhook event family `governance.signal.{fired,acknowledged,resolved,dismissed}` + `governance.escalation.triggered`. Legacy aliases (`sideband.*.fired`, `drift.detected`) kept for 30 days post-cutover.
-- New notification destinations: Slack incoming-webhook, email (Resend), PagerDuty Events API v2, generic HMAC-signed webhook. Per-org configurable + filterable + rule-driven.
-- New escalation rule engine with rate-based gating (`threshold_count` + `window_minutes`).
-- New UI at team + agent scope (`/dashboard/teams/:teamId/governance` + `/dashboard/agents/:uuid/governance`).
-- `mnemom governance` CLI subcommand group: `signals`, `destinations`, `rules`.
-- `@mnemom/agent-alignment-protocol@1.1.0` ships TypeScript governance signal types (consumed by operator dashboards, webhook subscribers, alerting tools).
-- `@mnemom/agent-integrity-protocol@1.1.0` adds optional `triggering_governance_signal_id` to `IntegritySignal`.
-
-**Cutover:** observer writers redirected, gateway reader narrowed. Pre-cutover `pending_advisories` rows for `sideband.*` TTL out within 24 hours.
-
-**Surface-separation invariant:** operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail. Asserted continuously in CI.
-
-**Amendment 2026-05-07:** the original "application-owned sovereign-agent composition" design was retracted as a layering mistake — encoding any one application's role typology in the platform's API surface and SDK examples couples Mnemom to a customer's design. The agent-scoped fast-path endpoint `/v1/internal/governance-signals?agent_id=…` and the related `POST /v1/safe-house/sovereign-setup` preset have been removed; `@mnemom/agent-alignment-protocol@1.2.0` removes the `examples/sovereign-agent-composer.ts` example file (governance signal types stay). Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform never knows.
-
-See [governance signals](/concepts/governance-signals), [schema](/specifications/governance-signals-schema), [operator runbook](/guides/operating-governance-signals).
-
----
+See [Governance signals](/concepts/governance-signals), the [schema
+reference](/specifications/governance-signals-schema), and the [operator
+guide](/guides/operating-governance-signals).
 
 ## Agent ID format update — `mnm-{uuid_v4}`
 <sub>April 2026</sub>
 
-New agents now receive IDs in the `mnm-{uuid_v4}` format (e.g., `mnm-550e8400-e29b-41d4-a716-446655440000`).
+New agents receive IDs in the `mnm-{uuid_v4}` format. Existing `smolt-{8_hex}` IDs continue
+to work permanently — they're committed to proof chains and are never reissued. The new
+format gives 128-bit entropy and IDs are server-assigned, so they're recoverable via API key
+if local config is lost.
 
-**No action required for existing agents.** All `smolt-{8_hex}` IDs continue to work permanently — they are cryptographically committed to proof chains and will never be changed or invalidated.
-
-The new format provides 128-bit entropy (vs. 32-bit previously), eliminating any practical risk of ID collision at scale. Agent IDs are now server-assigned UUIDs rather than hash-derived values, making them recoverable via API key re-registration if your local config is lost.
-
-- **CLI:** `@mnemom/mnemom` — new agents are registered with `mnm-*` IDs automatically the first time a request is routed through the gateway (after `mnemom login`)
-- **API:** `POST /internal/agents` — new service-to-service endpoint (gateway delegates agent creation to mnemom-api, single canonical creation path)
-- **Docs:** New [Agent Identity](/concepts/agent-identity) concept page explains ID formats, assignment, and stability guarantees
+See [Agent identity](/concepts/agent-identity).
 
 ---
 
 ## AAP 0.6.0 — Fault line analysis
 <sub>March 2026</sub>
 
-**Classified, actionable fault lines for multi-agent teams.** The raw divergence report from fleet coherence analysis is now automatically classified into four categories with impact scores and resolution hints. A new structural fault line detector identifies when multiple fault lines consistently split the same agents — the most serious form of team misalignment.
+Team divergence reports are now classified into actionable fault lines instead of a raw
+diff: `resolvable`, `priority_mismatch`, `incompatible`, or `complementary`, plus detection
+of a structural fault line (the same split recurring across multiple values). Available in
+both SDKs (`analyzeFaultLines()` / `analyze_fault_lines()`), and via `POST
+/v1/teams/fault-lines`.
 
-- **`analyzeFaultLines()`** — new SDK function that classifies `FleetCoherenceResult` divergences into actionable fault lines with 4 classifications: `resolvable`, `priority_mismatch`, `incompatible`, `complementary`
-- **`checkFleetFaultLines()`** — convenience wrapper that runs fleet coherence analysis and fault line extraction in one call
-- **`FaultLineAlignment`** — new type detecting structural compound fault lines (multiple fault lines that consistently split the same agents)
-- Fault line impact scores now optionally weighted by agent reputation scores
-- **Python SDK parity**: `analyze_fault_lines()` and `check_fleet_fault_lines()` available in the `aap` package
-- **Intelligence API**: `POST /v1/teams/fault-lines` now takes `{ team_id }` (server fetches authoritative cards); response includes `alignments` array with structural fault line data
-- [Fault Line Analysis Guide](/guides/fault-line-analysis) | [Fleet Coherence Concepts](/concepts/fleet-coherence) | [Intelligence API](/api-reference/intelligence-overview)
+See [Fault line analysis](/guides/fault-line-analysis) and the [Intelligence
+API](/api-reference/intelligence-overview).
 
----
-
-## Tiered proving & arena cost optimization
+## Fewer unnecessary proofs, and lower proving cost
 <sub>March 2026</sub>
 
-**Proving costs reduced by 80-95%.** Stale alignment cards during rapid development caused false `boundary_violation` verdicts, each proven at 100% rate on Modal GPUs. The new tiered proving strategy defers proving for card-gap violations until DDR reconciliation classifies them, then only proves confirmed real violations.
+Proving strategy now defers cryptographic proof generation for verdicts that a policy-gap
+review might later dismiss, only proving confirmed real violations. This cut proving volume
+and cost substantially without changing which verdicts are trustworthy.
 
-- **[Deferred proofs](/protocols/aip/verifiable-verdicts#deferred-proofs)**: `shouldProve()` now detects card gaps from policy evaluation and defers proving instead of immediately dispatching to GPU. Observer DDR resolves deferred proofs as `skipped_card_gap`, `skipped_noise`, or upgrades to `pending`.
-- **New `proof_boundary_cap` setting**: Rate-limits boundary violation proving on paths where policy evaluation isn't available (streaming). Configurable per-agent.
-- **New proof statuses**: `deferred`, `skipped_card_gap`, `skipped_noise` added to `verdict_proofs` table.
-- **Arena frequency reduction**: Adversarial simulation cron schedules reduced from 436 to 24 executions/day (94.5% reduction). Arena simulation every 2h (was 5min), sideband analyzer every 4h (was 15min), red team evolution every 12h (was 30min).
+See [Deferred proofs](/protocols/aip/verifiable-verdicts#deferred-proofs).
 
----
-
-## AAP 0.5.0 — Version alignment and trust edges
+## AAP 0.5.0 — YAML policies and Trust Edges
 <sub>March 2026</sub>
 
-**Ecosystem-wide version alignment.** The `aap_version` field now defaults to `"0.5.0"` across all SDKs, schemas, fixtures, and examples. This release also introduces YAML policy authoring and the Trust Edges API.
+The alignment API now accepts policies authored in YAML (`text/yaml` /`application/yaml`)
+alongside JSON, and a new Trust Edges API (`GET`/`POST`/`DELETE
+/v1/agents/:id/trust-edges`) lets you declare explicit trust relationships between agents.
+Cards on the prior `aap_version` continue to work unmodified.
 
-- **Version alignment**: `aap_version` default bumped from `"0.1.0"` to `"0.5.0"` across all Mnemom packages
-- **YAML policy support**: The API now accepts policies in `text/yaml` and `application/yaml` content types alongside JSON
-- **Trust Edges API**: `GET`/`POST`/`DELETE /v1/agents/:id/trust-edges` for declaring explicit trust relationships between agents
-- **Fixture consistency**: Test fixture version inconsistencies resolved (`"1.0"` → `"0.5.0"`) across the observer and gateway
-- **Backward compatible**: Existing cards with `aap_version: "0.1.0"` continue to work without modification
-- [Upgrading to 0.5.0 — Migration Guide](/guides/upgrading-to-0-5)
+See [Upgrading to 0.5.0](/guides/upgrading-to-0-5).
 
 ---
 
-## Card Lifecycle & Policy Intelligence — CLPI
+## Card Lifecycle & Policy Intelligence
 <sub>February 2026</sub>
 
-**Mnemom becomes a policy-driven governance platform.** A 5-phase overhaul that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, and on-chain anchoring. Root cause: configuration drift (new tools added without updating alignment cards) caused false violations and unfair trust score declines. CLPI fixes this by distinguishing card gaps from behavioral gaps and enabling trust recovery.
+A multi-phase release turning alignment cards into policy-governed, lifecycle-managed
+artifacts:
 
-### Phase 1: Policy engine
-- **[Policy DSL](/specifications/policy-dsl)**: YAML-based governance rules with `capability_mappings` (glob patterns bridging tools to card categories), `forbidden` rules, `escalation_triggers`, and configurable `defaults`
-- **Three evaluation contexts**: CI/CD static validation, gateway live enforcement, observer post-action analysis
-- **Enforcement modes**: `warn` (log only), `enforce` (block with 403), `off` — controlled independently from alignment enforcement via `X-Policy-Verdict` header
-- **Grace period**: 24-hour default window for newly discovered tools before they become violations
-- **[Policy CLI](/gateway/policy-cli)**: `mnemom policy init|validate|publish|list|test|evaluate` subcommands with CI-friendly exit codes
-- **Policy merge**: Org-level + agent-level policies merge with union semantics for mappings and floor semantics for defaults
+- **Policy engine:** YAML governance rules (`warn`/`enforce`/`off`), a 24-hour grace period
+  for newly discovered tools, and a `mnemom policy` CLI. See the [Policy
+  DSL](/specifications/policy-dsl) and [Policy CLI](/gateway/policy-cli).
+- **Card lifecycle & trust recovery:** tracked card amendments with version history, and
+  reclassifying a violation as a configuration gap (rather than real misbehavior) now
+  recovers the affected trust score automatically. See [Card lifecycle](/concepts/card-lifecycle),
+  [Trust recovery](/guides/trust-recovery), and the [Reclassification
+  API](/api-reference/reclassification-overview).
+- **On-chain verification:** reputation scores and Merkle roots can be anchored on Base L2
+  for tamper-evident, independently verifiable history. See [On-chain
+  verification](/concepts/on-chain-verification) and the [On-chain
+  API](/api-reference/on-chain-overview).
+- **Policy management guides:** [CI/CD policy gates](/guides/ci-cd-policy-gates) and
+  [Policy management](/guides/policy-management); full reference at the [Policy
+  API](/api-reference/policy-overview).
 
-### Phase 2: Card lifecycle and trust recovery
-- **[Card amendments](/concepts/card-lifecycle)**: Tracked changes with version history and diffs — cards are now lifecycle-managed artifacts
-- **[Violation reclassification](/guides/trust-recovery)**: Distinguish `card_gap` (configuration error) from `behavior_gap` (genuine misbehavior) — reclassified card_gap violations are excluded from compliance and drift scoring
-- **Score recomputation**: Automatic trust score recovery after reclassification with trust graph propagation (BFS, depth 3, max 50 agents, 0.85/hop decay)
-- **Compliance export**: Full audit trail of violations, reclassifications, card amendments, and score history
-- **[Reclassification API](/api-reference/reclassification-overview)**: 5 endpoints for reclassify, recompute, export, and history
-
-### Phase 3: Intelligence layer
-- **[Fault line analysis](/api-reference/intelligence-overview)**: Identify value conflicts and capability gaps across teams with classification (resolvable, priority mismatch, incompatible) and severity scoring
-- **Risk forecasting**: Predict failure modes (escalation conflicts, capability gaps, coordination deadlocks, trust erosion) with probability and severity estimates
-- **Policy recommendations**: LLM-powered policy generation from team analysis with confidence scores and reasoning chains
-- **Transaction guardrails**: 3-layer policy merge (org + team + transaction) with intersection semantics for capability mappings
-
-### Phase 4: On-Chain verification
-- **[ERC-8004 Reputation Registry](/concepts/on-chain-verification)**: Smart contracts on Base L2 for immutable reputation anchoring
-- **MnemoReputationRegistry**: Publish individual and batch scores (max 200/batch) with metadata hashes
-- **MnemoMerkleAnchor**: Anchor Merkle roots for tamper-evident verification
-- **[On-Chain API](/api-reference/on-chain-overview)**: 5 endpoints for anchoring roots, publishing scores, verification, and history
-
-### Phase 5: Observability
-- **Policy OTel spans**: `policy.evaluate` span with verdict, violations, and duration attributes
-- **Reclassification OTel spans**: `reclassification.process` span with before/after scores and amendment tracking
-- **Policy-aware drift detection**: Distinguishes policy gaps from genuine misalignment in drift analysis
-
-**New documentation:**
-- [Policy Engine](/concepts/policy-engine) | [Card Lifecycle](/concepts/card-lifecycle) | [On-Chain Verification](/concepts/on-chain-verification)
-- [Policy DSL Specification](/specifications/policy-dsl)
-- [Policy CLI Reference](/gateway/policy-cli)
-- [Policy Management](/guides/policy-management) | [Trust Recovery](/guides/trust-recovery) | [CI/CD Policy Gates](/guides/ci-cd-policy-gates) | [On-Chain Verification Guide](/guides/on-chain-verification)
-- [Policy API](/api-reference/policy-overview) | [Reclassification API](/api-reference/reclassification-overview) | [Intelligence API](/api-reference/intelligence-overview) | [On-Chain API](/api-reference/on-chain-overview)
-
----
-
-## Team reputation & risk scoring
+## Team reputation
 <sub>February 2026</sub>
 
-**Teams become first-class meta-agents.** Persistent team identity, team alignment cards, accumulated team reputation with a 5-component scoring model, embeddable team badges, roster management with audit trails, ZK proofs for team reputation, and 9 new webhook events.
+Teams (groups of 2–50 agents) become first-class entities with their own persistent
+identity, an alignment card auto-derived from members (or manually curated), and an
+accumulated reputation score. Includes embeddable team badges
+(`/v1/teams/{id}/badge.svg`), roster management with an audit trail, and 9 new webhook
+events for team lifecycle and reputation changes.
 
-- **Team CRUD**: Create, manage, and archive teams of 2-50 agents with persistent identity and organizational scope
-- **Team alignment cards**: Auto-derived from member cards (union of values, bounded actions, forbidden actions, escalation triggers) or manually curated — with full version history
-- **Team reputation scoring**: 5-component model (coherence history 35%, member quality 25%, operational record 20%, structural stability 10%, assessment density 10%) on the same AAA–NR scale
-- **Team badges**: Embeddable SVG badges at `/v1/teams/{id}/badge.svg` with all 4 variants (score, score_tier, score_trend, compact)
-- **Roster management**: Add/remove members with full audit trail and roster history endpoint
-- **ZK proofs**: Team reputation scores are cryptographically provable via SP1 STARK proofs, chaining individual proof attestations
-- **9 webhook events**: `team.created`, `team.archived`, `team.member_added`, `team.member_removed`, `team.card_updated`, `team_reputation.score_changed`, `team_reputation.grade_changed`, `quota.team_reputation_exceeded`, `quota.team_reputation_warning`
-- **Billing**: Team plan includes 200 team reputation computations/mo ($0.005/ea overage); Enterprise unlimited
-- [Team Management Guide](/guides/team-management)
-- [Team Reputation](/concepts/team-reputation)
-- [Teams API](/api-reference/team-overview)
+See [Team management](/guides/team-management), [Team reputation](/concepts/team-reputation),
+and the [Teams API](/api-reference/team-overview).
 
----
-
-## Mnemom Trust Rating -- public surfaces & viral distribution
+## Public Trust Ratings and embeddable badges
 <sub>February 2026</sub>
 
-**Trust scores escape the dashboard.** Public reputation pages, embeddable badges, a verification endpoint with cryptographic proof chains, an A2A trust extension for inter-agent reputation sharing, a GitHub Action for CI/CD gates, and SDK reputation methods across TypeScript and Python.
+Every agent with a published score gets a public page at `/reputation/{agent_id}` with a
+score breakdown, trend chart, and cryptographic verification link, plus a searchable
+[Trust Directory](https://www.mnemom.ai/directory). `GET
+/v1/reputation/{agent_id}/verify` returns a proof chain for independent verification, and
+[`mnemom/reputation-check`](https://github.com/mnemom/reputation-check) gates CI/CD
+pipelines on a minimum score.
 
-- **Public reputation pages**: Every agent with a published score gets a public page at `/reputation/{agent_id}` with full component breakdown, trend chart, and cryptographic verification link
-- **Trust Directory**: Searchable directory of all publicly rated agents at `/trust-directory` — filter by grade, confidence, trend, and sort by score or checkpoints
-- **Badge ecosystem**: New `score_tier` badge variant displays `[ Mnemom Trust | 782 Established ]`; agents with no reputation record display a "Not Rated" badge instead of a broken image
-- **Verification endpoint**: `GET /v1/reputation/{agent_id}/verify` returns a cryptographic proof chain (certificate hash, Merkle root, hash chain validation) for independent score verification
-- **A2A trust extension**: `a2a_trust_extension` field added to the reputation response, providing a pre-built trust block for A2A Agent Cards with live score, grade, and verified URLs
-- **GitHub Action**: `mnemom/reputation-check@v1` gates CI/CD pipelines on minimum reputation scores — fail builds when agent scores drop below a configurable threshold
-- **SDK reputation methods**: TypeScript `getReputation()`, `createReputationGate()`, `getA2AReputationExtension()`; Python `get_reputation()`, `ReputationGate`
-- **Webhook events**: `reputation.score_changed` fires when score changes by more than 10 points; `reputation.grade_changed` fires on letter grade transitions
-- [Trust Rating API](/api-reference/reputation-overview)
-- [Embeddable Badges](/guides/reputation-badges)
-- [Understanding Trust Ratings](/concepts/reputation-scores)
+See [Embeddable badges](/guides/reputation-badges) and [Understanding Trust
+Ratings](/concepts/reputation-scores).
 
----
-
-## GPU-accelerated proving (Fly.io CPU to Modal H100 GPU)
+## Faster, cheaper cryptographic proofs
 <sub>February 2026</sub>
 
-**Proving latency reduced from ~270 seconds to ~700ms — a 400x speedup.** Migrated the ZK prover from Fly.io (4-core CPU, SP1 cpu mode) to Modal (NVIDIA H100 GPU, SP1 cuda mode). Per-proof cost dropped from ~$0.005 to ~$0.001 with per-second GPU billing that scales to zero.
+Zero-knowledge proof generation moved to GPU hardware, cutting proving latency from roughly
+270 seconds to well under a second and roughly halving the per-proof cost. A follow-up fix
+also made the proving pipeline recover automatically instead of silently stalling when an
+individual proof failed to generate.
 
-- **Infrastructure**: Fly.io performance VMs replaced by Modal serverless H100 GPUs
-- **Proving mode**: `SP1_PROVER=cpu` (270s avg) to `SP1_PROVER=cuda` (700ms avg)
-- **Benchmarks**: clear 710ms, boundary_violation 721ms, review_needed 690ms (warm GPU: 673ms)
-- **Receipt size**: ~2.7 MB (real SP1 STARK proof)
-- **Cost**: ~$0.001/proof (Modal H100 at ~$0.001/sec, ~0.7s per proof)
-- **Cold start**: 60-120s for SP1 prover initialization; warm requests sub-second
-- [Verifiable Verdicts](/protocols/aip/verifiable-verdicts)
-
----
-
-## Self-healing ZK proof pipeline
-<sub>February 2026</sub>
-
-**Proof inputs are now persisted and the retry loop actually proves.** Three interacting bugs caused the ZK proof pipeline to silently stop generating proofs: Fly.io auto-stopped prover machines despite configuration, the retry loop was a no-op that logged warnings but never called the prover, and the gateway's fire-and-forget pattern lost proof inputs when the prover was unavailable.
-
-- **Proof input persistence**: Gateway now stores `analysis_json`, `thinking_hash`, `card_hash`, `values_hash`, and `model` in `verdict_proofs` on INSERT
-- **Self-healing retry loop**: Prover fetches stored inputs from DB and spawns `prove_verdict_derivation()` directly -- no longer depends on the original HTTP request
-- **Auto-stop prevention**: Retry loop self-pings `/health` every 30s to maintain HTTP activity; machine-level `autostop=off` set on both prover machines
-- **Orphan cleanup**: All pre-fix pending proofs marked as permanently failed (inputs were never persisted)
-- **Updated `get_pending_proofs()`**: Returns input columns, filters out rows without stored inputs
-- [Verifiable Verdicts -- Proof Input Persistence](/protocols/aip/verifiable-verdicts#proof-input-persistence)
-
----
+See [Verifiable verdicts](/protocols/aip/verifiable-verdicts).
 
 ## N-way fleet coherence
 <sub>February 2026</sub>
 
-**Fleet-level value coherence analysis** — extend pairwise coherence checks to true N-agent fleet analysis with aggregate scoring, outlier detection, cluster analysis, and divergence reporting.
+Pairwise value-coherence checks extend to whole fleets: a fleet score across every pair of
+agents, outlier detection for agents that diverge from the group, cluster analysis, and a
+per-value divergence report. Available via `GET /v1/orgs/:org_id/coherence` and as
+`checkFleetCoherence()` / `check_fleet_coherence()` in both SDKs.
 
-- **Fleet Score**: Mean of all C(n,2) pairwise coherence scores with weakest-link identification
-- **Outlier Detection**: Statistical detection of agents >1σ below fleet mean, with primary conflict identification
-- **Cluster Analysis**: Connected-component grouping of compatible agents with shared/distinguishing values
-- **Divergence Report**: Per-value analysis showing which agents declare, miss, or conflict on each value
-- **Enterprise API**: `GET /v1/orgs/:org_id/coherence` with 5-minute caching
-- **Showcase**: Live interactive fleet coherence panel on [/showcase](https://www.mnemom.ai/showcase/)
-- **SDK**: `checkFleetCoherence()` in TypeScript and `check_fleet_coherence()` in Python
-- **[Fleet Coherence Docs](/concepts/fleet-coherence)**
+See [Fleet coherence](/concepts/fleet-coherence).
 
----
-
-## Admin impersonate mode
+## Read-only support access, fully audited
 <sub>February 2026</sub>
 
-**See exactly what your customer sees.** Enterprise support can now view the real dashboard from any customer's perspective -- read-only, fully audit-logged, with automatic 1-hour expiry.
-
-- **Session-based impersonation**: Token-based approach avoids JWT forgery; admin's own JWT stays the auth credential
-- **3 API endpoints**: `POST /impersonate` (start), `GET /impersonation/:id` (status), `POST /impersonation/:id/end` (exit)
-- **Read-only enforcement**: Centralized write guard rejects all POST/PUT/PATCH/DELETE during active session
-- **Full audit trail**: Session start/end logged to `admin_audit_log`, per-page visits tracked
-- **No nesting**: Cannot impersonate admin users
-- **Dashboard integration**: Amber "Viewing as" banner with Exit button, all data resolves to target user
-- **Security**: `sessionStorage` (clears on tab close), API keys already masked, payment details already last-4
-
----
+Enterprise support can view your dashboard exactly as you see it to help diagnose an issue —
+read-only, time-limited to one hour, and every session is logged with a visible "Viewing as"
+banner while it's active. All write actions are blocked for the duration.
 
 ## Custom conscience values
 <sub>February 2026</sub>
 
-**Per-org alignment policies injected into the AIP conscience prompt.** Enterprise orgs can now define custom conscience values -- "patient safety > efficiency" for healthcare, "never recommend regulatory risk" for fintech -- that apply to every agent integrity check.
+Enterprise orgs can define custom values (for example, "patient safety over efficiency")
+that apply to every agent's integrity check, layered on top of Mnemom's defaults and
+optionally overridden per agent. Fully audited, with a webhook event on every change.
 
-- **7 API endpoints**: CRUD, reorder, mode control, and audit log under `/v1/orgs/:org_id/conscience-values`
-- **Layered value resolution**: Base defaults + org values + per-agent values, with `augment` (additive) and `replace` modes
-- **5 value types**: BOUNDARY, FEAR, COMMITMENT, BELIEF, HOPE with advisory/mandatory severity
-- **Full audit trail**: Every create, update, delete, and mode change logged with actor and diffs
-- **Observer + Gateway integration**: Org values resolved via RPC with 5-min KV cache, fail-open
-- **Analyze API integration**: Layered resolution applies to hybrid analysis path
-- **Webhook event**: `conscience.values_updated` fires on all mutations
-- **Dashboard UI**: Manage values, toggle mode, view audit log from org settings
-- **Feature-gated**: Enterprise plan only via `custom_conscience_values` flag
-- [Conscience Values guide](/gateway/conscience-values)
+See [Conscience values](/gateway/conscience-values).
 
----
-
-## Agent containment engine
+## Agent containment
 <sub>February 2026</sub>
 
-**Kill-switch for rogue agents.** Enterprise teams can now pause, kill, and resume agents in real-time through the API and dashboard.
-
-- **Containment API**: `POST /pause`, `/resume`, `/kill`, `/reactivate` endpoints under org agent routes
-- **Gateway enforcement**: Contained agents receive HTTP 403 with structured `containment_error` response
-- **Auto-containment**: Configure automatic pause after N consecutive boundary violations
-- **Webhook events**: `agent.paused`, `agent.resumed`, `agent.killed` events for SIEM integration
-- **Audit log**: Every containment action recorded with actor, reason, and state transition
-- **RBAC**: Kill/reactivate restricted to owners; pause/resume available to admins
+Enterprise teams can pause, resume, or permanently kill an agent in real time from the API
+or dashboard. A contained agent's gateway traffic is rejected with a structured error, and
+orgs can configure automatic pause after repeated boundary violations.
 
 ---
 
-## February 2026
+## February 2026 — Public launch
 
-### Phase 12: Verifiable Integrity -- Cryptographic proof layer
+- **Mnemom v1.0:** the gateway and CLI ship for zero-configuration agent transparency —
+  automatic agent identification, real-time integrity analysis, and CLI login with
+  automatic agent registration.
+- **AIP v0.1.5:** the Agent Integrity Protocol ships with provider adapters for Anthropic,
+  OpenAI, and Google Gemini, analyzing agent reasoning between turns before actions execute.
+- **AAP v0.1.0:** the Agent Alignment Protocol ships as a public spec — alignment cards,
+  AP-Traces, and value coherence handshakes for verifying compatibility before multi-agent
+  coordination. TypeScript (`@mnemom/agent-alignment-protocol`) and Python
+  (`agent-alignment-protocol`) SDKs.
+- **Verifiable Integrity:** every AIP verdict can be independently verified through Ed25519
+  checkpoint signing, hash-chain integrity, Merkle inclusion proofs, and optional
+  zero-knowledge proofs. See [Certificates](/protocols/aip/certificates) and [Verifiable
+  verdicts](/protocols/aip/verifiable-verdicts).
+- **aip-otel-exporter v0.1.0:** an OpenTelemetry exporter for AIP/AAP telemetry, compatible
+  with Datadog, Grafana, Splunk, Arize, Langfuse, and any OTel collector. TypeScript
+  (`@mnemom/aip-otel-exporter`) and Python (`aip-otel-exporter`).
+- **Dashboard:** agent management, a trace viewer, and an integrity score view with
+  real-time and historical drift.
 
-Every AIP verdict can now be independently verified through a four-layer cryptographic attestation stack. Agents produce IntegrityCertificates that bundle Ed25519 signatures, hash chain proofs, Merkle inclusion proofs, and optional SP1 zero-knowledge proofs into a single portable artifact.
-
-- **Ed25519 checkpoint signing** with key rotation and public key registry
-- **Hash chain integrity** linking consecutive verdicts into a tamper-evident sequence
-- **Merkle tree certificates** enabling compact inclusion proofs for any checkpoint
-- **Zero-knowledge proofs** (SP1 STARK) for verdict derivation verification
-- 7 new verification API endpoints (`/v1/verify`, `/v1/keys`, certificate, proof, and Merkle endpoints)
-- Client-side WASM verifier for offline, trustless verification
-- Optimistic proving strategy: 10% stochastic + all boundary violations
-- [Certificates specification](/protocols/aip/certificates)
-- [Verifiable Verdicts specification](/protocols/aip/verifiable-verdicts)
-
-### AAP v0.1.0 -- Initial specification release
-
-The Agent Alignment Protocol specification is now public. AAP provides post-hoc verification infrastructure for autonomous agents: Alignment Cards declare an agent's alignment posture, AP-Traces create auditable decision records, and Value Coherence Handshakes verify compatibility before multi-agent coordination.
-
-- Full specification with JSON schemas
-- Python SDK (`pip install agent-alignment-protocol`) and TypeScript SDK (`npm install @mnemom/agent-alignment-protocol`)
-- 242 tests (Python), 199 tests (TypeScript), 92 schema validation tests
-
-### AIP v0.1.5 -- Initial specification with provider adapters
-
-The Agent Integrity Protocol specification ships with built-in support for analyzing thinking blocks from multiple LLM providers. AIP provides real-time assurance by analyzing agent reasoning between turns, before actions execute.
-
-- Provider adapters for Anthropic, OpenAI, and Google Gemini
-- Conscience prompt system with configurable evaluation criteria
-- Session windowing and integrity drift detection
-- Python SDK (`pip install agent-integrity-protocol`) and TypeScript SDK (`npm install @mnemom/agent-integrity-protocol`)
-
-### Mnemom v1.0 — Public launch
-
-Mnemom's AI gateway and CLI tool for zero-configuration agent transparency infrastructure.
-
-- Cloudflare Workers-based gateway with automatic agent identification
-- Observer Worker for AP-Trace generation and AAP verification
-- AIP Engine for real-time thinking block analysis
-- CLI: `mnemom login` + automatic gateway-side agent registration for full-stack setup
-- API key hashing (never stored in plaintext), raw log deletion within 60 seconds
-
-### aip-otel-exporter v0.1.0 -- OpenTelemetry integration
-
-OpenTelemetry exporter for AIP and AAP telemetry, enabling agent integrity signals in any OTel-compatible observability platform.
-
-- TypeScript package: `@mnemom/aip-otel-exporter`
-- Python package: `aip-otel-exporter`
-- GenAI semantic convention span attributes for integrity verdicts, verification results, and drift alerts
-- Compatible with Datadog, Grafana, Splunk, Arize, Langfuse, and any OTel collector
-
-### Mnemom dashboard -- Web console
-
-The Mnemom Dashboard provides a web interface for managing agents, viewing traces, and monitoring integrity scores.
-
-- Agent management with Alignment Card creation and rotation
-- Trace viewer with filtering by session, verdict, and time range
-- Integrity score dashboard with real-time and historical drift visualization
-- Team management and role-based access control
-
-### Phase 1: Analytics and intelligence
-
-Enterprise features for organizations deploying agents at scale.
-
-- Enterprise billing with usage-based pricing and license keys
-- SSO/SAML authentication via Supabase Auth
-- Admin customer detail views and usage analytics
-- Daily usage rollup and billing reconciliation
-
----
-
-<Note>
-For detailed changelogs, see the individual repository release pages. Each SDK and tool maintains its own `CHANGELOG.md` with granular version history.
-</Note>
-
-**GitHub**: [github.com/mnemom](https://github.com/mnemom) -- Browse all repositories for release notes, issues, and discussions.
