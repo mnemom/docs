@@ -13,23 +13,31 @@ Conceptual overview: [/concepts/protection-card](/concepts/protection-card). Ali
 
 ```yaml
 card_version: protection/2026-04-26   # required; string; schema version
-card_id: pc-<uuid>                    # required on canonical output; assigned by composer
 agent_id: mnm-<uuid>                  # required; string
-issued_at: 2026-04-26T12:00:00Z       # required on canonical output
 expires_at: null                      # optional; protection cards rarely expire
 
 mode: enforce                         # required; see §mode
 thresholds: { ... }                   # optional; see §thresholds
 screen_surfaces: { ... }              # optional; see §screen-surfaces
 trusted_sources: { ... }              # optional; see §trusted-sources
-extensions: { ... }                   # optional; §extensions
+protected_surface: { ... }            # optional to send; composer always emits it — see §protected_surface
+review: { ... }                       # optional; see §review
+scopes: { ... }                       # optional; see §scopes
+extensions: { ... }                   # optional; not composed — see §extensions
 
-_composition: { ... }                 # canonical-only; see §composition-metadata
+# Server-assigned response fields — do not send on PUT:
+card_id: pc-<uuid>                    # server-assigned
+issued_at: 2026-04-26T12:00:00Z       # response-only
+content_hash: sha256:<hex>            # response-only; also the ETag value
+version: 4                            # response-only; monotonic card version
+_composition: { ... }                 # response-only, and only when `?include_composition=true`; see §composition-metadata
 ```
+
+`thresholds`, `screen_surfaces` and `trusted_sources` may each be omitted from a raw agent-scope PUT — the composer fills the platform default for whichever bucket is absent. `thresholds` requires all three of `warn`/`quarantine`/`block` when the block is present at all; `screen_surfaces` and `trusted_sources` validate whichever individual keys you send and leave the rest to the composer — see each section below.
 
 ## §mode
 
-Top-level action policy for Safe House on this agent. Mirrors the alignment card's `integrity.enforcement_mode` enum plus an `off` value for explicit opt-out.
+Top-level action policy for Safe House on this agent. The same `off | observe | nudge | enforce` enum as the alignment card's `autonomy_mode` / `integrity_mode` master switches — see [Master switches](/specifications/alignment-card-schema#master-switches).
 
 ```yaml
 mode: enforce   # "off" | "observe" | "nudge" | "enforce"
@@ -131,33 +139,117 @@ Trusted sources cause Safe House to skip detection for matching content (no dete
 
 **Security note:** the validator's deny-list is non-exhaustive — adding a publicly-routable IP range or a customer-controllable domain is a critical misconfiguration even if it passes the deny-list. Treat `trusted_sources` as a sharp tool.
 
-## §extensions
+## §protected_surface
 
-Free-form `Record<string, unknown>` for protocol-specific or user-defined additions. Mnemom reserves `mnemom.*`.
+Org-declared assets and mechanical operations the substrate must protect, enforced independent of the agent's own declared intent (the alignment card's `autonomy.forbidden_actions` is advisory; this is enforced). The composer always emits this block — a caller may omit it entirely to inherit the composed floor.
 
 ```yaml
-extensions:
-  mnemom:
-    alert_webhook: https://ops.acme.example/safe-house-alerts
-    team_channel: "#safehouse-alerts"
+protected_surface:
+  assets:
+    - kind: table
+      selector: customers
+      reason: "PII table"
+  forbidden_operations:
+    - pattern: "unscoped UPDATE/DELETE"
+      applies_to: ["table:customers"]   # empty/absent = GLOBAL (every asset)
+      severity: critical
+  escalation_required:
+    - pattern: "TRUNCATE"
+      reason: "Requires human approval"
 ```
 
-Extensions are agent-scoped and not composed across scopes by default.
+| Field | Type | Required | Composition |
+|---|---|---|---|
+| `assets[].kind` / `.selector` | string | Yes | Together form the intrinsic identity `${kind}:${selector}`; the composer unions by this identity across Platform → Org → Team → Agent |
+| `assets[].label` / `.reason` | string | No | Display-only; resolved by the composer when scopes disagree — not a value to key logic on |
+| `forbidden_operations[].pattern` | string | Yes | Intrinsic identity (normalized); **union** across scopes |
+| `forbidden_operations[].applies_to` | string[] of asset identities | No | Empty/absent = GLOBAL; global beats any scoped list on collision |
+| `forbidden_operations[].severity` | enum `low\|medium\|high\|critical` | No | **Max across scopes** |
+| `escalation_required[].pattern` / `.applies_to` / `.reason` | — | pattern required | Same identity + union rules as `forbidden_operations`, minus severity |
+| `*.source_scope` | string | Server-assigned | Do not send on a PUT |
+
+Precedence when a request matches more than one: `forbidden_operations` > `escalation_required` > allow.
+
+## §review
+
+Review-hold policy (Safe House Review). Optional; a raw card may set any subset of fields and the composer fills the rest.
+
+```yaml
+review:
+  enabled: true
+  gate_on:
+    incoming: quarantine
+    outgoing: quarantine
+    tool_calls: warn
+    tool_responses: warn
+    integrity: review_needed       # "off" | "review_needed" | "boundary_violation"
+  sla_seconds: 300
+  on_timeout: reject                # "reject" | "release"; default "reject" (fail-closed)
+  notify:
+    sse: true
+    webhooks: true
+  reviewer:
+    kind: builtin_opus               # "builtin_opus" | "endpoint" | "human"
+    dual_control: false              # human-tier only: require two distinct resolvers
+  quarantine_notice: "This request is held for review."
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `enabled` | boolean | Required when `review` is present |
+| `gate_on.{incoming,outgoing,tool_calls,tool_responses}` | enum `off\|warn\|quarantine\|block` | Minimum Safe House band that escalates to a hold |
+| `gate_on.integrity` | enum `off\|review_needed\|boundary_violation` | AIP integrity plane gate |
+| `sla_seconds` | number (≥ 1) | Hold timeout |
+| `on_timeout` | enum | `reject` (fail-closed) or `release` |
+| `notify.sse` / `notify.webhooks` | boolean | Delivery channels for hold events |
+| `reviewer.kind` | enum `builtin_opus\|endpoint\|human` | `endpoint` (BYO reviewer) is schema-accepted but not yet consumed by the gateway. `human` routes to `POST /v1/safe-house/reviews/{review_id}/resolve` |
+| `reviewer.endpoint_url` | string (https URL) | Required when `kind` is `endpoint` |
+| `reviewer.dual_control` | boolean | When `true`, a human-tier resolution requires two distinct resolvers before it finalizes |
+| `quarantine_notice` | string (≤ 2000 chars) | No |
+
+**Composition:** strictest-wins per field, same ladder as `mode`.
+
+## §scopes
+
+Agent-declared named scopes used for grounding checks (MNE-1987 — org/platform do not contribute in the current version; agent-scope only).
+
+```yaml
+scopes:
+  finance_qa:
+    grounding:
+      mode: enforce          # "off" | "shadow" | "enforce"
+      corpus_ref: finance-kb
+```
+
+| Field | Type | Validation |
+|---|---|---|
+| `<name>` | object key | `^[a-z0-9][a-z0-9_-]{0,63}$`; at most 32 scope names |
+| `<name>.grounding.mode` | enum `off\|shadow\|enforce` | Unrecognized value defaults to `off` (fail closed) at the gateway |
+| `<name>.grounding.corpus_ref` | string | Same `^[a-z0-9][a-z0-9_-]{0,63}$` pattern |
+
+## §extensions
+
+Free-form `Record<string, unknown>`. Accepted on a raw agent-scope PUT, but the composer does **not** copy `extensions` onto the canonical/composed card — it is stored on the raw card only and never appears in a `GET`/`preview-compose` response. Do not use it to carry data a runtime consumer needs to read.
 
 ## §_composition (canonical-only)
 
-Present on the canonical protection card produced by the composer; absent on raw agent-scope cards written by `PUT /v1/protection/agent/:id`.
+Only returned from `GET`/`preview-compose` when the caller passes `?include_composition=true`; absent on raw agent-scope cards written by `PUT /v1/protection/agent/{agent_id}`.
 
 ```yaml
 _composition:
+  canonical_id: cp-44ee22bb
   composed_at: 2026-04-26T18:23:41Z
-  scopes_applied: [platform, "org:acme", "agent:mnm-patch-001"]
+  scopes_applied:
+    - scope: platform
+      version: 1
+    - scope: "org:acme"
+    - scope: "agent:mnm-patch-001"
+      card_id: pc-88ccdd11
   exemptions_applied: []
   source_card_id: pc-88ccdd11
-  canonical_id: cp-44ee22bb
 ```
 
-`_composition` is read-only on the wire.
+Same shape as the [alignment card's `_composition`](/specifications/alignment-card-schema#_composition-canonical-only) — see that page for the field table. `_composition` is read-only on the wire.
 
 ## YAML safe schema
 
@@ -165,18 +257,11 @@ All `yaml.load()` calls use `{ schema: yaml.CORE_SCHEMA }` — Node-specific tag
 
 ## Body-size limits
 
-- Full protection card payload: **64 KB** max (enforced via Content-Length + body-length double-check).
-- `thresholds`, `screen_surfaces`, `trusted_sources` are bounded by the 64 KB envelope.
-
-`413 Payload Too Large` for oversize bodies.
+Full protection card payload: **64 KB** max, enforced at the API boundary from both `Content-Length` and the actual body size. Oversize bodies get `413 Payload Too Large`.
 
 ## Versioning
 
-`card_version` currently:
-
-- `protection/2026-04-26` — current canonical form. All canonical cards emit this version.
-
-Older `protection/2026-04-15` cards stored before the canonical form were transformed in-place by migration 140; the schema version was rolled forward at the same time.
+`card_version` is a required, non-empty string. The composer stamps every canonical card with `protection/<YYYY-MM-DD>` using the composition date — treat the prefix (`protection/`) as the stable signal, not the date suffix, which changes on every recompose.
 
 ## See also
 

@@ -5,7 +5,7 @@ sidebarTitle: "Transparency Log"
 icon: "file-lines"
 ---
 
-The canonical row shape for the [transparency log](/concepts/transparency-log). Mirrors [`mnemom-contracts/transparency-log/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/transparency-log/v1.yaml).
+The canonical row shape for the [transparency log](/concepts/transparency-log).
 
 ## Row shape
 
@@ -53,16 +53,17 @@ Returned by the by-index + at-timestamp endpoints alongside the row:
 | **Leaf hash** | `SHA-256(0x00 \|\| canonical_json(...))` |
 | **Internal hash** | `SHA-256(0x01 \|\| left \|\| right)` |
 | **Leaf ordering** | by `log_index ASC` |
-| **Odd-count** | last unpaired hash promoted unchanged (Bitcoin / Sigstore-compatible — **not** RFC 6962's duplicate-last) |
+| **Odd-count** | last unpaired hash promoted unchanged — this bottom-up rule is root-equivalent to RFC 6962 §2.1's `MTH` recursion for every tree size, so RFC 6962 consistency proofs apply as-written. (RFC 6962 does **not** duplicate the last node; *duplicate*-last is Bitcoin's convention, and the source of Bitcoin's CVE-2012-2459 duplicate-txid malleability — don't conflate the two.) |
 | **Persistence** | none; rebuilt on demand from rows. Layer arrays cached in KV for 60s; cache busts on every append. |
 
-The canonical TypeScript implementation lives at [`mnemom-api/src/transparency/merkle.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/merkle.ts). The offline CLI verifier mirrors it byte-for-byte.
+The offline CLI verifier (`mnemom verify-card`) mirrors the server-side implementation byte-for-byte.
 
 ## Append discipline
 
 | Property | Detail |
 |---|---|
-| DB-level append-only | Service role has `SELECT + INSERT` only; no `UPDATE` or `DELETE` |
+| DB-level append-only | Service role has `SELECT + INSERT` only (no `UPDATE`/`DELETE`/`TRUNCATE`), **and** a `BEFORE UPDATE OR DELETE` row trigger + `BEFORE TRUNCATE` statement trigger additionally block mutation at the table level — including for the table owner, which a `REVOKE` alone doesn't cover. See [Append discipline](/concepts/transparency-log#append-discipline). |
+| Tamper detection | The signed-tree-head monitor stores each signed root and proves the next one is an append-only RFC 6962 consistency-proof extension of it, so a rewrite becomes evident on the next monitor tick even in the (unenforceable) case of a superuser disabling the trigger. |
 | Idempotent | UNIQUE INDEX on `(agent_id, card_kind, content_hash, version)` |
 | Compose hook | Best-effort post-commit; 5-minute reconciler closes gaps |
 | Backfill | One-shot script for canonical rows that pre-date the log; marks tokens with `historic_backfill: true` |
@@ -82,18 +83,13 @@ The row shape is intentionally [Sigstore Rekor](https://www.sigstore.dev/rekor)-
 | (computed on demand) | `Verification.InclusionProof.Hashes` |
 | (computed on demand) | `Verification.InclusionProof.RootHash` |
 
-Rekor's entry-kind closest to our shape is [DSSE](https://github.com/secure-systems-lab/dsse). The migration plan is [documented](/migration/sigstore-rekor-migration).
+Rekor's entry-kind closest to our shape is [DSSE](https://github.com/secure-systems-lab/dsse).
 
 ## Editorial source
 
-Schema authored at [`mnemom-contracts/transparency-log/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/transparency-log/v1.yaml). Runtime consumers:
-
-- [`mnemom-api/src/transparency/log.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/log.ts) — append + read
-- [`mnemom-api/src/transparency/merkle.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/transparency/merkle.ts) — tree + proof
-- [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) — offline verifier
+Issued, appended, and served server-side by the mnemom-api transparency-log service, and independently re-verifiable offline via [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) (the `mnemom verify-card` CLI command), which mirrors the server-side Merkle implementation byte-for-byte.
 
 ## See also
 
 - [Transparency log concept](/concepts/transparency-log)
 - [Attestation token schema](/specifications/attestation-token)
-- [Sigstore Rekor migration](/migration/sigstore-rekor-migration)

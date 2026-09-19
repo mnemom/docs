@@ -142,24 +142,13 @@ See [api-reference/governance](/api-reference/governance) for full schemas. Quic
 | `*` | `/v1/orgs/:org_id/governance/notification-destinations[/:id][/test]` | org_admin / org_owner |
 | `*` | `/v1/orgs/:org_id/governance/escalation-rules[/:id]` | org_admin / org_owner |
 
-## Webhook event taxonomy
+## Notification dispatch
 
-| Event | Fired when |
-|---|---|
-| `governance.signal.fired` | New row inserted (or open row coalesced). |
-| `governance.signal.acknowledged` | `_acknowledge` RPC. |
-| `governance.signal.resolved` | `_resolve` RPC. |
-| `governance.signal.dismissed` | `_dismiss` RPC. |
-| `governance.escalation.triggered` | A rule's predicate matched and dispatch fired. |
+Governance signals are **not** delivered through the account-wide webhook subscription surface (`/v1/orgs/:org_id/webhooks`, [Webhooks](/guides/webhooks)). They dispatch only to the channels an org explicitly configures under `governance_notification_destinations` (`webhook`, `slack`, `email`, or `pagerduty` — see [REST endpoints](#rest-endpoints) above).
 
-Legacy aliases (kept 30 days post-cutover, removed at D+30):
+`governance.signal.fired` is the only event this system dispatches today, sent whenever a new signal is inserted or an existing open signal is coalesced (`detected_at`/`severity`/`agent_ids`/`detail` refreshed on the open row). Acknowledging, resolving, or dismissing a signal changes its row but does not currently dispatch any notification. An escalation rule only decides **which configured destinations** a given signal's `governance.signal.fired` reaches — matching a rule does not produce a separate event type.
 
-- `sideband.coherence.fired` → use `governance.signal.fired` filtered on `payload.source == "sideband.coherence"`.
-- `sideband.fault_line.fired` → same.
-- `sideband.fleet.fired` → same.
-- `drift.detected` → use `governance.signal.fired` filtered on `payload.source == "sideband.drift"`.
-
-All HMAC-SHA256 signed (`X-Mnemom-Signature: sha256=…`) following the AAP webhook contract; subscribers should verify the signature before trusting the payload.
+The `webhook` channel signs its POST body HMAC-SHA256 (`X-Mnemom-Signature: sha256=<hex>`, `X-Mnemom-Event: governance.signal.fired`, `X-Mnemom-Delivery-Id: <uuid>`) — subscribers should verify the signature before trusting the payload. This is a distinct signing scheme from the account-wide webhook surface's `X-Webhook-Signature: v1={hex}`; do not conflate the two.
 
 ## Naming convention discipline
 

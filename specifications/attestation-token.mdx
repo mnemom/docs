@@ -1,17 +1,17 @@
 ---
 title: "Attestation Token Schema"
-description: "Canonical wire format for AAP attestation tokens (v1). JWS Compact serialization, EdDSA-signed payload conforming to mnemom-contracts/attestation-token/v1.yaml."
+description: "Canonical wire format for AAP attestation tokens (v1) — JWS Compact serialization, EdDSA-signed payload."
 sidebarTitle: "Attestation Token"
 icon: "file-shield"
 ---
 
-The canonical wire format for [AAP attestation tokens](/concepts/aap-attestation). Mirrors [`mnemom-contracts/attestation-token/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/attestation-token/v1.yaml).
+The canonical wire format for [AAP attestation tokens](/concepts/aap-attestation).
 
 ## Envelope
 
 JWS Compact Serialization (RFC 7515):
 
-```
+```text
 <base64url(header)>.<base64url(payload)>.<base64url(signature)>
 ```
 
@@ -48,7 +48,7 @@ JSON object conforming to JSON Schema 2020-12. All required fields below; `addit
 | `version` | integer (≥ 1) | yes | Monotone canonical-card version at attestation time. |
 | `composed_at` | string (date-time) | yes | ISO-8601 UTC timestamp at which the canonical card was composed. |
 | `card_kind` | enum `"alignment" \| "protection"` | yes | Which canonical card the token attests to. |
-| `smolt_id` | string (`^smolt-[a-z0-9]+$`) | no | Optional convenience claim for consumers binding on smolt-id. |
+| `smolt_id` | string | no | Optional convenience claim for consumers binding on smolt-id. Not itself format-validated by the verifier — smolt IDs conventionally look like `smolt-<hex>`. |
 | `historic_backfill` | const `true` | no | Present (and only `true`) on tokens minted by the one-shot backfill script for canonical cards that pre-date the transparency log. |
 
 ## Signature
@@ -61,11 +61,7 @@ Tokens are short-lived. After `exp`, the embedded token is no longer cryptograph
 
 ## Editorial source
 
-Schema authored at [`mnemom-contracts/attestation-token/v1.yaml`](https://github.com/mnemom/mnemom-contracts/blob/main/attestation-token/v1.yaml). Runtime consumers:
-
-- [`mnemom-api/src/attestation/signer.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/signer.ts) — issuer
-- [`mnemom-api/src/attestation/verifier.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/verifier.ts) — server-side verifier
-- [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) — offline verifier CLI
+Issued and verified server-side by the mnemom-api attestation service (signer + verifier), and independently re-verifiable offline via [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) (the `mnemom verify-card` CLI command).
 
 ## See also
 
