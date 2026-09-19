@@ -1,0 +1,293 @@
+---
+title: "mnemom code"
+description: "Launch a governed Claude Code session through the Mnemom gateway — good defaults, saved config, an agent set up for you."
+sidebarTitle: "mnemom code"
+icon: "robot"
+---
+
+# `mnemom code`
+
+`mnemom code` launches your coding-agent CLI (Claude Code today) with its
+dev-time model traffic routed through the Mnemom gateway — so every session runs
+under a **governed agent identity**, is observable in your traces, and can carry
+a sealed per-conversation **contract** (goal, requirements, path allow/forbid,
+and guardrail ceilings) that the gateway seals on the first turn.
+
+It is designed to *just work*: sensible defaults out of the box, a config file so
+you never retype your flags, and a default governed agent provisioned for you on
+first run.
+
+<CodeGroup>
+
+```bash Install once
+npm install -g @mnemom/mnemom
+mnemom login
+mnemom code my-first-session
+```
+
+```bash Run with npx (no install)
+# Every mnemom command works through npx — handy for CI or a first try.
+npx @mnemom/mnemom login
+npx @mnemom/mnemom code my-first-session
+```
+
+</CodeGroup>
+
+That's it — the first run checks your prerequisites, sets up a governed agent in
+your org (with your confirmation), and drops you into a Claude Code session that
+is routed and governed.
+
+<Note>
+`npx @mnemom/mnemom code …` runs the launcher without a global install (the RC
+proxy is bundled, so nothing else is needed). Pin with
+`npx @mnemom/mnemom@latest code …` to bypass a stale npx cache. Throughout this
+page, any `mnemom …` command can be run as `npx @mnemom/mnemom …`.
+</Note>
+
+<Note>
+`mnemom code` needs a coding-agent CLI to launch. Install
+[Claude Code](https://claude.com/claude-code) first (`claude` on your `PATH`),
+or point `mnemom code` at any install with `--cli <name|/full/path>`.
+</Note>
+
+## Account & µ balance
+
+`mnemom code` runs your session governed and under your Mnemom account, so the
+first run signs you in:
+
+- **Sign in / sign up.** If you have no Mnemom session, `mnemom code` offers a
+  one-click browser sign-in (with a device-code fallback on headless/SSH boxes).
+  New to Mnemom? You can create a free account in the same flow. You can also
+  sign in ahead of time with `mnemom login`, or set `MNEMOM_API_KEY` for
+  non-interactive/CI use.
+- **µ balance.** `mnemom code` runs on µ and has **no free tier**. Before
+  launching, it checks the µ balance on the org the agent lives in (by default
+  your personal org). If there's no µ, the launch is blocked with a top-up link —
+  top up at `https://mnemom.ai/settings/billing`, and your balance updates the
+  moment the top-up completes.
+
+<Note>
+Run `mnemom code doctor` any time to see your session and prerequisites without
+launching.
+</Note>
+
+## Defaults out of the box
+
+| Default | Value | Override |
+| --- | --- | --- |
+| Gateway | `https://gateway.mnemom.ai` (us-2 / prod) | `--gateway <url>`, `MNEMOM_CODE_GATEWAY`, `config set gateway` |
+| Launch shape | **Remote Control in this terminal** when your machine can run it, else terminal-only | `--remote-control` / `--server`, `config set launch` |
+| Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
+| Agent | a governed `code-<you>` agent, created and claimed in your org on first run | `--agent <slug>`, `config set agent` |
+| Key source | env → saved store → prompt (no 1Password required) | `config set key_source` |
+
+The prod gateway is the default door, but it is **never** selected silently for
+any other value — a custom cell is reached only when you name it.
+
+## Preflight: `mnemom code doctor`
+
+Before your first launch (or any time something looks off), run the read-only
+preflight:
+
+```bash
+mnemom code doctor
+```
+
+It checks, with an actionable hint for anything that is not ready:
+
+- your settings file,
+- the coding-agent CLI (`claude`, or your `--cli`),
+- your Anthropic key source,
+- **gateway health** — a `200` plus the `x-mnemom-verdict` header that proves the
+  governance pipeline is live,
+- **Remote Control capability** — `node` + `openssl` + a Claude Code build with
+  the `--remote-control` flag,
+- your claude.ai login (Remote Control needs it; terminal-only does not).
+
+`doctor` writes nothing, never reads your key's value, and exits non-zero when
+the machine is not launch-ready — so you can gate a script on it.
+
+## Saved settings: `mnemom code config`
+
+Configure the launcher once and stop retyping flags. Settings live in a
+human-editable TOML file at `~/.mnemom/code.toml` (the same `config.toml`
+convention Cargo and Codex use). Your **secret Anthropic key is never stored
+here** — it lives separately in `~/.mnemom/code.json` (mode `0600`), so the file
+you open and share never carries a credential.
+
+```bash
+mnemom code config list                 # show your current settings
+mnemom code config get model            # print one value
+mnemom code config set gateway https://gateway.mnemom.ai
+mnemom code config set launch remote-control
+mnemom code config set guardrails.max_turns 200
+mnemom code config unset model          # remove one value
+mnemom code config edit                 # open ~/.mnemom/code.toml in $EDITOR
+mnemom code config path                 # print the file path
+```
+
+### Settable keys
+
+| Key | Meaning |
+| --- | --- |
+| `gateway` | Gateway host (default `https://gateway.mnemom.ai`) |
+| `model` | Model to launch (CLI alias or concrete id, e.g. `claude-sonnet-5`) |
+| `agent` | Governed agent identity slug (`x-mnemom-agent`) |
+| `effort` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`) |
+| `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
+| `launch` | Launch shape (`terminal`\|`remote-control`\|`server`) |
+| `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
+| `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
+| `guardrails.budget_usd` | Contract guardrail: spend ceiling in USD (positive number) |
+| `guardrails.stall_turns` | Contract guardrail: consecutive no-write turns (positive integer) |
+
+### Precedence
+
+Settings resolve highest-wins:
+
+```
+command-line flag  >  environment variable  >  ~/.mnemom/code.toml  >  built-in default
+```
+
+Guardrails saved in config apply only when you actually launch with a `--goal`,
+so a saved ceiling never forces an unrequested contract.
+
+An example `~/.mnemom/code.toml`:
+
+```toml
+gateway = "https://gateway.mnemom.ai"
+model = "claude-sonnet-5"
+agent = "code-alex"
+launch = "remote-control"
+
+[guardrails]
+max_turns = 200
+budget_usd = 25
+```
+
+## Your governed agent
+
+If you do not name an agent, `mnemom code` provisions a safe default one for you.
+On first run it:
+
+1. derives a slug — `code-<your handle>` — from your Mnemom login;
+2. checks whether that agent already exists and is claimed in your org;
+3. if not, shows you the plan (slug, org, and the cards it will publish) and asks
+   for confirmation, then **births** the agent through the gateway, **claims** it
+   into your org, and publishes a sane default governed posture.
+
+The default posture keeps the **cards in observe mode** — they watch and record,
+without actively intervening — and lets the **goal contract do the nudging**. So
+the alignment card runs integrity/injection screening for visibility
+(`autonomy_mode`/`integrity_mode: observe`, `principal.relationship:
+delegated_authority`), the protection card screens all four surfaces (incoming,
+outgoing, tool calls, and tool responses) in observe mode at thresholds
+`0.60 / 0.80 / 0.95`, and goal-alignment nudges: when you launch with a `--goal`,
+the gateway grades each turn and re-anchors the agent if it drifts.
+
+```bash
+mnemom code setup                 # provision / repair the governed agent explicitly
+mnemom code my-session --setup    # provision non-interactively, then launch
+mnemom code my-session --no-setup # skip the provisioning check for this launch
+```
+
+<Note>
+Provisioning writes to your org, so it always asks first. In a non-interactive
+run (no TTY) nothing is provisioned unless you pass `--setup`; without it the
+launch still proceeds, with a warning that the agent is unclaimed and how to
+claim it. Bring your own agent any time with `--agent <slug>`.
+</Note>
+
+## Launch shapes
+
+<Steps>
+
+### Remote Control, in this terminal (default when available)
+
+One session you can steer from **both** this terminal and claude.ai / the Claude
+app.
+
+```bash
+mnemom code my-session --remote-control
+```
+
+Claude Code gates Remote Control on a first-party claude.ai login, so `mnemom
+code` runs Claude Code untouched behind a small local proxy it ships — no key or
+gateway URL is injected into the Remote Control process. This shape needs `node`,
+`openssl`, and a claude.ai login (see `doctor`).
+
+### Terminal only
+
+A plain governed session in this terminal.
+
+```bash
+mnemom code my-session --remote-control=false   # or: config set launch terminal
+```
+
+### Headless server
+
+A `claude remote-control` dispatcher with no terminal, driven entirely from
+claude.ai / the Claude app.
+
+```bash
+mnemom code my-session --server
+```
+
+</Steps>
+
+## Contracts and guardrails
+
+Attach a sealed goal contract to the session. Passing any contract flag makes
+`--goal` required; the gateway seals the contract on the first turn and grades
+each turn against it, re-anchoring the agent if it drifts.
+
+```bash
+mnemom code refactor-auth \
+  --goal "Refactor the auth module without changing its public API" \
+  --requirement "All existing tests keep passing" \
+  --allow "src/auth/**" \
+  --forbid "**/*.env" \
+  --max-turns 200 --budget 25
+```
+
+The CLI prints the contract statement and its `sha256[0:16]` so you can confirm
+what was sealed. Guardrails (`--max-turns`, `--budget`, `--stall`) are
+observe-and-nudge ceilings.
+
+## Keys, without 1Password
+
+`mnemom code` resolves your Anthropic key with no 1Password dependency, in order:
+
+1. environment — `MNEMOM_CODE_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY`;
+2. the CLI's own store — `~/.mnemom/code.json` (`0600`);
+3. an interactive prompt (masked), offering to save it for next time.
+
+`config set key_source env|store|prompt` restricts the search (`env` = env only,
+`store` = env then store, `prompt` = always prompt). The key is placed only in
+the launched process and is never logged, printed, or passed as an argument. If
+no key resolves, `mnemom code` refuses to launch un-routed rather than silently
+falling back.
+
+## Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
+| `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
+| `--agent <slug>` | Governed identity (else a default `code-<you>` is provisioned) |
+| `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
+| `--gateway <url>` | Gateway host override |
+| `--remote-control` / `--server` | Launch shape |
+| `--model <alias\|id>`, `--effort <level>` | Model + reasoning effort |
+| `--trim-mcp` | Launch with no MCP servers |
+| `--no-yolo` | Do not pass `--dangerously-skip-permissions` |
+| `--setup` / `--no-setup` | Force / skip governed-agent provisioning |
+| `--dry-run` | Print the resolved launch plan and exit |
+
+Anything after `--` is passed straight through to the coding-agent CLI.
+
+## Related
+
+- [CLI reference](/gateway/cli) — the full `mnemom` command surface
+- [Agent claim flow](/guides/agent-claim-flow)
+- [Conscience values](/gateway/conscience-values) and [org card templates](/gateway/org-card-templates)
