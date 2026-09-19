@@ -5,8 +5,6 @@ sidebarTitle: "Intelligence API"
 icon: "brain"
 ---
 
-# Intelligence API
-
 <Note>
   Part of **[CLPI](/concepts/clpi) Phase 3: Intelligence Layer**. The Intelligence API provides fault line analysis, risk forecasting, and policy recommendations.
 </Note>
@@ -81,7 +79,7 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
 {
   "team_id": "team-abc123",
   "analysis_id": "fl-def456",
-  "fleet_score": 0.72,
+  "coherence": { "...": "dimensional coherence vector — governance median, conflict-edge count, conscience/integrity invariants" },
   "fault_lines": [
     {
       "id": "fl-001",
@@ -123,7 +121,7 @@ Analyze fault lines in a team's configuration -- value conflicts, capability gap
 |-------|------|-------------|
 | `team_id` | string | Team identifier |
 | `analysis_id` | string | Unique identifier for this analysis (used as input to `/forecast`) |
-| `fleet_score` | number | Overall fleet alignment score (0.0 -- 1.0) |
+| `coherence` | object | Dimensional team-coherence vector (governance median, conflict edges, conscience/integrity invariants). Replaces the deprecated scalar `fleet_score` |
 | `fault_lines` | array | List of detected fault lines |
 | `alignments` | array | List of structural fault line alignments (compound fault lines that consistently split the same agents) |
 | `summary` | object | Aggregate counts by classification and severity |
@@ -192,7 +190,6 @@ The fault line analysis is grounded in the `checkFleetFaultLines` function from 
 | Status | Meaning |
 |--------|---------|
 | `404` | Team not found |
-| `422` | Team has no agents registered |
 
 ---
 
@@ -273,7 +270,6 @@ Forecast risks based on fault line analysis. Uses LLM analysis (Claude Haiku) to
 | Status | Meaning |
 |--------|---------|
 | `404` | Team or analysis not found |
-| `422` | Analysis ID does not belong to the specified team |
 
 ---
 
@@ -358,7 +354,6 @@ Generate a policy recommendation based on team analysis. Uses LLM analysis to pr
 | Status | Meaning |
 |--------|---------|
 | `404` | Team not found |
-| `422` | Team has no agents registered or no fault line data available |
 
 ---
 
@@ -388,7 +383,7 @@ Create a transaction with scoped guardrails. Transaction guardrails use a 3-laye
 | `duration_hours` | number | No | Transaction TTL in hours (default: 1, max: 24) |
 | `policy` | object | No | Transaction-scoped policy overrides; merged with org and team policies |
 
-**Response:** `201 Created`
+**Response:** `200 OK`
 
 ```json
 {
@@ -424,7 +419,7 @@ Create a transaction with scoped guardrails. Transaction guardrails use a 3-laye
 |--------|---------|
 | `400` | Invalid request body or unsupported `action_type` |
 | `404` | Agent not found |
-| `422` | Policy merge conflict or invalid tool reference |
+| `409` | Conflicting concurrent transaction |
 
 ---
 
@@ -460,7 +455,11 @@ Delete or cancel an active transaction. Expired transactions are automatically c
 |-----------|----|------|----------|-------------|
 | `id` | path | string | Yes | Transaction identifier |
 
-**Response:** `204 No Content`
+**Response:** `200 OK`
+
+```json
+{ "deleted": true, "id": "txn-mno345" }
+```
 
 **Error responses:**
 
@@ -472,23 +471,18 @@ Delete or cancel an active transaction. Expired transactions are automatically c
 
 ## Error codes
 
-| Status | Code | Description |
-|--------|------|-------------|
-| `400` | `invalid_request` | Missing or invalid parameters |
-| `401` | `unauthorized` | API key required but not provided or invalid |
-| `402` | `feature_required` | Intelligence features require Team or Enterprise plan |
-| `404` | `not_found` | Requested resource does not exist |
-| `422` | `validation_error` | Request body fails schema validation or business rule checks |
-| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
-| `500` | `internal_error` | Server error; retry with exponential backoff |
+Every intelligence endpoint can return `400` (invalid request), `401` (missing/invalid API
+key), `404` (resource not found), `429` (rate limited — check `Retry-After`), or `500` (server
+error, retry with backoff). `POST /teams/recommend-policy` and `POST /transactions` can also
+return `409` on a conflicting concurrent request.
 
 All error responses follow the standard envelope:
 
 ```json
 {
   "error": {
-    "code": "feature_required",
-    "message": "Intelligence features require a Team or Enterprise plan. Upgrade at https://mnemom.ai/settings/billing"
+    "code": "not_found",
+    "message": "Team not found"
   }
 }
 ```
@@ -516,7 +510,6 @@ const analysis = await fetch(`${API_BASE}/v1/teams/fault-lines`, {
   headers,
   body: JSON.stringify({ team_id: 'team-abc123' }),
 }).then((r) => r.json());
-console.log(`Fleet score: ${analysis.fleet_score}`);
 console.log(`Fault lines: ${analysis.summary.total}`);
 
 // Forecast risks
@@ -566,7 +559,6 @@ analysis = httpx.post(
     headers=headers,
     json={"team_id": "team-abc123"},
 ).json()
-print(f"Fleet score: {analysis['fleet_score']}")
 print(f"Fault lines: {analysis['summary']['total']}")
 
 # Forecast risks

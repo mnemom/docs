@@ -87,7 +87,10 @@ The publish triggers `compose_protection_card(agent_id)`, which generates the ne
 mnemom protection validate protection.card.yaml
 ```
 
-Runs the full schema validator + applies an inline composition with current platform/org templates so you can see the canonical output without writing anything.
+By default this is server-authoritative: it runs the full schema validator and an inline
+composition against the live platform/org templates, so you see the actual canonical output
+without writing anything. Pass `--offline` to validate against the schema only, with no network
+call — useful in CI environments without API credentials.
 
 ## Understanding composition
 
@@ -179,24 +182,10 @@ Trusted content still emits a low-priority trace entry. If your internal KB ever
 
 ## Alerting
 
-Protection-card violations emit webhook events if your org has webhooks configured:
-
-```
-POST https://your-webhook.example/safe-house
-{
-  "event_type": "safe_house.violation",
-  "agent_id": "mnm-xxxxxxxx",
-  "detector": "injection_score",
-  "score": 0.83,
-  "threshold": 0.70,
-  "surface": "incoming",
-  "action_taken": "block",
-  "trace_id": "trace-...",
-  "timestamp": "2026-04-17T18:23:41Z"
-}
-```
-
-See [Safe House Webhooks](/guides/safe-house-webhooks) for the full event catalog.
+Safe House verdicts emit `sh.evaluation.warn` / `sh.evaluation.quarantine` / `sh.evaluation.block`
+webhook events if your org has a webhook endpoint subscribed to them. See the [Webhook Event
+Catalog](/api-reference/webhook-events#safe-house) for the exact payload shape, and [Webhook
+Notifications](/guides/webhooks) for creating an endpoint.
 
 ## Validating changes before deploy
 
@@ -211,20 +200,11 @@ echo $?   # 0 = valid, 1 = validation errors
 
 ## Rolling back a change
 
-There's no first-class rollback endpoint. To revert:
-
-1. Fetch the amendment history to find the prior shape:
-
-   ```bash
-   curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-     "https://api.mnemom.ai/v1/agents/{agent_id}/card-amendments"
-   ```
-
-   Each entry records the `field_changed`, `old_value`, `new_value`, `reason`, `triggered_by`, and `created_at` — so you can reconstruct any past field value.
-
-2. Reconstruct the card you want from the amendment history, then publish it as a new `PUT /v1/protection/agent/{agent_id}`.
-
-All publishes are amendments — the history is preserved. A "rollback" is just another amendment referencing the prior shape.
+There's no first-class rollback endpoint for protection cards, and no amendment-history read
+endpoint either (`GET /v1/agents/{agent_id}/card-amendments` tracks alignment-card edits only —
+bounded actions and declared values — not protection-card publishes). Keep your protection card
+YAML in version control as the source of truth: to revert, publish the prior committed version
+with `mnemom protection publish` or `PUT /v1/protection/agent/{agent_id}`.
 
 ## See also
 
@@ -232,5 +212,5 @@ All publishes are amendments — the history is preserved. A "rollback" is just 
 - [Protection Card Schema](/specifications/protection-card-schema) — normative spec
 - [Safe House](/concepts/safe-house) — the detection pipeline this card configures
 - [Safe House Threat Model](/guides/safe-house-threat-model) — what Safe House defends against
-- [Safe House Webhooks](/guides/safe-house-webhooks) — alerting integration
+- [Webhook Notifications](/guides/webhooks) — alerting integration
 - [Card Composition Guide](/guides/card-composition) — managing org templates and exemptions

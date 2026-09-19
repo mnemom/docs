@@ -122,36 +122,24 @@ curl -sS \
 
 The `mnemom_synthetic` boolean tells you whether the indicator is real (`false`) or synthetic seed (`true`). For production alerting, filter to `mnemom_synthetic: false`.
 
-## Step 4 — Subscribe to push updates (optional)
-
-The poll path is the canonical integration. If you also want push-based notification on new IoC insertion, subscribe to the `ioc.added` webhook event:
-
-- Catalog entry: [`/api-reference/webhook-events`](/api-reference/webhook-events#iocadded)
-- Subscription how-to: [Webhooks guide](/guides/webhooks)
-
-Push + poll together gives you near-real-time arrival plus a periodic full-state reconciliation. The poll path remains the source-of-truth for end-of-day reconciliation against your threat-intel platform.
-
-## Step 5 — Resume from where you left off
+## Step 4 — Resume from where you left off
 
 The endpoint orders results `last_seen_at DESC`. The recommended resume pattern is to track the *most recent* `last_seen_at` your pipeline has ingested and pass it as `?after=` on the next call.
 
-When a response contains `limit` rows and more are available, the bundle carries a `next_after` extension at the bundle level:
+When a response contains exactly `limit` rows (more may be available), the bundle carries a
+top-level `next_after` field — a Mnemom addition outside the STIX 2.1 bundle spec, which STIX
+consumers simply ignore as an unknown field:
 
 ```json
 {
   "type": "bundle",
   "id": "bundle--<uuid>",
   "objects": [ /* limit indicators */ ],
-  "extensions": {
-    "extension-definition--mnemom-aegis-2026-05": {
-      "extension_type": "property-extension",
-      "next_after": "2026-05-30T12:14:07Z"
-    }
-  }
+  "next_after": "2026-05-30T12:14:07Z"
 }
 ```
 
-Pass `next_after` as `?after=` on the next request to paginate forward. STIX consumers that do not understand the extension ignore it; integrate the read in your own pipeline code.
+Pass `next_after` as `?after=` on the next request to paginate forward.
 
 ```python Python — full pagination loop
 def fetch_all_iocs(api_key: str, ioc_type: str | None = None, since: str | None = None):
@@ -173,12 +161,8 @@ def fetch_all_iocs(api_key: str, ioc_type: str | None = None, since: str | None 
         for obj in bundle.get("objects", []):
             yield obj
 
-        # Look for the bundle-level next_after extension to keep paginating.
-        next_after = (
-            bundle.get("extensions", {})
-                  .get("extension-definition--mnemom-aegis-2026-05", {})
-                  .get("next_after")
-        )
+        # Look for the bundle-level next_after field to keep paginating.
+        next_after = bundle.get("next_after")
         if not next_after:
             break
         cursor = next_after
@@ -188,18 +172,15 @@ def fetch_all_iocs(api_key: str, ioc_type: str | None = None, since: str | None 
 
 The endpoint is rate-limited to **1 request per second per IP** (KV-backed; fail-open if the rate-limit KV namespace is unbound). Cloudflare Workers KV has a 60-second minimum TTL, so the *effective* practical bound is closer to 1 request per minute per IP.
 
-**Recommended polling cadence:** every 5–15 minutes via cron. The IoC publication rate at GA is very low (calm-at-GA contract); more frequent polling burns rate-limit budget without producing more signal. If your downstream tooling needs near-real-time updates, combine cron polling with the `ioc.added` webhook (Step 4).
+**Recommended polling cadence:** every 5–15 minutes via cron. The IoC publication rate at GA is very low (calm-at-GA contract); more frequent polling burns rate-limit budget without producing more signal. Polling is currently the only integration path — IoC insertions are not delivered as a customer-subscribable webhook event.
 
 ## No bundle-level cryptographic signing at GA
 
 <Note>
 The STIX bundle is **not** cryptographically signed at GA. The IoC entries are produced from rows in the internal `iocs` table; the recipe-set envelope signing chain protects the [Managed Rule](/concepts/managed-rules) pipeline, but the IoC bundle is a derived view.
 
-Customers wanting cryptographic attestation for cross-tenant detection content should rely on:
-
-- The append-only audit chain on `recipe_review_actions` (recipe-level provenance via the admin API surface).
-- The [`recipe.promoted`](/api-reference/webhook-events#recipepromoted) and [`advisory.published`](/api-reference/webhook-events#advisorypublished) webhook events.
-- The published [`/trust/slos`](https://trust.mnemom.ai/slos) commitments.
+Customers wanting cryptographic attestation for cross-tenant detection content should rely on
+the published [`/trust/slos`](https://www.mnemom.ai/trust) commitments.
 </Note>
 
 ## See also
@@ -208,5 +189,4 @@ Customers wanting cryptographic attestation for cross-tenant detection content s
 - [IoC STIX 2.1 mapping](/specifications/ioc-stix-mapping) — wire-format reference
 - [AEGIS](/concepts/aegis) — protection-layer framing
 - [Advisories](/concepts/advisories) — the per-incident transparency surface IoC entries may reference via `mnemom_related_advisory_id`
-- [Webhooks](/guides/webhooks) — push-based IoC notifications
 - [Substrate fingerprint](/concepts/substrate-fingerprint) — what `substrate_fingerprint` IoC values represent
