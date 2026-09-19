@@ -35,7 +35,7 @@ interface TeamCoherenceResult {
   conscience_universal: boolean | null;
   conscience_divergence: Array<{ agent_id; diverges_on: string[] }>;
   integrity_uniform: boolean | null;
-  integrity_divergence: Array<{ agent_id; integrity_mode }>;
+  integrity_divergence: Array<{ agent_id; enforcement_mode: "observe" | "nudge" | "enforce" | null }>;
 
   // Outlier analysis
   outlier_agents: Array<{ agent_id; mean_pair_governance; deviation_sigma }>;
@@ -77,6 +77,7 @@ Key properties:
 - **Only explicit conflicts count.** A value in one card's `conflicts_with` that the other card declares is real disagreement. Everything else is tolerated specialization.
 - **Insufficient evidence returns `null`**, not a fabricated zero. Pairs with no overlap and no conflicts surface honestly as "not enough data to score."
 - **Bounded in [0, 1].** `governance_score = 1` when there are only shared values; `governance_score = 0` when every evidence item is a conflict.
+- Each pair also carries a **`confidence`** label — `"high"` when evidence comfortably clears the minimum, `"moderate"` when it just clears it, `"insufficient_evidence"` when `governance_score` is `null` — so a UI can visually distinguish a well-evidenced 0.85 from a thinly-evidenced one.
 
 ### Concrete scenarios
 
@@ -107,7 +108,7 @@ The Sentinel↔Patch delta (0.58 → 1.00) is the single most important signal t
 When the fleet uses [unified cards](/concepts/agent-cards) with `conscience` and `integrity` sections, the scorer checks two binary invariants:
 
 - **`conscience_universal`** — `true` if every agent shares the exact same conscience commitment set. `false` if any agent's conscience set differs from the modal set (the minority diverges, not the majority). `null` if any card lacks a conscience section.
-- **`integrity_uniform`** — `true` if all agents are in the same top-level `integrity_mode` (`off`, `observe`, `nudge`, or `enforce`). `false` if modes differ.
+- **`integrity_uniform`** — `true` if all agents share the same unified-card `integrity.enforcement_mode` (`observe`, `nudge`, or `enforce`). `false` if modes differ; `null` if any card lacks an `integrity` section.
 
 These are first-order signals. A fleet without a universal conscience floor has a governance problem that no continuous score can express.
 
@@ -142,7 +143,9 @@ const cards: TeamCoherenceInput[] = [
     conscience: {
       declared_values: ["principal_benefit", "honesty"],
     },
-    integrity_mode: "enforce",
+    integrity: {
+      enforcement_mode: "enforce",
+    },
   },
   // ... more agents
 ];
@@ -170,7 +173,7 @@ import { checkFleetCoherenceBaseline } from "@mnemom/team-coherence/baseline";
 
 ## Fault-line analysis
 
-Fault-line classification — grouping divergences into `resolvable` / `priority_mismatch` / `incompatible` / `complementary` buckets and surfacing structural fault lines — is a **separate** layer built on top of coherence scoring. It continues to be emitted by the mnemom-api `/v1/teams/fault-lines` endpoint alongside the v2 coherence vector.
+Fault-line classification — grouping divergences into `resolvable` / `priority_mismatch` / `incompatible` / `complementary` buckets and surfacing structural fault lines — is a **separate** layer built on top of coherence scoring. It is emitted by the `/v1/teams/fault-lines` endpoint alongside the v2 coherence vector.
 
 See the [Fault Line Analysis guide](/guides/fault-line-analysis) for the classification model, and the [Intelligence API reference](/api-reference/intelligence-overview) for the endpoint shape.
 

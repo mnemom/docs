@@ -1,6 +1,6 @@
 ---
 title: "Advisories"
-description: "AEGIS's post-incident transparency surface at /trust/advisories. Each advisory is a published JSON document with a synthetic boolean that distinguishes the GA synthetic seed from real published advisories."
+description: "AEGIS's post-incident transparency surface at /trust/advisories. Each advisory is a published JSON document with a synthetic boolean that distinguishes illustrative entries from real published advisories."
 sidebarTitle: "Advisories"
 icon: "newspaper"
 ---
@@ -23,21 +23,21 @@ Each advisory is published as a JSON document and rendered on `/trust/advisories
 | `related_campaign_id` | string \| null | UUID of the L1 aggregator campaign state row this advisory closes, or `null` for non-campaign-driven advisories. |
 | `references` | array | External references (CVE IDs, vendor advisories, news coverage). |
 | `published_at` | string | ISO-8601 UTC publication timestamp. |
-| `synthetic` | boolean | `true` for the GA synthetic seed; `false` for real published advisories. **Customers can rely on this field.** |
+| `synthetic` | boolean | `true` for an illustrative or test-seed entry; `false` for a real published advisory. **Customers can rely on this field.** |
 
 The schema is documented at [`/specifications/pending-advisories-schema`](/specifications/pending-advisories-schema).
 
 ## The synthetic flag
 
-Every advisory carries `synthetic: boolean`. At GA the only advisory is the synthetic seed post-mortem, clearly labeled with `synthetic: true`. The synthetic seed is the system telling the truth: AEGIS exercises the end-to-end advisory pipeline — draft, review, publish, IoC linkage, webhook emission — against a real workflow with synthetic content, so the pipeline is proven before the first real advisory needs it.
+Every advisory carries `synthetic: boolean`. A `true` value marks an illustrative or pipeline-validation entry — AEGIS exercises the end-to-end advisory pipeline (draft, review, publish, IoC linkage, webhook emission) against synthetic content so the pipeline is proven before it needs to carry a real incident. A `false` value means the advisory describes a real, published incident.
 
-When AEGIS publishes a real advisory it carries `synthetic: false`. The boolean is the field external pipelines, dashboards, and reputation systems can use to filter; the rule is simple and customer-readable.
+The boolean is the field external pipelines, dashboards, and reputation systems can use to filter; the rule is simple and customer-readable.
 
 ## The calm-at-GA framing
 
-> If at GA the network is genuinely calm, the thermometer says calm, the advisory list shows the synthetic seed post-mortem, the IoC feed is empty. That's not a stub — that's the system telling the truth.
+> If the network is genuinely calm, the thermometer says calm, the advisory list shows no unresolved incidents, the IoC feed is empty. That's not a stub — that's the system telling the truth.
 
-See [AEGIS — calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract). The advisory surface does not fabricate real-looking activity; the GA list contains one entry, clearly labeled. When AEGIS detects, the surface fills.
+See [AEGIS — calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract). The advisory surface does not fabricate real-looking activity to appear busier than the network actually is. When AEGIS detects and closes out a real incident, the surface fills.
 
 ## Authoring lifecycle
 

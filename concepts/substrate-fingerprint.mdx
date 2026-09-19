@@ -31,7 +31,7 @@ The three table prefixes let the L1 aggregator bucket production vs. adversarial
 
 ### The four collapse forms
 
-The production trigger (migration 252) composes `substrate_id` from up to four components: `<provider>`, `<model>`, the SDK identifier `<sdk@ver>`, and the customer-set lockfile hash. The trigger collapses based on which optional inputs are present:
+The production database trigger composes `substrate_id` from up to four components: `<provider>`, `<model>`, the SDK identifier `<sdk@ver>`, and the customer-set lockfile hash. The trigger collapses based on which optional inputs are present:
 
 | Inputs present | Components | Resulting `substrate_id` shape |
 |---|---|---|
@@ -40,11 +40,11 @@ The production trigger (migration 252) composes `substrate_id` from up to four c
 | Lockfile only | 4 | `<provider>:<model>::<lockfile-hash>` (empty third slot) |
 | Both | 4 | `<provider>:<model>:<sdk@ver>:<lockfile-hash>` |
 
-The separator is `:` throughout. The `@` inside `<sdk@ver>` is internal to the SDK identifier (`@anthropic-ai/sdk@0.65.0`); it is not a top-level separator. The four collapse forms are covered by the `aegis23_substrate_trigger` pgTAP suite.
+The separator is `:` throughout. The `@` inside `<sdk@ver>` is internal to the SDK identifier (`@anthropic-ai/sdk@0.65.0`); it is not a top-level separator.
 
 ### The two customer-set headers
 
-The fingerprint enrichments are surfaced through two opt-in request headers. Workers Headers handling is case-insensitive; the canonical names below are the casing used in the gateway's `LOCKFILE_HASH_HEADER` and `SDK_VERSION_HEADER` constants in `mnemom-platform/gateway/src/substrate-fingerprint.ts`.
+The fingerprint enrichments are surfaced through two opt-in request headers. Workers Headers handling is case-insensitive; the canonical names below are the casing used in the gateway's `LOCKFILE_HASH_HEADER` and `SDK_VERSION_OVERRIDE_HEADER` constants in `mnemom-platform/gateway/src/substrate-fingerprint.ts`.
 
 | Header | Effect | Validation |
 |---|---|---|
@@ -59,10 +59,10 @@ Both opt-ins are header-only; there is no admin-UI toggle. See the [lockfile-has
 
 The substrate fingerprint is one of four L0 axis-identity fields stamped on every row. The full set:
 
-| Field | What it identifies | GA derivation |
+| Field | What it identifies | Derivation |
 |---|---|---|
 | `substrate_id` | The AI substrate the agent ran on | `<provider>:<model>` from request context |
-| `vertical_id` | The customer industry vertical | Defaults to `unspecified` at GA; Phase 2 enrichment from `agent.metadata.vertical` |
+| `vertical_id` | The customer industry vertical | Defaults to `unspecified` today — vertical enrichment from agent metadata is not yet wired in |
 | `pattern_fingerprint` | The canonicalized hash of the detection pattern (or the verdict, for integrity rows) | Per-table derivation: `ic:<verdict>` for integrity, `<category>:<technique>` for arena, prefix-based for sideband |
 | `source_fingerprint` | The canonicalized hash of the request source identity | `agent_id` for direct rows; `attempt_id` for sideband |
 
@@ -89,7 +89,7 @@ The full path from row stamp to cross-tenant signal:
         threat_level transitions calm → elevated → high → under_attack
         │
         ▼
-5.  L2 under-attack overlay engages (Phase 4) / L3 Managed Rule promotion candidate
+5.  L2 under-attack overlay engages / L3 Managed Rule promotion candidate
     L4 threat thermometer surface updates / L5 IoC entry candidate
 ```
 
