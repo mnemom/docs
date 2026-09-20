@@ -46,7 +46,16 @@ const RULES = [
 // source (mnemom-api#720), deployed, and re-synced — so the gate is now blocking
 // with NO exceptions. Add an entry only to ratchet in a gate on a non-clean tree:
 // `${location}::${matchedToken}` + a comment + a ticket to scrub at source.
-const SPEC_ALLOWLIST = new Set([]);
+const SPEC_ALLOWLIST = new Set([
+  // Ratchet: the 2026-09-19 re-sync of the live slice (380 -> 522 paths) pulled in
+  // four operations whose descriptions carry internal tokens. Scrub at the source
+  // (mnemom-api openapi/tags/policy.ts + openapi/tags/presentations.ts), redeploy,
+  // re-sync, then delete these four lines. Tracked in Linear (see the docs PR #505).
+  "$.paths./policies/evaluate.post.description::UC-8",
+  "$.paths./policies/evaluate/historical.post.description::UC-8",
+  "$.paths./presentations/{slug}/chat.post.description::cfd",
+  "$.paths./presentations/{slug}/chat.post.description::cbd",
+]);
 
 const findings = []; // {surface, loc, label, token}
 const allowlistHits = new Set();
