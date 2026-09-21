@@ -263,8 +263,33 @@ mnemom agent refactor-auth \
 ```
 
 The CLI prints the contract statement and its `sha256[0:16]` so you can confirm
-what was sealed. Guardrails (`--max-turns`, `--budget`, `--stall`) are
-observe-and-nudge ceilings.
+what was sealed. The gateway echoes the full hash back on every response as
+`x-mnemom-contract-hash`.
+
+### Limits
+
+| What | Limit | If exceeded |
+| --- | --- | --- |
+| Goal statement | 4,000 characters | first turn rejected with `400` (`statement_too_long`) |
+| Whole contract (statement + requirements + paths + ceilings, as canonical JSON) | 8,192 bytes | first turn rejected with `400` (`contract_too_large`) |
+| `--max-turns`, `--stall` | any positive whole number | the CLI refuses the flag before launching |
+| `--budget` | any positive USD amount (decimals allowed) | the CLI refuses the flag before launching |
+| Requirements, `--allow`, `--forbid` | no count limit; only the 8,192-byte total applies | — |
+
+The contract is sealed on the **first turn** of a session and cannot change
+afterwards: a later request that sends a different or invalid contract header is
+ignored and the sealed contract keeps governing, so a client hiccup mid-session
+never kills a governed session. To change the contract, start a new session.
+
+### What guardrails do
+
+Guardrails (`--max-turns`, `--budget`, `--stall`) **observe and nudge, never
+block**. Each ceiling is checked once per turn; when one is crossed the gateway
+appends a short `[mnemom guardrail]` line to your next message telling the agent
+which ceiling it hit, and marks the crossing on the response headers and in your
+traces. The session keeps running. A ceiling you leave unset falls back to the
+cell's default for that guardrail, if the cell has one; otherwise it is simply
+off.
 
 ## Your Anthropic key
 
