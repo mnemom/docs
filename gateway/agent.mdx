@@ -84,11 +84,10 @@ mnemom agent doctor
 
 A read-only check with an actionable hint for anything not ready: your settings
 file, the coding-agent CLI, your Anthropic key source, **gateway health** (a
-`200` plus the `x-mnemom-verdict` header that proves governance is live),
-Remote Control capability (`node` + `openssl` + a Claude Code build with
-`--remote-control`), your claude.ai login, and your **Mnemom Agent access** for
-the active org. It writes nothing, never reads your key's value, and exits
-non-zero when the machine is not launch-ready, so a script can gate on it.
+`200` plus the `x-mnemom-verdict` header that proves governance is live), and
+your **Mnemom Agent access** for the active org. It writes nothing, never reads
+your key's value, and exits non-zero when the machine is not launch-ready, so a
+script can gate on it.
 
 ## Account and µ balance
 
@@ -103,7 +102,7 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 | Default | Value | Override |
 | --- | --- | --- |
 | Gateway | `https://gateway.mnemom.ai` (us-2 / prod) | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
-| Launch shape | **Remote Control in this terminal** when your machine can run it, else terminal-only | `--remote-control` / `--server`, `config set launch` |
+| Launch shape | **Terminal-only** — a governed session in this terminal. (Remote Control is an internal Mnemom feature.) | `config set launch` |
 | Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
 | Agent | a governed `agent-<you>` agent, created and claimed in your org on first run | `--agent <slug>`, `config set agent` |
 | Key source | env → saved store → prompt | `config set key_source` |
@@ -122,7 +121,7 @@ never stored there**; it lives separately in `~/.mnemom/launcher.json` (mode
 mnemom agent config list                 # show your current settings
 mnemom agent config get model            # print one value
 mnemom agent config set gateway https://gateway.mnemom.ai
-mnemom agent config set launch remote-control
+mnemom agent config set launch terminal
 mnemom agent config set guardrails.max_turns 200
 mnemom agent config unset model          # remove one value
 mnemom agent config edit                 # open ~/.mnemom/launcher.toml in $EDITOR
@@ -138,7 +137,7 @@ mnemom agent config path                 # print the file path
 | `agent` | Governed agent identity slug (`x-mnemom-agent`) |
 | `effort` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`) |
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
-| `launch` | Launch shape (`terminal`\|`remote-control`\|`server`) |
+| `launch` | Launch shape — `terminal` (`remote-control`\|`server` are internal-only) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
 | `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
 | `guardrails.budget_usd` | Contract guardrail: spend ceiling in USD (positive number) |
@@ -161,7 +160,7 @@ An example `~/.mnemom/launcher.toml`:
 gateway = "https://gateway.mnemom.ai"
 model = "claude-sonnet-5"
 agent = "agent-alex"
-launch = "remote-control"
+launch = "terminal"
 
 [guardrails]
 max_turns = 200
@@ -214,36 +213,19 @@ mnemom agent move <id-or-name> --to <slug|id>
 
 <Steps>
 
-### Remote Control, in this terminal (default when available)
+### Terminal (the default)
 
-One session you can steer from **both** this terminal and claude.ai / the Claude
-app.
-
-```bash
-mnemom agent my-session --remote-control
-```
-
-Claude Code gates Remote Control on a first-party claude.ai login, so `mnemom
-agent` runs Claude Code untouched behind a small local proxy it ships; no key or
-gateway URL is injected into the Remote Control process. This shape needs `node`,
-`openssl`, and a claude.ai login (see `doctor`).
-
-### Terminal only
-
-A plain governed session in this terminal.
+A governed coding session in this terminal — nothing else to set up.
 
 ```bash
-mnemom agent my-session --remote-control=false   # or: config set launch terminal
+mnemom agent my-session
 ```
 
-### Headless server
+### Remote Control and headless server (internal)
 
-A `claude remote-control` dispatcher with no terminal, driven entirely from
-claude.ai / the Claude app.
-
-```bash
-mnemom agent my-session --server
-```
+Remote Control (a session you also steer from claude.ai and the Claude app) and
+the headless `--server` dispatcher are internal Mnemom capabilities. They are not
+enabled for invited accounts, and `mnemom agent` launches terminal-only for them.
 
 </Steps>
 
@@ -316,7 +298,7 @@ falling back.
 | `--agent <slug>` | Governed identity (else a default `agent-<you>` is provisioned) |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
 | `--gateway <url>` | Gateway host override |
-| `--remote-control` / `--server` | Launch shape |
+| `--remote-control` / `--server` | Launch shape (internal-only) |
 | `--model <alias\|id>`, `--effort <level>` | Model + reasoning effort |
 | `--trim-mcp` | Launch with no MCP servers |
 | `--no-yolo` | Do not pass `--dangerously-skip-permissions` |
