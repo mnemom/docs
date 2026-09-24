@@ -111,7 +111,7 @@
     },
     {
       "name": "Code",
-      "description": "Mnemom Code — the governed coding-agent launcher (`mnemom code`). The per-org feature gate the CLI checks at startup; invites and access reuse the product-invite surface with product `code`."
+      "description": "Mnemom Agent — the governed agent launcher (`mnemom agent`). The per-org feature gate the CLI checks at startup; invites and access reuse the product-invite surface with product `code`."
     },
     {
       "name": "Invites",
@@ -9224,6 +9224,232 @@
         }
       }
     },
+    "/agent/sessions/{conversationId}": {
+      "get": {
+        "operationId": "getAgentSession",
+        "summary": "Live goal state of one Mnemom Agent session",
+        "description": "Backs `mnemom agent show`. Resolves the org like `GET /v1/code/entitlement` (explicit `org_id` else the caller's primary org), requires membership, and confirms `agent_id` belongs to that org — an unknown agent and an agent in another org are the SAME 404 `agent_not_found`, so existence never leaks across tenants. Then relays the gateway's state for `conversationId` verbatim: the sealed goal contract (`sealed`, with the gateway's `hash` — the only sealed hash; a locally computed one differs because the gateway normalises absent arrays), the latest alignment verdict, the turn counter and the guardrail ceilings/state. `null` sections mean the gateway holds nothing for that conversation (absence is data, never a 404). 503 `gateway_unavailable` when the gateway is unset or unreachable.",
+        "tags": [
+          "Code"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "description": "The conversation id the CLI launched the session with.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "description": "The agent record id (`agents.id`) the session ran as.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "description": "Target organization (defaults to the caller's primary org).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's live goal state. Every gateway-owned section is nullable — a session that never sealed a goal contract returns `sealed: null`, `verdict: null`, `turn: null`, `guardrails: null`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "conversation_id",
+                    "agent",
+                    "org_id",
+                    "sealed",
+                    "verdict",
+                    "turn",
+                    "guardrails"
+                  ],
+                  "properties": {
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "sealed": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "What the gateway sealed for this conversation.",
+                      "required": [
+                        "contract",
+                        "hash",
+                        "sealed_at"
+                      ],
+                      "properties": {
+                        "contract": {
+                          "description": "The sealed goal contract (statement, requirements, allowed/forbidden paths, ceilings) exactly as the gateway normalised it."
+                        },
+                        "hash": {
+                          "type": "string",
+                          "description": "The gateway's sealed hash — the canonical one."
+                        },
+                        "sealed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "verdict": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "The latest goal-alignment verdict.",
+                      "required": [
+                        "turn",
+                        "verdict",
+                        "reason",
+                        "at"
+                      ],
+                      "properties": {
+                        "turn": {
+                          "type": "integer"
+                        },
+                        "verdict": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "at": {
+                          "type": "string"
+                        },
+                        "streak_start": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "turn": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Turns the gateway has counted for this conversation."
+                    },
+                    "guardrails": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "required": [
+                        "ceilings",
+                        "state"
+                      ],
+                      "properties": {
+                        "ceilings": {
+                          "type": "object",
+                          "description": "The guardrail ceilings the contract sealed.",
+                          "additionalProperties": true
+                        },
+                        "state": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Current guardrail counters (turns, spend, stall, crossed flags).",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`agent_id` is missing (`agent_id_required`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No org for the caller (`not_found`), or the agent does not exist / is not in the resolved org (`agent_not_found` — deliberately the same answer for both).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "description": "The agent lookup failed (retryable), or the Mnemom gateway is unset or unreachable (`gateway_unavailable`, with `details.reason`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agents": {
       "post": {
         "operationId": "registerAgent",
@@ -12486,7 +12712,7 @@
       "post": {
         "operationId": "mintProtectionCapability",
         "summary": "Mint a one-time protection-write capability (the CISO grant)",
-        "description": "Issues a SINGLE-USE, short-lived (15-minute) capability authorizing ONE subsequent protection-card write for the caller + agent. The protection card is the 'locked door' surface, so its write is gated behind an explicit, operator-approved grant rather than a standing one (the alignment card, by contrast, is standing). The caller MUST be a human operator that org-co-manages the agent (ADR-062); agent (OAuth) principals are rejected — an agent can never mint its own protection grant. Idempotent: a re-mint within the window refreshes the single live grant. No token is returned — the capability is a server-side record keyed to the caller; the agent then publishes its protection card via its own connection and the server consumes the live grant on a successful write.",
+        "description": "Issues a SINGLE-USE, short-lived (15-minute) capability authorizing ONE subsequent protection-card write for the caller + agent. The protection card is the 'locked door' surface, so its write is gated behind an explicit, operator-approved grant rather than a standing one (the alignment card, by contrast, is standing). The caller MUST be a human operator that org-co-manages the agent (ADR-062). A human is recognised by capability, not transport: session, JWT, API-key, and OAuth principals carrying the broad `api:write` user capability (an `mcp:write` grant, e.g. the CLI's `mnemom login`) may mint; an OAuth principal carrying only per-agent resource scopes (`agent:<id>:<action>`) is rejected — an agent can never mint its own protection grant. Idempotent: a re-mint within the window refreshes the single live grant. No token is returned — the capability is a server-side record keyed to the caller; the agent then publishes its protection card via its own connection and the server consumes the live grant on a successful write.",
         "tags": [
           "Agents"
         ],
@@ -12550,7 +12776,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — the caller is an agent (OAuth) principal (`agent_principal_cannot_mint`), or is not a member of the org that governs the agent.",
+            "description": "Forbidden — the caller is an agent principal (an OAuth token without the `api:write` user capability; `agent_principal_cannot_mint`), or is not a member of the org that governs the agent.",
             "content": {
               "application/json": {
                 "schema": {
@@ -40145,8 +40371,8 @@
     "/code/entitlement": {
       "get": {
         "operationId": "getCodeEntitlement",
-        "summary": "Is Mnemom Code enabled for this organization?",
-        "description": "The `mnemom code` feature gate. Enabled when the caller's email is in the internal cohort (`@mnemom.ai`), the caller is Mnemom staff, or the org (or the caller's own account) holds a `product_access_grant` for product `code` — typically from a redeemed Code invitation (`POST /v1/invites/accept`). `org_id` targets a specific org the caller belongs to; omitted, the caller's primary org is used. A non-member of `org_id` is 403 (`forbidden`); an org without access is 403 `code_not_enabled` with a machine-readable hint the CLI prints.",
+        "summary": "Is Mnemom Agent enabled for this organization?",
+        "description": "The `mnemom agent` feature gate. Enabled when the caller's email is in the internal cohort (`@mnemom.ai`), the caller is Mnemom staff, or the org (or the caller's own account) holds a `product_access_grant` for product `code` — typically from a redeemed Code invitation (`POST /v1/invites/accept`). `org_id` targets a specific org the caller belongs to; omitted, the caller's primary org is used. A non-member of `org_id` is 403 (`forbidden`); an org without access is 403 `code_not_enabled` with a machine-readable hint the CLI prints.",
         "tags": [
           "Code"
         ],
@@ -40174,7 +40400,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Mnemom Code is enabled for the org.",
+            "description": "Mnemom Agent is enabled for the org.",
             "content": {
               "application/json": {
                 "schema": {
@@ -40182,7 +40408,8 @@
                   "required": [
                     "org_id",
                     "enabled",
-                    "source"
+                    "source",
+                    "remote_control"
                   ],
                   "properties": {
                     "org_id": {
@@ -40202,6 +40429,10 @@
                         "invitation"
                       ],
                       "description": "Why access is enabled: internal cohort (@mnemom.ai email), platform staff, or a product-access grant (redeemed invitation / staff-granted)."
+                    },
+                    "remote_control": {
+                      "type": "boolean",
+                      "description": "May this caller use Remote Control (a session steerable from claude.ai and the Claude app)? True only for the internal cohort and platform staff; invited customers run terminal-only. The CLI reads this to gate its `--remote-control`/`--server` shapes and the auto-upgrade."
                     }
                   }
                 }
@@ -40212,7 +40443,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Not a member of `org_id` (`forbidden`), or Mnemom Code is not enabled for the org (`code_not_enabled`, with `details.org_id` and `details.hint`).",
+            "description": "Not a member of `org_id` (`forbidden`), or Mnemom Agent is not enabled for the org (`code_not_enabled`, with `details.org_id` and `details.hint`).",
             "content": {
               "application/json": {
                 "schema": {
