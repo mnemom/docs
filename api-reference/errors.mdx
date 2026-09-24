@@ -33,7 +33,8 @@ Branch on `error.code`, not on `error.message`. Messages are human-facing and ma
 |---|---|---|
 | **`400 Bad Request`** | Request shape / validation problem. | No — fix the request and resubmit. |
 | **`401 Unauthorized`** | Missing or invalid credentials. | No — re-authenticate. |
-| **`403 Forbidden`** | Authenticated, not authorized for the requested resource or action. | No. |
+| **`402 Payment Required`** | Billing is unconfigured for the org, or the µ balance is depleted (gateway-routed calls). | No — resolve billing, then retry. |
+| **`403 Forbidden`** | Authenticated, not authorized for the requested resource or action — or the agent is contained (`paused`/`killed`, gateway-routed calls). | No. |
 | **`404 Not Found`** | Resource doesn't exist. | No. |
 | **`409 Conflict`** | Concurrent modification / already-exists conflict. | Yes — re-read, re-modify, re-submit. |
 | **`413 Payload Too Large`** | Request body exceeded the size budget. | No — split or shrink the payload. |
@@ -50,7 +51,6 @@ Most 400s carry the default `bad_request` code with a message describing the spe
 | Code | When |
 |---|---|
 | `invalid_request` | Malformed request body — used broadly, including on OAuth 2.1 token/registration endpoints (RFC 6749/7591 error vocabulary). |
-| `invalid_hash_proof` | The `hash_proof` supplied to prove agent-key possession (claim, link, rekey) doesn't match. |
 
 If you see an unfamiliar 400, capture the `X-Request-Id` and open a support ticket.
 
@@ -62,7 +62,43 @@ If you see an unfamiliar 400, capture the `X-Request-Id` and open a support tick
 | `auth_required` | 401 | Explicit variant used on session-dependent endpoints when no credentials were presented at all. |
 | `forbidden` | 403 | Default — authenticated but not authorized for this resource or action. |
 | `aal2_required` | 403 | The action (e.g. removing a passkey, rotating an API key) requires a fresh **AAL2 step-up**; re-verify and retry. See [Authentication — AAL2 step-up](/guides/authentication#aal2-step-up). |
+| `invalid_hash_proof` | 403 | The `hash_proof` supplied to prove agent-key possession (claim, link, rekey) doesn't match. |
 | `not_found` | 404 | Default — the resource doesn't exist, or doesn't belong to the caller's org (Mnemom does not distinguish the two, to avoid leaking existence across orgs). |
+
+**Agent containment (403).** A `paused` or `killed` agent gets every gateway-routed request rejected with a distinct code:
+
+```json
+{
+  "error": {
+    "code": "containment_error",
+    "message": "Agent contained",
+    "details": { "reason": "agent_paused" }
+  }
+}
+```
+
+`details.reason` is `agent_paused` or `agent_killed`. Checked before any billing evaluation, so a contained agent always sees `403`, never `402`. See [Agent containment](/gateway/enforcement#agent-containment) for the containment API and lifecycle.
+
+## 402 Payment Required — billing and depletion
+
+Gateway-routed requests (`gateway.mnemom.ai`) can be rejected for two distinct billing reasons, both under the `billing_error` code, distinguished by `details.reason`:
+
+| `details.reason` | When |
+|---|---|
+| `billing_unconfigured` | The org's billing account could not be resolved (e.g. no payment method configured). Checked first — always wins over a depleted balance for the same org. |
+| `balance_depleted` | The org's µ balance is determined to be at or below zero. The gateway fails closed: the request is rejected rather than proxied to the model. |
+
+```json
+{
+  "error": {
+    "code": "billing_error",
+    "message": "Billing is not configured for this organization. Your organization admin has been notified — no action is needed here.",
+    "details": { "reason": "billing_unconfigured" }
+  }
+}
+```
+
+An unresolved balance (a cache miss, not a confirmed depletion) fails **open** — it is never mistaken for `balance_depleted`. Add a payment method / top up µ, then retry; this is not a transient condition, so retrying immediately without resolving billing will keep failing. See [Pricing](https://www.mnemom.ai/pricing) for how µ balances and auto top-up work.
 
 ## 422 — semantically rejected
 
