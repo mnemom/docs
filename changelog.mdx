@@ -9,6 +9,40 @@ Track changes across the Mnemom ecosystem — protocols, SDKs, infrastructure, a
 
 ---
 
+## Mnemom Agent — a governed launcher for your coding agent
+<sub>September 2026</sub>
+
+`mnemom agent` (shipped in CLI 0.17.0, now the first stable release of the Mnemom Agent
+line) launches your coding-agent CLI — Claude Code today — through the Mnemom gateway
+under a governed agent identity, with an optional sealed per-session goal contract. It's
+rolling out to an invited cohort.
+
+- The standalone `mnemom agents` command is now `mnemom agent list|claim|move`.
+- `mnemom agent sessions` and `mnemom agent show` read back a session's live goal state
+  (also available via `GET /v1/agent/sessions/{conversationId}`), and can now show whether
+  goal mode is on, off, or implicit.
+- `mnemom agent config` and `mnemom agent doctor` save your launch settings and preflight
+  your machine before you run it.
+- Two opt-in toggles: **implicit goal mode** infers a goal contract from your own messages
+  instead of requiring one up front, and `--no-context` turns off the gateway's
+  context-folding summarization for a session that needs the full, unsummarized window.
+
+See [`mnemom agent`](/gateway/agent).
+
+## Billing fails closed at the edges of your balance
+<sub>September 2026</sub>
+
+Two related gateway changes:
+
+- If your organization's billing account can't be resolved, requests now get a clear
+  `402 billing_unconfigured` response (your org admin is notified) instead of being
+  mistaken for a depleted balance.
+- Once your μ balance is determined to be at or below zero, gateway requests are now
+  blocked by default instead of passing through ungoverned. See
+  [Pricing](/pricing/overview) for how to avoid a gap with auto top-up.
+
+---
+
 ## Usage-based pricing: everything included, pay only for μ
 <sub>September 2026</sub>
 
@@ -18,8 +52,9 @@ immutable) — and every feature is available to every account regardless of spe
 
 - The billing dashboard now shows your available μ balance, a full ledger of grants,
   purchases, and spend, and configurable budget alerts.
-- If your org runs agents with enforcement on, requests pause automatically once your
-  balance is depleted rather than billing past zero, and the dashboard tells you why.
+- Once your balance is depleted, requests now pause automatically instead of billing past
+  zero, and the dashboard tells you why (see "Billing fails closed" above for the
+  follow-up that also covers an unconfigured billing account).
 - `GET /billing/mu`, `GET /billing/mu/ledger`, and `GET /billing/mu/statement` expose the
   same balance, ledger, and monthly statement by API; `GET/PUT /billing/budget-alert` manages
   alert thresholds; `GET /billing/payment-methods` and `GET /billing/receipts` cover payment
