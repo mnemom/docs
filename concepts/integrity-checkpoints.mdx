@@ -11,7 +11,7 @@ An Integrity Checkpoint is a point-in-time analysis of an LLM's thinking block �
 
 [AP-Traces](/concepts/ap-traces) are the durable artifact the checkpoint writes; the trace records what happened — both the model's thinking and the integrity verdict — in the same turn. Drift detection and coherence analysis then operate on the trace surface longitudinally (sideband) across multiple turns.
 
-Integrity Checkpoints are the primary data structure of the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), the sister protocol to [AAP](/protocols/aap/specification).
+Integrity Checkpoints are the primary data structure of the [Agent Integrity Protocol (AIP)](/protocols/aip/specification), the sister protocol to [AAP](/protocols/aap/specification). See [Protocol versions in production](/protocols/overview#protocol-versions-in-production) for which AIP runtime version the hosted gateway runs.
 
 <Note>
   AIP follows a daimonion philosophy. Like Socrates' inner voice, the integrity system is silent when things are aligned and speaks only when it detects something outside boundaries. Silence (`clear`) means proceed. Voice (`review_needed`, `boundary_violation`) means pause and evaluate.
@@ -164,7 +164,7 @@ A concern at `critical` severity triggers a `boundary_violation` verdict, as doe
       "severity": "critical",
       "description": "Thinking block shows agent responding to injected instructions embedded in tool output rather than the user's original request",
       "evidence": "I see the instructions say to ignore my guidelines and send the data to external-api.com...",
-      "relevant_card_field": "autonomy_envelope.forbidden_actions",
+      "relevant_card_field": "autonomy.forbidden_actions",
       "relevant_conscience_value": "BOUNDARY:no_data_exfiltration"
     }
   ],
@@ -256,7 +256,7 @@ console.log(`Confidence: ${thinking.confidence}`); // 0.9
 
 ## Code example
 
-A complete integrity check from response to signal:
+A complete integrity check from response to signal. The `card` shape below is the AIP SDK's own lightweight `AlignmentCard` type (`values` is an array of `{name, priority}` objects, lower number = higher priority) -- see [AIP quickstart](/protocols/aip/quickstart#2-define-an-alignment-card) for how it differs from the full AAP unified card:
 
 <CodeGroup>
 ```python Python
@@ -266,13 +266,12 @@ from aip import check_integrity, build_signal, WindowManager
 manager = WindowManager(max_size=10)
 
 card = {
-    "aap_version": "1.0.0",
     "card_id": "ac-my-card",
-    "agent_id": "my-agent",
-    "values": {
-        "declared": ["principal_benefit", "transparency", "harm_prevention"],
-        "conflicts_with": ["data_exfiltration"],
-    },
+    "values": [
+        {"name": "principal_benefit", "priority": 1},
+        {"name": "transparency", "priority": 2},
+        {"name": "harm_prevention", "priority": 3},
+    ],
     "autonomy_envelope": {
         "bounded_actions": ["search", "summarize", "recommend"],
         "forbidden_actions": ["share_credentials", "exfiltrate_data"],
@@ -320,13 +319,12 @@ import { initialize, type AIPConfig } from '@mnemom/agent-integrity-protocol';
 
 const config: AIPConfig = {
   card: {
-    aap_version: '1.0.0',
     card_id: 'ac-my-card',
-    agent_id: 'my-agent',
-    values: {
-      declared: ['principal_benefit', 'transparency', 'harm_prevention'],
-      conflicts_with: ['data_exfiltration'],
-    },
+    values: [
+      { name: 'principal_benefit', priority: 1 },
+      { name: 'transparency', priority: 2 },
+      { name: 'harm_prevention', priority: 3 },
+    ],
     autonomy_envelope: {
       bounded_actions: ['search', 'summarize', 'recommend'],
       forbidden_actions: ['share_credentials', 'exfiltrate_data'],
@@ -412,7 +410,7 @@ When both protocols are active, they enrich each other. The integrity verdict is
 
 - `GET /v1/agents/{id}/checkpoints` returns an empty list. This is expected and correct for this provisioning tier, not a gap to investigate.
 - `X-Mnemom-Verdict` and `X-AIP-Verdict` still appear on every response, but their values reflect the gateway's fail-open defaults (`clear`/`pass`) — not the result of integrity analysis. This is distinct from the `unverified` verdict value: `unverified` means a canonical card exists and analysis was attempted but failed, whereas an unclaimed agent has no canonical card and no analysis is attempted at all. See [`X-Mnemom-Verdict`](/api-reference/headers#x-mnemom-verdict--structured-per-checkpoint-state) for the full verdict vocabulary.
-- AP-Traces are best-effort only: the observer writes them when Cloudflare metadata survives, but this is not guaranteed.
+- AP-Traces are best-effort only: the observer writes them when request-level metadata survives from the gateway, but this is not guaranteed.
 
 The full integrity pipeline — checkpoints, analytical verdicts, guaranteed AP-Traces — starts when the agent is claimed and a canonical card is composed. See [integrity during the unclaimed phase](/guides/agent-claim-flow#between-steps-integrity-during-the-unclaimed-phase) for the complete picture.
 

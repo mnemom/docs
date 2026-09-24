@@ -135,7 +135,7 @@ Composition runs in response to events:
 
 ### Staleness window
 
-Between an org-template change and the recompose worker finishing, the canonical card is stale. The gateway handles this with the `needs_recompose` KV bypass: when the canonical row flag is true, the gateway serves the canonical without populating the 5-minute KV cache, so the next change after recompose is seen immediately.
+Between an org-template change and the recompose job finishing, the canonical card is stale. The gateway handles this with a `needs_recompose` cache bypass: when the canonical row's flag is true, the gateway serves the canonical without populating its short-lived read cache, so the next change after recompose is seen immediately.
 
 For a sub-50-agent org, recompose completes in under 2 seconds. For 10k+ agents, the background worker paces the batch to avoid saturating downstream services.
 
@@ -305,7 +305,7 @@ Every gateway + observer card read emits a structured log entry with `card_sourc
 
 Cards compose along `Platform → Org → Team → Agent`. **[Trust Posture](/concepts/trust-posture) — the team-scoped oversight policy artifact — composes along its own parallel cascade `Platform → Org → Team` and does NOT fold into the per-agent card.**
 
-Postures and cards are parallel artifact types: postures are team-scoped policy input (drives the observer's sideband sweep), cards are agent-scoped runtime treatment (read by the gateway at request time). They share infrastructure (this composer idiom, KV caching, audit log) but their data planes are independent.
+Postures and cards are parallel artifact types: postures are team-scoped policy input (drives the observer's sideband sweep), cards are agent-scoped runtime treatment (read by the gateway at request time). They share infrastructure (this composer idiom, read-through caching, audit log) but their data planes are independent.
 
 Practically:
 

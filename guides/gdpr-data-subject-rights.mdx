@@ -82,7 +82,7 @@ All agent-specific data is permanently deleted from Mnemom's primary database:
 | **On-chain mapping** | Off-chain Merkle tree state and score-publication records that link the agent to its on-chain anchors (see [On-chain anchors](#on-chain-anchors) below) |
 | **Detection & session data** | Safe House evaluations and configs, drift alerts, session records, agent-authored content, feedback the agent filed |
 | **Agent record itself** | The agent record, its composed/canonical card, and any per-section exemptions are removed last, once every table that references the agent has been cleared |
-| **Cache** | All cached data across Cloudflare KV namespaces |
+| **Cache** | All cached data associated with the agent |
 
 ### Retained under a legal carve-out (Article 17(3))
 
@@ -114,7 +114,7 @@ Mnemom anchors aggregate Merkle roots to Base L2 for tamper-evidence (see [On-Ch
 | Phase | Timing | What happens |
 |---|---|---|
 | **Immediate** (< 1 second) | On request | Agent tombstoned; all read endpoints return 404 |
-| **Cascade** | Async, kicked off immediately; a cron sweep every 15 minutes resumes any interrupted cascade | Database rows deleted across all tables; KV keys cleared |
+| **Cascade** | Async, kicked off immediately; a cron sweep every 15 minutes resumes any interrupted cascade | Database rows deleted across all tables; cached data cleared |
 | **Pseudonymization** | Async | Retained records scrubbed of agent identifiers |
 | **Complete** | Monitored against an internal 2-hour SLA — well inside GDPR's "without undue delay" standard | Deletion request status transitions to `complete` |
 | **Trace expiry** | Per the observability backend's own retention window | OpenTelemetry spans (separate from the `traces` database rows already removed above) age out naturally |
@@ -137,7 +137,7 @@ Each deletion request transitions through a fixed sequence of `status` values as
 | **Phase 5** | `phase_5_complete` | On-chain mapping deleted — off-chain Merkle tree state and score-publication records. |
 | **Phase 6** | `phase_6_complete` | Detection configs, drift alerts, session records, agent-authored content, and agent-filed feedback deleted. |
 | **Phase 7** | `phase_7_complete` | Behavioral traces and Safe House evaluations deleted, then the agent record itself — which also removes its composed/canonical card and any exemptions. |
-| **KV cleared** | `kv_cleared` | All cached data cleared across Cloudflare KV namespaces. |
+| **Cache cleared** | `kv_cleared` | All cached data associated with the agent is cleared. |
 | **Pseudonymized** | `pseudonymized` | Retained records scrubbed of agent identifiers. See [Retained in pseudonymized form](#retained-in-pseudonymized-form) below. |
 | **Complete** | `complete` | Full cascade complete. All agent-identifiable data removed except the Article 17(3) carve-outs above. |
 | **Failed** | `failed` | Cascade halted at a phase. The `failed_phase` field identifies where. Automatic retries apply. |

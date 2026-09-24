@@ -5,11 +5,7 @@ sidebarTitle: "Authentication"
 icon: "key"
 ---
 
-Mnemom supports four authentication paths — passkeys, password + MFA, SSO, and API keys — each mapped to the operations it is meant for. A small set of account-security actions are gated by **AAL2 step-up**: a fresh user-verification gesture on top of the current session. This page is the operator-level reference; for the end-user passkey walkthrough, see [Passkeys](/guides/passkeys).
-
-<Note>
-The auth overhaul (passkey + AAL2) is the current system. Earlier docs that describe Bearer-JWT-only or API-key-only access on all endpoints are superseded by the tiered model below.
-</Note>
+Mnemom supports four authentication paths — passkeys, password + MFA, SSO, and API keys — each mapped to the operations it is meant for. A small set of account-security actions are gated by **AAL2 step-up**: a fresh user-verification gesture on top of the current session. This page is the operator-level reference; for the end-user passkey walkthrough, see [Passkeys](/guides/passkeys). For how a CLI or a headless agent authenticates (as opposed to a human at the dashboard), see [API reference overview](/api-reference/overview#authentication) and the [OAuth device flow guide](/guides/oauth-device-flow).
 
 ---
 
@@ -79,6 +75,8 @@ Dashboard sessions are issued as a short-lived signed access token wrapped in an
 Sessions expire after **7 days** of inactivity — the idle window is re-upped on every authenticated request — and reach an absolute maximum lifetime of **30 days** from the original sign-in, after which re-authentication is required. Sessions also end on explicit revocation. Active sessions are listed in **Settings → Security → Active sessions** with last-seen IP and user agent; each can be revoked individually.
 
 Server-side, sessions are revalidated against the session registry on every protected request. Stolen tokens are not replayable past revocation.
+
+Signing in from a new device sends a notification email; that email carries a one-click, single-use revoke link so you can kill the new session without first signing back in yourself — useful if the new sign-in wasn't you.
 
 ---
 
@@ -162,6 +160,10 @@ If you lose all your passkeys and cannot complete MFA, use the password recovery
 Completing the password-recovery flow invalidates all existing sessions. If passkeys were enrolled at the time of the recovery, Mnemom logs an internal security-review event — surface it to support via the dashboard if it was not you.
 
 For SSO-enforced organizations, recovery goes through your IdP; Mnemom's recovery path does not apply.
+
+## Deleting your account
+
+Account deletion is self-service and permanent: sign in and call `DELETE /v1/auth/delete-account` (cookie or Bearer auth; not available to API keys). It cancels any active subscription, permanently deletes your user identity, and unlinks (does not delete) any agents you claimed — they revert to unowned rather than disappearing. If you're the sole owner of an org that still has other members, deletion is refused until you transfer ownership or remove those members first.
 
 ---
 

@@ -9,6 +9,8 @@ icon: "book"
 **SDK versions:** `agent-integrity-proto` (PyPI) 1.3.0 -- `@mnemom/agent-integrity-protocol` (npm) 1.3.0
 **Sister protocol:** [AAP](/protocols/aap/specification), SDK 2.0.0 -- AIP reads the same unified Alignment Card
 
+See [Protocol versions in production](/protocols/overview#protocol-versions-in-production) for which runtime/SDK builds are live on the hosted gateway and observer today.
+
 ---
 
 ## Table of contents
@@ -49,7 +51,7 @@ The Agent Integrity Protocol (AIP) provides per-turn integrity assurance for aut
 
 ### 2.1 problem statement
 
-AAP provides comprehensive post-hoc transparency. Every agent action is traced, verified against an Alignment Card, and checked for behavioral drift. But this verification happens after the action has already been taken -- typically 30-60 seconds later when the Observer Worker processes the gateway log.
+AAP provides comprehensive post-hoc transparency. Every agent action is traced, verified against an Alignment Card, and checked for behavioral drift. But this verification happens after the action has already been taken -- typically 30-60 seconds later when the observer processes the gateway log.
 
 This delay creates a window of vulnerability:
 
@@ -183,9 +185,9 @@ AIP operates as a three-layer system that sits alongside the existing Mnemom gat
 
 **Relationship to Mnemom gateway infrastructure:**
 
-- The **Gateway Worker** routes requests and attaches metadata (agent_id, session_id). AIP uses the same session_id mechanism.
-- The **Observer Worker** processes logs post-hoc via AAP. AIP operates in parallel, per turn.
-- The **API Worker** serves traces and integrity scores. AIP checkpoints enrich these via AAP integration (Section 12).
+- The **gateway** routes requests and attaches metadata (agent_id, session_id). AIP uses the same session_id mechanism.
+- The **observer** processes logs post-hoc via AAP. AIP operates in parallel, per turn.
+- The **API** serves traces and integrity scores. AIP checkpoints enrich these via AAP integration (Section 12).
 - The **Alignment Card** is shared. AIP MUST use the same card as AAP (Section 12.4).
 
 ### 4.2 signal flow
@@ -218,7 +220,7 @@ AIP and AAP share infrastructure and data structures:
 | Verdict in APTrace | AIP -> AAP | Stored in `APTrace.context.metadata.integrity_verdict` |
 | Escalation trigger | AIP -> AAP | `boundary_violation` sets `escalation.required = true` |
 | Drift alerts | AIP -> AAP | IntegrityDriftAlerts stored in same `drift_alerts` table |
-| Session identity | Shared | Both use Gateway Worker's session_id (hourly bucket hash) |
+| Session identity | Shared | Both use the gateway's session_id (hourly bucket hash) |
 
 ### 4.4 signal paths
 
@@ -371,7 +373,7 @@ interface IntegrityCheckpoint {
   /** Alignment Card used for evaluation */
   card_id: string;
 
-  /** Session identifier (shared with Gateway Worker) */
+  /** Session identifier (shared with the gateway) */
   session_id: string;
 
   /** When this checkpoint was created (ISO 8601, RFC 3339) */
@@ -852,7 +854,7 @@ interface WindowSummary {
 
 ### 8.4 session boundary detection
 
-AIP uses the same session_id mechanism as the Gateway Worker. The session_id is generated from the agent's hash and an hourly time bucket:
+AIP uses the same session_id mechanism as the gateway. The session_id is generated from the agent's hash and an hourly time bucket:
 
 ```
 session_id = "sess-{agent_hash[0:8]}-{floor(now_ms / 3600000)}"
@@ -1317,7 +1319,7 @@ AIP is designed to enrich AAP, not replace it. This section specifies the integr
 When AIP is active, the integrity verdict MUST be stored in the corresponding AP-Trace's context metadata:
 
 ```typescript
-// In the APTrace built by the Observer Worker:
+// In the APTrace built by the observer:
 {
   context: {
     metadata: {
@@ -1334,7 +1336,7 @@ When AIP is active, the integrity verdict MUST be stored in the corresponding AP
 }
 ```
 
-The Observer Worker SHOULD look up the most recent IntegrityCheckpoint for the same session and thinking block hash when building the AP-Trace.
+The observer SHOULD look up the most recent IntegrityCheckpoint for the same session and thinking block hash when building the AP-Trace.
 
 ### 12.2 triggering escalation
 
@@ -1651,7 +1653,7 @@ AIP defines the following HTTP headers for webhook delivery:
 - **[RFC 8174]** Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words", BCP 14, RFC 8174, May 2017.
 - **[RFC 8259]** Bray, T., Ed., "The JavaScript Object Notation (JSON) Data Interchange Format", RFC 8259, December 2017.
 - **[RFC 3339]** Klyne, G. and C. Newman, "Date and Time on the Internet: Timestamps", RFC 3339, July 2002.
-- **[AAP SPEC]** Mnemom.ai, "Agent Alignment Protocol Specification", v0.1.5, 2026.
+- **[AAP SPEC]** Mnemom.ai, "Agent Alignment Protocol Specification", v2.0.0, 2026.
 
 ### 19.2 informative references
 
@@ -2458,7 +2460,7 @@ This table provides a formal mapping between AIP and AAP types, enabling impleme
 | `IntegrityCheckpoint` | `APTrace` | Parallel structures | Checkpoint records thinking analysis; APTrace records action. Linked via `linked_trace_id`. |
 | `IntegrityCheckpoint.checkpoint_id` | `APTrace.trace_id` | Analogous identifiers | Both are unique identifiers. Prefix: `ic-` (AIP) vs `tr-` (AAP). |
 | `IntegrityCheckpoint.card_id` | `APTrace.card_id` | Shared value | Both MUST reference the same card for the same agent. |
-| `IntegrityCheckpoint.session_id` | `APTrace.context.session_id` | Shared value | Both use Gateway Worker's session_id mechanism. |
+| `IntegrityCheckpoint.session_id` | `APTrace.context.session_id` | Shared value | Both use the gateway's session_id mechanism. |
 | `IntegrityVerdict` | `VerificationResult.verified` | Semantic mapping | `clear` -> `verified: true`; `review_needed` -> `verified: true` + warnings; `boundary_violation` -> `verified: false` + violations. |
 | `IntegrityConcern` | `Violation` | Structural parallel | Both describe what went wrong. AIP has `category`/`severity`/`evidence`; AAP has `type`/`severity`/`description`/`trace_field`. |
 | `IntegrityConcern.category` | `ViolationType` | Partial overlap | AIP categories are thinking-focused (`prompt_injection`, `deceptive_reasoning`). AAP types are action-focused (`unbounded_action`, `forbidden_action`). |

@@ -126,9 +126,30 @@ The `X-Mnemom-Api-Key` header is the canonical auth path for `mnm_*` keys. (Some
 
 The gateway's `/router` surface requires this header and checks that the resolved key carries `gateway`. Provider-dialect credentials (`x-api-key`, `Authorization: Bearer <provider-key>`, and `x-goog-api-key`) do not authorize the router. Keep the upstream BYOK credential separate in `X-Mnemom-Egress-Key`; see [Cross-Dialect Egress](/gateway/router-cross-dialect#headers).
 
+### Inspecting a key
+
+`GET /v1/api-keys/whoami` resolves whichever credential is on the request and echoes back its identity — scopes, the bound user/org, and the `key_id` — without you needing to know it in advance. Useful for confirming a key's scope before wiring it into an integration:
+
+```bash
+curl https://api.mnemom.ai/v1/api-keys/whoami \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY"
+```
+
+```json
+{
+  "user_id": "3f2b1a4c-...",
+  "auth_method": "api_key",
+  "key_id": "mk-1a2b3c4d",
+  "account_id": "acct_...",
+  "org_id": "org-acme",
+  "scopes": ["gateway", "api:read", "api:write"],
+  "is_admin": false
+}
+```
+
 ## Legacy keys (`["gateway", "api"]`)
 
-Keys minted before May 2026 carry the legacy two-scope set `["gateway", "api"]`. They continue to work — the auth gate aliases them to `["gateway", "api:read", "api:write"]` at request time, so existing integrations need no changes.
+Keys minted before May 2026 carry the legacy two-scope set `["gateway", "api"]` (or, rarer, a single `["api"]`). They continue to work — the auth gate aliases `["gateway", "api"]` to `["gateway", "api:read", "api:write"]` and bare `["api"]` to `["api:read", "api:write"]` at request time, so existing integrations need no changes.
 
 The dashboard renders these keys with a "legacy" badge. To upgrade a legacy key to the canonical vocabulary:
 

@@ -48,7 +48,7 @@ Note that **two different keys are involved** in a claim call:
 | Key | Variable | Purpose |
 |---|---|---|
 | Agent's provider key (Anthropic / OpenAI / Gemini) | `$AGENT_PROVIDER_KEY` | Derives `hash_proof` — proves you hold the agent's identity key |
-| Your Mnemom key / JWT | `$MNEMOM_API_KEY` | Authenticates you as the owner — you become `claimed_by` |
+| Your Mnemom key / Bearer token | `$MNEMOM_API_KEY` | Authenticates you as the owner — you become `claimed_by` |
 
 ---
 
@@ -82,7 +82,7 @@ Record the `mnm-*` ID — you'll need it to claim.
 
 **Verdict headers are fail-open, not analytical.** The gateway still returns `X-Mnemom-Verdict` and `X-AIP-Verdict` headers on every request, but their values (`clear` / `pass`) come from the fail-open path — there is no canonical card to analyze against. These headers are not evidence that integrity analysis ran. Don't confuse this with the `unverified` verdict value: `unverified` means a canonical card exists and analysis was attempted but failed (analyzer timeout/error); it never applies to unclaimed agents, since no analysis is attempted for them at all.
 
-**AP-Traces are best-effort.** The observer writes AP-Traces when Cloudflare metadata survives to the observer layer, but this is not guaranteed for unclaimed agents.
+**AP-Traces are best-effort.** The observer writes AP-Traces when the request's origin metadata survives to the observer layer, but this is not guaranteed for unclaimed agents.
 
 **Enforcement mode is `observe`.** There is no owner to authorize a more active mode; nothing is blocked or nudged.
 
@@ -92,7 +92,7 @@ Record the `mnm-*` ID — you'll need it to claim.
 
 ## Step 2 — Owner claims the agent
 
-Authenticated as the owner — a Bearer JWT (from `mnemom login`), an `mnm_*` API key (`X-Mnemom-Api-Key`), or a session cookie — call the claim endpoint. Standard auth is all it takes; there is no special claim-only scheme. You prove you hold the agent's provider key by sending `hash_proof`; the principal you authenticate as becomes the agent's owner.
+Authenticated as the owner — a Bearer token (from `mnemom login`), an `mnm_*` API key (`X-Mnemom-Api-Key`), or a session cookie — call the claim endpoint. Standard auth is all it takes; there is no special claim-only scheme. You prove you hold the agent's provider key by sending `hash_proof`; the principal you authenticate as becomes the agent's owner.
 
 <CodeGroup>
 ```bash cURL
@@ -201,7 +201,7 @@ Revoking ownership ([`DELETE /v1/agents/{id}`](/api-reference/endpoint/delete-ag
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `401` | No credentials presented, or JWT expired | Add `Authorization: Bearer <jwt>`, `X-Mnemom-Api-Key: <mnm_key>`, or a valid session cookie |
+| `401` | No credentials presented, or the token expired | Add `Authorization: Bearer <token>`, `X-Mnemom-Api-Key: <mnm_key>`, or a valid session cookie |
 | `400` — "hash_proof is required" | Body missing `hash_proof` | Compute and include `hash_proof` |
 | `403 invalid_hash_proof` | `hash_proof` doesn't match the agent's stored proof (wrong key, wrong name, or malformed hex) | Recompute `SHA256(providerApiKey + '|' + agentName)` and verify the agent name matches exactly |
 | `403 agent_org_not_member` | `org_id` is one you don't belong to | Use an org from `details.claimable_orgs`, or omit `org_id` to land in personal org |

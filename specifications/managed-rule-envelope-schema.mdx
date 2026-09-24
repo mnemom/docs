@@ -1,13 +1,13 @@
 ---
 title: "Managed Rule Envelope Schema"
-description: "Wire format for the signed envelope the AEGIS promoter writes to Workers KV and R2 and the gateway reads at request time. Documents the customer-readable surface; per-recipe internal columns are out of scope."
+description: "Wire format for the signed envelope the AEGIS promoter writes to two independent storage tiers and the gateway reads at request time. Documents the customer-readable surface; per-recipe internal columns are out of scope."
 sidebarTitle: "Managed Rule Envelope"
 icon: "file-shield"
 ---
 
-Normative reference for the **Managed Rule envelope** — the signed wire format the [AEGIS](/concepts/aegis) promoter writes to Workers KV and R2 and the gateway reads at request time. This is the wire surface the gateway consumes during failover; it is not a customer-side verification surface (see §4 below).
+Normative reference for the **Managed Rule envelope** — the signed wire format the [AEGIS](/concepts/aegis) promoter writes to two independent storage tiers and the gateway reads at request time. This is the wire surface the gateway consumes during failover; it is not a customer-side verification surface (see §4 below).
 
-The canonical implementation is in `mnemom-api/src/composition/envelope-signer.ts` (signer) and `mnemom-platform/gateway/src/aegis-recipes.ts` (verifier). Both envelopes — the KV variant and the R2 variant — share the same shape; only the signing key (`key_id`) differs.
+Both envelopes — the primary-tier variant and the secondary-tier variant — share the same shape; only the signing key (`key_id`) differs.
 
 ## 1. Top-level structure
 
@@ -45,10 +45,10 @@ The promoter writes two parallel envelopes in the same canonical recipe set. The
 
 | Variant | Storage | Signing key | Gateway tier |
 |---|---|---|---|
-| **KV envelope** | Workers KV key `sh:aegis-recipes:v1` | `RECIPE_KV_SIGNING_KEY` | Primary read path; no expiration — the promoter overwrites the key on every promotion, so staleness is governed by `signed_at`, not KV TTL |
-| **R2 envelope** | R2 bucket `aegis-recipes-failover`, key `composed-recipe-set/latest` | `RECIPE_R2_SIGNING_KEY` | Secondary read path; per-promotion refresh |
+| **Primary envelope** | Primary storage tier | `RECIPE_KV_SIGNING_KEY` | Primary read path; no expiration — the promoter overwrites the entry on every promotion, so staleness is governed by `signed_at`, not a storage-level TTL |
+| **Secondary envelope** | Secondary storage tier | `RECIPE_R2_SIGNING_KEY` | Secondary read path; per-promotion refresh |
 
-The two signing chains are **independent**. KV poisoning degrades gracefully to R2; the gateway's tiered read pipeline (see [Managed Rules](/concepts/managed-rules)) verifies each tier with its own JWKS binding and fails over on signature failure.
+The two signing chains are **independent**. Poisoning of the primary tier degrades gracefully to the secondary tier; the gateway's tiered read pipeline (see [Managed Rules](/concepts/managed-rules)) verifies each tier with its own JWKS binding and fails over on signature failure.
 
 ## 3. Per-recipe row shape
 
@@ -90,10 +90,10 @@ At GA, the envelope signature exists for **gateway-internal verification only**.
 
 The verification model and what it does and does not provide:
 
-- **What the envelope signature provides.** Defense in depth between the KV and R2 read tiers. The gateway verifies on every read; a poisoned KV envelope (whose signature does not verify against `kvVerifyJwks`) falls through to R2 (a different signing chain). A poisoned R2 envelope falls through to the last-known-good in-isolate cache.
-- **What it does not provide.** Customer-side cryptographic attestation. The verify halves — `kvVerifyJwks` and `r2VerifyJwks` — are passed in as worker bindings; they are secrets in the gateway's worker environment, not customer-reachable URLs.
+- **What the envelope signature provides.** Defense in depth between the primary and secondary read tiers. The gateway verifies on every read; a poisoned primary-tier envelope (whose signature does not verify against the primary-tier verification key set) falls through to the secondary tier (a different signing chain). A poisoned secondary-tier envelope falls through to the last-known-good in-process cache.
+- **What it does not provide.** Customer-side cryptographic attestation. The verification key sets for both tiers are held server-side as secrets in the gateway's runtime environment, not customer-reachable URLs.
 - **The customer-facing transparency surface.** The append-only audit chain on `recipe_review_actions` is the recipe-level provenance trail, verifiable via the admin API surface. The published [`/trust/slos`](https://www.mnemom.ai/trust/slos) describe propagation, freshness, and failover commitments. The [advisory](/concepts/advisories) and [IoC](/concepts/iocs) surfaces describe the network-level signal output.
-- **`/v1/.well-known/jwks.json` publishes a different set of keys.** That endpoint publishes [AAP](/concepts/aap-attestation) attestation keys (the `aap_signing_keys` table). Recipe-set signing keys are escrowed in 1Password under the operator's rotation policy and are not part of the public JWKS.
+- **`/v1/.well-known/jwks.json` publishes a different set of keys.** That endpoint publishes [AAP](/concepts/aap-attestation) attestation keys (the `aap_signing_keys` table). Recipe-set signing keys are held in Mnemom's operator credential vault under the operator's rotation policy and are not part of the public JWKS.
 
 A future public JWKS surface for recipe-set verification keys is not currently on the roadmap; if and when one ships, this section is updated and a customer-side verification guide lands.
 
@@ -103,41 +103,38 @@ The full rule plane uses three Ed25519 keys, each rotated under Class A annual r
 
 | Key | What it signs | Where it sits |
 |---|---|---|
-| `RECIPE_PROMOTION_SIGNING_KEY` | Per-row promotion signature (`detection_recipes.promotion_signature`) | 1Password operator vault |
-| `RECIPE_KV_SIGNING_KEY` | The KV envelope (§2) | 1Password operator vault |
-| `RECIPE_R2_SIGNING_KEY` | The R2 envelope (§2) | 1Password operator vault |
+| Promotion signing key | Per-row promotion signature (`detection_recipes.promotion_signature`) | Mnemom's operator credential vault |
+| Primary-tier signing key | The primary envelope (§2) | Mnemom's operator credential vault |
+| Secondary-tier signing key | The secondary envelope (§2) | Mnemom's operator credential vault |
 
-Three independent compromise paths required to fully poison the pipeline. KV poisoning degrades gracefully to R2 (different signing chain). KV + R2 compromise is still defeated by the per-row promotion signature: the gateway re-checks each row against the promotion signature after envelope verification, and a forged row will not match.
+Three independent compromise paths required to fully poison the pipeline. Poisoning of the primary tier degrades gracefully to the secondary tier (different signing chain). Compromise of both tiers is still defeated by the per-row promotion signature: the gateway re-checks each row against the promotion signature after envelope verification, and a forged row will not match.
 
 ## 6. Failover behavior
 
 The gateway's tiered read pipeline at request time:
 
-1. **In-isolate memory cache** — fresh entries (< 60 s) served from in-isolate state.
-2. **Workers KV primary** — no expiration (overwritten on every promotion); signed with `RECIPE_KV_SIGNING_KEY`.
-3. **R2 secondary** — per-promotion refresh; signed with `RECIPE_R2_SIGNING_KEY` (independent chain).
-4. **Last-known-good in-isolate** — staleness up to 24 hours; fail-closed on safety-critical checkpoints at 24 h.
+1. **In-process memory cache** — fresh entries (< 60 s) served from in-process state.
+2. **Primary storage tier** — no expiration (overwritten on every promotion); signed with the primary-tier signing key.
+3. **Secondary storage tier** — per-promotion refresh; signed with the secondary-tier signing key (independent chain).
+4. **Last-known-good in-process cache** — staleness up to 24 hours; fail-closed on safety-critical checkpoints at 24 h.
 5. **Fail-closed 503** with `X-Mnemom-Reason: aegis-data-plane-unavailable`.
 
 Customers MUST NOT depend on the failover path; the SLO is rule-set freshness P99 ≤ 5 min under normal operation. See [`/trust/slos`](https://www.mnemom.ai/trust/slos) for the published commitments.
 
-<Note>
-</Note>
+## 7. Failover alerting
 
-## 7. Failover alert tags
+The gateway emits internal operator alerts on the failover path, at two severities. These are operator-facing diagnostics that customers do not consume directly; customers see the corresponding impact, if any, on the published [`/trust/slos`](https://www.mnemom.ai/trust/slos) commitments.
 
-The gateway emits stable alert tags on the failover path. These are operator-facing diagnostic tags drawn from the cell-matrix vocabulary; customers may see the corresponding SLO impact on [`/trust/slos`](https://www.mnemom.ai/trust/slos) but do not consume these tag values directly.
-
-| Tag | Severity | Condition |
-|---|---|---|
-| `P1_kv_unreachable` | P1 | KV read returned an unreachable error. |
-| `P0_kv_sig_fail` | P0 | KV envelope signature did not verify. |
-| `P0_r2_unreachable` | P0 | R2 fallback read returned an unreachable error. |
-| `P0_r2_sig_fail` | P0 | R2 envelope signature did not verify. |
-| `P1_isolate_stale` | P1 | Last-known-good in-isolate cache exceeded freshness target. |
-| `P0_isolate_stale_24h` | P0 | Last-known-good in-isolate cache exceeded 24 h staleness; fail-closed on safety-critical checkpoints. |
-| `P0_coordinated_attack` | P0 | Both KV and R2 signatures failed in a single read — the layered-defense signal. |
-| `P0_data_plane_unavailable` | P0 | All read tiers exhausted; gateway returns 503. |
+| Severity | Condition |
+|---|---|
+| P1 | A read against the primary tier was unreachable. |
+| P0 | The primary-tier envelope signature did not verify. |
+| P1 | A fallback read against the secondary tier was unreachable. |
+| P0 | The secondary-tier envelope signature did not verify. |
+| P1 | The last-known-good in-process cache exceeded its freshness target. |
+| P0 | The last-known-good in-process cache exceeded 24 h staleness; fail-closed on safety-critical checkpoints. |
+| P0 | Both tiers' signatures failed in a single read — the layered-defense signal. |
+| P0 | All read tiers exhausted; gateway returns 503. |
 
 ## 8. Example — a signed envelope at GA
 
@@ -170,7 +167,7 @@ The Day-1 envelope carries the five GA-seeded synthetic Managed Rules. Signature
 
 ## 9. Validation notes
 
-- **Versioning.** `key_id` includes the rotation cohort. The gateway verifies against the JWKS bound in its worker env, never a hardcoded key.
+- **Versioning.** `key_id` includes the rotation cohort. The gateway verifies against its configured JWKS, never a hardcoded key.
 - **Signature failure is loud.** The gateway emits `P0_kv_sig_fail` or `P0_r2_sig_fail` on signature failure and falls through to the next tier. It does not silently accept an envelope whose signature did not verify.
 - **Replay defense.** The signed message includes `key_id` and `signed_at` — an envelope captured at time T cannot be replayed under a different `signed_at` because the signature would not verify.
 

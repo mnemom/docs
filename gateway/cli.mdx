@@ -19,18 +19,19 @@ npm install -g @mnemom/mnemom
 
 ### `mnemom login`
 
-Authenticate with your Mnemom account. Opens a browser-based login flow and stores the auth token locally.
+Authenticate with your Mnemom account. `mnemom login` runs OAuth 2.1 against Mnemom's own authorization server:
 
 ```bash
-mnemom login
+mnemom login              # authorization-code + PKCE via a local loopback redirect (opens a browser)
+mnemom login --no-browser # RFC 8628 device-authorization grant — for SSH sessions, containers, anywhere with no local browser
 ```
 
-Auth tokens are stored in `~/.mnemom/auth.json`. All subsequent commands use this token automatically.
+The resulting scoped access + refresh tokens are stored in `~/.mnemom/auth.json`; all subsequent commands use them automatically, refreshing as needed. See the [OAuth device flow guide](/guides/oauth-device-flow) for what `--no-browser` does under the hood.
 
 <Note>
 Logging in does **not** select an organization — the session carries no org
-context. Org-scoped commands (like `agents claim`) target an org via `--org`,
-defaulting to your personal org when omitted.
+context. Org-scoped commands (like `agents claim`) target your **active** org,
+set with `mnemom org use`, defaulting to your personal org when none is set.
 </Note>
 
 ### `mnemom logout`
@@ -43,16 +44,28 @@ mnemom logout
 
 ### `mnemom whoami`
 
-Display the currently authenticated user.
+Display the currently authenticated credential's status.
 
 ```bash
 mnemom whoami
 ```
 
-**Example output:**
+**Example output** (OAuth login — the default; opaque tokens carry no identity, so only scope and expiry are shown):
 
 ```
-Logged in as alex@example.com (org: mnemom)
+Auth Status
+
+  Scope:   mcp:read mcp:write
+  Token:   valid until 2026-09-20T18:32:10.000Z
+```
+
+**Example output** (`MNEMOM_API_KEY` set instead):
+
+```
+Auth Status
+
+  Credential Type: API key
+  Status:          valid (no expiry)
 ```
 
 </Steps>

@@ -68,7 +68,7 @@ Phase 0.5 is **not a single screen per turn**. It runs once per inbound surface 
 
 ### Phase 0 — Agent identification
 
-The gateway resolves the `Authorization` header to an agent record and loads the agent's alignment card, canonical protection card (including the org's `protected_surface`), and policy bundle from KV. If Safe House mode is `off` (the default), Phase 0.5 is skipped entirely with no performance cost.
+The gateway resolves the `Authorization` header to an agent record and loads the agent's alignment card, canonical protection card (including the org's `protected_surface`), and policy bundle from cache. If Safe House mode is `off` (the default), Phase 0.5 is skipped entirely with no performance cost.
 
 ### Phase 0.5 — Safe House screening
 
@@ -141,9 +141,9 @@ Message passed Safe House threshold but apply elevated scrutiny.
 
 Note: Safe House L2 enforcement of the org's `protected_surface` (forbidden operations, sealed assets) happens in **Phase 0.5**, not Phase 4. The same is true of tool-result screening — it is a Phase 0.5 front-door check on the inbound body, not something Phase 4 picks up afterwards. By the time Phase 4 runs, the org's hard policy floor has already been evaluated and every screened tool result has already been withheld, decorated, or passed. Phase 4 AIP enrichment adds behavioral context from the alignment card; it does not re-derive the org's `protected_surface` and it is not the tool-result screen.
 
-## KV caching
+## Caching
 
-Safe House configuration and session state are cached in the `BILLING_CACHE` KV binding (the same binding used for quota state). Cache TTLs:
+Safe House configuration and session state are cached (the same cache used for quota state). This is why a Safe House config change can take up to the TTL below to take effect on live traffic:
 
 | Item | TTL |
 |------|-----|
@@ -151,8 +151,6 @@ Safe House configuration and session state are cached in the `BILLING_CACHE` KV 
 | Session risk score | Duration of session (30-min idle expiry) |
 | Canary patterns | 5 minutes |
 | Quarantine metadata | 72 hours |
-
-The `BILLING_CACHE` binding must be present in `wrangler.toml` for Safe House to operate. If the binding is absent and `SAFE_HOUSE_ENABLED=true`, the gateway logs a warning and skips Safe House analysis for all requests.
 
 ## Pre-emptive nudge injection
 
@@ -209,16 +207,7 @@ The key differences from default settings: `enforce` mode is on (instead of `obs
 
 Canary credentials (`sh.canary.triggered`) and session-escalation policy are configured separately from the protection card; see [Canary credentials](/concepts/safe-house#canary-credentials) and the [webhook event catalog](/api-reference/webhook-events) for the canonical surfaces.
 
-## Environment requirements
-
-Safe House requires the following to be present in the gateway environment:
-
-| Requirement | Purpose |
-|-------------|---------|
-| `SAFE_HOUSE_ENABLED=true` | Activates Safe House code path (feature flag) |
-| `BILLING_CACHE` KV binding | Session state and config caching |
-
-No additional API keys or service bindings are required — L2 analysis runs through the existing Anthropic API key configured for the gateway.
+On the hosted gateway, Safe House needs no separate setup or API keys from you — L2 analysis runs through the same Anthropic API access the gateway already uses.
 
 ## See also
 

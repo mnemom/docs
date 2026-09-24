@@ -41,7 +41,7 @@ For end-user sign-in (passkey, password + MFA, SSO), session lifecycle, and API-
 
 ### Session cookie (dashboard / SPA)
 
-Browser sessions at `mnemom.ai` (and `www.mnemom.ai`) authenticate via an HttpOnly, `Secure`, `SameSite=Lax` cookie named `mnemom_session`, issued on sign-in by the API itself. The cookie is opaque to JavaScript — it holds an AES-256-GCM-encrypted blob of the underlying session tokens, never a raw access token.
+Browser sessions at `mnemom.ai` (and `www.mnemom.ai`) authenticate via an HttpOnly, `Secure`, `SameSite=Lax` cookie — `__Host-mnemom_session` on the live site (host-locked; the bare `mnemom_session` name is used only on `http://localhost` in local development) — issued on sign-in by the API itself. The cookie is opaque to JavaScript — it holds an encrypted blob of the underlying session tokens, never a raw access token.
 
 ```bash
 # Browser flow — the SPA does this transparently; you rarely call it directly.
@@ -56,11 +56,11 @@ curl https://api.mnemom.ai/v1/agents \
   --cookie cookies.txt
 ```
 
-The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. Passkey (WebAuthn / FIDO2) sign-in endpoints live at `/v1/auth/passkey/*` and return the same session cookie; MFA step-up and SSO are carried through `/v1/auth/mfa/*` and `/v1/auth/sso/*`. Sensitive operations require **AAL2 step-up** — a fresh user-verification gesture within the session's AAL2 window; see the [Authentication guide](/guides/authentication#aal2-step-up) for the list of protected actions. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
+The gateway auto-refreshes an expired access token server-side and rotates the cookie in the response. Passkey (WebAuthn / FIDO2) sign-in endpoints live at `/v1/auth/passkey/*` and return the same session cookie; MFA step-up is carried through `/v1/auth/mfa/*` and enterprise SSO through `/v1/auth/oidc/*`. Sensitive operations require **AAL2 step-up** — a fresh user-verification gesture within the current session; see the [Authentication guide](/guides/authentication#aal2-step-up) for the list of protected actions. This is the only auth pattern where `Access-Control-Allow-Credentials: true` matters — `fetch()` calls from the SPA must include `credentials: "include"`.
 
 ### Bearer token (CLI and OAuth/MCP clients)
 
-The Mnemom CLI and anything mimicking it use the classic `Authorization: Bearer <token>` header, carrying a signed JWT. The CLI obtains its token via a one-time browser → localhost handoff at login time (exchanged through `POST /v1/auth/cli-exchange`, which requires an already-authenticated session cookie); the raw token never leaves the CLI's local auth file after that.
+The Mnemom CLI and anything mimicking it use the classic `Authorization: Bearer <token>` header. `mnemom login` authenticates against Mnemom's own OAuth 2.1 authorization server — an authorization-code + PKCE flow via a local loopback redirect by default, or the [device-authorization grant](/guides/oauth-device-flow) with `--no-browser` — and stores the resulting scoped access token (prefixed `mcp_at_…`) and refresh token at `~/.mnemom/auth.json`; the CLI refreshes it automatically as it nears expiry. This is the same OAuth 2.1 server (and the same token shape) that issues access tokens to MCP clients — see [Connect over MCP](/mcp-clients#authentication).
 
 ```bash
 curl https://api.mnemom.ai/v1/agents \
@@ -69,7 +69,7 @@ curl https://api.mnemom.ai/v1/agents \
 
 **How to get a Bearer token outside the CLI**: run `mnemom login` and read `~/.mnemom/auth.json`. Generating your own Bearer tokens from scratch is not supported — use an API key (below) for programmatic access.
 
-The same `Authorization: Bearer` header also carries opaque OAuth access tokens (prefixed `mcp_at_…`) minted for MCP clients through the OAuth 2.1 authorization-code + PKCE flow. The API tells the two apart by the token's shape, so no separate header is needed.
+For a scripted client that wants a session without going through OAuth, `POST /v1/auth/login` accepts email + password and returns a bearer token pair directly in the JSON body (no cookie involved) — or, if you have a TOTP factor enrolled, `{ mfa_required: true, factor_id, mfa_token }`, which you complete with `POST /v1/auth/login/mfa`. `POST /v1/auth/refresh` exchanges the refresh token for a new pair. The API distinguishes an OAuth access token from this token type by its shape, so `Authorization: Bearer` accepts either without a separate header.
 
 ### API key
 
@@ -80,7 +80,7 @@ curl https://api.mnemom.ai/v1/agents \
   -H "X-Mnemom-Api-Key: <key>"
 ```
 
-**How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time. Creating or rotating a key requires AAL2 step-up; see [Authentication — API keys](/guides/authentication#api-keys) for the rotation procedure.
+**How to get an API key**: Generate one from the [Mnemom Dashboard](https://mnemom.ai/dashboard) under **Settings > API Keys**. API keys are scoped to your user account (or organization) and can be rotated at any time; creating and rotating a key only requires your normal signed-in session — see [Authentication — API keys](/guides/authentication#api-keys) for the rotation procedure.
 
 API keys are accepted on the great majority of endpoints — agent management, card and policy operations, integrity, webhooks, enforcement, reviews, teams, and deployments. This lets enterprise customers manage agent fleets programmatically without a user session.
 

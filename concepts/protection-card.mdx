@@ -30,7 +30,7 @@ Top-level action policy for Safe House on this agent. Shares the four-mode enum 
 mode: enforce
 ```
 
-[AEGIS Managed Rules](/concepts/managed-rules) tune protection-card behavior across the network. When a new Managed Rule promotes platform-scope (Ed25519-signed; tier-3 auto-promoted with 24h observe soak; tier-1/-2 dual-control), the gateway loads it via the tiered KV → R2 → isolate read substrate and adds the rule's detection thresholds to the screening pipeline your protection card configured. Your card's `mode` (`off / observe / nudge / enforce`) determines what action the gateway takes when a Managed Rule matches.
+[AEGIS Managed Rules](/concepts/managed-rules) tune protection-card behavior across the network. When a new Managed Rule promotes platform-scope (Ed25519-signed; tier-3 auto-promoted with 24h observe soak; tier-1/-2 dual-control), the gateway loads it via a tiered, multi-layer read substrate and adds the rule's detection thresholds to the screening pipeline your protection card configured. Your card's `mode` (`off / observe / nudge / enforce`) determines what action the gateway takes when a Managed Rule matches.
 
 ### `thresholds`
 
@@ -120,7 +120,7 @@ Exemptions replace the legacy boolean `org_card_exempt` flag — which waived th
 
 Every request hits:
 
-1. `canonical_protection_cards` read (KV-cached, 5-min TTL) to get the composed protection card.
+1. `canonical_protection_cards` read (cached, 5-min TTL) to get the composed protection card.
 2. Detectors inspect enabled `screen_surfaces` with the composed `thresholds`. This is **per surface, not per request** — the inbound message runs the pipeline once, and each tool result carried in the same request body runs it again on its own `tool_result` surface.
 3. `mode` determines the action: observe (log only), nudge (advisory), enforce (block, or — for a flagged tool result — withhold it from the body and forward the rest).
 4. `trusted_sources` short-circuits detectors for allowlisted upstreams (with trace entry).
@@ -160,7 +160,7 @@ A well-run fleet has both dimensions aligned across all agents. The [fleet coher
 ## See also
 
 - [Agent Cards](/concepts/agent-cards) — the two-card model (alignment + protection)
-- [Alignment Card (protocol surface)](/concepts/alignment-cards) — AAP 1.0 alignment card
+- [Alignment Card (protocol surface)](/concepts/alignment-cards) — the AAP alignment card
 - [Protection Card Schema](/specifications/protection-card-schema) — normative YAML schema
 - [Card Composition](/concepts/card-composition) — the full platform → org → team → agent composition rules
 - [Safe House](/concepts/safe-house) — the runtime detection pipeline this card configures

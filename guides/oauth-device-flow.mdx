@@ -5,7 +5,7 @@ sidebarTitle: "Device Auth Flow"
 icon: "terminal"
 ---
 
-Headless agents — CI runners, containerised workers, server-side pipelines — cannot open a browser to complete the authorization-code + PKCE flow. The **OAuth 2.0 device-authorization grant** ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) is the correct mechanism for these callers: the agent requests a short `user_code`, the human operator approves it in a browser, and the agent polls the token endpoint until it receives an access token. For a full comparison of all supported authentication methods, see [Authentication](/guides/authentication).
+Headless agents — CI runners, containerised workers, server-side pipelines — cannot open a browser to complete the authorization-code + PKCE flow. The **OAuth 2.0 device-authorization grant** ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) is the correct mechanism for these callers: the agent requests a short `user_code`, the human operator approves it in a browser, and the agent polls the token endpoint until it receives an access token. This is exactly what `mnemom login --no-browser` runs under the hood for a headless CLI session — see [CLI Reference](/gateway/cli#authentication). For a full comparison of all supported authentication methods, see [Authentication](/guides/authentication).
 
 ## Flow overview
 
@@ -33,7 +33,7 @@ POST /v1/oauth/device_authorization HTTP/1.1
 Host: api.mnemom.ai
 Content-Type: application/x-www-form-urlencoded
 
-client_id=<your_client_id>&scope=api:read%20api:write
+client_id=<your_client_id>&scope=mcp:read%20mcp:write
 ```
 
 Successful response (HTTP 200):
@@ -160,11 +160,11 @@ A successful poll returns HTTP 200 with a token response:
 
 ```json
 {
-  "access_token": "mnm_act_…",
+  "access_token": "mcp_at_…",
   "token_type": "Bearer",
   "expires_in": 28800,
-  "refresh_token": "mnm_rft_…",
-  "scope": "api:read api:write"
+  "refresh_token": "mcp_rt_…",
+  "scope": "mcp:read mcp:write"
 }
 ```
 
