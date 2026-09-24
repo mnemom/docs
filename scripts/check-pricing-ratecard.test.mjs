@@ -123,13 +123,85 @@ test("retired pricing wording fails", () => {
   mustFail(PAGE + "\nPick a monthly subscription.\n", /subscription wording/);
 });
 
+test("review mutation (a): a stale dollar figure beside a μ price fails", () => {
+  mustFail(PAGE.replace("24,900 μ ($249)", "24,900 μ ($299)"), /rg\.run\.person-card shows 24900 μ as \$299; at the peg that is \$249/);
+  mustFail(PAGE.replace("24,900 μ ($249)", "24,900 μ ($299)"), /24900 μ is \$249 at the peg, not \$299/);
+  mustFail(PAGE.replace("10,000 μ (worth $100", "10,000 μ (worth $150"), /10000 μ is \$100 at the peg, not \$150/);
+  mustFail(PAGE.replace("$0.0004 (0.04 μ)", "$0.004 (0.04 μ)"), /0\.04 μ is \$0\.0004 at the peg, not \$0\.004/);
+  // and a μ-only re-price on the rate card leaves the page's dollar figure stale:
+  const snap = clone(SNAP);
+  snap.classes.find((c) => c.class === "rg.run.person-card").rate_mu = 29900;
+  mustFail(PAGE.replace("24,900 μ ($249)", "29,900 μ ($249)"), /shows 29900 μ as \$249; at the peg that is \$299/, snap);
+});
+
+test("review mutation (b): trailing text after a price fails", () => {
+  mustFail(PAGE.replace("| `kernel.egress.webhook` | Free |", "| `kernel.egress.webhook` | Free, then 1 μ each |"), /cannot read the price "Free, then 1 μ each"/);
+  mustFail(
+    PAGE.replace("5× measured model cost of the level 2 call |", "5× measured model cost of every call, including level 1 |"),
+    /cannot read the price "5× measured model cost of every call, including level 1" for gateway\.sh\.check/,
+  );
+});
+
+test("a fixed price with the wrong unit fails", () => {
+  mustFail(PAGE.replace("| 5 μ per checkpoint |", "| 5 μ per batch |"), /analyze\.checkpoint is priced per batch; the rate card unit is checkpoint/);
+});
+
+test("review mutation (c): wrong worked-example arithmetic fails", () => {
+  mustFail(PAGE.replace("At 5× that is\n1 μ", "At 5× that is\n2 μ"), /5× 0\.2 μ is 2 μ; it is 1 μ/);
+  mustFail(PAGE.replace("At 5× that is 0.2 μ", "At 4× that is 0.16 μ"), /worked example uses 4×; the rate card implies 5×/);
+  mustFail(PAGE.replace("1.2 μ in\ntotal", "1.4 μ in\ntotal"), /total is 1\.4 μ but its charges add up to 1\.2 μ/);
+  mustFail(PAGE.replace("### A worked example", "### An example"), /must keep a "### A worked example" section/);
+  mustFail(PAGE.replace(/At 5× that is/g, "Five times that is"), /no "At N× that is C μ" step/);
+});
+
+test("review mutation (c): a wrong expiry period fails", () => {
+  mustFail(PAGE.replace("12-month expiry", "24-month expiry"), /says 24 months; unused lots expire after 12 months/);
+  mustFail(PAGE.replace(/12 months/g, "a year").replace(/12-month/g, "one-year"), /must state that unused μ expires after 12 months/);
+});
+
+test("the snapshot carries the card's overdraft switch", () => {
+  assert.equal(SNAP.overdraft, false);
+});
+
+test("overdraft:false — permissive overdraft wording fails", () => {
+  const permissive =
+    "A turn that is already running when the balance runs out is allowed to finish and is charged in full, so a balance can end slightly below zero.";
+  mustFail(PAGE.replace("To avoid a gap", permissive + "\n\nTo avoid a gap"), /sets overdraft: false, but the page says: "A turn that is already running/);
+  mustFail(PAGE + "\nYour balance may go negative for a moment.\n", /sets overdraft: false, but the page says/);
+  mustFail(PAGE + "\nWe offer a small overdraft on request.\n", /sets overdraft: false, but the page says/);
+  mustFail(PAGE.replace(/never goes below 0 μ/g, "stays positive"), /must say the balance "never goes below 0"/);
+});
+
+test("overdraft:true — promising no overdraft fails; absent (legacy) is not checked", () => {
+  const allow = clone(SNAP);
+  allow.overdraft = true;
+  mustFail(PAGE, /allows overdraft, but the page says/, allow);
+  const legacy = clone(SNAP);
+  legacy.overdraft = null;
+  assert.deepEqual(problemsFor(PAGE + "\nA balance can dip below zero.\n", legacy), []);
+});
+
 test("parsePrice reads each price form", () => {
   assert.deepEqual(parsePrice("Free"), { kind: "free" });
-  assert.deepEqual(parsePrice("**5× measured model cost** of the L2 call"), { kind: "usage", multiplier: 5 });
+  assert.deepEqual(parsePrice("**5× measured model cost** of the level 2 call"), { kind: "usage", multiplier: 5 });
   assert.deepEqual(parsePrice("5x measured model cost"), { kind: "usage", multiplier: 5 });
-  assert.deepEqual(parsePrice("49,900 μ ($499) per completed run"), { kind: "fixed", mu: 49900 });
-  assert.deepEqual(parsePrice("100 µ per proof"), { kind: "fixed", mu: 100 });
+  assert.deepEqual(parsePrice("49,900 μ ($499) per completed run"), { kind: "fixed", mu: 49900, usd: 499, unit: "run" });
+  assert.deepEqual(parsePrice("100 µ per proof"), { kind: "fixed", mu: 100, unit: "proof" });
+  assert.deepEqual(parsePrice("5 μ"), { kind: "fixed", mu: 5 });
   assert.equal(parsePrice("about a cent").kind, "unparseable");
+});
+
+test("parsePrice reads the whole cell, not a prefix", () => {
+  for (const cell of [
+    "Free, then 1 μ each",
+    "Free for now",
+    "5× measured model cost of every call, including level 1",
+    "5× measured model cost, minimum 1 μ",
+    "5 μ per checkpoint, plus 1 μ per item",
+    "5 μ or more",
+  ]) {
+    assert.equal(parsePrice(cell).kind, "unparseable", cell);
+  }
 });
 
 test("usageMultiplier maps margin to a whole multiplier or throws", () => {
@@ -171,6 +243,13 @@ test("extractRatecard rejects malformed cards", () => {
   assert.throws(() => extractRatecard(YAML.replace("version: v-test", ""), src), /missing `version`/);
 });
 
+test("extractRatecard reads overdraft and rejects a non-boolean", () => {
+  const src = { path: "p", ref: "r" };
+  assert.equal(extractRatecard(YAML, src).overdraft, null);
+  assert.equal(extractRatecard(YAML.replace("usage_margin_pct: 0.80", "usage_margin_pct: 0.80\noverdraft: false"), src).overdraft, false);
+  assert.throws(() => extractRatecard(YAML.replace("usage_margin_pct: 0.80", "usage_margin_pct: 0.80\noverdraft: maybe"), src), /overdraft must be true or false/);
+});
+
 test("a card without usage_margin_pct extracts as null margin", () => {
   const ex = extractRatecard(YAML.replace("usage_margin_pct: 0.80\n", ""), { path: "p", ref: "r" });
   assert.equal(ex.usage_margin_pct, null);
@@ -182,7 +261,9 @@ test("pageRelevantDiff sees changes to listed classes only", () => {
   assert.deepEqual(pageRelevantDiff(SNAP, b, REQUIRED_PAGE_CLASSES), []);
   Object.assign(b.classes.find((c) => c.class === "gateway.sh.check"), { model: "free_counted", rate_mu: 0 });
   b.usage_margin_pct = 0.75;
+  b.overdraft = true;
   const d = pageRelevantDiff(SNAP, b, REQUIRED_PAGE_CLASSES);
+  assert.ok(d.includes("overdraft false → true"), d.join("\n"));
   assert.ok(d.some((x) => x.startsWith("gateway.sh.check: usage → free_counted 0 μ")), d.join("\n"));
   assert.ok(d.some((x) => x.startsWith("usage_margin_pct")), d.join("\n"));
 });

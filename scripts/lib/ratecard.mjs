@@ -14,7 +14,7 @@
 //                                        prices differ from the committed extract.
 //
 // The extract deliberately keeps only customer-facing fields (peg, usage margin,
-// and each class's rate model / unit / list rate). Provider cost tables, notes and
+// the card-level overdraft switch, and each class's rate model / unit / list rate). Provider cost tables, notes and
 // internal commentary in the YAML are dropped: this docs repo is public.
 
 import { parse as parseYaml } from "yaml";
@@ -55,6 +55,19 @@ export const FORBIDDEN_PATTERNS = [
   },
 ];
 
+// How long an unused lot of μ lasts. This is not on the rate card: it is ledger
+// behaviour in mnemom-billing (server/src/ledger/engine.ts expireRetailCredits and
+// the nightly sweep in server/src/index.ts: `latest_usage_at + interval '12 months'`).
+// `sync-ratecard.mjs --check` re-reads that code on billing main and fails if the
+// interval changes, so this constant cannot silently go stale.
+export const LOT_EXPIRY_MONTHS = 12;
+
+// A decimal number as written on the page: "24,900", "0.04", "1".
+const NUM = String.raw`\d[\d,]*(?:\.\d+)?`;
+const num = (t) => Number(t.replace(/,/g, ""));
+// Money on the page is compared at 1e-9 of a dollar so float noise never matters.
+const sameMoney = (a, b) => Math.abs(a - b) < 1e-9;
+
 const CLASS_ID_RE = /^[a-z0-9]+(?:\.[a-z0-9-]+)+$/;
 
 function fail(msg) {
@@ -74,6 +87,13 @@ export function extractRatecard(yamlText, source) {
   const peg = doc.peg || {};
   if (typeof peg.mu_usd !== "number") fail(`rate card ${doc.version}: missing \`peg.mu_usd\``);
   if (!Array.isArray(doc.classes) || doc.classes.length === 0) fail(`rate card ${doc.version}: no \`classes\``);
+
+  if (doc.overdraft !== undefined && typeof doc.overdraft !== "boolean") {
+    fail(`rate card ${doc.version}: overdraft must be true or false, got ${JSON.stringify(doc.overdraft)}`);
+  }
+  // Absent means the legacy behaviour (per-class overage allowlist in the ledger);
+  // recorded as null so it is distinguishable from an explicit true.
+  const overdraft = typeof doc.overdraft === "boolean" ? doc.overdraft : null;
 
   const margin = doc.usage_margin_pct ?? null;
   if (margin !== null && !(typeof margin === "number" && margin >= 0 && margin < 1)) {
@@ -107,6 +127,7 @@ export function extractRatecard(yamlText, source) {
     effective_at: doc.effectiveAt,
     peg: { usd_per_mu: peg.mu_usd, mmu_per_mu: peg.mmu_per_mu ?? null },
     usage_margin_pct: margin,
+    overdraft,
     classes,
   };
 }
@@ -136,17 +157,34 @@ export function usageMultiplier(margin) {
   return r;
 }
 
-/** Parse the price cell of a pricing-page table row. */
+// Trailing text a usage-priced cell may carry after "N× measured model cost".
+// Anything else after the price is rejected, so a cell cannot state a charge
+// (e.g. "…, including level 1") that the parser would otherwise ignore.
+const USAGE_SUFFIXES = ["", " of the level 2 call"];
+
+/**
+ * Parse the price cell of a pricing-page table row. The WHOLE cell must be one of:
+ *   Free
+ *   N× measured model cost[ of the level 2 call]
+ *   N μ[ ($X)][ per [completed ]<unit>]
+ * Anything else is "unparseable", which the gate reports as a failure.
+ */
 export function parsePrice(cell) {
   const text = cell
     .replace(/\*\*|__|`/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
     .trim();
-  if (/^free\b/i.test(text)) return { kind: "free" };
-  const usage = text.match(/^(\d+)\s*[×x]\s+(?:the\s+)?measured model cost\b/i);
-  if (usage) return { kind: "usage", multiplier: Number(usage[1]) };
-  const fixed = text.match(/^(\d[\d,]*)\s*[μµ]/);
-  if (fixed) return { kind: "fixed", mu: Number(fixed[1].replace(/,/g, "")) };
+  if (/^free$/i.test(text)) return { kind: "free" };
+  const usage = text.match(/^(\d+)\s*[×x]\s+(?:the\s+)?measured model cost(.*)$/i);
+  if (usage && USAGE_SUFFIXES.includes(usage[2].toLowerCase())) return { kind: "usage", multiplier: Number(usage[1]) };
+  const fixed = text.match(new RegExp(String.raw`^(${NUM})\s*[μµ](?:\s*\(\$(${NUM})\))?(?:\s+per\s+(?:completed\s+)?([a-z][a-z-]*))?$`));
+  if (fixed) {
+    const out = { kind: "fixed", mu: num(fixed[1]) };
+    if (fixed[2] !== undefined) out.usd = num(fixed[2]);
+    if (fixed[3] !== undefined) out.unit = fixed[3];
+    return out;
+  }
   return { kind: "unparseable", text };
 }
 
@@ -244,6 +282,15 @@ export function checkPageAgainstExtract(mdx, extract) {
     } else if (price.kind !== "fixed" || price.mu !== cls.rate_mu) {
       const shown = price.kind === "fixed" ? `${price.mu} μ` : price.kind;
       problems.push(`line ${row.line}: ${row.class} shows ${shown} but the rate card says ${cls.rate_mu} μ`);
+    } else {
+      if (price.usd !== undefined && !sameMoney(price.usd, cls.rate_mu * extract.peg.usd_per_mu)) {
+        problems.push(
+          `line ${row.line}: ${row.class} shows ${price.mu} μ as $${price.usd}; at the peg that is $${cls.rate_mu * extract.peg.usd_per_mu}`,
+        );
+      }
+      if (price.unit !== undefined && cls.unit && price.unit !== cls.unit) {
+        problems.push(`line ${row.line}: ${row.class} is priced per ${price.unit}; the rate card unit is ${cls.unit}`);
+      }
     }
   }
 
@@ -269,6 +316,11 @@ export function checkPageAgainstExtract(mdx, extract) {
     }
   }
 
+  problems.push(...checkMoneyPairs(mdx, extract));
+  problems.push(...checkWorkedExample(mdx, multiplier));
+  problems.push(...checkOverdraftWording(mdx, extract));
+  problems.push(...checkExpiryWording(mdx));
+
   const lines = mdx.split("\n");
   for (const { label, re } of FORBIDDEN_PATTERNS) {
     lines.forEach((line, i) => {
@@ -276,6 +328,133 @@ export function checkPageAgainstExtract(mdx, extract) {
     });
   }
 
+  return problems;
+}
+
+const lineOf = (mdx, index) => mdx.slice(0, index).split("\n").length;
+
+/**
+ * Every "N μ ($X)", "N μ (worth $X …)" and "$X (N μ)" on the page must agree with
+ * the peg, so a μ-only re-price cannot leave a stale dollar figure beside it.
+ */
+export function checkMoneyPairs(mdx, extract) {
+  const problems = [];
+  const peg = extract.peg.usd_per_mu;
+  const muThenUsd = new RegExp(String.raw`(${NUM})\s*[μµ]\s*\((?:worth\s+)?\$\s?(${NUM})`, "g");
+  const usdThenMu = new RegExp(String.raw`\$\s?(${NUM})\s*\((${NUM})\s*[μµ]\)`, "g");
+  const pairs = [
+    ...[...mdx.matchAll(muThenUsd)].map((m) => ({ mu: num(m[1]), usd: num(m[2]), at: m.index, text: m[0] })),
+    ...[...mdx.matchAll(usdThenMu)].map((m) => ({ usd: num(m[1]), mu: num(m[2]), at: m.index, text: m[0] })),
+  ];
+  for (const p of pairs) {
+    if (!sameMoney(p.mu * peg, p.usd)) {
+      problems.push(`line ${lineOf(mdx, p.at)}: "${p.text.trim()}" — ${p.mu} μ is $${+(p.mu * peg).toFixed(10)} at the peg, not $${p.usd}`);
+    }
+  }
+  return problems;
+}
+
+const WORKED_EXAMPLE_HEADING = "### A worked example";
+
+/**
+ * The worked example's arithmetic. In the section under WORKED_EXAMPLE_HEADING,
+ * each "At N× that is C μ" must use the rate card's multiplier and equal N × the
+ * most recent measured cost written as "(B μ)"; "T μ in total" must be the sum of
+ * those charges. The section is required and must contain at least one step, so
+ * rewording it out of the checked shape fails rather than going unchecked.
+ */
+export function checkWorkedExample(mdx, multiplier) {
+  const start = mdx.indexOf(WORKED_EXAMPLE_HEADING);
+  if (start === -1) return [`the page must keep a "${WORKED_EXAMPLE_HEADING}" section (its arithmetic is checked)`];
+  const rest = mdx.slice(start + WORKED_EXAMPLE_HEADING.length);
+  const next = rest.search(/\n#{1,3} /);
+  const section = next === -1 ? rest : rest.slice(0, next);
+  const base = start + WORKED_EXAMPLE_HEADING.length;
+  const where = (i) => `line ${lineOf(mdx, base + i)}`;
+
+  const events = [
+    ...[...section.matchAll(new RegExp(String.raw`\((${NUM})\s*[μµ]\)`, "g"))].map((m) => ({ at: m.index, cost: num(m[1]) })),
+    ...[...section.matchAll(new RegExp(String.raw`At\s+(\d+)\s*[×x]\s+that\s+is\s+(${NUM})\s*[μµ]`, "g"))].map((m) => ({
+      at: m.index,
+      n: Number(m[1]),
+      charge: num(m[2]),
+    })),
+    ...[...section.matchAll(new RegExp(String.raw`(${NUM})\s*[μµ]\s+in\s+total`, "g"))].map((m) => ({ at: m.index, total: num(m[1]) })),
+  ].sort((a, b) => a.at - b.at);
+
+  const problems = [];
+  let cost = null;
+  const charges = [];
+  let totals = 0;
+  for (const e of events) {
+    if (e.cost !== undefined) cost = e.cost;
+    else if (e.charge !== undefined) {
+      if (multiplier !== null && e.n !== multiplier) problems.push(`${where(e.at)}: the worked example uses ${e.n}×; the rate card implies ${multiplier}×`);
+      if (cost === null) problems.push(`${where(e.at)}: the worked example charges ${e.charge} μ with no "(N μ)" measured cost before it`);
+      else if (!sameMoney(e.n * cost, e.charge)) problems.push(`${where(e.at)}: the worked example says ${e.n}× ${cost} μ is ${e.charge} μ; it is ${+(e.n * cost).toFixed(10)} μ`);
+      charges.push(e.charge);
+      cost = null;
+    } else {
+      totals++;
+      const sum = charges.reduce((a, b) => a + b, 0);
+      if (!sameMoney(sum, e.total)) problems.push(`${where(e.at)}: the worked example total is ${e.total} μ but its charges add up to ${+sum.toFixed(10)} μ`);
+    }
+  }
+  if (charges.length === 0) problems.push(`the worked example has no "At N× that is C μ" step to check`);
+  if (totals === 0) problems.push(`the worked example has no "T μ in total" line to check`);
+  return problems;
+}
+
+// Split prose into sentences. Lines are joined first because MDX paragraphs wrap.
+function sentences(mdx) {
+  return mdx
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/);
+}
+
+const OVERDRAFT_TOPIC = /\b(?:below (?:zero|0)|negative|overdraft|overdrawn|overdraw|credit line)\b/i;
+const NEGATION = /\b(?:no|never|not|cannot|can't|won't|isn't|doesn't|don't)\b/i;
+const NO_OVERDRAFT_STATEMENT = /\bnever goes below (?:zero|0)\b/i;
+
+/**
+ * When the card says overdraft: false, the page must say the balance never goes
+ * below zero, and no sentence may talk about going below zero / a negative
+ * balance / an overdraft without negating it. When the card allows overdraft,
+ * the page must not promise that it never happens.
+ */
+export function checkOverdraftWording(mdx, extract) {
+  const problems = [];
+  const all = sentences(mdx);
+  if (extract.overdraft === false) {
+    if (!all.some((s) => NO_OVERDRAFT_STATEMENT.test(s))) {
+      problems.push(`rate card ${extract.version} sets overdraft: false; the page must say the balance "never goes below 0"`);
+    }
+    for (const s of all) {
+      if (OVERDRAFT_TOPIC.test(s) && !NEGATION.test(s)) {
+        problems.push(`rate card ${extract.version} sets overdraft: false, but the page says: "${s.trim()}"`);
+      }
+    }
+  } else if (extract.overdraft === true) {
+    for (const s of all) {
+      if (NO_OVERDRAFT_STATEMENT.test(s) || /\bno overdraft\b/i.test(s)) {
+        problems.push(`rate card ${extract.version} allows overdraft, but the page says: "${s.trim()}"`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Every "N months" on the page must be the ledger's lot expiry, and one must be stated. */
+export function checkExpiryWording(mdx) {
+  const found = [...mdx.matchAll(/(\d+)[- ]months?\b/gi)];
+  const problems = [];
+  if (found.length === 0) problems.push(`the page must state that unused μ expires after ${LOT_EXPIRY_MONTHS} months`);
+  for (const m of found) {
+    if (Number(m[1]) !== LOT_EXPIRY_MONTHS) {
+      problems.push(`line ${lineOf(mdx, m.index)}: the page says ${m[1]} months; unused lots expire after ${LOT_EXPIRY_MONTHS} months`);
+    }
+  }
   return problems;
 }
 
@@ -288,6 +467,7 @@ export function pageRelevantDiff(a, b, classes) {
   const diffs = [];
   if (a.peg.usd_per_mu !== b.peg.usd_per_mu) diffs.push(`peg ${a.peg.usd_per_mu} → ${b.peg.usd_per_mu}`);
   if (a.usage_margin_pct !== b.usage_margin_pct) diffs.push(`usage_margin_pct ${a.usage_margin_pct} → ${b.usage_margin_pct}`);
+  if ((a.overdraft ?? null) !== (b.overdraft ?? null)) diffs.push(`overdraft ${a.overdraft ?? null} → ${b.overdraft ?? null}`);
   const am = new Map(a.classes.map((c) => [c.class, c]));
   const bm = new Map(b.classes.map((c) => [c.class, c]));
   for (const id of classes) {

@@ -19,7 +19,12 @@
 //       head of a rate-card PR) and write nothing. Exit 1 if
 //         (a) the pinned rate card on main no longer matches the snapshot, or
 //         (b) the rate card that is in force LAST (latest effectiveAt on main)
-//             changes a price the page shows (peg, margin, or a listed class).
+//             changes a price the page shows (peg, margin, overdraft, or a
+//             listed class), or
+//         (c) the ledger code the page's expiry section describes has changed:
+//             the lot expiry interval in server/src/ledger/engine.ts is no longer
+//             LOT_EXPIRY_MONTHS, or server/src/ledger/holds.ts now resets a lot's
+//             clock on settle (the page documents that it does not).
 //       This is what the scheduled workflow runs.
 //
 // Exit codes: 0 ok, 1 drift, 2 usage / fetch / parse error.
@@ -30,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 import {
+  LOT_EXPIRY_MONTHS,
   RATECARD_REPO,
   REQUIRED_PAGE_CLASSES,
   extractRatecard,
@@ -133,11 +139,38 @@ async function check() {
     }
   }
 
+  failures.push(...(await checkLedgerFacts(ref)));
+
   if (failures.length) {
     for (const f of failures) process.stderr.write(`::error::${f}\n`);
     process.exit(1);
   }
   process.stderr.write(`sync-ratecard: snapshot ${snap.version} matches ${RATECARD_REPO}@${ref}\n`);
+}
+
+// The expiry section of the page is not on the rate card; it describes ledger code.
+async function checkLedgerFacts(ref) {
+  const failures = [];
+  const engine = await fetchFile("server/src/ledger/engine.ts", ref);
+  if (engine === null) {
+    failures.push(`server/src/ledger/engine.ts is not on ${RATECARD_REPO}@${ref}; cannot confirm the ${LOT_EXPIRY_MONTHS}-month lot expiry`);
+  } else {
+    const months = [...engine.matchAll(/latest_usage_at \+ interval '(\d+) months?'/g)].map((m) => Number(m[1]));
+    if (months.length === 0 || months.some((m) => m !== LOT_EXPIRY_MONTHS)) {
+      failures.push(
+        `lot expiry in server/src/ledger/engine.ts on ${ref} is ${months.length ? months.join("/") : "not found"} months; ` +
+          `the page and LOT_EXPIRY_MONTHS say ${LOT_EXPIRY_MONTHS}`,
+      );
+    }
+  }
+  const holds = await fetchFile("server/src/ledger/holds.ts", ref);
+  if (holds !== null && holds.includes("latest_usage_at")) {
+    failures.push(
+      `server/src/ledger/holds.ts on ${ref} now touches latest_usage_at; the page says a settled reservation does not ` +
+        "restart a lot's expiry clock. Re-read the code and update 'When μ expires' in pricing/overview.mdx.",
+    );
+  }
+  return failures;
 }
 
 async function write() {

@@ -6,8 +6,11 @@
 // `<!-- pricing-ratecard:start -->` / `<!-- pricing-ratecard:end -->` markers, plus
 // the peg, the margin and the "N× measured" multiplier anywhere on the page —
 // with scripts/ratecard-snapshot.json, the committed extract of the rate card.
-// It also fails on wording from the retired pricing model (Safe House "bundled"
-// into the turn, flat per-request dollar prices, subscriptions).
+// Each price cell must be read whole (no trailing text), every "N μ ($X)" pair
+// must agree with the peg, the worked example's arithmetic must add up, overdraft
+// wording must match the card's `overdraft` switch, and every "N months" must be
+// the ledger's lot expiry. It also fails on wording from the retired pricing model
+// (Safe House "bundled" into the turn, flat per-request dollar prices, subscriptions).
 //
 // Whether the snapshot itself still matches the rate card on mnemom-billing main
 // is a separate, token-gated check: `node scripts/sync-ratecard.mjs --check`.

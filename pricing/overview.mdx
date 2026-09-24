@@ -89,26 +89,33 @@ Prices on this page match Mnemom rate card `v2026-09-gateway`.
 
 ### A worked example
 
-A governed turn whose integrity analysis uses $0.002 of model tokens has a measured cost
-of 0.2 μ. At 5× that is 1 μ. If one of the turn's surfaces also escalated to the Safe House
-level 2 model, and that call cost $0.0004 (0.04 μ), it adds 0.2 μ, for a total of 1.2 μ.
-If Safe House cleared everything at level 1, that screen costs nothing.
+A governed turn's integrity analysis uses $0.002 (0.2 μ) of model tokens. At 5× that is
+1 μ. One of the turn's surfaces also escalates to the Safe House level 2 model, and that
+call uses $0.0004 (0.04 μ) of model tokens. At 5× that is 0.2 μ. The turn costs 1.2 μ in
+total. If Safe House had cleared every surface at level 1, the screen would have cost
+nothing.
 
 ## When your balance runs out
 
-There is no overdraft and no credit line. Once your balance reaches zero, the gateway
-rejects new requests with `402 Payment Required` (see
+There is no overdraft and no credit line: your balance never goes below 0 μ. A charge your
+balance cannot cover is refused, and the gateway rejects requests with
+`402 Payment Required` (see
 [Errors](/api-reference/errors#402-payment-required--billing-and-depletion)) until you add
-μ. A turn that is already running when the balance runs out is allowed to finish and is
-charged in full, so a balance can end slightly below zero. Your next purchase covers that
-amount first.
+μ.
 
 To avoid a gap, turn on auto top-up before you need it.
 
 ## When μ expires
 
-Each purchase or grant of μ is kept as a separate lot. A lot you don't spend from expires
-12 months after you bought or received it. Spending from a lot restarts its 12-month clock.
+Each purchase or grant of μ is kept as a separate lot, and each lot has a 12-month expiry
+clock. The clock starts when you buy or receive the lot. Every charge except a settled
+reservation (below) restarts the clock on each lot it draws from. A lot that goes 12 months
+without such a charge expires, and its unspent μ is removed.
+
+The exception: a ResearchGrade run reserves μ when it starts and settles the reservation
+when it completes. Settling draws from your lots but does not restart their clocks. If
+ResearchGrade runs are all you spend μ on, a lot still expires 12 months after you bought
+it, or 12 months after the last other charge drawn from it.
 
 Grants (such as the introductory 10,000 μ) are spent before purchased μ, and purchased μ is
 spent oldest first, so in normal use your oldest lots are the ones being drawn down.
@@ -173,13 +180,14 @@ accounting and peg) and dedicated cells (an isolated deployment in the region yo
     grant of 10,000 μ ($100 at the peg). Nothing is charged until you spend past it.
   </Accordion>
   <Accordion title="What happens when my balance runs out?">
-    The gateway rejects new requests with `402 Payment Required` until you add μ. There is
-    no overdraft. Buy more μ in one click at any time, or turn on auto top-up so your balance
+    Your balance never goes below 0 μ. A charge it cannot cover is refused, and the gateway
+    rejects requests with `402 Payment Required` until you add μ. There is no overdraft. Buy more μ in one click at any time, or turn on auto top-up so your balance
     refills once it drops below a threshold you set.
   </Accordion>
   <Accordion title="Does μ expire?">
-    A lot of μ you don't spend from expires 12 months after purchase. Spending from a lot
-    restarts its 12-month clock.
+    Yes. Each lot of μ expires after 12 months without a charge drawn from it. The clock
+    starts at purchase, and every charge except a settled ResearchGrade reservation restarts
+    it. See "When μ expires" above.
   </Accordion>
   <Accordion title="Do features differ depending on how much μ I buy?">
     No. Every feature is available to every account regardless of spend. Buying more μ buys
