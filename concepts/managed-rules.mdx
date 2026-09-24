@@ -44,19 +44,19 @@ A promoted rule transits four stages before it reaches its target enforcement mo
 1. **Sign + dual-write.** Promotion writes the per-row signed entry, then dual-writes both envelopes from the same canonical recipe set — only the signing key differs between them.
 2. **Gateway propagation.** The gateway's tiered read pipeline picks up the new envelope within the P95 ≤ 30s propagation target.
 3. **24-hour observe soak.** The rule enters `observe` mode regardless of its target mode. During the soak, the false-positive rate over that window governs whether the rule survives.
-4. **Escalation or auto-rollback.** If the soak passes, the rule escalates to its target mode (`nudge` or `enforce`). If it fails on false-positive rate, the rule is auto-rolled-back under [CLPI trust recovery](/concepts/card-lifecycle) and the `recipe.retired` webhook fires with `reason = 'observe_soak_fp'`.
+4. **Escalation or auto-rollback.** If the soak passes, the rule escalates to its target mode (`nudge` or `enforce`). If it fails on false-positive rate, the rule is auto-rolled-back under [CLPI trust recovery](/concepts/card-lifecycle) and Mnemom's internal `recipe.retired` signal fires with `reason = 'observe_soak_fp'` (see note below — this is an internal operations signal, not one your org subscribes to).
 
 The soak is not bypassable: a platform admin cannot manually escalate before the 24-hour window completes. A rule can be published directly as `enforce`, but only after the soak, never instead of it. Independently of the soak, a rule that goes 90 days with zero hits, or whose cumulative false-positive rate crosses threshold once it has enough evaluations to be statistically meaningful, is retired by a nightly sweep.
 
 ## Webhook events
 
-The rule lifecycle emits webhook events to the customer's subscription. See [Webhooks](/guides/webhooks) for the subscription setup and [Webhook contract](/concepts/webhook-contract) for the canonical payload shape.
+Only one event in the rule lifecycle is delivered to your org's own webhook subscription today:
 
 | Event | When | Notable fields |
 |---|---|---|
-| `recipe.promoted` | Promotion completes (or on soak-to-active escalation) | `recipe_id`, `version`, `composition_scope`, `transition`, `effective_at` |
-| `recipe.retired` | Rule retired (auto-rollback on soak failure, or manual retirement) | `recipe_id`, `reason`, `retired_at` |
-| `network.threat_level.changed` | Axis-bucket threat-level transition | `axis`, `bucket_id`, `old_state`, `new_state`, `transitioned_at` |
+| [`recipe.candidate.created`](/api-reference/webhook-events#recipecandidatecreated) | Your org submits a false-positive/false-negative report on a recipe (see below) | `candidate_id`, `writer_identity`, `report_type`, `related_recipe_id` |
+
+The rest of the lifecycle — `recipe.promoted`, `recipe.retired`, and the campaign-state transitions on the network layer — are internal Mnemom operations signals, not customer-subscribable webhooks; see the note on [Webhook Event Catalog](/api-reference/webhook-events#detection-reports). Track their effect instead through the [advisory](/concepts/advisories) and [IoC](/concepts/iocs) feeds, or the published [`/trust/slos`](https://www.mnemom.ai/trust/slos) commitments. See [Webhooks](/guides/webhooks) for subscription setup and [Webhook contract](/concepts/webhook-contract) for the canonical payload shape.
 
 ## Reporting a false positive or false negative
 

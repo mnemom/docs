@@ -35,33 +35,7 @@ When Mnemom retries delivery (per the retry policy below), the same `id` flows t
 
 ### 5. HMAC signature
 
-Every delivery is signed with HMAC-SHA256 over `${X-Webhook-Timestamp}.${rawBody}` using the per-endpoint signing secret. The signature is sent as `X-Webhook-Signature: v1=<hex>` (Stripe convention).
-
-**Verifying a signature:**
-
-```ts
-import { createHmac, timingSafeEqual } from 'crypto';
-
-function verifyWebhookSignature(
-  rawBody: string,
-  timestamp: string,
-  signatureHeader: string,
-  signingSecret: string,
-): boolean {
-  const sigMatch = signatureHeader.match(/^v1=(.+)$/);
-  if (!sigMatch) return false;
-
-  const expected = createHmac('sha256', signingSecret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest('hex');
-
-  const a = Buffer.from(sigMatch[1], 'hex');
-  const b = Buffer.from(expected, 'hex');
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-```
-
-Always reject signatures whose `X-Webhook-Timestamp` is more than 5 minutes from server time — replay attacks are otherwise indistinguishable from legitimate retries.
+Every delivery is signed HMAC-SHA256 over `${X-Webhook-Timestamp}.${rawBody}` using the per-endpoint signing secret, sent as `X-Webhook-Signature: v1=<hex>` (Stripe convention), with a 5-minute replay tolerance. See [Signature verification](/guides/webhooks#signature-verification) for runnable verification code in Node and Python.
 
 ### 6. Retry policy
 
@@ -98,7 +72,7 @@ This is enforced at three layers:
 
 ## Scope: which deliveries this contract covers
 
-This contract governs the **org webhook subscription system**: the closed set of catalog events, delivered to endpoints you register at `POST /v1/orgs/:org_id/webhooks`. It is the delivery mechanism for `sideband.*.fired`, `recipe.*`, `advisory.published`, `ioc.added`, billing events, and the rest of the catalog.
+This contract governs the **org webhook subscription system**: the closed set of catalog events, delivered to endpoints you register at `POST /v1/orgs/:org_id/webhooks`. It is the delivery mechanism for `sideband.*.fired`, `recipe.candidate.created`, billing events, and the rest of the [catalog](/api-reference/webhook-events) — see that page's note on which detection-recipe lifecycle events stay internal to Mnemom today.
 
 [Governance signal](/concepts/governance-signals) notification destinations (`governance.signal.fired` and its lifecycle siblings) are a **separate, purpose-built delivery path** configured per-org under `/v1/orgs/:org_id/governance/notification-destinations` — not an entry in this catalog. It uses its own signature header (`X-Mnemom-Signature: sha256=<hex>` over the raw body) and its own delivery semantics. Don't assume this page's retry schedule, idempotency key format, or `X-Webhook-Signature` scheme apply there.
 

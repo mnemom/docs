@@ -115,6 +115,21 @@ The same shape works for `protection`. One routing table covers every scope for 
 
 Older, scope-specific URLs (`/v1/agents/{id}/alignment-card`, `/v1/orgs/{id}/alignment-template`, `/v1/admin/platform-card/alignment`, and their protection + preview-compose equivalents) still work: each returns an HTTP 308 Permanent Redirect ([RFC 7538](https://www.rfc-editor.org/rfc/rfc7538)) to its canonical equivalent, preserving the original method and body, with `Deprecation`/`Sunset`/`Link` headers pointing here. Point new code at the canonical URL directly — it's the same call, one hop shorter.
 
+One legacy path per resource × scope, so org/team/platform callers don't have to infer the pattern:
+
+| Legacy | Canonical |
+|--------|-----------|
+| `/v1/agents/{id}/alignment-card` | `/v1/alignment/agent/{id}` |
+| `/v1/agents/{id}/protection-card` | `/v1/protection/agent/{id}` |
+| `/v1/orgs/{id}/alignment-template` | `/v1/alignment/org/{id}` |
+| `/v1/orgs/{id}/protection-template` | `/v1/protection/org/{id}` |
+| `/v1/teams/{id}/alignment-template` | `/v1/alignment/team/{id}` |
+| `/v1/teams/{id}/protection-template` | `/v1/protection/team/{id}` |
+| `/v1/admin/platform-card/alignment` | `/v1/alignment/platform/default` |
+| `/v1/admin/platform-card/protection` | `/v1/protection/platform/default` |
+
+Each row's `GET`/`PUT`/`DELETE`/`.../preview-compose` verbs redirect the same way — only the resource path changes.
+
 This canonical surface is also the foundation for two more capabilities:
 
 - **[Sub-resource verbs](/concepts/sub-resource-verbs)** — `PUT`/`PATCH /v1/<resource>/<scope>/<scope_id>/<primitive>` to set just one primitive without replacing the whole spec.

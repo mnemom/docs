@@ -5,7 +5,7 @@ sidebarTitle: "Webhook Events"
 icon: "list"
 ---
 
-51 event types your org's webhook endpoints can subscribe to. Every event uses the same envelope
+52 event types your org's webhook endpoints can subscribe to. Every event uses the same envelope
 (see [Webhook Notifications](/guides/webhooks) for delivery, signing, and retry mechanics):
 
 ```json
@@ -240,6 +240,30 @@ Fired when a review hold reaches its SLA deadline unresolved. The card's configu
 ```json
 { "review_id": "rev-ghi789", "agent_id": "agt-x", "session_id": "sess-y", "on_timeout_applied": "reject", "sla_deadline": "2026-07-09T19:30:00.000Z" }
 ```
+
+---
+
+## Detection reports
+
+### `recipe.candidate.created`
+
+Fired when your org submits a false-negative/false-positive report on a detection recipe (or
+Mnemom's own arena tooling proposes one). Delivered to your org's own webhook endpoints when
+you're the reporting org, alongside Mnemom's internal review queue.
+
+```json
+{ "candidate_id": "cand-abc12345", "writer_identity": "customer-fn-report", "report_type": "fn", "related_recipe_id": "rcp_0123456789abcdef", "agent_id": "agt-x", "checkpoint_id": "chk-xyz", "summary_excerpt": "Agent was prompted to leak credentials via Base64-encoded payload; existing prompt-injection rule didn't fire." }
+```
+
+<Note>
+  The recipe lifecycle events that follow a candidate's triage —
+  `recipe.promoted`, `recipe.retired`, `advisory.published`, `ioc.added`,
+  `network.campaign.closed`, and `reviewer-mode.changed` — are internal Mnemom
+  operations events today (delivered only to Mnemom's own account, never to a
+  customer org), so they aren't in this catalog. Poll
+  [Intelligence Overview](/api-reference/intelligence-overview) for advisories
+  and indicators instead.
+</Note>
 
 ---
 
