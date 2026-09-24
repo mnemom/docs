@@ -7,6 +7,12 @@ icon: "terminal"
 
 The `mnemom` CLI manages authentication, alignment cards, protection cards, and agent diagnostics for the Mnemom trust stack.
 
+<Note>
+Looking to launch a **governed coding agent**? See [`mnemom agent`](/gateway/agent)
+— install once, run `mnemom agent`, and it launches Claude Code through the
+gateway with an agent set up for you.
+</Note>
+
 ## Installation
 
 ```bash
@@ -447,14 +453,32 @@ mnemom protection drift protection.yaml --agent my-coder
 
 </Steps>
 
-## Agent listing
+## Agent commands
 
-### `mnemom agents`
+`mnemom agent` is one namespace for everything about your governed agents: the
+launcher, and the fleet verbs `list`, `claim`, and `move`.
 
-List agents across the orgs you belong to. Pass `--org <id>` to scope to a single org (default: all orgs you belong to).
+### `mnemom agent`
+
+Launch a governed coding-agent session (Claude Code today) through the gateway.
+A bare `mnemom agent` asks for a session name and an optional goal, then
+launches. The launcher, its sub-verbs (`setup`, `doctor`, `config`, `invite`),
+saved settings, contracts, and guardrails are documented on their own page:
+[`mnemom agent`](/gateway/agent).
 
 ```bash
-mnemom agents
+mnemom agent                    # prompts for a session name + optional goal
+mnemom agent fix-auth --goal "make login work on Safari"
+mnemom agent doctor             # read-only preflight
+```
+
+### `mnemom agent list`
+
+List agents across the orgs you belong to.
+
+```bash
+mnemom agent list               # every org you belong to
+mnemom agent list --org <id>    # one org
 ```
 
 **Example output:**
@@ -477,26 +501,41 @@ mnemom agents
 Requires authentication via `mnemom login`. Agents are auto-created by the gateway on first API call -- there is no registration step.
 </Note>
 
-### `mnemom agents claim <id-or-name>`
+### `mnemom agent claim <id-or-name>`
 
 Claim a gateway-provisioned agent into an org by proving you hold its provider
 key. See the [Agent Claim Flow guide](/guides/agent-claim-flow) for the full
 lifecycle.
 
 ```bash
-mnemom agents claim mnm-... --key "$AGENT_PROVIDER_KEY" --org mnemom
+mnemom agent claim mnm-... --key "$AGENT_PROVIDER_KEY" --org mnemom
 ```
 
-- `--org <slug|id>` — destination org. Defaults to your **active** org (set via `mnemom org use`), falling back to your personal org when none is active.
+- `--org <slug|id>` — destination org. Defaults to your active org (set with
+  `mnemom org use`), else your personal org, with a loud notice.
 - `--key <key>` — the agent's provider API key; the CLI derives the
   `hash_proof` locally. Alternatively pass `--hash-proof <64-hex>` directly.
-- `--name <name>` — provisioned agent name for proof derivation; auto-resolved from the agent id when possible, pass only to override.
-- `--json` — output JSON instead of human-readable text.
+- `--name <name>` — the provisioned agent name used in proof derivation. It is
+  auto-resolved from the agent id when possible; pass it only to override.
+- `--json` — machine-readable output.
 
 <Note>
-To re-home an agent by proving you hold its provider key, re-`claim` it with a new `--org` (possession-based). To move an agent without its key, use `mnemom agents move <id-or-name> --to <slug-or-id>` instead — it requires owner/admin in both the current and destination org, role-based, no agent key needed. Either way, the destination org's template can floor/cap the agent's composed card — its effective posture may change. See
+To re-home an agent you hold the key for, re-`claim` it with a new `--org`. The
+destination org's template can floor/cap the agent's composed card, so its
+effective posture may change. See
 [Idempotency and re-homing](/guides/agent-claim-flow#idempotency-and-re-homing).
 </Note>
+
+### `mnemom agent move <id-or-name> --to <slug|id>`
+
+Move an agent to another org without its key. This is role-based: you must be an
+owner or admin in **both** the current and the destination org. `--to` is
+required and never defaults to your active org.
+
+```bash
+mnemom agent move mnm-... --to acme
+mnemom agent move my-coder --to acme --json
+```
 
 ## Diagnostics
 
@@ -531,12 +570,12 @@ Providers:
 Last seen: 2 minutes ago
 ```
 
-### `mnemom integrity`
+### `mnemom activity`
 
-Display integrity score and verification statistics for your agent.
+Show AAP behavioral activity and the activity score for your agent (the agent-side runtime audit log, distinct from AIP checkpoints).
 
 ```bash
-mnemom integrity --agent my-coder
+mnemom activity --agent my-coder
 ```
 
 **Output includes:**
@@ -765,7 +804,7 @@ mnemom status --agent my-coder
 ### Check integrity
 
 ```bash
-mnemom integrity --agent my-coder
+mnemom activity --agent my-coder
 ```
 
 ### Review recent activity
