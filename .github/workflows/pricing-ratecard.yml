@@ -1,0 +1,76 @@
+name: Pricing rate card
+
+# Keeps the hand-written pricing page (pricing/overview.mdx) honest against
+# Mnemom's rate card, which lives in the PRIVATE mnemom/mnemom-billing repo
+# (ratecards/<version>.yaml). Two jobs, because the two halves need different
+# access:
+#
+#   page-vs-snapshot (every PR + push to main; offline, no secrets)
+#     The prices are vendored as a small public extract, scripts/ratecard-snapshot.json,
+#     written by scripts/sync-ratecard.mjs. This job fails if any price on the page
+#     differs from that extract, if a required class is missing, or if wording from
+#     the retired pricing model comes back. Needing no token means it also runs on
+#     fork PRs, and it is the job that blocks a wrong price from merging.
+#
+#   snapshot-vs-billing (daily, on push to main, and on manual dispatch)
+#     Re-reads the rate card from mnemom-billing main and fails if the committed
+#     extract has drifted, or if the rate card in force last (latest effectiveAt)
+#     changes a price the page shows. Reading a private repo needs a token; this
+#     reuses the org's existing ADW GitHub App (vars.ADW_APP_ID +
+#     secrets.ADW_APP_PRIVATE_KEY, already used by adw-zte.yml here and installed on
+#     mnemom-billing), minted read-only and scoped to that one repo. No new secret.
+#     It does not run on pull_request: a docs PR that pins a rate card which has not
+#     merged in mnemom-billing yet is expected, and the offline job already covers
+#     the PR. A red run here means: re-run `node scripts/sync-ratecard.mjs`, update
+#     the page, open a PR.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "41 7 * * *" # daily 07:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  page-vs-snapshot:
+    name: Pricing page matches rate card
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - name: Self-test the gate
+        run: npm run test:pricing-ratecard
+      - name: Compare pricing/overview.mdx with scripts/ratecard-snapshot.json
+        run: npm run check:pricing-ratecard
+
+  snapshot-vs-billing:
+    name: Rate card snapshot matches mnemom-billing main
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - name: Mint a read-only token for mnemom-billing
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.ADW_APP_ID }}
+          private-key: ${{ secrets.ADW_APP_PRIVATE_KEY }}
+          owner: mnemom
+          repositories: mnemom-billing
+          permission-contents: read
+      - name: Compare the snapshot with the rate card on mnemom-billing main
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: node scripts/sync-ratecard.mjs --check

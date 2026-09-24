@@ -1,23 +1,26 @@
 ---
 title: "Pricing"
-description: "Usage-based pricing for the Mnemom trust plane: one unit, one peg, everything included"
+description: "Usage-based pricing in μ (1 μ = $0.01): gateway model calls at 5× measured cost, fixed-price API products, and free non-model work"
 sidebarTitle: "Pricing"
 icon: "credit-card"
 ---
 
-Mnemom has no plan tiers. Every feature — the gateway, integrity checks, alignment cards,
-reputation, the dashboard — is available to every account from the first minute. The only
-thing you ever buy is **μ**.
+Mnemom has no plan tiers. Every feature (the gateway, integrity checks, alignment cards,
+reputation, the dashboard) is available to every account from the start. You pay for work
+as it happens, in **μ**.
 
 <Info>
-This page summarizes the model. For live figures, use the [pricing
+For estimates at your own volume, use the [pricing
 calculator](https://www.mnemom.ai/pricing).
 </Info>
 
-## The peg
+## The unit
 
-1 μ = $0.01 USD, and that peg is immutable — it will never be re-denominated. A μ balance is
-a dollar figure you can read at a glance, and it never expires because of a plan you're on.
+1 μ = $0.01 USD. The peg is fixed and will not be re-denominated, so a μ balance reads
+directly as a dollar amount.
+
+Charges are recorded in thousandths of a μ and rounded up, so a small model call can cost
+a fraction of a μ.
 
 ## Getting μ
 
@@ -27,7 +30,7 @@ a dollar figure you can read at a glance, and it never expires because of a plan
   </Step>
   <Step title="Add a card, get 10,000 μ">
     Adding a payment method triggers a one-time introductory grant of 10,000 μ (worth $100
-    at the peg). It's a grant, not a charge — nothing is billed until you spend past it.
+    at the peg). It's a grant, not a charge. Nothing is billed until you spend past it.
   </Step>
   <Step title="Buy more, or turn on auto top-up">
     Purchase any amount of μ in one click, or set a threshold and target so your balance
@@ -35,35 +38,80 @@ a dollar figure you can read at a glance, and it never expires because of a plan
   </Step>
 </Steps>
 
-## What's metered
+## What you pay for
 
-<table>
-  <thead>
-    <tr>
-      <th>Usage</th>
-      <th>How it's priced</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>A governed turn through the [gateway](/gateway/overview) — Safe House screening,
-      the AIP integrity checkpoint, and the attested checkpoint, all bundled into one call</td>
-      <td>Charged from that turn's actual measured model cost — not a flat per-check fee</td>
-    </tr>
-    <tr>
-      <td>A ResearchGrade deep-research report on a person</td>
-      <td>Flat 24,900 μ ($249) per completed run</td>
-    </tr>
-    <tr>
-      <td>A ResearchGrade deep-research report on a company</td>
-      <td>Flat 49,900 μ ($499) per completed run</td>
-    </tr>
-  </tbody>
-</table>
+The rule is simple: when the gateway calls a model to do work for you, that call is
+charged at **5× its measured model cost**, which is an 80% margin. The cost is measured
+per call from the tokens it used, at the model provider's list prices. A step that makes
+no model call costs nothing.
 
-Everything else documented on this site — agent registration, alignment/protection cards,
-webhooks, the dashboard, reputation lookups — is included at no additional per-call charge
-today.
+{/* <!-- pricing-ratecard:start --> */}
+
+Prices on this page match Mnemom rate card `v2026-09-gateway`.
+
+### Model calls the gateway makes
+
+| What | Rate card class | Price |
+|---|---|---|
+| A governed turn: the integrity analysis and goal-contract check the gateway runs on a model turn | `gateway.turn.governed` | 5× measured model cost |
+| A Safe House screen. Level 1 (rules, no model call) is free. You are charged only when a screened surface escalates to the level 2 model | `gateway.sh.check` | 5× measured model cost of the level 2 call |
+| A context fold: condensing a long run's context so it fits the model's window | `gateway.context.fold` | 5× measured model cost |
+| Observer trace analysis, per analyzed trace | `kernel.observer.trace-analysis` | 5× measured model cost |
+
+### API products with a fixed price
+
+| What | Rate card class | Price |
+|---|---|---|
+| A direct integrity checkpoint through `/v1/analyze` (per checkpoint, or per item in a batch) | `analyze.checkpoint` | 5 μ per checkpoint |
+| A zero-knowledge (ZK) proof of a verdict | `analyze.zk-proof` | 100 μ per proof |
+| A ResearchGrade deep-research report on a person | `rg.run.person-card` | 24,900 μ ($249) per completed run |
+| A ResearchGrade deep-research report on a company | `rg.run.company-card` | 49,900 μ ($499) per completed run |
+
+### Work that needs no model call
+
+| What | Rate card class | Price |
+|---|---|---|
+| Attestation and anchoring of integrity checkpoints | `kernel.anchoring.base-l2` | Free |
+| Webhook delivery | `kernel.egress.webhook` | Free |
+| Email delivery | `kernel.egress.email` | Free |
+
+{/* <!-- pricing-ratecard:end --> */}
+
+### What is not charged
+
+- **Your own model inference.** When you send requests through the gateway with your own
+  provider key (BYOK), the model call you asked for is passed through. Your provider bills
+  you for it; Mnemom does not. You pay Mnemom only for the gateway's own model calls in the
+  first table above.
+- **Work that needs no model call**, as listed in the last table.
+- **Everything else on this site** (agent registration, alignment and protection cards,
+  the dashboard, reputation lookups) has no per-call charge today.
+
+### A worked example
+
+A governed turn whose integrity analysis uses $0.002 of model tokens has a measured cost
+of 0.2 μ. At 5× that is 1 μ. If one of the turn's surfaces also escalated to the Safe House
+level 2 model, and that call cost $0.0004 (0.04 μ), it adds 0.2 μ, for a total of 1.2 μ.
+If Safe House cleared everything at level 1, that screen costs nothing.
+
+## When your balance runs out
+
+There is no overdraft and no credit line. Once your balance reaches zero, the gateway
+rejects new requests with `402 Payment Required` (see
+[Errors](/api-reference/errors#402-payment-required--billing-and-depletion)) until you add
+μ. A turn that is already running when the balance runs out is allowed to finish and is
+charged in full, so a balance can end slightly below zero. Your next purchase covers that
+amount first.
+
+To avoid a gap, turn on auto top-up before you need it.
+
+## When μ expires
+
+Each purchase or grant of μ is kept as a separate lot. A lot you don't spend from expires
+12 months after you bought or received it. Spending from a lot restarts its 12-month clock.
+
+Grants (such as the introductory 10,000 μ) are spent before purchased μ, and purchased μ is
+spent oldest first, so in normal use your oldest lots are the ones being drawn down.
 
 ## Checking your balance and usage
 
@@ -72,14 +120,15 @@ today.
   [/settings/billing/usage](https://www.mnemom.ai/settings/billing/usage) breaks down
   consumption over time.
 - **API:** `GET /billing/mu` returns your org's current μ balance,
-  `GET /billing/mu/ledger` returns every ledger entry (grants, holds, settlements, refunds)
-  behind that balance, and `GET /billing/mu/statement` returns an itemized monthly statement
-  for a given `YYYY-MM` period. See the [Mu balance](/api-reference/endpoint/get-billing-mu),
-  [Mu ledger](/api-reference/endpoint/get-billing-mu-ledger), and [Mu
+  `GET /billing/mu/ledger` returns every ledger entry (grants, holds, settlements, refunds,
+  expirations) behind that balance, and `GET /billing/mu/statement` returns an itemized
+  monthly statement for a given `YYYY-MM` period. See the [Mu
+  balance](/api-reference/endpoint/get-billing-mu), [Mu
+  ledger](/api-reference/endpoint/get-billing-mu-ledger), and [Mu
   statement](/api-reference/endpoint/get-billing-mu-statement) endpoint references.
 - **Payment methods and receipts:** `GET /billing/payment-methods` lists your saved payment
-  instruments (tokenized — full card numbers are never returned) and `GET /billing/receipts`
-  lists your completed μ purchases. See the [Payment
+  instruments (tokenized, so full card numbers are never returned) and
+  `GET /billing/receipts` lists your completed μ purchases. See the [Payment
   methods](/api-reference/endpoint/get-billing-payment-methods) and
   [Receipts](/api-reference/endpoint/get-billing-receipts) references.
 - **CLI:** `mnemom usage --org <org_id>` shows per-person token and request consumption for
@@ -88,7 +137,7 @@ today.
 
 ## Enterprise
 
-An annual μ commitment unlocks a volume discount off the list peg — retail purchases always
+An annual μ commitment unlocks a volume discount off the list peg. Retail purchases always
 stay at list price, with no discount tiers:
 
 | Annual μ commitment | Discount off list |
@@ -107,18 +156,30 @@ accounting and peg) and dedicated cells (an isolated deployment in the region yo
 
 <AccordionGroup>
   <Accordion title="What is μ?">
-    μ is the unit of metered work on the trust plane. One μ is one cent, and the peg is
-    immutable. A balance never expires because of a plan.
+    μ is the unit you pay in. One μ is one US cent, and the peg is fixed.
+  </Accordion>
+  <Accordion title="What exactly am I charged for?">
+    The model calls the gateway makes for you (governed turns, Safe House level 2
+    escalations, context folds, and observer trace analysis), each at 5× its measured model
+    cost, plus the fixed-price API products listed above. Work that needs no model call is
+    free, and your own model inference sent with your own provider key is not charged.
+  </Accordion>
+  <Accordion title="Is Safe House screening free?">
+    Level 1 screening, which runs rules and makes no model call, is free. When a surface
+    escalates to level 2, that model call is charged at 5× its measured cost.
   </Accordion>
   <Accordion title="How do I get my first μ?">
     Sign up for free with no card required. Add a payment method and you receive a one-time
-    grant of 10,000 μ ($100 at the peg) — nothing is charged until you spend past it.
+    grant of 10,000 μ ($100 at the peg). Nothing is charged until you spend past it.
   </Accordion>
   <Accordion title="What happens when my balance runs out?">
-    You can buy more μ in one click at any time, or turn on auto top-up so your balance
-    refills automatically once it drops below a threshold you set. If your balance reaches
-    zero before you top up, gateway requests are blocked rather than billed past zero —
-    set up auto top-up ahead of time to avoid a gap.
+    The gateway rejects new requests with `402 Payment Required` until you add μ. There is
+    no overdraft. Buy more μ in one click at any time, or turn on auto top-up so your balance
+    refills once it drops below a threshold you set.
+  </Accordion>
+  <Accordion title="Does μ expire?">
+    A lot of μ you don't spend from expires 12 months after purchase. Spending from a lot
+    restarts its 12-month clock.
   </Accordion>
   <Accordion title="Do features differ depending on how much μ I buy?">
     No. Every feature is available to every account regardless of spend. Buying more μ buys

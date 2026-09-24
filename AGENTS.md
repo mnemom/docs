@@ -72,6 +72,11 @@ agents.txt                 # Mirror of /for-agents agent pitch (also at root)
   frontmatter or the first H1 — pick one, be consistent.
 - **`api-reference/` is generated** from the OpenAPI spec. Hand-
   editing pages there will be overwritten. Edit the spec, regenerate.
+- **`pricing/overview.mdx` prices come from the rate card.** Every price in
+  its checked region must match `scripts/ratecard-snapshot.json` (a public
+  extract of the billing rate card). Change a price by re-running
+  `node scripts/sync-ratecard.mjs` against the new card, then editing the page;
+  `npm run check:pricing-ratecard` must pass (`.github/workflows/pricing-ratecard.yml`).
 - **`for-agents/` mirrors the second-person tone of agents.txt on
   www.mnemom.ai.** Keep them aligned in voice.
 - **Internal links use absolute paths** (`/concepts/foo`), not
