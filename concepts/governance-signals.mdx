@@ -7,7 +7,7 @@ icon: "siren"
 
 **Governance signals** are operator-actionable observations produced by Mnemom platform detectors. They surface fleet-shaped concerns — coherence drift across a team, value fault lines between agents, fleet topology changes, per-agent behavior drift — that an *operator* (CISO, org admin, team admin, on-call SRE) needs to see and act on.
 
-They are deliberately distinct from the [per-turn advisories](/concepts/safe-house) that the gateway injects into an agent's next prompt. The architectural commitment is:
+They are deliberately distinct from the agent-facing advisories the gateway carries forward into an agent's next turn (the `pending_advisories` surface — see the [wire format](/specifications/pending-advisories-schema)). The architectural commitment is:
 
 > **Operator observations never reach an agent's prompt; agent advisories never reach the operator alert rail.**
 
@@ -29,7 +29,7 @@ Future `protection.*` and `posture.*` sources will land additively.
 A governance signal lives in **three operator surfaces** simultaneously:
 
 1. **Web UI** at `mnemom.ai/dashboard/teams/{teamId}/governance` (and per-agent at `mnemom.ai/dashboard/agents/{uuid}/governance`). Filterable list, severity badges, ack/resolve/dismiss workflow.
-2. **Webhook** events: `governance.signal.fired`, `governance.signal.acknowledged`, `governance.signal.resolved`, `governance.signal.dismissed`, `governance.escalation.triggered`. HMAC-SHA256 signed POSTs (`X-Mnemom-Signature: sha256=…`) following the AAP webhook contract.
+2. **Notification destinations**: `governance.signal.fired`, `governance.signal.acknowledged`, `governance.signal.resolved`, `governance.signal.dismissed`, `governance.escalation.triggered`. A generic `webhook` destination delivers an HMAC-SHA256 signed POST (`X-Mnemom-Signature: sha256=<hex>` over the raw JSON body, plus `X-Mnemom-Event` and `X-Mnemom-Delivery-Id` headers). This is a purpose-built delivery path for governance destinations, configured per-org and separate from the general-purpose org webhook subscriptions described in the [webhook contract](/concepts/webhook-contract) — do not assume the same signature scheme or retry schedule applies.
 3. **REST API**: `GET /v1/orgs/:org/governance/signals`, `GET /v1/teams/:team/governance/signals`, `GET /v1/agents/:agent/governance/signals`, plus state-transition endpoints. See [Governance Signals Schema](/specifications/governance-signals-schema).
 
 The platform **never** injects governance signals into an agent's LLM request — there is no exception, no per-agent fast-path, no platform-supplied composer pattern. Applications that want fleet context inside an agent's prompt derive it from application-internal data and render it application-side; the platform offers no surface for that.
@@ -58,9 +58,9 @@ The schema's partial unique index on `(scope, scope_id, source, pattern_type) WH
 
 Each org configures destinations independently:
 
-- **`webhook`** — generic HMAC-signed POST to a URL of your choice. Mirrors AAP webhook contract.
+- **`webhook`** — generic HMAC-signed POST to a URL of your choice (see the signature format above).
 - **`slack`** — incoming-webhook POST with [Block Kit](https://api.slack.com/block-kit) payload. Severity-color border, action button to "Acknowledge in dashboard."
-- **`email`** — Resend-backed HTML + plaintext.
+- **`email`** — HTML + plaintext email.
 - **`pagerduty`** — Events API v2 with stable `dedup_key` so coalesced detections don't duplicate incidents.
 
 A destination's `filter` narrows what it receives (sources, severities, scopes, pattern_types). [Escalation rules](/guides/operating-governance-signals#escalation-rules) bind a predicate to a list of destination IDs and support rate-based gating (`threshold_count` + `window_minutes`) for "fire only if N matching signals occurred in M minutes."

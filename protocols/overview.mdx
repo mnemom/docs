@@ -163,6 +163,21 @@ Both protocols have SDK implementations in Python and TypeScript:
 | `agent-integrity-proto` | Python | AIP | [PyPI](https://pypi.org/project/agent-integrity-proto/) |
 | `@mnemom/agent-integrity-protocol` | TypeScript | AIP | [npm](https://www.npmjs.com/package/@mnemom/agent-integrity-protocol) |
 
+## Protocol versions in production
+
+The wire-format protocol versions above are stable; the table below is about the concrete runtime and SDK builds that implement them today.
+
+| Component | Version | Role |
+|---|---|---|
+| Alignment card contract | unified card shape (`card_version: unified/2026-04-26`) | What `api.mnemom.ai` accepts on card writes. Legacy `autonomy_envelope` / `audit_commitment` locations are rejected. |
+| AAP SDKs (TypeScript + Python) | 2.0.0+ | Emit the unified card shape above. |
+| Hosted gateway integrity checks | AIP 1.3.0 | Per-turn `enforce`/`observe`/`nudge` verdicts, plus `@mnemom/aip-otel-exporter` 0.13.0 for telemetry export. |
+| Hosted observer verification | AAP 1.3.1 | Verifies AP-Traces against cards using the 1.3.x behavioral-similarity feature extractor. |
+
+If you consume verification scores from the hosted service, they follow the 1.3.x extractor. AAP 2.0.1 changed that extractor's feature set, and similarity scores are not numerically comparable across the 1.3.x / 2.0.1 boundary — treat a self-hosted upgrade across that line as a score reset point, not a continuation of the same series.
+
+For direct or self-hosted use, the current SDK releases are `@mnemom/agent-alignment-protocol` / `agent-alignment-protocol` 2.0.0 and `@mnemom/agent-integrity-protocol` 1.3.0 / `agent-integrity-proto` 1.3.0 -- see [SDK packages](#sdk-packages) above.
+
 ## Quickstarts
 
 - [Mnemom Gateway quickstart](/quickstart/gateway) -- Both protocols, zero code changes

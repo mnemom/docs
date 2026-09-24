@@ -10,11 +10,9 @@ An Alignment Card is a structured, machine-readable document that declares an AI
 Alignment Cards are the foundational data structure of the [Agent Alignment Protocol (AAP)](/protocols/aap/specification). Every other AAP operation -- [AP-Traces](/concepts/ap-traces), [verification](/protocols/aap/specification), [value coherence](/concepts/value-coherence), and [drift detection](/concepts/drift-detection) -- references an Alignment Card as its source of truth.
 
 <Note>
-**This page describes the AAP 1.0 protocol-level card structure** — the minimum surface every AAP implementation must support. In production, Mnemom stores and serves a richer **unified alignment card** that adds first-class `conscience`, `integrity`, `capabilities`, and `enforcement` sections, and supports three-scope composition (platform > org > agent).
+**This page describes the AAP protocol-level card structure** — the minimum surface every AAP implementation must support (the **unified card shape**, shipped in AAP SDK 2.0.0 and later). In production, Mnemom stores and serves a richer version of this same shape that adds first-class `conscience`, `capabilities`, `enforcement`, and `integrity_config` sections, and composes across up to four scopes (platform > org > team *(optional)* > agent).
 
-For the unified model, see [Agent Cards](/concepts/agent-cards) (the two-card product story), [Card Composition](/concepts/card-composition) (scope hierarchy), and the normative [Alignment Card Schema](/specifications/alignment-card-schema).
-
-The AAP protocol surface on this page is unchanged and remains the stable contract for external agent interoperability.
+For the full production model, see [Agent Cards](/concepts/agent-cards) (the two-card product story), [Card Composition](/concepts/card-composition) (scope hierarchy), and the normative [Alignment Card Schema](/specifications/alignment-card-schema).
 </Note>
 
 <Note>
@@ -29,34 +27,39 @@ Alignment Cards fill this gap by making the answer to that question observable. 
 
 ## Structure
 
-An Alignment Card contains five required blocks and one optional block:
+An Alignment Card contains six required blocks and one optional block:
 
 | Block | Purpose | Required |
 |---|---|---|
 | **Identity** | Agent ID, card ID, version, timestamps | Yes |
+| **Mode switches** | `autonomy_mode` / `integrity_mode` -- master switches for the action-policing and conscience pipelines | Yes |
 | **Principal** | Who the agent serves and how | Yes |
 | **Values** | What the agent prioritizes | Yes |
-| **Autonomy Envelope** | What the agent can do independently | Yes |
-| **Audit Commitment** | How the agent logs decisions | Yes |
+| **Autonomy** | What the agent can do independently | Yes |
+| **Audit** | How the agent logs decisions | Yes |
 | **Extensions** | Protocol-specific additions (A2A, MCP) | No |
 
 ### Identity fields
 
-Every card begins with identity and versioning metadata:
+Every card begins with identity and versioning metadata, plus the two mode switches:
 
 ```json
 {
-  "aap_version": "1.0.0",
+  "card_version": "unified/2026-04-26",
   "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "agent_id": "did:web:shopping.agent.example.com",
   "issued_at": "2026-01-31T12:00:00Z",
-  "expires_at": "2026-07-31T12:00:00Z"
+  "expires_at": "2026-07-31T12:00:00Z",
+  "autonomy_mode": "enforce",
+  "integrity_mode": "observe"
 }
 ```
 
+- `card_version` is the date-anchored schema version (pattern `^unified/\d{4}-\d{2}-\d{2}$`).
 - `card_id` is a unique identifier (UUID or URI) for this specific version of the card.
 - `agent_id` identifies the agent itself, using a DID (Decentralized Identifier), URL, or UUID.
 - `issued_at` and `expires_at` establish the card's validity window.
+- `autonomy_mode` and `integrity_mode` are the master switches (`off` / `observe` / `nudge` / `enforce`) for, respectively, the AAP action-policing checks and the [AIP](/concepts/integrity-checkpoints) per-turn conscience pipeline that shares this card.
 
 ### Principal block
 
@@ -144,7 +147,7 @@ These represent the agent's decision-making commitments and should appear in AP-
 | `fiduciary_precision` | `extensions.clpi.role` or `extensions` metadata |
 | `organizational_clarity` | `extensions.clpi.role` or `extensions` metadata |
 | `conservative_risk_management` (as a role label) | `extensions` metadata — unless it materially changes ethical reasoning |
-| `read_documents` (a capability) | `autonomy_envelope.bounded_actions` |
+| `read_documents` (a capability) | `autonomy.bounded_actions` |
 
 **Rule of thumb**: If removing the value from a card would change HOW the agent reasons about ethics, it's a value. If it describes WHAT the agent is or does in its role, it belongs in `extensions`.
 
@@ -154,13 +157,13 @@ These represent the agent's decision-making commitments and should appear in AP-
   Custom values declared by one agent but not others create fault lines in fleet coherence analysis. If the divergence is intentional role specialization — for example, a CFO agent has `fiduciary_precision` and a CoS agent has `organizational_clarity` — set `extensions.clpi.role` on each agent's card. The fault line analyzer uses this field to classify those divergences as `complementary` (by design) rather than `resolvable` (a gap to fill).
 </Note>
 
-### Autonomy envelope block
+### Autonomy block
 
-The autonomy envelope defines the boundaries of independent action:
+The `autonomy` block defines the boundaries of independent action:
 
 ```json
 {
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": ["search", "compare", "recommend", "add_to_cart"],
     "escalation_triggers": [
       {
@@ -205,13 +208,13 @@ This block has four components:
 `autonomy.forbidden_actions` is the agent's *behavioral commitment* — declared by the agent (with org/platform as the floor). The protection card's `protected_surface.forbidden_operations` is the org's *enforced policy*, authored by the org and applied by Safe House L2 independent of what the agent declares. An empty or naive agent still gets the org's `protected_surface` floor enforced. See [Agent Cards](/concepts/agent-cards) for the two-card model.
 </Note>
 
-### Audit commitment block
+### Audit block
 
-The audit commitment declares how the agent logs and exposes its decisions:
+The `audit` block declares how the agent logs and exposes its decisions:
 
 ```json
 {
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 90,
     "queryable": true,
@@ -250,11 +253,13 @@ Here is a full Alignment Card for a shopping assistant agent:
 
 ```json
 {
-  "aap_version": "1.0.0",
+  "card_version": "unified/2026-04-26",
   "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "agent_id": "did:web:shopping.agent.example.com",
   "issued_at": "2026-01-31T12:00:00Z",
   "expires_at": "2026-07-31T12:00:00Z",
+  "autonomy_mode": "enforce",
+  "integrity_mode": "observe",
 
   "principal": {
     "type": "human",
@@ -268,7 +273,7 @@ Here is a full Alignment Card for a shopping assistant agent:
     "hierarchy": "lexicographic"
   },
 
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": ["search", "compare", "recommend", "add_to_cart"],
     "escalation_triggers": [
       {
@@ -294,7 +299,7 @@ Here is a full Alignment Card for a shopping assistant agent:
     "forbidden_actions": ["store_payment_credentials", "subscribe_to_services"]
   },
 
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 90,
     "queryable": true,
@@ -422,19 +427,15 @@ Use `mnemom card validate` for local pre-flight checks before publishing. This r
 
 See the [CLI reference](/gateway/cli) for full command documentation.
 
-### Organization card templates (Enterprise)
+### Organization card templates
 
-<Info>
-  Organization card templates require an Enterprise plan.
-</Info>
-
-Organizations can define a base alignment card template that all agents inherit. Agent cards layer on top of the org template -- org values cannot be removed by individual agents, ensuring consistent organizational alignment policy.
+Any org owner or admin can define a base alignment card template (`PUT /v1/alignment/org/{org_id}`) that all of the org's agents inherit — this is a core part of the composition model, not a gated add-on. Agent cards layer on top of the org template; org values cannot be removed by individual agents, ensuring consistent organizational alignment policy.
 
 This is similar to how [custom conscience values](/gateway/conscience-values) work at the org level, but applied to the full alignment card structure rather than just the conscience prompt.
 
 Note that the org's **protection card template** — including `protected_surface` (sealed assets, forbidden operations, escalation requirements) — is separate from the alignment card template. `protected_surface` is org-owned and enforced by Safe House independently of what the agent declares here.
 
-See the [Organization Card Templates guide](/gateway/org-card-templates) for setup and configuration details.
+See the [Organization Card Templates guide](/gateway/org-card-templates) for setup details, and [Card Composition](/concepts/card-composition) for the full composition model.
 
 ## Relationship to A2A Agent Cards
 

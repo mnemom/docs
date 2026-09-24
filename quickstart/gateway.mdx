@@ -19,6 +19,10 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
   These quickstarts are available in [Spanish (Español)](/es/quickstart/overview) and [French (Français)](/fr/quickstart/overview) — six pages per language have been translated.
 </Note>
 
+<Tip>
+  Looking to launch a **governed coding agent** instead of wiring up your own application's API calls? See [`mnemom agent`](/gateway/agent) — install once, run `mnemom agent`, and it launches Claude Code through the gateway with an agent set up for you.
+</Tip>
+
 <Steps>
   <Step title="Install the CLI">
     ```bash
@@ -33,7 +37,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     mnemom login
     ```
 
-    This opens a browser-based login flow and stores your auth token in `~/.mnemom/auth.json`.
+    This opens a browser-based login flow and stores your auth token in `~/.mnemom/auth.json`. On a machine with no local browser (SSH, a container), use `mnemom login --no-browser` instead — see [CLI Reference](/gateway/cli#authentication).
 
     <Note>
     Your provider API keys are **not** sent to Mnemom. Only SHA-256 hashes are used to identify your agent. The hash cannot be reversed to recover your key.
@@ -125,7 +129,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     }
     ```
 
-    See the [Headers reference](/api-reference/headers) for the full canonical set + per-language parsers, and the [Errors reference](/api-reference/errors) for the verdict-to-status mapping (when `enforced` becomes a 422 quarantine or 403 block).
+    See the [Headers reference](/api-reference/headers) for the full canonical set + per-language parsers, and the [Errors reference](/api-reference/errors) for the verdict-to-status mapping.
   </Step>
 
   <Step title="Claim your agent">
@@ -141,7 +145,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
 
     - Pass `--name` matching the `x-mnemom-agent` value you sent on the gateway call (omit `--name` if you made that call without the header). If the id, `--name`, or `--key` don't resolve to a real agent, the claim returns `404` — re-check the `X-Mnemom-Agent` id and that `--name`/`--key` match the gateway call.
     - The key is hashed locally (SHA-256) and never sent to Mnemom.
-    - The agent lands in your personal org by default; pass `--org <slug>` to claim into a shared org.
+    - The agent lands in your active org (set with `mnemom org use <slug>`), or your personal org if you haven't set one; pass `--org <slug>` to claim into a specific shared org instead.
     - The operation is idempotent — safe to run more than once.
 
     <Note>
@@ -156,13 +160,7 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     mnemom status --agent my-agent
     ```
 
-    ```text Output
-    Agent:    my-agent (mnm-550e8400-e29b-41d4-a716-446655440000)
-    Gateway:  https://gateway.mnemom.ai (healthy)
-    Status:   Connected
-    Providers: anthropic, openai
-    Last seen: just now
-    ```
+    This prints an authentication / gateway / API connectivity checklist, then your agent ID, the gateway URL, and a dashboard link, followed by a trace summary once the agent has traffic.
   </Step>
 
   <Step title="View traces">
@@ -172,32 +170,27 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
     mnemom logs --agent my-agent
     ```
 
-    ```text Output
-    2026-02-17T10:30:00Z  tr-abc123  recommend  bounded   verified  0.82
-    2026-02-17T10:30:05Z  tr-abc124  search     bounded   verified  0.76
-    2026-02-17T10:30:12Z  tr-abc125  respond    bounded   verified  0.91
-    ```
-
-    Use `mnemom logs --agent my-agent -l 20` to show more entries.
+    Each trace prints as its own block — timestamp, action, type, and (when present) the reasoning excerpt and any policy violations. Use `mnemom logs --agent my-agent --limit 20` to show more entries.
   </Step>
 
-  <Step title="Check integrity">
-    View AIP integrity scores for your agent's recent activity:
+  <Step title="Check activity">
+    View your agent's AAP behavioral activity — total traces, how many verified clean, and any violations:
 
     ```bash
-    mnemom integrity --agent my-agent
+    mnemom activity --agent my-agent
     ```
 
     ```text Output
-    Agent: mnm-550e8400-e29b-41d4-a716-446655440000
-    Checkpoints: 12
-    Verdicts:
-      clear: 11
-      review_needed: 1
-      boundary_violation: 0
-    Integrity score: 0.94
-    Drift: none detected
+    Agent Activity (AAP)
+      Score:      94.0% [█████████░]
+      Total:      12 traces
+      Verified:   11
+      Violations: 1
     ```
+
+    <Note>
+    `mnemom integrity` is a deprecated alias for this same command — `mnemom activity` is the current name. Despite the name, this surfaces AAP trace verification, not the AIP per-turn [integrity checkpoints](/concepts/integrity-checkpoints); AIP checkpoint data is not yet exposed through the CLI.
+    </Note>
   </Step>
 
   <Step title="View your alignment card">
@@ -258,20 +251,19 @@ You can also create agents programmatically via the [Agent CRUD API](/api-refere
 {/* <!-- model-coverage:supported:start --> */}
 | Provider | Models | Thinking / AIP Support | Auth Header |
 |----------|--------|----------------------|-------------|
-| Anthropic | Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Full (thinking blocks analyzed directly) | `x-api-key` |
-| OpenAI | GPT-5, GPT-5 Codex, o3, o3-mini, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna | Via reasoning summaries (reduced confidence) | `Authorization: Bearer` |
-| Gemini | Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 3.8 Flash, Gemini 3.5 Flash-Lite | Full (thought parts analyzed directly) | `x-goog-api-key` |
+| Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Full (thinking blocks analyzed directly) | `x-api-key` |
+| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Not available through the gateway today | `Authorization: Bearer` |
+| Gemini | Gemini 3.8 Flash, Gemini 3.5 Flash-Lite, Gemini 2.5 Pro, Gemini 2.5 Flash | Full (thought parts analyzed directly) | `x-goog-api-key` |
 {/* <!-- model-coverage:supported:end --> */}
 
 ### AIP compatibility
 
 | Provider / Model | AIP Support | Method |
 |-----------------|-------------|--------|
-| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
-| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
+| Anthropic reasoning models (Opus, Sonnet, Fable) | Full | Thinking blocks analyzed directly |
 | Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
-| Non-reasoning models | Tracing only | Synthetic clear verdict |
-| OpenAI o-series (o3, o3-mini) | Partial | Reasoning summaries only — reduced confidence |
+| Non-reasoning models | Tracing only | Synthetic `clear` verdict, no analysis-LLM call |
+| OpenAI (all models, including the o-series) | Not available | The gateway's `/openai` door proxies Chat Completions, which never returns reasoning content — see [Provider Support](/concepts/provider-support#2-openai--no-thinking-trace-inspection-through-the-gateway-today) for the full disclosure |
 
 <Note>
 **Thinking elements in proxied responses.** Safe House / AIP enables extended thinking to analyze the agent's reasoning per turn. Proxied responses therefore include a `thinking` content element in the `content` array alongside the standard `text` block. Clients that assume text-only content arrays should be updated to handle or ignore `thinking` blocks. Thinking output tokens are billed as standard output tokens — this behavior is intentional and cannot be disabled.
@@ -301,7 +293,7 @@ The Mnemom Gateway supports three enforcement modes when an integrity violation 
 |------|----------|
 | `observe` | Detect violations, record them, take no action (default) |
 | `nudge` | Detect violations, inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct. |
-| `enforce` | Gates same-turn on both streaming and non-streaming requests (HTTP 403 for non-streaming); on streaming this adds latency because the response is evaluated before it is delivered. |
+| `enforce` | Gates same-turn on both streaming and non-streaming requests. The request still completes with a `2xx` status — the response body is replaced with an agent-voice intervention message and `X-Mnemom-Verdict` reports `integrity=enforced`. On streaming this adds latency because the response is evaluated before it is delivered. |
 
 Set enforcement mode by updating the agent's alignment card. `integrity_mode` and `autonomy_mode` are top-level fields on the alignment card; the legacy `/v1/agents/{id}/enforcement` endpoint was retired 2026-05-14.
 

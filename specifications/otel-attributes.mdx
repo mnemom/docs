@@ -7,9 +7,11 @@ icon: "list-check"
 
 Complete reference for all span attributes and metrics emitted by the [aip-otel-exporter](/guides/observability). These attributes follow [OpenTelemetry Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/) for span naming and attribute structure.
 
+All spans are `SpanKind.INTERNAL`, created as children of the currently active span. String attribute values longer than 4096 characters are truncated (suffixed ` [truncated]`). An attribute whose value is `undefined`/`null` is omitted from the span entirely rather than sent as an empty value — so the presence/absence of an attribute is itself signal.
+
 ## Span attributes
 
-### `aip.integrity_check` — 22 attributes + 2 GenAI SIG aliases
+### `aip.integrity_check` — 31 domain attributes + 2 GenAI SIG aliases + 3 GenAI SemConv / role attributes
 
 The primary span for AIP integrity checkpoint results.
 
@@ -24,7 +26,7 @@ The primary span for AIP integrity checkpoint results.
 | `aip.integrity.proceed` | boolean | signal | Whether the agent should proceed |
 | `aip.integrity.recommended_action` | string | signal | `continue`, `log_and_continue`, `pause_for_review`, or `deny_and_escalate` |
 | `aip.integrity.concerns_count` | int | signal | Number of concerns detected |
-| `aip.integrity.analysis_model` | string | analysis_metadata | Model used for integrity analysis |
+| `aip.integrity.analysis_model` | string | analysis_metadata | Model used for integrity analysis (the AIP *verifier* model, e.g. Haiku — distinct from `gen_ai.request.model` below) |
 | `aip.integrity.analysis_duration_ms` | float | analysis_metadata | Analysis duration in milliseconds |
 | `aip.integrity.thinking_tokens` | int | analysis_metadata | Token count of the thinking block |
 | `aip.integrity.truncated` | boolean | analysis_metadata | Whether the thinking block was truncated |
@@ -32,16 +34,30 @@ The primary span for AIP integrity checkpoint results.
 | `aip.conscience.consultation_depth` | string | conscience_context | `standard` or `deep` conscience evaluation |
 | `aip.conscience.values_checked_count` | int | conscience_context | Number of values evaluated |
 | `aip.conscience.conflicts_count` | int | conscience_context | Number of value conflicts detected |
+| `aip.attestation.input_commitment` | string | attestation | Commitment hash over the checkpoint's input |
+| `aip.attestation.chain_hash` | string | attestation | Hash-chain link to the prior checkpoint's attestation |
+| `aip.attestation.merkle_root` | string | attestation | Merkle root covering this checkpoint's attestation batch |
+| `aip.attestation.signature_verified` | boolean | attestation | Whether the attestation signature verified |
+| `aip.attestation.certificate_id` | string | attestation | Linked integrity certificate identifier |
+| `aip.attestation.zk_proven` | boolean | attestation | Whether a zero-knowledge proof was produced for this checkpoint |
+| `aip.attestation.zk_proof_time_ms` | float | attestation | ZK proof generation time in milliseconds |
 | `aip.window.size` | int | window_summary | Number of checkpoints in the rolling window |
 | `aip.window.integrity_ratio` | float | window_summary | Ratio of `clear` verdicts (0.0-1.0) |
 | `aip.window.drift_alert_active` | boolean | window_summary | Whether a drift alert is currently active |
-| `gen_ai.evaluation.verdict` | string | GenAI SIG | Forward-compatible alias for `aip.integrity.verdict` |
-| `gen_ai.evaluation.score` | float | GenAI SIG | Forward-compatible alias for `aip.window.integrity_ratio` |
+| `aip.integrity.output_hash` | string | output_analysis | SHA-256 hash of the analyzed output block |
+| `aip.integrity.output_tokens` | int | output_analysis | Token count of the analyzed output |
+| `aip.integrity.output_truncated` | boolean | output_analysis | Whether the output block was truncated before analysis |
+| `aip.integrity.analysis_scope` | string | output_analysis | What was analyzed (e.g. thinking-only vs. thinking+output) |
+| `gen_ai.evaluation.verdict` | string | GenAI SIG alias | Forward-compatible alias for `aip.integrity.verdict` |
+| `gen_ai.evaluation.score` | float | GenAI SIG alias | Forward-compatible alias for `aip.window.integrity_ratio` |
+| `gen_ai.system` | string | checkpoint | Upstream LLM provider (`anthropic`/`openai`/`gemini`) whose response this checkpoint analyzed — distinct from `aip.integrity.analysis_model` (the verifier) |
+| `gen_ai.request.model` | string | checkpoint | The customer's upstream model name |
+| `mnemom.span.role` | string | signal | `"customer"` (default), `"verifier"`, or `"harness"` — filter to `customer` for per-provider customer SLOs; verifier-internal and harness traffic also emit this span |
 
 **Events emitted on this span:**
 
-- `aip.concern` — One event per concern detected. Includes `category`, `severity`, `description`, and `evidence`.
-- `aip.drift_alert` — Emitted when a drift alert is active. Includes `drift_direction` and `integrity_similarity`.
+- `aip.concern` — One event per concern detected. Attributes: `category`, `severity`, `description`.
+- `aip.drift_alert` — Emitted (with no event attributes) when the window summary's `drift_alert_active` is true. The drift detail lives on the separate `aap.detect_drift` span's `aap.drift_alert` events (below), not on this one.
 
 ### `aap.verify_trace` — 8 attributes
 
@@ -60,7 +76,7 @@ Span for AAP trace verification results.
 
 **Events emitted on this span:**
 
-- `aap.violation` — One event per violation. Includes `type`, `severity`, `description`, and `field`.
+- `aap.violation` — One event per violation. Attributes: `type`, `severity`, `description`.
 
 ### `aap.check_coherence` — 5 attributes
 
@@ -85,9 +101,9 @@ Span for AAP behavioral drift detection results.
 
 **Events emitted on this span:**
 
-- `aap.drift_alert` — One event per alert. Includes `drift_direction`, `integrity_similarity`, and `sustained_checks`.
+- `aap.drift_alert` — One event per alert. Attributes (each present only when the underlying alert carries it): `alert_type`, `agent_id`, `card_id`, `similarity_score`, `drift_direction`, `recommendation`.
 
-### `policy.evaluate` — 8 attributes
+### `policy.evaluate` — 13 attributes
 
 Span for policy evaluation results. Created when the [Policy Engine](/concepts/policy-engine) evaluates a request against the active policy.
 
@@ -103,81 +119,93 @@ Span for policy evaluation results. Created when the [Policy Engine](/concepts/p
 | `policy.context` | string | input | Evaluation context: `cicd`, `gateway`, `observer` |
 | `policy.duration_ms` | float | measured | Evaluation duration in milliseconds |
 | `policy.enforcement_mode` | string | policy | Active enforcement mode: `warn`, `enforce`, `off` |
+| `gen_ai.system` | string | input | Upstream LLM provider, for per-provider SLO rollups |
+| `gen_ai.request.model` | string | input | Upstream model name |
+| `mnemom.span.role` | string | input | `"customer"` (default), `"verifier"`, or `"harness"` |
 
 **Events emitted on this span:**
 
-- `policy.violation` — One event per violation. Includes `type` (forbidden/capability_exceeded/unmapped_denied), `tool`, `severity`, and `reason`.
+- `policy.violation` — One event per violation. Attributes: `type` (forbidden/capability_exceeded/unmapped_denied), `severity`, `reason`, and `tool` (present only when the violation names a specific tool).
 
-### `reclassification.process` — 8 attributes
+### `gen_ai.safety.reclassification` — 8 attributes
 
-Span for violation reclassification. Created when a checkpoint is reclassified via the [Reclassification API](/api-reference/reclassification-overview).
+Span for violation reclassification. Created when a checkpoint is reclassified via the [Reclassification API](/api-reference/reclassification-overview). Note the span (and every attribute on it) lives under the `gen_ai.safety.reclassification.*` namespace, not a `reclassification.*` one.
 
-| Attribute | Type | Source | Description |
-|---|---|---|---|
-| `reclassification.agent_id` | string | input | Agent whose violation is reclassified |
-| `reclassification.checkpoint_id` | string | input | Checkpoint being reclassified |
-| `reclassification.original_type` | string | checkpoint | Original violation type (e.g., `UNMAPPED_TOOL`) |
-| `reclassification.new_type` | string | result | New classification: `card_gap` or `behavior_gap` |
-| `reclassification.reason` | string | input | Human-provided reclassification reason |
-| `reclassification.card_amendment_id` | string | input | Linked card amendment ID (if any) |
-| `reclassification.score_before` | int | computed | Agent score before reclassification |
-| `reclassification.score_after` | int | computed | Agent score after recomputation |
+| Attribute | Type | Description |
+|---|---|---|
+| `gen_ai.safety.reclassification.agent_id` | string | Agent whose violation is reclassified |
+| `gen_ai.safety.reclassification.checkpoint_id` | string | Checkpoint being reclassified |
+| `gen_ai.safety.reclassification.trace_id` | string | Associated AP-Trace identifier |
+| `gen_ai.safety.reclassification.before_verdict` | string | The verdict/classification before reclassification |
+| `gen_ai.safety.reclassification.after_classification` | string | New classification: `card_gap` or `behavior_gap` |
+| `gen_ai.safety.reclassification.reason` | string | Human-provided reclassification reason |
+| `gen_ai.safety.reclassification.score_before` | int | Agent score before reclassification |
+| `gen_ai.safety.reclassification.score_after` | int | Agent score after recomputation |
+
+This span emits no events.
+
+### `safe_house.sideband.finding` — 3-6 attributes
+
+Span for a [sideband detector](/specifications/pending-advisories-schema#source-taxonomy) firing (coherence / fault-line / fleet cron sweeps). `source`, `axis`, and `finding_count` are always present (defaulting `finding_count` to `0`); the rest are present only when the finding carries them.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `safe_house.sideband.source` | string | Closed-but-extensible source value, e.g. `sideband.coherence` |
+| `safe_house.sideband.axis` | string | The detector axis (defaults to the last dot-segment of `source`) |
+| `safe_house.sideband.finding_count` | int | Number of rows the detector wrote on this firing |
+| `safe_house.sideband.team_id` | string | Team the detector swept (absent for non-team-scoped sources) |
+| `safe_house.sideband.severity` | string | `low \| medium \| high \| critical` |
+| `safe_house.sideband.pattern_type` | string | Free-form discriminator for the firing condition within the axis |
+
+**Events emitted on this span:**
+
+- `safe_house.sideband.finding` — One event, mirroring the span's own attributes (`source`, `axis`, and whichever of `team_id`/`severity`/`pattern_type`/`finding_count` are present).
 
 ## Span hierarchy
 
 Spans are created as children of the current active span via `context.active()`:
 
-```
+```text
 your_application_span
   ├── aip.integrity_check
   │    ├── event: aip.concern (one per concern)
-  │    └── event: aip.drift_alert (when drift active)
+  │    └── event: aip.drift_alert (when window drift is active)
   ├── policy.evaluate
   │    └── event: policy.violation (one per violation)
-  ├── reclassification.process
+  ├── gen_ai.safety.reclassification
   ├── aap.verify_trace
   │    └── event: aap.violation (one per violation)
   ├── aap.check_coherence
-  └── aap.detect_drift
-       └── event: aap.drift_alert (one per alert)
+  ├── aap.detect_drift
+  │    └── event: aap.drift_alert (one per alert)
+  └── safe_house.sideband.finding
+       └── event: safe_house.sideband.finding
 ```
 
 ## Metrics
 
-13 metric instruments for aggregate monitoring:
+9 metric instruments for aggregate monitoring, created by `createAIPMetrics()`. There is no separate metrics API for policy evaluation, reclassification, or sideband findings today — those three are span/event-only (§Span attributes above); aggregate them from spans if you need counters.
 
 ### AIP metrics
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `aip.integrity_checks.total` | Counter | `verdict`, `agent_id` | Total number of integrity checks performed |
-| `aip.concerns.total` | Counter | `category`, `severity` | Total number of concerns detected |
-| `aip.analysis.duration_ms` | Histogram | `verdict` | Distribution of analysis durations |
-| `aip.window.integrity_ratio` | Histogram | — | Distribution of integrity ratios across windows |
-| `aip.drift_alerts.total` | Counter | — | Total number of drift alerts generated |
+| `aip.integrity_checks.total` | Counter | `verdict`, `agent_id`? | Total number of integrity checks performed |
+| `aip.concerns.total` | Counter | `category`, `severity`, `verdict`, `agent_id`? | Total number of concerns detected |
+| `aip.analysis.duration_ms` | Histogram | `verdict`, `agent_id`? | Distribution of analysis durations |
+| `aip.window.integrity_ratio` | Histogram | `verdict`, `agent_id`? | Distribution of integrity ratios across windows |
+| `aip.drift_alerts.total` | Counter | `verdict`, `agent_id`? (from the integrity-check path) or `drift_direction`, `agent_id` (from the AAP drift path) | Total number of drift alerts generated — this single counter is fed from two different recorders, so its label set depends on which one incremented it |
 
 ### AAP metrics
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `aap.verifications.total` | Counter | `verified` | Total number of trace verifications |
+| `aap.verifications.total` | Counter | `verified`, `card_id`? | Total number of trace verifications |
 | `aap.violations.total` | Counter | `type`, `severity` | Total number of violations detected |
-| `aap.verification.duration_ms` | Histogram | — | Distribution of verification durations |
+| `aap.verification.duration_ms` | Histogram | `verified`, `card_id`? | Distribution of verification durations |
 | `aap.coherence.score` | Histogram | `compatible` | Distribution of coherence scores |
 
-### Policy metrics
-
-| Metric | Type | Labels | Description |
-|---|---|---|---|
-| `policy.evaluations.total` | Counter | `verdict`, `context` | Total number of policy evaluations |
-| `policy.violations.total` | Counter | `type`, `severity` | Total number of policy violations detected |
-| `policy.evaluation.duration_ms` | Histogram | `verdict` | Distribution of policy evaluation durations |
-
-### Reclassification metrics
-
-| Metric | Type | Labels | Description |
-|---|---|---|---|
-| `reclassification.total` | Counter | `new_type` | Total reclassifications (card_gap vs behavior_gap) |
+`?` marks a label that is only attached when the underlying value is present.
 
 ## GenAI SIG forward compatibility
 
@@ -189,6 +217,16 @@ The exporter includes forward-compatible aliases that track the emerging [OTel G
 | `gen_ai.evaluation.score` | `aip.window.integrity_ratio` | Standardized evaluation score |
 
 These aliases are emitted alongside the `aip.*` attributes on every `aip.integrity_check` span, ensuring forward compatibility as the OTel GenAI SIG conventions stabilize.
+
+### Upstream-provider attribution and span role
+
+Two further [OTel GenAI SemConv](https://opentelemetry.io/docs/specs/semconv/gen-ai/) attributes, plus one Mnemom-specific one, are emitted on `aip.integrity_check` and `policy.evaluate` spans:
+
+| Attribute | Description |
+|---|---|
+| `gen_ai.system` | The customer's upstream LLM provider (`anthropic` / `openai` / `gemini`) whose response this span analyzed. Distinct from `aip.integrity.analysis_model`, which names the AIP *verifier* model (Haiku) — not the customer's model. |
+| `gen_ai.request.model` | The customer's upstream model name. |
+| `mnemom.span.role` | `"customer"` (default), `"verifier"`, or `"harness"`. The AIP verifier itself emits `aip.integrity_check` spans, tagged with the *verifier's* `gen_ai.system` if you don't filter — so per-provider customer SLOs must filter on `mnemom.span.role = "customer"` to exclude verifier-internal and harness traffic. |
 
 ## Dashboard templates
 

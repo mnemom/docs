@@ -5,11 +5,7 @@ sidebarTitle: "Authentication"
 icon: "key"
 ---
 
-Mnemom supports four authentication paths — passkeys, password + MFA, SSO, and API keys — each mapped to the operations it is meant for. Sensitive actions are gated by **AAL2 step-up**: a fresh user-verification gesture within a short window, on top of the current session. This page is the operator-level reference; for the end-user passkey walkthrough, see [Passkeys](/guides/passkeys).
-
-<Note>
-The auth overhaul (passkey + AAL2) is the current system. Earlier docs that describe Bearer-JWT-only or API-key-only access on all endpoints are superseded by the tiered model below.
-</Note>
+Mnemom supports four authentication paths — passkeys, password + MFA, SSO, and API keys — each mapped to the operations it is meant for. A small set of account-security actions are gated by **AAL2 step-up**: a fresh user-verification gesture on top of the current session. This page is the operator-level reference; for the end-user passkey walkthrough, see [Passkeys](/guides/passkeys). For how a CLI or a headless agent authenticates (as opposed to a human at the dashboard), see [API reference overview](/api-reference/overview#authentication) and the [OAuth device flow guide](/guides/oauth-device-flow).
 
 ---
 
@@ -19,7 +15,7 @@ The auth overhaul (passkey + AAL2) is the current system. Earlier docs that desc
 |---|---|---|---|
 | Passkey (WebAuthn / FIDO2) | Dashboard sign-in, SDK-issued sessions | AAL2 if the gesture is fresh | Settings → Account → Passkeys |
 | Password + MFA (TOTP) | Dashboard sign-in, recovery path from lost passkeys | AAL2 when MFA is completed in the current flow | Settings → Security |
-| SSO (Okta, Entra ID, Google Workspace) | Org-enforced dashboard sign-in | AAL2 when the IdP's `acr` claim asserts step-up | Org Settings → SSO |
+| SSO (Okta, Entra ID, Google Workspace) | Org-enforced dashboard sign-in | AAL1 by default; reaches AAL2 only via the same in-session step-up gesture other methods use | Org Settings → SSO |
 | API key | Server-to-server API calls | N/A — bound to the org, scoped by role | Settings → API Keys or Org Settings → API Keys |
 
 Passkeys are **phishing-resistant** (scoped to `mnemom.ai`, never presented to a wrong origin) and **not a shared secret** (Mnemom stores only the public half). They are the recommended default.
@@ -48,41 +44,39 @@ See [Passkeys](/guides/passkeys) for browser support, troubleshooting, and the f
 
 ## AAL2 step-up
 
-Sensitive actions — removing a passkey, rotating an API key, changing SSO enforcement, deleting an organization — require **Authenticator Assurance Level 2 (AAL2)**: a user-verification gesture completed in the current flow, not reused from an older session.
+A small set of destructive account-security actions require **Authenticator Assurance Level 2 (AAL2)**: a user-verification gesture completed in the current session, not carried over from an older one.
 
-The step-up is presented inline: when an AAL2-protected action is attempted and the current session does not already carry an AAL2 claim, the dashboard prompts for a passkey gesture (or a TOTP code for password users, or an IdP re-assertion for SSO users). Passkey-minted sessions satisfy AAL2 for their lifetime — WebAuthn is inherently multi-factor under NIST SP 800-63B; for password and SSO users the gesture stamps the AAL2 claim on the session. Each WebAuthn step-up challenge is single-use and valid for 60 seconds.
+The step-up is presented inline: when an AAL2-protected action is attempted and the current session does not already carry an AAL2 claim, the dashboard prompts for a passkey gesture (or a TOTP code for password users). Passkey-minted sessions satisfy AAL2 for their lifetime — WebAuthn is inherently multi-factor under NIST SP 800-63B. AAL2 is currently a binary session property (once a session reaches AAL2 it stays there — there is no separate time-boxed re-auth window), and SSO sessions do not automatically inherit AAL2 from the IdP's own step-up state; an SSO user goes through the same in-session gesture as everyone else. Each WebAuthn step-up challenge is single-use and valid for 60 seconds.
 
-Actions that require AAL2 step-up:
+Actions that require AAL2 step-up today:
 
-- Removing a passkey or adding a hardware authenticator
-- Creating, rotating, or revoking an API key
-- Changing SSO configuration or enforcement
-- Inviting or removing an org owner
-- Deleting an organization
-- Pausing, killing, or resuming an agent via the Containment API
-- Deleting your account
+- Removing a passkey
+- Disabling MFA
+- Revoking a session (your own, or all other sessions)
 
-{/* TODO(Wassim/Alex): security posture — the implementation currently enforces AAL2 as a binary session property (no time-boxed freshness window) and does not yet consume IdP `acr` values for SSO step-up. Decide whether to add a time-boxed AAL2 re-auth window and which `acr` values to accept, then update this section accordingly. */}
+Other sensitive actions — API key management, SSO configuration, org membership and deletion, agent containment — are gated by role and org membership (see [Org Admin](/guides/org-admin)) rather than by a fresh AAL2 gesture.
 
 ---
 
 ## Session lifecycle
 
-Dashboard sessions are issued as short-lived Supabase JWTs wrapped in an httpOnly, secure, same-site cookie. Rotation is automatic on the client; revocation is immediate on the server.
+Dashboard sessions are issued as a short-lived signed access token wrapped in an httpOnly, secure, same-site cookie (`__Host-mnemom_session` on the live site). Rotation is automatic on the client; revocation is immediate on the server.
 
 | Event | Effect |
 |---|---|
-| Sign-in (any method) | JWT issued with `aal` claim (`aal1` or `aal2`), session row created in `auth_sessions` |
+| Sign-in (any method) | Access token issued carrying an `aal` claim (`aal1` or `aal2`); a revocable session record is registered server-side |
 | AAL2 step-up | Session `aal` claim upgraded to `aal2` |
 | Token refresh | Old JWT invalidated, new JWT issued with preserved claims |
-| Sign-out | Session row deleted; all JWTs derived from it fail verification |
+| Sign-out | Session record deleted; all tokens derived from it fail verification |
 | Password reset | All sessions for the user invalidated |
 | Passkey removal | The specific credential invalidated server-side; other sessions are unaffected |
 | Org role change | Affected user's sessions re-issue with new claims on next refresh |
 
 Sessions expire after **7 days** of inactivity — the idle window is re-upped on every authenticated request — and reach an absolute maximum lifetime of **30 days** from the original sign-in, after which re-authentication is required. Sessions also end on explicit revocation. Active sessions are listed in **Settings → Security → Active sessions** with last-seen IP and user agent; each can be revoked individually.
 
-Server-side, sessions are revalidated on every protected request against the `auth_sessions` table. Stolen JWTs are not replayable past revocation.
+Server-side, sessions are revalidated against the session registry on every protected request. Stolen tokens are not replayable past revocation.
+
+Signing in from a new device sends a notification email; that email carries a one-click, single-use revoke link so you can kill the new session without first signing back in yourself — useful if the new sign-in wasn't you.
 
 ---
 
@@ -114,7 +108,7 @@ The full deep dive on key management — including the side-by-side comparison o
 
 ### Pick capabilities
 
-The dialog has a Capabilities section (default scopes) and an Admin permissions section (opt-in, role-gated). Quick-pick presets ("Default", "Read-only", "Gateway-only") cover most cases. AAL2 step-up is required.
+The dialog has a Capabilities section (default scopes) and an Admin permissions section (opt-in, role-gated). Quick-pick presets ("Default", "Read-only", "Gateway-only") cover most cases.
 
 ### Copy the secret
 
@@ -139,7 +133,7 @@ Keys minted before May 2026 carry the legacy two-scope set `["gateway", "api"]`.
 
 Rotation is **create-new-then-revoke-old**, not an in-place swap. This gives you a window to roll callers over before the old key dies.
 
-1. Create the replacement key (AAL2 step-up required).
+1. Create the replacement key.
 2. Deploy the new key to your services.
 3. Verify traffic has shifted: the old key's last-used timestamp should stop advancing.
 4. Revoke the old key.
@@ -167,16 +161,15 @@ Completing the password-recovery flow invalidates all existing sessions. If pass
 
 For SSO-enforced organizations, recovery goes through your IdP; Mnemom's recovery path does not apply.
 
+## Deleting your account
+
+Account deletion is self-service and permanent: sign in and call `DELETE /v1/auth/delete-account` (cookie or Bearer auth; not available to API keys). It cancels any active subscription, permanently deletes your user identity, and unlinks (does not delete) any agents you claimed — they revert to unowned rather than disappearing. If you're the sole owner of an org that still has other members, deletion is refused until you transfer ownership or remove those members first.
+
 ---
 
 ## Responsible disclosure
 
-Report suspected auth vulnerabilities via GitHub Security Advisories on the affected repository. Do not file public issues. We acknowledge within 48 hours and aim to provide a fix or mitigation within 7 days.
-
-| Component | Repository |
-|---|---|
-| Mnemom API (auth surface) | [github.com/mnemom/mnemom-api](https://github.com/mnemom/mnemom-api) |
-| Passkey server-side | [@simplewebauthn/server](https://github.com/MasterKale/SimpleWebAuthn) |
+If you discover a suspected auth vulnerability, see [Security and trust model § Responsible disclosure](/guides/security-trust-model#responsible-disclosure) for how to report it. Mnemom's passkey server-side verification is powered by [@simplewebauthn/server](https://github.com/MasterKale/SimpleWebAuthn).
 
 ---
 

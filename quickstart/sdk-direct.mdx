@@ -19,9 +19,13 @@ pip install agent-alignment-protocol agent-integrity-proto
 ```
 
 ```bash TypeScript
-npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
+npm install --legacy-peer-deps @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
 ```
 </CodeGroup>
+
+<Note>
+`--legacy-peer-deps` is needed on npm 7+ while `@mnemom/agent-integrity-protocol` 1.3.0 still declares an optional peer on the 1.x alignment-protocol package; the two SDKs work together at 2.0.0 / 1.3.0.
+</Note>
 
 <Steps>
   <Step title="Define an Alignment Card">
@@ -29,16 +33,19 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
 
     <CodeGroup>
     ```python Python
-    from aap import AlignmentCard, Principal, Values, AutonomyEnvelope, AuditCommitment
+    from aap import AlignmentCard, Principal, Values, Autonomy, Audit
 
     card = AlignmentCard(
-        aap_version="1.0.0",
+        card_version="unified/2026-04-26",
         card_id="ac-my-agent-001",
         agent_id="my-agent",
         issued_at="2026-01-31T12:00:00Z",
+        autonomy_mode="observe",
+        integrity_mode="observe",
 
         principal=Principal(
             type="human",
+            identifier="did:web:user.example.com",
             relationship="delegated_authority",
         ),
 
@@ -47,7 +54,7 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
             conflicts_with=["deceptive_marketing", "hidden_fees"],
         ),
 
-        autonomy_envelope=AutonomyEnvelope(
+        autonomy=Autonomy(
             bounded_actions=["search", "compare", "recommend", "add_to_cart"],
             escalation_triggers=[
                 {"condition": "action_type == \"purchase\"", "action": "escalate",
@@ -58,10 +65,11 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
             forbidden_actions=["share_credentials", "subscribe_to_services"],
         ),
 
-        audit_commitment=AuditCommitment(
+        audit=Audit(
             trace_format="ap-trace-v1",
             retention_days=90,
             queryable=True,
+            query_endpoint="https://my-agent.example.com/api/v1/traces",
         ),
     )
 
@@ -72,13 +80,16 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
     import type { AlignmentCard } from '@mnemom/agent-alignment-protocol';
 
     const card: AlignmentCard = {
-      aap_version: '1.0.0',
+      card_version: 'unified/2026-04-26',
       card_id: 'ac-my-agent-001',
       agent_id: 'my-agent',
       issued_at: '2026-01-31T12:00:00Z',
+      autonomy_mode: 'observe',
+      integrity_mode: 'observe',
 
       principal: {
         type: 'human',
+        identifier: 'did:web:user.example.com',
         relationship: 'delegated_authority',
       },
 
@@ -87,7 +98,7 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
         conflicts_with: ['deceptive_marketing', 'hidden_fees'],
       },
 
-      autonomy_envelope: {
+      autonomy: {
         bounded_actions: ['search', 'compare', 'recommend', 'add_to_cart'],
         escalation_triggers: [
           { condition: 'action_type == "purchase"', action: 'escalate',
@@ -98,14 +109,19 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
         forbidden_actions: ['share_credentials', 'subscribe_to_services'],
       },
 
-      audit_commitment: {
+      audit: {
         trace_format: 'ap-trace-v1',
         retention_days: 90,
         queryable: true,
+        query_endpoint: 'https://my-agent.example.com/api/v1/traces',
       },
     };
     ```
     </CodeGroup>
+
+    <Note>
+    **Field names changed in the unified card shape (AAP 2.0.0).** `aap_version` is now `card_version` (date-anchored); `autonomy_envelope`/`AutonomyEnvelope` is now `autonomy`/`Autonomy`; `audit_commitment`/`AuditCommitment` is now `audit`/`Audit`; `autonomy_mode` and `integrity_mode` are new top-level fields; `principal.identifier` is required whenever `principal.type` isn't `unspecified`; and `audit.queryable: true` requires `audit.query_endpoint`. See [migrating from the legacy 0.5.0 card shape](/protocols/aap/specification#410-migrating-from-the-legacy-050-card-shape) for the full mapping.
+    </Note>
 
     <Tip>
     The Alignment Card is the foundation of both protocols. Define it once and use it for AAP verification, AIP integrity checking, and value coherence checks.
@@ -277,61 +293,79 @@ npm install @mnemom/agent-alignment-protocol @mnemom/agent-integrity-protocol
     **AIP defaults to fail-open mode.** If the analysis LLM is unreachable, integrity checks will silently pass. For production deployments handling sensitive operations, set `failure_policy: { mode: "fail_closed" }` in your AIP configuration.
     </Warning>
 
+    A client does the extraction, the LLM call, and the checkpoint/window bookkeeping for you — hand it the raw provider response body, not a pre-extracted thinking string. The `card` here is AIP's own minimal card shape (`card_id`, `values`, `autonomy_envelope`) — a small subset of fields, kept separate from the full AAP `AlignmentCard` you built in Step 1, since `@mnemom/agent-alignment-protocol` is only an optional peer dependency for AIP.
+
     <CodeGroup>
     ```python Python
-    from aip import check_integrity, build_signal
-
-    checkpoint = check_integrity(
-        thinking_block="The user wants product recommendations. I should focus on "
-        "finding options that genuinely serve their needs, not sponsored results...",
-        card=card_dict,
-        config={
-            "agent_id": "my-agent",
-            "analysis_llm": {
-                "model": "claude-haiku-4-5-20251001",
-                "base_url": "https://api.anthropic.com",
-                "api_key": "your-anthropic-api-key",
-                "max_tokens": 1024,
-            },
-        },
+    from aip import create_client
+    from aip.schemas.config import (
+        AIPConfig, AnalysisLLMConfig, WindowConfig,
+        AlignmentCard as AIPCard, AlignmentCardValue, AutonomyEnvelope,
     )
 
-    print(f"Verdict: {checkpoint.verdict}")       # "clear"
-    print(f"Concerns: {checkpoint.concerns}")     # []
+    client = create_client(AIPConfig(
+        card=AIPCard(
+            card_id="ac-my-agent-001",
+            values=[AlignmentCardValue(name="principal_benefit", priority=1)],
+            autonomy_envelope=AutonomyEnvelope(
+                bounded_actions=["search", "compare", "recommend", "add_to_cart"],
+            ),
+        ),
+        analysis_llm=AnalysisLLMConfig(
+            model="claude-haiku-4-5-20251001",
+            base_url="https://api.anthropic.com",
+            api_key="your-anthropic-api-key",
+            max_tokens=1024,
+        ),
+        window=WindowConfig(),
+        agent_id="my-agent",
+    ))
 
-    # Build signal for your host system
-    signal = build_signal(checkpoint, window_state)
-    print(f"Proceed: {signal.proceed}")           # True
-    print(f"Action: {signal.recommended_action}") # "continue"
+    # response_body is the raw JSON text of the provider response your agent
+    # just received (the one carrying the thinking block to be analyzed).
+    signal = await client.check(response_body)
+
+    print(f"Verdict: {signal.checkpoint.verdict}")   # "clear"
+    print(f"Concerns: {signal.checkpoint.concerns}") # []
+    print(f"Proceed: {signal.proceed}")              # True
+    print(f"Action: {signal.recommended_action}")    # "continue"
     ```
 
     ```typescript TypeScript
-    import { checkIntegrity, buildSignal } from '@mnemom/agent-integrity-protocol';
+    import { createClient } from '@mnemom/agent-integrity-protocol';
 
-    const checkpoint = await checkIntegrity({
-      thinkingBlock:
-        'The user wants product recommendations. I should focus on ' +
-        'finding options that genuinely serve their needs, not sponsored results...',
-      card,
-      config: {
-        agentId: 'my-agent',
-        analysisLlm: {
-          model: 'claude-haiku-4-5-20251001',
-          baseUrl: 'https://api.anthropic.com',
-          apiKey: 'your-anthropic-api-key',
-          maxTokens: 1024,
+    const client = createClient({
+      card: {
+        card_id: 'ac-my-agent-001',
+        values: [{ name: 'principal_benefit', priority: 1 }],
+        autonomy_envelope: {
+          bounded_actions: ['search', 'compare', 'recommend', 'add_to_cart'],
         },
       },
+      analysis_llm: {
+        model: 'claude-haiku-4-5-20251001',
+        base_url: 'https://api.anthropic.com',
+        api_key: 'your-anthropic-api-key',
+        max_tokens: 1024,
+      },
+      window: {},
+      agent_id: 'my-agent',
     });
 
-    console.log(`Verdict: ${checkpoint.verdict}`);     // "clear"
-    console.log(`Concerns: ${checkpoint.concerns}`);   // []
+    // responseBody is the raw JSON text of the provider response your agent
+    // just received (the one carrying the thinking block to be analyzed).
+    const signal = await client.check(responseBody);
 
-    const signal = buildSignal(checkpoint, windowState);
-    console.log(`Proceed: ${signal.proceed}`);         // true
-    console.log(`Action: ${signal.recommended_action}`); // "continue"
+    console.log(`Verdict: ${signal.checkpoint.verdict}`);   // "clear"
+    console.log(`Concerns: ${signal.checkpoint.concerns}`); // []
+    console.log(`Proceed: ${signal.proceed}`);              // true
+    console.log(`Action: ${signal.recommended_action}`);    // "continue"
     ```
     </CodeGroup>
+
+    <Tip>
+    `client.check()` runs the full pipeline every call: extract the thinking block for the detected provider, call the analysis LLM, parse the verdict, update the sliding window, and detect drift. There is no separate low-level "just parse this analysis response" function in the public API — `check()` is the one entry point.
+    </Tip>
 
     ### Verdict to Action Mapping
 

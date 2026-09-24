@@ -5,8 +5,6 @@ sidebarTitle: "Enforcement"
 icon: "gavel"
 ---
 
-# Enforcement modes
-
 The Mnemom Gateway supports three enforcement modes that control how the system responds when alignment or integrity violations are detected. You can choose the level of intervention appropriate for your use case — from passive observation to active blocking.
 
 ## Modes overview
@@ -177,7 +175,7 @@ mnemom card edit    # opens current alignment-card YAML in $EDITOR
 # save and exit; CLI publishes + triggers recompose
 ```
 
-**Programmatic.** [`PUT /v1/alignment/agent/{agent_id}`](/api-reference/endpoint/put-agents-agent-id-alignment-card) with the full canonical card. See [Card Management](/guides/card-management) for the read-modify-write flow and the [alignment-card schema](/specifications/alignment-card-schema) for the field requirements.
+**Programmatic.** [`PUT /v1/alignment/agent/{agent_id}`](/api-reference/endpoint/put-alignment-agent-agent-id) with the full canonical card, or [`PUT /v1/alignment/agent/{agent_id}/modes`](/api-reference/endpoint/put-alignment-agent-agent-id-modes) to update just `autonomy_mode`/`integrity_mode` without a full read-modify-write. See [Card Management](/guides/card-management) for the read-modify-write flow and the [alignment-card schema](/specifications/alignment-card-schema) for the field requirements.
 
 ## Nudge strategy
 
@@ -206,7 +204,7 @@ Use `threshold` mode to avoid alert fatigue. The agent only receives a nudge aft
 ## Per-agent feature toggles
 
 <Note>
-Team operations require the `team_reputation` feature flag, available on Team and Enterprise plans. See [Pricing](/pricing/overview) for plan details.
+Team operations require the `team_reputation` entitlement, enabled on enterprise agreements. See [Pricing](/pricing/overview) for how plans and entitlements work.
 </Note>
 
 Each agent has independent controls for the transparency and integrity pipeline:
@@ -255,36 +253,26 @@ Enforcement applies to all violation types detected by the AAP verification engi
 
 ### Policy violations
 
-Policy enforcement operates as a **parallel system** alongside alignment enforcement. While alignment enforcement checks agent behavior against card values, policy enforcement checks tool usage against governance rules.
+The policy engine checks tool usage against the card's `capabilities` + `enforcement` sections, but it does **not** have its own independent enforce switch — whether a violation is logged or blocks the request is governed by the same `autonomy_mode` field documented above (`off`/`observe`/`nudge` all evaluate-and-log without blocking; `nudge` and `observe` behave identically for policy today; `enforce` blocks on `critical`/`high` violations).
 
 | Violation Type | Severity | Enforcement Behavior |
 |----------------|----------|---------------------|
-| `POLICY_VIOLATION` | HIGH | Blocked when policy enforcement mode is `enforce`; logged when `warn` |
-| `UNMAPPED_TOOL` | MEDIUM | Logged as warning; behavior depends on `defaults.unmapped_tool_action` |
-| `CAPABILITY_MISMATCH` | HIGH | Blocked when policy enforcement mode is `enforce`; logged when `warn` |
+| Forbidden-tool match | Per-rule (`critical`/`high`/`medium`/`low`) | Blocked in `autonomy_mode: enforce` when severity is `critical`/`high`; logged otherwise |
+| Unmapped tool, `allow_unmapped_tools: false` (default) | `high` | Blocked in `autonomy_mode: enforce`; logged in `observe`/`nudge` |
+| Unmapped tool, `allow_unmapped_tools: true` | `low` | Never blocks; informational only |
 
-Policy enforcement is controlled independently via the `enforcement_mode` field in the [Policy DSL](/specifications/policy-dsl):
-
-- **`warn`** — Log violations, return `X-Policy-Verdict: warn` header, allow request to proceed
-- **`enforce`** — Block requests with violations (HTTP 403), return `X-Policy-Verdict: fail` header
-- **`off`** — Skip policy evaluation entirely
-
-The `X-Policy-Verdict` response header is always present when a policy is active:
+The `X-Policy-Verdict` response header is always present when the canonical card carries a policy section:
 
 | Header Value | Meaning |
 |-------------|---------|
 | `pass` | All tools mapped and permitted |
 | `warn` | Violations detected but not blocking |
-| `fail` | Violations detected and request blocked (enforce mode only) |
+| `fail` | Violations detected and request blocked (`autonomy_mode: enforce` only) |
 
-<Tip>
-Alignment enforcement (observe/nudge/enforce) and policy enforcement (off/warn/enforce) can be configured independently. For example, you might use `nudge` for alignment violations while using `enforce` for policy violations, or vice versa.
-</Tip>
-
-See [Policy Engine](/concepts/policy-engine) for full details on how policies are evaluated, and [Policy Management](/guides/policy-management) for setup instructions.
+See [Policy Engine](/concepts/policy-engine) for full details on how policies are evaluated, including the `allow_unmapped_tools` field and the grace-period mechanics above.
 
 <Note>
-In enforce mode, only `CRITICAL` and `HIGH` severity violations trigger hard blocks on non-streaming requests. `MEDIUM` severity violations are always handled via nudge, even in enforce mode. This applies to both alignment and policy violations.
+In `enforce` mode, only `CRITICAL`/`critical` and `HIGH`/`high` severity violations trigger a hard block. `MEDIUM`/`medium` (and lower) severity violations are logged/nudged instead, even in enforce mode. This applies to both alignment violations and policy violations.
 </Note>
 
 ## Safe House front-door enforcement
@@ -303,9 +291,23 @@ Enforcement on a flagged tool result is turn-internal and does not fail the requ
 
 This is a front-door check, not an AIP check, and it is not deferred to the agent's next turn. AIP (the `integrity_mode` pipeline documented above) runs afterwards on the model's *reasoning*; by then the model has already read whatever the front door let through.
 
+## Response headers
+
+The gateway reports every enforcement decision on the response, whether or not anything fired:
+
+| Header | Meaning |
+|---|---|
+| `X-Mnemom-Verdict` | Structured, always present: `front=<v>; autonomy=<v>; integrity=<v>; back=<v>`, one entry per phase — Safe House front door, action-policing (policy + bounded actions), AIP integrity, Safe House back door. Each `<v>` is one of `pass`, `observed`, `nudged`, `enforced`, `unverified`. Absent phases default to `pass`. |
+| `X-Mnemom-Advisory` | A JSON array of `{source, text, severity?, id?}` entries surfacing what a `nudged`/`enforced` phase actually did, capped at 5 entries. Omitted entirely when there's nothing to advise. |
+| `X-Mnemom-Request-Id` | A per-request UUID for support correlation. |
+| `X-AIP-Verdict` + `X-AIP-Checkpoint-Id` | The two AIP-specific headers that still exist standalone alongside the structured `X-Mnemom-Verdict.integrity` field. |
+| `X-Policy-Verdict` | `pass` / `warn` / `fail` from the policy engine specifically — see [Policy violations](#policy-violations) above. |
+
 <Note>
-**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` is defined at `gateway/src/index.ts:7683` and is called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` (the synchronous acting chain that produces the per-tool decisions applied in the table above), `gateway/src/index.ts:7990` (the `waitUntil` shadow chain — recording only, never changes acting behaviour), and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run inside the lifecycle of the request that carried the tool results.
+A number of legacy per-phase headers — `X-Mnemom-Autonomy-Verdict`, the `X-Safe-House-*` family (`Verdict`, `Quarantine-Id`, `Session-Risk`, `Mode`, `Simulated-Verdict`, `Canary-Triggered`, `DLP`, `Advisory`, `Event`), and most of the old `X-AIP-*` family (`Action`, `Proceed`, `Synthetic`, `Source`, `Analysis-Scope`, `Certificate-Id`, `Chain-Hash`, `Reason`, `Nudge-Count`, `Enforcement`) — were retired in a clean break in favor of the structured `X-Mnemom-Verdict`/`X-Mnemom-Advisory` pair above. The gateway actively strips any of these names from every outbound response as defense-in-depth. If you integrated against one of them before this cutover, migrate to the fields above — the old names will never reappear.
 </Note>
+
+For the front-door table above, a `pass`/`warn` per-tool verdict never raises `front` past `observed`; a `quarantine`/`block` verdict is what produces `front=enforced` on `X-Mnemom-Verdict`.
 
 ## Conscience timeline
 
@@ -386,13 +388,15 @@ When a contained agent attempts an API request through the gateway, it receives:
 
 ```json
 {
-  "error": "Agent contained",
-  "type": "containment_error",
-  "reason": "agent_paused"
+  "error": {
+    "code": "containment_error",
+    "message": "Agent contained",
+    "details": { "reason": "agent_paused" }
+  }
 }
 ```
 
-The HTTP status code is `403 Forbidden` (distinct from `402 Payment Required` used for billing enforcement).
+`details.reason` is `agent_paused` or `agent_killed` depending on the containment state. The HTTP status code is `403 Forbidden` (distinct from `402 Payment Required` used for billing enforcement — see [Errors](/api-reference/errors#402-payment-required--billing-and-depletion)).
 
 ### Auto-containment
 

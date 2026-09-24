@@ -108,13 +108,16 @@ from aap import AlignmentCard
 
 # Define server alignment
 SERVER_ALIGNMENT = AlignmentCard(
-    aap_version="1.0.0",
+    card_version="unified/2026-04-26",
+    autonomy_mode="observe",
+    integrity_mode="observe",
     card_id="ac-filesystem-server-001",
     agent_id="mcp-filesystem",
     issued_at="2026-01-31T12:00:00Z",
 
     principal={
         "type": "human",
+        "identifier": "mcp-filesystem-owner",
         "relationship": "delegated_authority"
     },
 
@@ -123,7 +126,7 @@ SERVER_ALIGNMENT = AlignmentCard(
         "conflicts_with": ["data_exfiltration", "unauthorized_access"]
     },
 
-    autonomy_envelope={
+    autonomy={
         "bounded_actions": ["read_file"],
         "escalation_triggers": [
             {
@@ -135,7 +138,7 @@ SERVER_ALIGNMENT = AlignmentCard(
         "forbidden_actions": ["delete_file"]
     },
 
-    audit_commitment={
+    audit={
         "trace_format": "ap-trace-v1",
         "retention_days": 30,
         "queryable": True,
@@ -196,11 +199,20 @@ mcp = FastMCP(
 
 Wrap tool implementations to produce AP-Traces:
 
+`Action.type` is one of `recommend | execute | escalate | deny` (there is no `tool_invocation` value), and `Action.category` is one of `bounded | escalation_trigger | forbidden` (not `"escalate"`). `Decision.alternatives_considered` requires at least one entry, and `selected` MUST be one of those entries' `option_id` -- it cannot be `None` or reference an empty list. `Decision.values_applied` must be a plain list of strings, so read `SERVER_ALIGNMENT.values.declared` (an attribute on the `Values` model), not `SERVER_ALIGNMENT.values["declared"]`:
+
 ```python
 from aap import APTrace, Action, Decision, Escalation
 from datetime import datetime, timezone
 import uuid
 import functools
+
+# Maps the decorator's simple category to the real ActionCategory enum
+_CATEGORY_MAP = {
+    "bounded": "bounded",
+    "escalate": "escalation_trigger",
+    "forbidden": "forbidden",
+}
 
 def traced_tool(tool_name: str, category: str):
     """Decorator to generate AP-Traces for tool invocations."""
@@ -209,25 +221,27 @@ def traced_tool(tool_name: str, category: str):
         def wrapper(*args, **kwargs):
             trace_id = f"tr-{uuid.uuid4().hex[:12]}"
             timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-            # Check if escalation is required
+            action_category = _CATEGORY_MAP[category]
             escalation_required = category == "escalate"
 
             if category == "forbidden":
-                # Log attempt but don't execute
+                # Log the attempt but don't execute. alternatives_considered
+                # still needs >= 1 entry, and selected must reference it.
                 trace = APTrace(
                     trace_id=trace_id,
                     agent_id="mcp-filesystem",
                     card_id=SERVER_ALIGNMENT.card_id,
                     timestamp=timestamp,
                     action=Action(
-                        type="tool_invocation",
+                        type="deny",
                         name=tool_name,
                         category="forbidden",
                     ),
                     decision=Decision(
-                        alternatives_considered=[],
-                        selected=None,
+                        alternatives_considered=[
+                            {"option_id": "deny", "description": f"Deny {tool_name}"},
+                        ],
+                        selected="deny",
                         selection_reasoning="Forbidden action blocked",
                         values_applied=["user_control"],
                     ),
@@ -251,9 +265,9 @@ def traced_tool(tool_name: str, category: str):
                 card_id=SERVER_ALIGNMENT.card_id,
                 timestamp=timestamp,
                 action=Action(
-                    type="tool_invocation",
+                    type="execute",
                     name=tool_name,
-                    category=category,
+                    category=action_category,
                 ),
                 decision=Decision(
                     alternatives_considered=[
@@ -266,7 +280,7 @@ def traced_tool(tool_name: str, category: str):
                     ],
                     selected="execute",
                     selection_reasoning=f"Tool {tool_name} within autonomy envelope",
-                    values_applied=SERVER_ALIGNMENT.values["declared"],
+                    values_applied=SERVER_ALIGNMENT.values.declared,
                 ),
                 escalation=Escalation(
                     evaluated=True,
@@ -277,8 +291,10 @@ def traced_tool(tool_name: str, category: str):
                     reason="Within bounded actions" if not escalation_required else "Requires approval",
                 ),
                 context={
-                    "tool_args": kwargs,
-                    "result_summary": str(result)[:100] if result else None,
+                    "metadata": {
+                        "tool_args": kwargs,
+                        "result_summary": str(result)[:100] if result else None,
+                    },
                 },
             )
 
@@ -370,7 +386,7 @@ class AlignedMCPClient:
             raise ValueError(f"Value conflict with server: {coherence.value_alignment.conflicts}")
 
         # 2. Check if tool is within our autonomy envelope
-        server_envelope = self.server_alignment.get("autonomy_envelope", {})
+        server_envelope = self.server_alignment.get("autonomy") or self.server_alignment.get("autonomy_envelope", {})
         bounded = server_envelope.get("bounded_actions", [])
         forbidden = server_envelope.get("forbidden_actions", [])
 
@@ -409,16 +425,18 @@ import os
 # --- Alignment Configuration ---
 
 SERVER_ALIGNMENT = AlignmentCard(
-    aap_version="1.0.0",
+    card_version="unified/2026-04-26",
+    autonomy_mode="observe",
+    integrity_mode="observe",
     card_id="ac-filesystem-001",
     agent_id="mcp-filesystem",
     issued_at="2026-01-31T12:00:00Z",
-    principal={"type": "human", "relationship": "delegated_authority"},
+    principal={"type": "human", "identifier": "mcp-filesystem-owner", "relationship": "delegated_authority"},
     values={
         "declared": ["user_control", "transparency", "harm_prevention"],
         "conflicts_with": ["data_exfiltration", "unauthorized_access"],
     },
-    autonomy_envelope={
+    autonomy={
         "bounded_actions": ["read_file", "list_directory", "file_info"],
         "escalation_triggers": [
             {
@@ -429,7 +447,7 @@ SERVER_ALIGNMENT = AlignmentCard(
         ],
         "forbidden_actions": ["delete_file", "execute_command"],
     },
-    audit_commitment={
+    audit={
         "trace_format": "ap-trace-v1",
         "retention_days": 90,
         "queryable": True,
@@ -497,7 +515,7 @@ def read_file(path: str) -> str:
             agent_id="mcp-filesystem",
             card_id=SERVER_ALIGNMENT.card_id,
             timestamp=timestamp,
-            action=Action(type="tool_invocation", name="read_file", category="bounded"),
+            action=Action(type="execute", name="read_file", category="bounded"),
             decision=Decision(
                 alternatives_considered=[{"option_id": "read", "description": f"Read {path}", "score": 1.0, "flags": []}],
                 selected="read",
@@ -510,22 +528,23 @@ def read_file(path: str) -> str:
                 required=False,
                 reason="Bounded action",
             ),
-            context={"path": path, "bytes_read": len(content)},
+            context={"metadata": {"path": path, "bytes_read": len(content)}},
         )
         store_trace(trace)
         return content
 
     except Exception as e:
-        # Trace the failure
+        # Trace the failure. alternatives_considered still needs >= 1 entry,
+        # and selected must reference one of them -- neither can be empty/None.
         trace = APTrace(
             trace_id=trace_id,
             agent_id="mcp-filesystem",
             card_id=SERVER_ALIGNMENT.card_id,
             timestamp=timestamp,
-            action=Action(type="tool_invocation", name="read_file", category="bounded"),
+            action=Action(type="deny", name="read_file", category="bounded"),
             decision=Decision(
-                alternatives_considered=[],
-                selected=None,
+                alternatives_considered=[{"option_id": "failed", "description": "Read attempt failed"}],
+                selected="failed",
                 selection_reasoning=f"Operation failed: {e}",
                 values_applied=["transparency"],
             ),
@@ -555,10 +574,10 @@ def write_file(path: str, content: str, approved: bool = False) -> dict:
             agent_id="mcp-filesystem",
             card_id=SERVER_ALIGNMENT.card_id,
             timestamp=timestamp,
-            action=Action(type="tool_invocation", name="write_file", category="escalate"),
+            action=Action(type="escalate", name="write_file", category="escalation_trigger"),
             decision=Decision(
-                alternatives_considered=[],
-                selected=None,
+                alternatives_considered=[{"option_id": "blocked", "description": "Write blocked pending approval"}],
+                selected="blocked",
                 selection_reasoning="Write operation requires explicit approval",
                 values_applied=["user_control"],
             ),
@@ -580,7 +599,7 @@ def write_file(path: str, content: str, approved: bool = False) -> dict:
         agent_id="mcp-filesystem",
         card_id=SERVER_ALIGNMENT.card_id,
         timestamp=timestamp,
-        action=Action(type="tool_invocation", name="write_file", category="escalate"),
+        action=Action(type="execute", name="write_file", category="escalation_trigger"),
         decision=Decision(
             alternatives_considered=[{"option_id": "write", "description": f"Write to {path}", "score": 1.0, "flags": ["approved"]}],
             selected="write",
@@ -591,10 +610,11 @@ def write_file(path: str, content: str, approved: bool = False) -> dict:
             evaluated=True,
             triggers_checked=[{"trigger": "tool == 'write_file'", "matched": True}],
             required=True,
-            principal_response="approved",
+            # principal_response is a PrincipalResponse object, not a bare string
+            principal_response={"decision": "approved", "timestamp": timestamp},
             reason="Write operations require approval",
         ),
-        context={"path": path, "bytes_written": bytes_written},
+        context={"metadata": {"path": path, "bytes_written": bytes_written}},
     )
     store_trace(trace)
 
@@ -618,10 +638,10 @@ def delete_file(path: str) -> dict:
         agent_id="mcp-filesystem",
         card_id=SERVER_ALIGNMENT.card_id,
         timestamp=timestamp,
-        action=Action(type="tool_invocation", name="delete_file", category="forbidden"),
+        action=Action(type="deny", name="delete_file", category="forbidden"),
         decision=Decision(
-            alternatives_considered=[],
-            selected=None,
+            alternatives_considered=[{"option_id": "deny", "description": "Delete blocked"}],
+            selected="deny",
             selection_reasoning="Forbidden action blocked",
             values_applied=["harm_prevention", "user_control"],
         ),

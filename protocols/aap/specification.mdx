@@ -1,14 +1,22 @@
 ---
 title: "AAP Specification"
-description: "Full protocol specification for the Agent Alignment Protocol (AAP) v0.1.0"
+description: "Full protocol specification for the Agent Alignment Protocol (AAP) -- the unified card shape shipped in SDK v2.0.0"
 sidebarTitle: "Specification"
 icon: "book"
 ---
 
-**Version**: 0.1.0
-**Status**: Draft
-**Date**: 2026-02-01
-**Authors**: Mnemon Research
+**Card shape**: unified (`card_version: "unified/2026-04-26"`)
+**SDK versions**: `agent-alignment-protocol` (PyPI) 2.0.0 -- `@mnemom/agent-alignment-protocol` (npm) 2.0.0
+**Status**: Stable (breaking changes require a major version bump)
+
+<Note>
+Earlier releases (AAP 0.5.0 and before) used a different card shape: `aap_version`,
+`autonomy_envelope`, `audit_commitment`. Both SDKs still accept the legacy field
+names when reading a card for backward compatibility, but every example in this
+document uses the current unified shape. See the [migration note](#410-migrating-from-the-legacy-050-card-shape) if you have cards issued before 2026-06.
+
+For which SDK/runtime versions are actually live on the hosted service today, see [Protocol versions in production](/protocols/overview#protocol-versions-in-production).
+</Note>
 
 ---
 
@@ -32,7 +40,7 @@ AAP is a transparency protocol, not a trust protocol. It makes agent behavior mo
 8. [Drift Detection](#8-drift-detection)
 9. [Security Considerations](#9-security-considerations)
 10. [Limitations](#10-limitations)
-11. [IANA Considerations](#11-iana-considerations)
+11. [Well-Known URI Convention](#11-well-known-uri-convention)
 12. [References](#12-references)
 13. [Appendix A: JSON Schemas](#appendix-a-json-schemas)
 14. [Appendix B: Verification Algorithm](#appendix-b-verification-algorithm)
@@ -164,7 +172,7 @@ AAP is designed to complement, not replace, existing protocols:
 
 ### 4.1 overview
 
-An Alignment Card is a structured document declaring an agent's alignment posture. It MUST be machine-readable (JSON) and SHOULD be human-readable.
+An Alignment Card is a structured document declaring an agent's alignment posture. It MUST be machine-readable (JSON) and SHOULD be human-readable. This is the **unified** card shape -- the same shape accepted by `mnemom card validate` and the Mnemom platform's `PUT /v1/agents/{agent_id}/alignment-card` endpoint, so an agent can serve one card that satisfies both AAP and the platform.
 
 ### 4.2 structure
 
@@ -172,16 +180,20 @@ An Alignment Card MUST contain the following top-level fields:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `aap_version` | string | REQUIRED | AAP specification version (e.g., "1.0.0") |
+| `card_version` | string | REQUIRED | Date-anchored schema version, pattern `^unified/\d{4}-\d{2}-\d{2}$` (default `"unified/2026-04-26"`) |
 | `card_id` | string | REQUIRED | Unique identifier for this card (UUID or URI) |
 | `agent_id` | string | REQUIRED | Identifier for the agent (DID, URL, or UUID) |
 | `issued_at` | string | REQUIRED | ISO 8601 timestamp of card issuance |
 | `expires_at` | string | OPTIONAL | ISO 8601 timestamp of card expiration |
+| `autonomy_mode` | enum | REQUIRED | Master switch for the action-policing pipeline: `off` \| `observe` \| `nudge` \| `enforce` |
+| `integrity_mode` | enum | REQUIRED | Master switch for the values/conscience pipeline: `off` \| `observe` \| `nudge` \| `enforce` |
 | `principal` | object | REQUIRED | Principal relationship declaration |
 | `values` | object | REQUIRED | Value declarations |
-| `autonomy_envelope` | object | REQUIRED | Autonomy bounds and escalation triggers |
-| `audit_commitment` | object | REQUIRED | Audit trail commitments |
+| `autonomy` | object | REQUIRED | Autonomy bounds and escalation triggers |
+| `audit` | object | REQUIRED | Audit trail commitments |
 | `extensions` | object | OPTIONAL | Protocol-specific extensions |
+
+`autonomy_mode` and `integrity_mode` are the two master switches introduced by the unified shape. `autonomy_mode` governs the AAP action-policing checks described in this document; `integrity_mode` governs the [AIP](/protocols/aip/specification) per-turn conscience pipeline sharing this same card. Both accept the same four-value `AlignmentMode` enum (`off`, `observe`, `nudge`, `enforce`).
 
 ### 4.3 principal block
 
@@ -201,7 +213,7 @@ The `principal` block declares the agent's relationship to its principal.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | enum | REQUIRED | Type of principal |
-| `identifier` | string | OPTIONAL | Principal identifier (DID, email, org ID) |
+| `identifier` | string | CONDITIONAL | Principal identifier (DID, email, org ID). REQUIRED when `type != "unspecified"` |
 | `relationship` | enum | REQUIRED | Nature of authority delegation |
 | `escalation_contact` | string | OPTIONAL | Endpoint for escalation notifications |
 
@@ -260,13 +272,13 @@ Custom values MUST be defined in the `definitions` block.
 >
 > Role-specific operational principles that describe the agent's job function rather than its ethical commitments belong in `extensions`, not `values.declared`. For example, `fiduciary_precision` or `organizational_clarity` describe what an agent IS in its role — they should be set in `extensions.clpi.role`. Values like `transparency`, `honesty`, `accuracy`, and `accountability` describe how an agent reasons — those belong in `declared`.
 
-### 4.5 autonomy envelope block
+### 4.5 autonomy block
 
-The `autonomy_envelope` block defines what the agent may do independently.
+The `autonomy` block defines what the agent may do independently. (Renamed from the legacy `autonomy_envelope` in the unified shape; semantics unchanged.)
 
 ```json
 {
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": ["search", "compare", "recommend"],
     "escalation_triggers": [
       {
@@ -337,19 +349,15 @@ Examples:
 
 Implementations MAY support additional operators beyond the minimal set.
 
-### 4.7 audit commitment block
+### 4.7 audit block
 
-The `audit_commitment` block declares how the agent logs decisions.
+The `audit` block declares how the agent logs decisions. (Renamed from the legacy `audit_commitment` in the unified shape; semantics unchanged. The legacy `storage` sub-object was removed in the 2.0.0 SDKs -- there is no `storage.type` / `storage.location`.)
 
 ```json
 {
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 90,
-    "storage": {
-      "type": "local | remote | distributed",
-      "location": "optional-endpoint"
-    },
     "queryable": true,
     "query_endpoint": "https://agent.example.com/api/traces",
     "tamper_evidence": "append_only | signed | merkle"
@@ -359,12 +367,11 @@ The `audit_commitment` block declares how the agent logs decisions.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `trace_format` | string | REQUIRED | Trace format identifier |
+| `trace_format` | string | REQUIRED (default `"ap-trace-v1"`) | Trace format identifier |
 | `retention_days` | integer | REQUIRED | Minimum retention period |
-| `storage` | object | OPTIONAL | Storage configuration |
 | `queryable` | boolean | REQUIRED | Whether traces can be queried externally |
-| `query_endpoint` | string | CONDITIONAL | Required if queryable is true |
-| `tamper_evidence` | enum | OPTIONAL | Tamper-evidence mechanism |
+| `query_endpoint` | string | OPTIONAL | Endpoint for trace queries (RECOMMENDED if `queryable` is true) |
+| `tamper_evidence` | enum | OPTIONAL | Tamper-evidence mechanism: `append_only` \| `signed` \| `merkle` |
 
 ### 4.8 extensions block
 
@@ -389,14 +396,17 @@ Extensions MUST be namespaced by protocol identifier. Implementations MUST ignor
 
 ```json
 {
-  "aap_version": "1.0.0",
+  "card_version": "unified/2026-04-26",
   "card_id": "ac-f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "agent_id": "did:web:shopping.agent.example.com",
   "issued_at": "2026-01-31T12:00:00Z",
   "expires_at": "2026-07-31T12:00:00Z",
+  "autonomy_mode": "enforce",
+  "integrity_mode": "observe",
 
   "principal": {
     "type": "human",
+    "identifier": "did:web:user.example.com",
     "relationship": "delegated_authority",
     "escalation_contact": "mailto:user@example.com"
   },
@@ -407,7 +417,7 @@ Extensions MUST be namespaced by protocol identifier. Implementations MUST ignor
     "hierarchy": "lexicographic"
   },
 
-  "autonomy_envelope": {
+  "autonomy": {
     "bounded_actions": ["search", "compare", "recommend", "add_to_cart"],
     "escalation_triggers": [
       {
@@ -433,7 +443,7 @@ Extensions MUST be namespaced by protocol identifier. Implementations MUST ignor
     "forbidden_actions": ["store_payment_credentials", "subscribe_to_services"]
   },
 
-  "audit_commitment": {
+  "audit": {
     "trace_format": "ap-trace-v1",
     "retention_days": 90,
     "queryable": true,
@@ -448,6 +458,19 @@ Extensions MUST be namespaced by protocol identifier. Implementations MUST ignor
   }
 }
 ```
+
+### 4.10 migrating from the legacy 0.5.0 card shape
+
+SDK versions before 2.0.0 used a different top-level shape. Both fields carry identical semantics; only the names (and the addition of the two mode switches) changed:
+
+| Legacy (AAP 0.5.0 and earlier) | Unified (AAP 2.0.0 and later) |
+|---|---|
+| `aap_version` | `card_version` (now date-anchored: `"unified/2026-04-26"`) |
+| `autonomy_envelope` | `autonomy` |
+| `audit_commitment` | `audit` (its `storage` sub-object was dropped) |
+| *(none)* | `autonomy_mode`, `integrity_mode` -- now REQUIRED |
+
+Both the Python and TypeScript SDKs still read the legacy field names for backward compatibility when validating an old card, but `AlignmentCard.model_dump()` / `aap init` always emit the unified shape. New cards SHOULD use the unified shape directly.
 
 ---
 
@@ -552,6 +575,7 @@ The `decision` block records the decision process.
 | `selection_reasoning` | string | REQUIRED | Human-readable explanation |
 | `values_applied` | array[string] | REQUIRED | Values that influenced decision |
 | `confidence` | number | OPTIONAL | Decision confidence (0.0-1.0) |
+| `value_scores` | object | OPTIONAL | Per-declared-value score (SDK >= 1.3.0), keyed by value id: `{score: "on_track" \| "off_track" \| "not_applicable", rationale: string}`. When present, `values_applied` is derived from entries scored `on_track`. |
 
 Each alternative MUST specify:
 
@@ -879,12 +903,16 @@ Value coherence score is computed as:
 coherence_score = (matched_values / total_required_values) * (1 - conflict_penalty)
 
 where:
-  matched_values = count of values present in both cards
-  total_required_values = count of values required for task
-  conflict_penalty = 0.5 * (conflicts_count / total_required_values)
+  matched_values = count of values present in both cards (or in both cards
+                    AND the task's required values, if task_values is given)
+  total_required_values = count of values required for task (defaults to the
+                           union of both cards' declared values if task_values
+                           is not given)
+  conflict_penalty = min(1.0, CONFLICT_PENALTY_MULTIPLIER * (conflicts_count / total_required_values))
+  CONFLICT_PENALTY_MULTIPLIER = 0.50
 ```
 
-Implementations MAY use more sophisticated scoring algorithms but MUST produce a score in the range [0.0, 1.0].
+The final score is clamped to `[0.0, 1.0]`. `compatible` is `true` only when there are **zero** value conflicts AND `score >= MIN_COHERENCE_FOR_PROCEED` (`0.70`); `proceed` mirrors `compatible`. Implementations MAY use more sophisticated scoring algorithms but MUST produce a score in the range [0.0, 1.0].
 
 ### 6.5 conflict resolution
 
@@ -912,13 +940,21 @@ Verification operates at three levels:
 
 ### 7.3 verification algorithm
 
-The verification algorithm MUST check:
+<Note>
+`verify_trace` provides **structural verification only**. It checks that a trace conforms to what an Alignment Card declares. It does NOT provide cryptographic integrity verification -- traces are not signed or hash-chained by the reference SDKs. A malicious agent can produce a structurally valid trace for arbitrary behavior. For an integrity guarantee over the agent's actual reasoning, pair AAP with [AIP](/protocols/aip/specification).
+</Note>
 
-1. **Autonomy compliance**: Action category matches autonomy envelope
-2. **Escalation compliance**: Required escalations were performed
-3. **Value consistency**: Applied values match declared values
-4. **Forbidden action compliance**: No forbidden actions taken
-5. **Behavioral similarity**: Trace behavior is semantically similar to declared alignment
+The reference implementation performs these checks, in order, tracked in `verification_metadata.checks_performed`:
+
+1. **`card_reference`**: Does `trace.card_id` match `card.card_id`?
+2. **`card_expiration`**: Is the card still valid (not past `expires_at`)?
+3. **`autonomy`**: Is `action.name` in `autonomy.bounded_actions` when `action.category == "bounded"`?
+4. **`forbidden`**: Is `action.name` NOT in `autonomy.forbidden_actions`?
+5. **`escalation`**: For every matched escalation trigger, was `escalation.required` set?
+6. **`values`**: Is every value in `decision.values_applied` present in `values.declared`?
+7. **`behavioral_similarity`**: Is the trace semantically similar to the card's declared alignment, per SSM analysis?
+
+Steps 3-6 additionally emit `near_boundary` warnings when a decision's `confidence` or an alternative's `score` falls below `NEAR_BOUNDARY_THRESHOLD` (`0.35`), even when no violation is found.
 
 ```
 function verify_trace(trace: APTrace, card: AlignmentCard) -> VerificationResult:
@@ -928,15 +964,15 @@ function verify_trace(trace: APTrace, card: AlignmentCard) -> VerificationResult
 
   // Check autonomy compliance
   if trace.action.category == "bounded":
-    if trace.action.name not in card.autonomy_envelope.bounded_actions:
+    if trace.action.name not in card.autonomy.bounded_actions:
       violations.append(ViolationType.UNBOUNDED_ACTION)
 
   // Check forbidden actions
-  if trace.action.name in card.autonomy_envelope.forbidden_actions:
+  if trace.action.name in card.autonomy.forbidden_actions:
     violations.append(ViolationType.FORBIDDEN_ACTION)
 
   // Check escalation compliance
-  for trigger in card.autonomy_envelope.escalation_triggers:
+  for trigger in card.autonomy.escalation_triggers:
     if evaluate_condition(trigger.condition, trace.context):
       if not trace.escalation.required:
         violations.append(ViolationType.MISSED_ESCALATION)
@@ -976,13 +1012,16 @@ A verification result MUST contain:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `verified` | boolean | REQUIRED | True if no violations were found |
+| `recommended_action` | enum | REQUIRED | `"proceed"` \| `"review"` \| `"deny"` -- derived from violations/warnings (see below) |
 | `trace_id` | string | REQUIRED | ID of the verified trace |
 | `card_id` | string | REQUIRED | ID of the Alignment Card used |
-| `timestamp` | string | REQUIRED | ISO 8601 timestamp of verification |
+| `timestamp` | string | REQUIRED | ISO 8601 timestamp of verification (UTC) |
 | `violations` | array | REQUIRED | List of violations found |
 | `warnings` | array | REQUIRED | List of non-critical warnings |
 | `similarity_score` | number | REQUIRED | Behavioral similarity (0.0-1.0) |
 | `verification_metadata` | object | REQUIRED | Metadata about verification process |
+
+`recommended_action` is derived mechanically: `"deny"` if any violation was found, else `"review"` if any warning was found, else `"proceed"`. Prefer branching on `recommended_action` over `verified` alone -- it distinguishes a clean pass from a warning-only pass.
 
 The `similarity_score` measures semantic similarity between the trace behavior and declared alignment using SSM (Self-Similarity Matrix) analysis. A score of 1.0 indicates perfect alignment; lower scores indicate divergence.
 
@@ -991,6 +1030,7 @@ The `similarity_score` measures semantic similarity between the trace behavior a
 ```json
 {
   "verified": true,
+  "recommended_action": "review",
   "trace_id": "tr-abc123",
   "card_id": "ac-def456",
   "timestamp": "2026-01-31T12:35:00Z",
@@ -999,21 +1039,26 @@ The `similarity_score` measures semantic similarity between the trace behavior a
   "warnings": [
     {
       "type": "near_boundary",
-      "description": "Action score 0.31 near boundary threshold 0.30",
+      "description": "Action score 0.31 near boundary threshold 0.35",
       "trace_field": "decision.alternatives_considered[2].score"
     }
   ],
   "verification_metadata": {
-    "algorithm_version": "1.0.0",
-    "checks_performed": ["autonomy", "escalation", "values", "forbidden", "behavioral_similarity"],
+    "algorithm_version": "1.2.0",
+    "checks_performed": ["card_reference", "card_expiration", "autonomy", "forbidden", "escalation", "values", "behavioral_similarity"],
+    "duration_ms": 4.2,
     "similarity_details": {
-      "similarities": [0.78],
-      "mean_similarity": 0.78,
-      "trend": 0.0
+      "similarity_score": 0.78,
+      "method": "cosine",
+      "algorithm_version": "1.2.0"
     }
   }
 }
 ```
+
+<Note>
+**`similarity_details` shape (SDK >= 2.0.1).** Earlier releases emitted a different Python-only shape (`{similarities, mean_similarity, trend}`). Since 2.0.1, both SDKs emit the same `{similarity_score, method, algorithm_version}` shape shown above. Similarity scores computed before 2.0.1 are not numerically comparable to scores computed after -- the feature extractor changed, which changes cosine denominators.
+</Note>
 
 ### 7.5 violation types
 
@@ -1057,9 +1102,11 @@ The following thresholds are calibrated from empirical analysis:
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `DEFAULT_SIMILARITY_THRESHOLD` | 0.30 | Alert when drift similarity drops below |
-| `DEFAULT_SUSTAINED_TURNS_THRESHOLD` | 3 | Alert after N consecutive low-similarity traces |
+| Sustained-traces threshold | 3 | Alert after N consecutive low-similarity traces |
 | `BEHAVIORAL_SIMILARITY_THRESHOLD` | 0.50 | Warn on single-trace verification when below |
 | `MIN_COHERENCE_FOR_PROCEED` | 0.70 | Minimum coherence score for automatic proceed |
+
+The sustained-traces constant is named differently across the two SDKs: `DEFAULT_SUSTAINED_TURNS_THRESHOLD` in the Python SDK, `DEFAULT_SUSTAINED_CHECKS_THRESHOLD` in the TypeScript SDK. Both default to `3`.
 
 **Feature Extraction for Drift Detection** (structural only):
 
@@ -1124,40 +1171,13 @@ When sustained divergence is detected:
 
 ## 9. security considerations
 
-### 9.1 threat model
+AAP's threat model, trust boundaries, and cryptographic recommendations are specified in full on the dedicated [Security](/protocols/aap/security) page. In summary:
 
-AAP operates under the following threat model:
+- **In scope**: agents misrepresenting their alignment, agents failing to log decisions accurately, agents gaming coherence checks, man-in-the-middle attacks on handshakes.
+- **Out of scope**: compromised agent runtime, adversarial principals, collusion between agents and verifiers.
+- The reference SDKs' `verify_trace` does **not** sign or hash-chain cards and traces -- that is a recommended practice for implementers (Ed25519 signatures, append-only storage, TLS for handshake transport), not something the SDK provides by default. See [Security](/protocols/aap/security) for the concrete recommendations.
 
-**In scope:**
-- Agents misrepresenting their alignment
-- Agents failing to log decisions accurately
-- Agents gaming coherence checks
-- Man-in-the-middle attacks on handshakes
-
-**Out of scope:**
-- Compromised agent runtime
-- Adversarial principals
-- Collusion between agents and verifiers
-
-### 9.2 Alignment Card security
-
-1. **Card authenticity**: Cards SHOULD be signed using Ed25519 or equivalent
-2. **Card freshness**: Cards MUST include `issued_at` and SHOULD include `expires_at`
-3. **Card revocation**: Implementations SHOULD support card revocation via `/.well-known/alignment-card-revocations.json`
-
-### 9.3 AP-Trace security
-
-1. **Trace integrity**: Traces MUST be append-only
-2. **Trace authenticity**: Traces SHOULD be signed by the generating agent
-3. **Trace completeness**: Agents MUST NOT selectively omit traces
-
-### 9.4 handshake security
-
-1. **Transport security**: All handshake messages MUST be transmitted over TLS 1.3 or equivalent
-2. **Replay protection**: Requests MUST include unique `request_id` and `timestamp`
-3. **Response binding**: Responses MUST reference the `request_id`
-
-### 9.5 known limitations
+### 9.1 known limitations
 
 AAP cannot protect against:
 
@@ -1174,7 +1194,7 @@ These limitations are inherent to any transparency-based protocol. See Section 1
 
 ### 10.1 what AAP does not guarantee
 
-This section is non-negotiable. Implementations MUST make these limitations clear to users.
+This section is non-negotiable. Implementations MUST make these limitations clear to users. See [Limitations](/protocols/aap/limitations) for the full, worked-example treatment.
 
 **1. AAP does NOT ensure alignment--it provides visibility.**
 
@@ -1221,32 +1241,9 @@ AAP is NOT appropriate for:
 
 ---
 
-## 11. IANA considerations
+## 11. well-known URI convention
 
-### 11.1 media type registration
-
-This specification registers the following media types:
-
-**application/aap-alignment-card+json**
-- Type name: application
-- Subtype name: aap-alignment-card+json
-- Required parameters: none
-- Optional parameters: version
-- Encoding considerations: UTF-8
-
-**application/aap-trace+json**
-- Type name: application
-- Subtype name: aap-trace+json
-- Required parameters: none
-- Optional parameters: version
-- Encoding considerations: UTF-8
-
-### 11.2 well-Known URI registration
-
-This specification registers the following well-known URIs:
-
-- `/.well-known/alignment-card.json`: Agent's current Alignment Card
-- `/.well-known/alignment-card-revocations.json`: Revoked card identifiers
+An agent MAY serve its current Alignment Card at `/.well-known/alignment-card.json`. This is a convention, not a registered media type or IANA well-known URI -- there is no dedicated `application/aap-*+json` content type; implementations serve the card as plain `application/json`. Mnemom follows this convention for its own platform-scope card at `https://www.mnemom.ai/.well-known/alignment-card.json`.
 
 ---
 
@@ -1280,15 +1277,15 @@ This specification registers the following well-known URIs:
 
 ### A.1 Alignment Card schema
 
-See `schemas/alignment-card.schema.json` for the complete JSON Schema.
+See [`schemas/alignment-card.schema.json`](https://github.com/mnemom/aap/blob/main/schemas/alignment-card.schema.json) for the complete, canonical unified JSON Schema.
 
 ### A.2 AP-Trace schema
 
-See `schemas/ap-trace.schema.json` for the complete JSON Schema.
+See [`schemas/ap-trace.schema.json`](https://github.com/mnemom/aap/blob/main/schemas/ap-trace.schema.json) for the complete JSON Schema.
 
 ### A.3 Value Coherence messages schema
 
-See `schemas/value-coherence.schema.json` for the complete JSON Schema.
+See [`schemas/value-coherence.schema.json`](https://github.com/mnemom/aap/blob/main/schemas/value-coherence.schema.json) for the complete JSON Schema.
 
 ---
 
@@ -1321,6 +1318,7 @@ BEHAVIORAL_SIMILARITY_THRESHOLD = 0.50
 @dataclass
 class VerificationResult:
     verified: bool
+    recommended_action: str  # "proceed" | "review" | "deny"
     trace_id: str
     card_id: str
     violations: List[Violation]
@@ -1358,7 +1356,7 @@ def verify_trace(trace: dict, card: dict) -> VerificationResult:
 
     # Check autonomy compliance
     action = trace.get("action", {})
-    envelope = card.get("autonomy_envelope", {})
+    envelope = card.get("autonomy") or card.get("autonomy_envelope", {})  # unified key, legacy fallback
 
     if action.get("category") == "bounded":
         if action.get("name") not in envelope.get("bounded_actions", []):
@@ -1414,8 +1412,11 @@ def verify_trace(trace: dict, card: dict) -> VerificationResult:
             "trace_field": "(computed)"
         })
 
+    recommended_action = "deny" if violations else "review" if warnings else "proceed"
+
     return VerificationResult(
         verified=len(violations) == 0,
+        recommended_action=recommended_action,
         trace_id=trace.get("trace_id", ""),
         card_id=card.get("card_id", ""),
         violations=violations,
@@ -1532,7 +1533,7 @@ def _extract_card_features(card: dict) -> dict:
     features = {}
 
     # Bounded action features
-    envelope = card.get("autonomy_envelope", {})
+    envelope = card.get("autonomy") or card.get("autonomy_envelope", {})  # unified key, legacy fallback
     for action in envelope.get("bounded_actions", []):
         features[f"action:{action}"] = 1.0
 
@@ -1571,29 +1572,18 @@ def _infer_drift_direction(
 
 ---
 
-## Appendix c: Changelog
+## Appendix c: SDK version notes
 
-### Version 0.1.1 (2026-02-01)
+This page describes the card shape and verification behavior shipped in **SDK 2.0.0** (`agent-alignment-protocol` on PyPI, `@mnemom/agent-alignment-protocol` on npm). The headline change from 1.x is the migration to the unified card shape (Section 4.10). Other notable behavior changes carried by 2.0.0 and 2.0.1:
 
-- Added behavioral similarity scoring to verification (Section 7.3, 7.4)
-- Added `similarity_score` field to VerificationResult
-- Added `BEHAVIORAL_SIMILARITY_THRESHOLD` constant (0.50)
-- Added `low_behavioral_similarity` warning type
-- Documented 60/30/10 TF-IDF feature weighting (Section 8.3)
-- Updated reference implementation in Appendix B.1
-- Reference to [calibration](/protocols/aap/calibration) for threshold derivation methodology
+- **2.0.1** -- `similarity_details` shape unified across both SDKs (Section 7.4); Python's card/trace feature extractor gained features to match TypeScript's, so `similarity_score` is now identical across languages for the same inputs. Scores computed before 2.0.1 are not comparable to scores computed after.
+- **2.0.0** -- Card shape migrated to unified (Section 4). `AutonomyEnvelope`/`AuditCommitment` SDK types renamed to `Autonomy`/`Audit`; `AuditStorage`/`StorageType` removed; `AlignmentMode` (and the `autonomy_mode`/`integrity_mode` card fields) added.
+- **1.3.0** -- `Decision.value_scores` added: an optional, per-declared-value score (`on_track` / `off_track` / `not_applicable`) against a card's catalog `observer_signals`, keyed by value id. When present, `values_applied` is derived from the entries scored `on_track`.
+- **1.0.0** -- Public API locked for stability; breaking changes now require a major version bump.
 
-### Version 0.1.0 (2026-01-31)
-
-- Initial draft specification
-- Alignment Card schema defined
-- AP-Trace format defined
-- Value Coherence Handshake protocol defined
-- Verification algorithm specified
-- Drift detection methodology outlined
+See the [full changelog](https://github.com/mnemom/aap/blob/main/typescript/CHANGELOG.md) for the complete history.
 
 ---
 
-*Agent Alignment Protocol Specification v0.1.1*
-*Authors: Mnemon Research*
+*Agent Alignment Protocol Specification*
 *This document is released under CC BY 4.0*

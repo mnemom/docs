@@ -98,9 +98,11 @@ The `image_id` is a content hash of the compiled guest program. It acts as a com
 
 Not every checkpoint receives a ZK proof. Proving has non-trivial cost and latency, so AIP uses a **tiered proving strategy** that distinguishes real violations from configuration errors:
 
+Every verdict type is proven stochastically -- there is no verdict that is proven unconditionally by default. `boundary_violation` gets its own, separately configurable sampling rate rather than a higher-priority guarantee:
+
 | Verdict | Proving Policy | Rationale |
 |---------|---------------|-----------|
-| `boundary_violation` (no card gaps) | **Proven** (subject to `proof_boundary_cap`) | Confirmed behavioral violations must be independently verifiable. |
+| `boundary_violation` (no card gaps) | **Stochastic sampling** at `proof_boundary_cap` (default 5%) -- set this to 100 to prove every confirmed violation | Confirmed behavioral violations are the highest-value target for independent verification, but proving every one by default is a cost/latency tradeoff each deployment makes explicitly. |
 | `boundary_violation` (with card gaps) | **Deferred** | Card-gap violations are configuration errors (stale alignment cards), not agent misbehavior. Proving is deferred until [DDR reconciliation](/concepts/card-lifecycle#violation-reclassification) classifies the violation. |
 | `review_needed` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampled proofs provide statistical confidence without proving every checkpoint. |
 | `clear` | **Stochastic sampling** at `proof_rate` (default 10%) | Sampling clear verdicts catches systematic errors in the derivation logic. |
@@ -109,12 +111,12 @@ Not every checkpoint receives a ZK proof. Proving has non-trivial cost and laten
 
 When the [policy engine](/concepts/policy-engine) detects `card_gaps` alongside a `boundary_violation`, the gateway creates a proof record with `status: deferred` instead of immediately dispatching to the prover. This creates a tamper-evident audit trail without incurring GPU cost.
 
-The observer's DDR (Distributed Deliberation Review) reconciliation later classifies the violation:
+The observer's DDR ([Disagreement-Driven Review](/protocols/aip/specification#15-disagreement-driven-review)) reconciliation later classifies the violation:
 
 | DDR Outcome | Proof Resolution | GPU Cost |
 |-------------|-----------------|----------|
 | `card_gap` | `skipped_card_gap` -- proof permanently skipped | None |
-| `observer_noise` | `skipped_noise` -- proof permanently skipped | None |
+| `noise` | `skipped_noise` -- proof permanently skipped | None |
 | `aip_miss` | Upgraded to `pending` and dispatched to prover | Normal |
 
 This means only **confirmed real violations** receive the expensive GPU treatment. During rapid development when alignment cards frequently drift, this can reduce proving costs by 80-95%.

@@ -13,14 +13,6 @@ For the request-pipeline view of how inbound and outbound traffic is screened at
 
 ---
 
-> **us-2 cutover (2026-08-04):** On 2026-08-04 Mnemom's **managed** production cut over onto the
-> Azure **us-2 cell**: `ca-*-us2` container apps in resource group `rg-mnemom-cell-us2-eastus2`,
-> fronted by Cloudflare, with identity on Zitadel `id-us2.mnemom.ai`. Managed compute moved off
-> Cloudflare Workers onto Azure container apps. Mnemom retired the legacy Supabase project as the
-> managed datastore. Cloudflare remains as the fronting CDN/edge. References to "Cloudflare Workers"
-> compute and "Supabase" storage below describe the **pre-cutover managed** topology. The
-> **self-hosted** stack still ships on Cloudflare Workers + Supabase — see the [self-hosted quickstart](/quickstart/self-hosted).
-
 ## Trust model overview
 
 Mnemom provides **transparency, not guarantees**. The two protocols serve complementary roles:
@@ -35,7 +27,7 @@ Together they provide **full-coverage observability**: AIP catches problems as t
 AAP is a transparency protocol, not a trust protocol. A verified trace means the agent's declared behavior is internally consistent -- it does not mean the agent is trustworthy, safe, or aligned with human values. Verification checks consistency, not correctness.
 </Warning>
 
-**Mnemom Gateway** is the operational layer that runs both protocols. It is a Cloudflare Workers gateway that intercepts LLM API traffic, extracts thinking blocks for AIP analysis, generates AP-Traces for AAP verification, and enforces configurable [enforcement modes](/gateway/enforcement) based on the combined results.
+**Mnemom Gateway** is the operational layer that runs both protocols. It intercepts LLM API traffic, extracts thinking blocks for AIP analysis, generates AP-Traces for AAP verification, and enforces configurable [enforcement modes](/gateway/enforcement) based on the combined results.
 
 ---
 
@@ -43,13 +35,15 @@ AAP is a transparency protocol, not a trust protocol. A verified trace means the
 
 ### What is stored
 
-| Data Type | Description | Storage Location |
-|-----------|-------------|------------------|
-| **AP-Traces** | Structured decision records: what action the agent took, which values were applied, what alternatives were considered, and whether escalation was evaluated | Supabase Postgres |
-| **Integrity Checkpoints** | Verdict (`clear`, `review_needed`, `boundary_violation`), concern categories, severity, reasoning summary, and a SHA-256 hash of the thinking block | Supabase Postgres |
-| **Alignment Cards** | Agent identity declarations: values, autonomy envelope, escalation triggers, audit commitment | Supabase Postgres |
-| **Drift Alerts** | Alerts generated when behavioral similarity drops below threshold over sustained turns (AAP) or when integrity patterns degrade within a session window (AIP) | Supabase Postgres |
-| **Enforcement Records** | Records of enforcement actions taken (observe, nudge, enforce) in response to violations | Supabase Postgres |
+| Data Type | Description |
+|-----------|-------------|
+| **AP-Traces** | Structured decision records: what action the agent took, which values were applied, what alternatives were considered, and whether escalation was evaluated |
+| **Integrity Checkpoints** | Verdict (`clear`, `review_needed`, `boundary_violation`), concern categories, severity, reasoning summary, and a SHA-256 hash of the thinking block |
+| **Alignment Cards** | Agent identity declarations: values, autonomy envelope, escalation triggers, audit commitment |
+| **Drift Alerts** | Alerts generated when behavioral similarity drops below threshold over sustained turns (AAP) or when integrity patterns degrade within a session window (AIP) |
+| **Enforcement Records** | Records of enforcement actions taken (observe, nudge, enforce) in response to violations |
+
+All of the above are stored encrypted at rest in Mnemom's database.
 
 ### What is NOT stored
 
@@ -76,11 +70,11 @@ Used for authenticated browser sessions -- the Mnemom dashboard at `mnemom.ai/da
 
 | Cookie | Shape |
 |--------|-------|
-| `mnemom_session` | HttpOnly, Secure, SameSite=Lax, Domain=`.mnemom.ai` |
+| `__Host-mnemom_session` | HttpOnly, Secure, Path=/, SameSite=Lax. The `__Host-` prefix means the browser refuses to accept it without `Secure`+`Path=/` and forbids a `Domain` attribute — the cookie is host-locked to `api.mnemom.ai`, so no sibling subdomain can plant or overwrite it. |
 
-The cookie value is an AES-256-GCM-encrypted blob of `{access_token, refresh_token, issued_at, auth_method}`. The first byte is a key ID enabling zero-downtime key rotation. Tokens are never exposed to JavaScript (HttpOnly) and are transparently refreshed + rotated server-side when the access token nears expiry.
+The cookie value is an AES-256-GCM-encrypted blob of the session's access/refresh tokens. Tokens are never exposed to JavaScript (HttpOnly) and are transparently refreshed + rotated server-side when the access token nears expiry.
 
-MFA step-up is carried through a short-lived `mnemom_mfa_pending` cookie between `POST /v1/auth/sign-in` and `POST /v1/auth/mfa/verify`; the aal1 access token never reaches JS. SSO uses a single-use `mnemom_sso_initiator` cookie bound to an HMAC-signed state token.
+MFA step-up is carried through a short-lived `__Host-mnemom_mfa_pending` cookie between `POST /v1/auth/sign-in` and `POST /v1/auth/mfa/verify`; the pre-MFA access token never reaches JS. SSO uses a single-use `mnemom_sso_initiator` cookie bound to signed state.
 
 ### Bearer token (`Authorization` header)
 
@@ -90,7 +84,7 @@ Used by the Mnemom CLI and programmatic agents mimicking its flow.
 |--------|-------|
 | `Authorization` | `Bearer <jwt>` |
 
-The JWT is issued by Supabase Auth on the user's behalf and contains identity, organization membership, and role. The CLI obtains its token via a one-time browser → localhost handoff at login time (mediated by `POST /v1/auth/cli-exchange`, which itself requires a valid session cookie). Tokens are verified on every request via JWKS.
+The JWT is issued on the user's behalf and contains identity, organization membership, and role. The CLI obtains its token via a one-time browser → localhost handoff at login time (mediated by `POST /v1/auth/cli-exchange`, which itself requires a valid session cookie). Tokens are verified on every request via JWKS.
 
 ### API key (`X-Mnemom-Api-Key` header)
 
@@ -102,14 +96,6 @@ Used for server-to-server and enterprise fleet management -- billing API calls, 
 
 API keys are scoped to a user or organization. The key itself is never stored; only its SHA-256 hash is persisted for lookup and validation. Keys are issued via the dashboard under **Settings > API Keys** and can be rotated at any time.
 
-### Service role key
-
-Used for internal and administrative operations -- database migrations, system maintenance, admin export endpoints. Service role access bypasses row-level security.
-
-<Warning>
-Service role keys must never be exposed to client-side code or included in agent configurations. They are intended exclusively for server-side administrative operations.
-</Warning>
-
 ### Organization RBAC
 
 Resources are scoped to organizations. Each organization member holds one of three roles:
@@ -120,7 +106,7 @@ Resources are scoped to organizations. Each organization member holds one of thr
 | **Admin** | Can manage members, invite users, configure agents, manage API keys, view billing. |
 | **Member** | Can view agents, traces, and checkpoints within the organization. Cannot modify configuration or manage members. |
 
-Role-based access is enforced at the API layer via Supabase row-level security policies. Organization-scoped API keys inherit the permissions of the role they were created under.
+Role-based access is enforced at the API and database layers via row-level security policies. Organization-scoped API keys inherit the permissions of the role they were created under.
 
 ---
 
@@ -130,16 +116,16 @@ Role-based access is enforced at the API layer via Supabase row-level security p
 
 All endpoints enforce **TLS 1.2+**. This applies to:
 
-- The Mnemom gateway (Cloudflare Workers edge network)
-- The Mnemom API (Cloudflare Workers, `api.mnemom.ai`)
-- Webhook signal delivery (AIP `POST` to registered endpoints, authenticated with HMAC-SHA256)
+- The Mnemom gateway
+- The Mnemom API (`api.mnemom.ai`)
+- Webhook delivery (signed with HMAC-SHA256 — see [Webhook Notifications](/guides/webhooks))
 - Cross-protocol communication between AAP and AIP components
 
-Cloudflare's edge network terminates TLS and re-encrypts traffic to origin servers. Certificate management is handled automatically.
+Certificate management is handled automatically at the edge.
 
 ### At rest
 
-Database storage uses **Supabase Postgres with encryption at rest**. This covers all persisted data: AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts, enforcement records, and user/organization data.
+All persisted data — AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts, enforcement records, and user/organization data — is stored in an encrypted-at-rest database.
 
 ### Thinking block privacy
 
@@ -167,11 +153,11 @@ State these upfront so customers under enterprise security review can answer the
 
 - **Agent trustworthiness.** Mnemom makes agent behavior *observable*; it does not make it trustworthy. A clear integrity verdict is not a safety certificate.
 - **Honest thinking blocks.** AIP analyzes what the model *emits* as its thinking. A sufficiently sophisticated model can reason silently in one channel and produce sanitized thinking content in another. AIP detects inconsistency between thinking and action; it cannot detect silent deception that never surfaces in the thinking channel at all.
-- **Model inference correctness.** The zero-knowledge proof layer proves that the deterministic verdict-derivation rules were applied honestly to the model's output. It does **not** prove the model inference itself was run correctly. Proving model inference at current scale is prohibitively expensive; see the [whitepaper](/concepts/whitepaper) for the rationale.
+- **Model inference correctness.** The zero-knowledge proof layer proves that the deterministic verdict-derivation rules were applied honestly to the model's output. It does **not** prove the model inference itself was run correctly. Proving model inference at current scale is prohibitively expensive.
 - **Upstream prompt injection.** AIP detects injection *patterns in thinking blocks* after the agent has processed injected content. It does not prevent untrusted content from reaching the model. Safe House reduces exposure on inbound and outbound channels (see [Safe House threat model](/guides/safe-house-threat-model)), but the broader prompt-injection attack surface — including novel injections the L1 patterns do not match — remains open.
 - **Model-provider compromise.** Mnemom trusts the LLM provider's API responses. A compromised or malicious provider (returning fabricated thinking blocks, omitting content, or replaying cached responses) is not detected by AIP or AAP.
 - **Out-of-band agent behavior.** If the agent operator disables the Mnemom gateway and calls the LLM provider directly, none of the trust-plane signals apply. AP-Traces, integrity checkpoints, and reputation scoring all require traffic to flow through the gateway (or an SDK-Direct equivalent path).
-- **Supply-chain and infrastructure attacks** on the LLM providers, Mnemom's hosting (Cloudflare, Supabase, Modal), or the package registries that distribute the Mnemom SDKs. These are mitigated by provider-side controls and Mnemom's own [supply-chain trust](/guides/supply-chain-trust) practices, not by the protocols themselves.
+- **Supply-chain and infrastructure attacks** on the LLM providers, Mnemom's own hosting infrastructure, or the package registries that distribute the Mnemom SDKs. These are mitigated by provider-side controls and Mnemom's own [supply-chain trust](/guides/supply-chain-trust) practices, not by the protocols themselves.
 - **Physical-layer tampering** with on-chain Merkle anchors on Base L2. The on-chain layer inherits Base/Ethereum's security assumptions; Mnemom does not defend against 51% attacks, censorship, or chain reorgs beyond L2 finality depth.
 - **Replacement for human oversight.** Mnemom is a transparency and integrity layer, not an autonomous enforcement system. High-stakes decisions — financial transactions above material thresholds, irreversible real-world actions, safety-critical operations — require human-in-the-loop controls set via [policy escalation triggers](/guides/policy-management), not full reliance on automated verdicts.
 
@@ -211,16 +197,15 @@ Detection accuracy is bounded by the analysis model's capability. A smaller, che
 
 ### Model dependency
 
-AIP requires models that expose thinking blocks. Current provider support:
+AIP requires models that expose thinking content. Current provider support:
 
-| Provider | Thinking Source | Extraction Confidence |
-|----------|----------------|----------------------|
-| **Anthropic** | Native `thinking` content blocks | 1.0 |
-| **OpenAI** | `reasoning_content` field (GPT-5 Thinking) | 0.9 |
-| **Google Gemini** | Thinking content parts | 0.9 |
-| **Fallback** | Regex-based inference from response text | 0.3 |
+| Provider | Thinking source |
+|----------|----------------|
+| **Anthropic** | Native `thinking` content blocks |
+| **OpenAI** | `reasoning_content` field |
+| **Google Gemini** | Thought parts (`generationConfig.thinkingConfig.includeThoughts`) |
 
-Models without exposed thinking blocks cannot be analyzed by AIP. In this case, the system generates **synthetic `clear` verdicts** -- the agent proceeds, but without integrity analysis. This is a known gap: models with opaque reasoning are invisible to AIP.
+Each Integrity Checkpoint carries an `extraction_confidence` field reflecting how reliably the thinking content was extracted for that turn. Models without any exposed thinking content cannot be meaningfully analyzed by AIP — this is a known gap: models with fully opaque reasoning are invisible to AIP.
 
 ---
 
@@ -253,8 +238,6 @@ Enterprise customers have access to compliance export endpoints for bulk data re
 
 - [`GET /billing/export/usage`](/api-reference/endpoint/get-billing-export-usage) -- Export usage data for billing and compliance reporting
 
-Admin export endpoints are available for organization-level data extraction, supporting regulatory audit requirements.
-
 ---
 
 ## Cryptographic guarantees
@@ -276,7 +259,7 @@ Each layer is independently verifiable. A verifier can check any combination of 
 
 The attestation system requires two trust assumptions:
 
-1. **Trust the signing key.** If the Ed25519 private key is compromised, an attacker can forge signatures on arbitrary checkpoints. Signing keys are managed in Cloudflare Workers secrets and are never exposed to client code. Key rotation is supported via the `key_id` field in certificates.
+1. **Trust the signing key.** If the Ed25519 private key is compromised, an attacker can forge signatures on arbitrary checkpoints. Signing keys are held in Mnemom's server-side secret store and are never exposed to client code. Key rotation is supported via the `key_id` field in certificates.
 
 2. **Trust the analysis model.** The ZK proof demonstrates that the verdict was correctly derived from the analysis LLM's output, but it does not prove the analysis output itself was correct. If the analysis LLM produces incorrect concerns (false positives or false negatives), the verdict will be derived correctly from incorrect inputs. Analysis quality remains bounded by the analysis model's capability.
 
@@ -307,7 +290,7 @@ If you discover a security vulnerability in any Mnemom component, please report 
 | Mnemom Gateway | [github.com/mnemom/mnemom-platform](https://github.com/mnemom/mnemom-platform) |
 
 <Warning>
-Do not open public GitHub issues for security vulnerabilities. Use the Security Advisories feature (Security tab on each repository) to report vulnerabilities privately. We will acknowledge receipt within 48 hours and aim to provide a fix or mitigation within 7 days.
+Do not open public GitHub issues for security vulnerabilities. Use the Security Advisories feature (Security tab on each repository) to report vulnerabilities privately, or email security@mnemom.ai. We acknowledge within 3 business days, confirm reproduction within 14 days, and target a fix or mitigation within 90 days of acknowledgment (sooner once a fix ships and customers are protected). See [SLA and Incident Response](/guides/sla-and-incident-response#how-customers-reach-us) for the full policy.
 </Warning>
 
 ---

@@ -18,7 +18,7 @@ Mnemom versions the API at two independent levels:
 
 Both axes are independent. A new `X-Mnemom-Version` date never moves the URL; a new URL generation does not invalidate active date-pinned integrations.
 
-This dual model mirrors [Stripe-Version](https://stripe.com/docs/api/versioning) and [GitHub's `X-GitHub-Api-Version`](https://docs.github.com/en/rest/overview/api-versions). `X-Mnemom-Version` is the 7th Mnemom-namespaced header and is permanent contract.
+This dual model mirrors [Stripe-Version](https://stripe.com/docs/api/versioning) and [GitHub's `X-GitHub-Api-Version`](https://docs.github.com/en/rest/overview/api-versions). `X-Mnemom-Version` is permanent contract.
 
 ## How clients pin a version
 
@@ -28,7 +28,7 @@ This dual model mirrors [Stripe-Version](https://stripe.com/docs/api/versioning)
 GET /v1/agents/mnm-... HTTP/1.1
 Host: api.mnemom.ai
 X-Mnemom-Api-Key: ...
-X-Mnemom-Version: 2026-04-13
+X-Mnemom-Version: 2026-04-15
 ```
 
 If the header is omitted, the **latest stable version** is served. This is fine for exploratory calls; it is **not** safe for production systems — and especially not for AI agents, whose embedded environments rarely self-update in response to version-cutover messages.
@@ -37,10 +37,10 @@ The response always echoes the version that was applied:
 
 ```http
 HTTP/1.1 200 OK
-X-Mnemom-Version: 2026-04-13
+X-Mnemom-Version: 2026-04-15
 ```
 
-If you request a version we don't recognize (typo, future date, retired version), we serve the closest valid predecessor and the response header tells you which one was applied. We never 4xx on an unrecognized version — silent fallback to the predecessor is the supported failure mode.
+If the header doesn't match `YYYY-MM-DD`, or names a version we don't recognize (typo, future date, a version never released), the request is rejected with `400` and the error body names every version we do support. There is no silent fallback to a nearby version — an unrecognized `X-Mnemom-Version` fails loudly rather than serving you a version you didn't ask for.
 
 ## Support window
 
@@ -81,23 +81,15 @@ When a version is deprecated, calls to that version surface:
 Deprecation: true
 Sunset: Mon, 13 Oct 2027 00:00:00 GMT
 Link: <https://docs.mnemom.ai/policy/versioning>; rel="deprecation"
-X-Mnemom-Deprecation-Note: Version 2026-04-13 deprecated; migrate to 2026-10-01 by Oct 2027
 ```
 
-The headers conform to [RFC 8594](https://datatracker.ietf.org/doc/html/rfc8594) (`Sunset`) and [draft-ietf-httpapi-deprecation-header](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-deprecation-header) (`Deprecation`).
-
-In parallel, we send email notifications to the org owner and to any integration contacts on file at:
-
-- **T+0** — deprecation announcement.
-- **T+12 months** — half-window mark.
-- **T+16 months** — 60-day warning.
-- **T+17 months** — 30-day final warning.
+The headers conform to [RFC 8594](https://datatracker.ietf.org/doc/html/rfc8594) (`Sunset`) and [draft-ietf-httpapi-deprecation-header](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-deprecation-header) (`Deprecation`). No version is deprecated as of this writing — `X-Mnemom-Version` currently accepts `2026-04-13`, `2026-04-15`, and the current `2026-08-17`, none of which are on a sunset path.
 
 ## What we will not do
 
 - We will **not** break date-pinned production behavior within `/v1/` without bumping the date.
 - We will **not** retire a version before the published `Sunset` date.
-- We will **not** silently change `X-Mnemom-Version` resolution behavior. The fallback rule (closest valid predecessor) is part of the contract.
+- We will **not** silently change `X-Mnemom-Version` resolution behavior. The resolution rule (missing header → latest; unrecognized value → `400` naming the supported set) is part of the contract.
 - We will **not** introduce a `/v2/` URL generation for individual breaking changes. URL increments are reserved for resource-model overhauls.
 
 ## Related

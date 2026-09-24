@@ -1,107 +1,82 @@
 ---
 title: "CLPI: Card Lifecycle & Policy Intelligence"
-description: "The governance layer that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring"
+description: "The governance layer built on top of alignment cards: policy enforcement, violation reclassification and trust recovery, fleet intelligence, and checkpoint anchoring"
 sidebarTitle: "CLPI Overview"
 icon: "gears"
 ---
 
-CLPI is Mnemom's governance layer — a 5-phase system that transforms alignment cards from static declarations into **lifecycle-managed artifacts** with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring.
+CLPI is Mnemom's governance layer — a set of systems, built on top of the [alignment card](/concepts/alignment-cards), that turn a card from a static declaration into something with lifecycle management: policy enforcement, violation reclassification, fleet-level intelligence, and tamper-evident checkpoint anchoring.
+
+<Note>
+Most of CLPI sits behind enterprise-tier entitlement flags (`clpi_fault_lines`, `clpi_risk_forecast`, `clpi_policy_recommendations`, `clpi_transactions`, `clpi_reclassification`, `clpi_on_chain`, `clpi_export`) — they are off by default and enabled per contract. The [policy engine](/concepts/policy-engine) itself is not gated this way; it runs for every agent regardless of plan. Contact [sales](https://mnemom.ai/pricing) to enable the entitled capabilities.
+</Note>
 
 ## The problem CLPI solves
 
 Without CLPI, a common failure mode undermines trust scores:
 
-1. An operator adds a new MCP server to an agent (e.g., a browser tool)
-2. The alignment card is not updated to declare the new capability
-3. The agent uses the tool correctly, but the [policy engine](/concepts/policy-engine) flags it as an `UNMAPPED_TOOL` violation
-4. The agent's [trust score](/concepts/reputation-scores) drops — even though the agent did nothing wrong
+1. An operator adds a new MCP server to an agent (e.g., a browser tool).
+2. The alignment card is not updated to declare the new capability.
+3. The agent uses the tool correctly, but the [policy engine](/concepts/policy-engine) flags it as an unmapped-tool violation because there's no capability mapping for it.
+4. The agent's [trust score](/concepts/reputation-scores) drops — even though the agent did nothing wrong.
 
-This is **configuration drift**: the card falls out of sync with the agent's actual capabilities. The result is false violations, unfair score declines, and eroded trust in the scoring system itself.
-
-CLPI fixes this by distinguishing configuration errors from behavioral failures, enabling trust recovery when the card was wrong, and providing governance-as-code to prevent drift in the first place.
+This is **configuration drift**: the card falls out of sync with the agent's actual capabilities. CLPI addresses this by letting an operator reclassify a checkpoint's verdict once the drift is understood, recovering the score, rather than leaving a false violation permanently on the record.
 
 ## How CLPI relates to AAP and AIP
 
-[AAP](/protocols/aap/specification) and [AIP](/protocols/aip/specification) are **detection protocols** — they identify misalignment and compromise. CLPI is the **governance layer** that prevents problems, recovers from false positives, and anchors trust on-chain.
+[AAP](/protocols/aap/specification) and [AIP](/protocols/aip/specification) are **detection protocols** — they identify misalignment and compromise. CLPI is the **governance layer** that enforces policy up front and lets an operator correct the record afterward.
 
 | | AAP | AIP | CLPI |
 |---|-----|-----|------|
-| **Role** | Post-hoc verification | Per-turn integrity | Governance & recovery |
-| **Catches** | Behavioral drift over time | Active attacks in progress | Configuration drift, false violations |
-| **Mechanism** | Alignment Cards + AP-Traces | Thinking block analysis | Policy enforcement + reclassification |
-| **When** | After the agent acts | While the agent thinks | Before, during, and after |
+| **Role** | Post-hoc verification | Per-turn integrity | Policy enforcement + reclassification |
+| **Catches** | Behavioral drift over time | Active attacks in progress | Configuration drift, tool-use policy violations |
+| **Mechanism** | Alignment Cards + AP-Traces | Thinking block analysis | Card `capabilities`/`enforcement` sections + checkpoint reclassification |
+| **When** | After the agent acts | While the agent thinks | At request time (policy) and after the fact (reclassification) |
 
-Together: AAP and AIP detect problems. CLPI prevents them and recovers from them.
-
-## The 5 phases
-
-<Steps>
-  <Step title="Phase 1: Policy Engine">
-    Governance-as-code. A declarative YAML-based DSL that bridges alignment card capabilities to concrete tool enforcement. Policies define which tools map to card capabilities, what is forbidden, and how unmapped tools are handled — evaluated in CI/CD, at the gateway, and post-action.
-
-    [Policy Engine concepts](/concepts/policy-engine) | [Policy DSL spec](/specifications/policy-dsl) | [Policy CLI](/gateway/policy-cli)
-  </Step>
-
-  <Step title="Phase 2: Card Lifecycle & Trust Recovery">
-    Alignment cards become lifecycle-managed artifacts with versioned amendments, violation reclassification (`card_gap` vs. `behavior_gap`), automatic score recovery, session re-proofing, and compliance export. When a violation was caused by a missing capability — not agent misbehavior — the score recovers.
-
-    [Card Lifecycle concepts](/concepts/card-lifecycle) | [Trust Recovery guide](/guides/trust-recovery)
-  </Step>
-
-  <Step title="Phase 3: Intelligence Layer">
-    Analytical capabilities on top of policy and reputation data. Fault line analysis identifies value conflicts across teams. Risk forecasting predicts failure modes. LLM-powered policy recommendations generate governance rules from team analysis. Transaction guardrails scope enforcement to individual operations.
-
-    [Intelligence API](/api-reference/intelligence-overview)
-  </Step>
-
-  <Step title="Phase 4: On-Chain Verification">
-    Immutable reputation anchoring on Base L2. Merkle roots from the integrity checkpoint tree are anchored to the `MnemoMerkleAnchor` contract. Reputation scores are published to the `MnemoReputationRegistry`. Any third party can verify an agent's score without trusting Mnemom's infrastructure.
-
-    [On-Chain Verification concepts](/concepts/on-chain-verification) | [On-Chain guide](/guides/on-chain-verification)
-  </Step>
-
-  <Step title="Phase 5: Observability">
-    OpenTelemetry integration for the full governance pipeline. Policy evaluation spans, reclassification spans, and policy-aware drift detection — all exported to any OTel-compatible backend. See [Observability guide](/guides/observability) and [OTel attributes spec](/specifications/otel-attributes).
-  </Step>
-</Steps>
-
-## CLPI sub-pages
+## What's in CLPI
 
 <CardGroup cols={2}>
   <Card title="Policy Engine" icon="shield-halved" href="/concepts/policy-engine">
-    Phase 1. Governance-as-code: capability mappings, forbidden rules, enforcement modes, and policy merge.
+    Governance-as-code, always on. Card `capabilities` + `enforcement` sections map declared actions to concrete tools, define forbidden patterns, and set the unmapped-tool default — evaluated in CI/CD (`mnemom card evaluate`), at the gateway on every request, and post-hoc by the observer.
   </Card>
-  <Card title="Card Lifecycle" icon="arrows-spin" href="/concepts/card-lifecycle">
-    Phase 2. Amendments, violation reclassification, trust recovery, score recomputation, and compliance export.
+  <Card title="Reclassification & Trust Recovery" icon="arrows-spin" href="/guides/trust-recovery">
+    `POST /v1/agents/{id}/reclassify` changes an `integrity_checkpoints` verdict (`clear` / `review_needed` / `boundary_violation`) after review — the path for correcting a false violation caused by a card gap rather than genuine misbehavior, which recomputes the agent's reputation score. `GET /v1/agents/{id}/reclassifications` lists the history. Entitlement: `clpi_reclassification`.
   </Card>
-  <Card title="Trust Recovery Guide" icon="heart-pulse" href="/guides/trust-recovery">
-    Step-by-step workflow for reclassifying violations and recovering trust scores.
+  <Card title="Fleet Intelligence" icon="chart-mixed" href="/api-reference/endpoint/post-teams-fault-lines">
+    `POST /v1/teams/fault-lines` identifies value-conflict fault lines across a team; `POST /v1/teams/recommend-policy` generates policy-rule suggestions from team analysis; `POST /v1/transactions` scopes enforcement to a single bounded operation. Entitlements: `clpi_fault_lines`, `clpi_policy_recommendations`, `clpi_transactions` (risk forecasting is a related, separately entitled capability — `clpi_risk_forecast`).
   </Card>
-  <Card title="On-Chain Verification" icon="link" href="/concepts/on-chain-verification">
-    Phase 4. Merkle root anchoring and reputation publishing on Base L2.
-  </Card>
-  <Card title="Observability" icon="chart-mixed" href="/guides/observability">
-    Phase 5. OTel spans for policy evaluation, reclassification, and drift detection.
-  </Card>
-  <Card title="Policy Management Guide" icon="list-check" href="/guides/policy-management">
-    Writing, deploying, and iterating on governance policies.
+  <Card title="Checkpoint Anchoring" icon="link" href="#checkpoint-anchoring">
+    Merkle-root checkpointing over an agent's integrity history, with signed attestation and an inclusion-proof verification endpoint. Entitlement: `clpi_on_chain`. See the caveats below before treating this as a public-chain guarantee.
   </Card>
 </CardGroup>
 
+## Checkpoint anchoring
+
+<Warning>
+This is the one area where the marketing shorthand ("on-chain", "Base L2") has run ahead of what the shipped endpoints actually check. Read this section before relying on anchoring for a compliance claim.
+</Warning>
+
+What's real today:
+
+- The platform computes a Merkle root over an agent's checkpoint leaves and records it, along with a leaf count and tree depth, in Mnemom's own database (`on_chain_anchors` / `score_publications` tables) — not by reading it back from a blockchain.
+- `GET /v1/on-chain/verify-proof/{agent_id}` **recomputes** the root from the stored leaf hashes, checks the leaf count against the leaf array, and — given a `leaf_index` — regenerates and verifies a real inclusion proof against the recomputed root. A mismatch at any step returns `verified: false` with a reason; the endpoint never reports a bare `verified: true` without doing this work.
+- What that endpoint does **not** yet do is read the anchored root back from a chain. The response is explicit about this via `verification.anchored_root_source`: it proves the tree Mnemom published is internally consistent and matches the root Mnemom recorded as anchored — it does not prove a chain agrees with that record. Publishing to a public chain such that a third party can verify without trusting Mnemom's infrastructure at all is a stated direction, not a delivered guarantee today.
+- `GET /v1/on-chain/status/{agent_id}` and `GET /v1/on-chain/history` are read-only and public; writing an anchor record is a service-key operation the platform performs on its own schedule, not something a customer calls directly.
+
+Treat checkpoint anchoring as tamper-evident bookkeeping backed by cryptographic hashing today, and as a building block toward independent chain verification — not as an existing "verify without trusting Mnemom" guarantee.
+
 ## API surface
 
-CLPI spans four API domains:
-
-| Domain | Phase | Overview | Key operations |
-|--------|-------|----------|----------------|
-| Policy | Phase 1 | [Policy API](/api-reference/policy-overview) | CRUD policies, evaluate tools, resolve merged policy |
-| Reclassification | Phase 2 | [Reclassification API](/api-reference/reclassification-overview) | Reclassify violations, recompute scores, export compliance |
-| Intelligence | Phase 3 | [Intelligence API](/api-reference/intelligence-overview) | Fault lines, risk forecast, policy recommendations, transactions |
-| On-Chain | Phase 4 | [On-Chain API](/api-reference/on-chain-overview) | Anchor roots, publish scores, verify proofs |
+| Area | Overview | Key operations |
+|--------|-------|----------------|
+| Policy | [Policy API](/api-reference/policy-overview) | Evaluate tools against a card (`/v1/policies/evaluate`, `/v1/policies/evaluate/historical`) |
+| Reclassification | [Reclassification API](/api-reference/reclassification-overview) | Reclassify a checkpoint, list reclassification history, recompute scores |
+| Intelligence | [Intelligence API](/api-reference/intelligence-overview) | Fault lines, risk forecast, policy recommendations, transaction guardrails |
+| Checkpoint anchoring | [On-Chain API](/api-reference/on-chain-overview) | Read anchor status, verify an inclusion proof, read anchoring history |
 
 ## See also
 
-- [Changelog — CLPI release](/changelog) — Full release notes with implementation details
-- [Policy DSL Specification](/specifications/policy-dsl) — Normative YAML schema reference
-- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — Integrating policy checks into deployment pipelines
-- [Reputation Scores](/concepts/reputation-scores) — How trust scores are computed and how CLPI affects them
+- [Policy Engine](/concepts/policy-engine) — the always-on governance-as-code layer
+- [Trust Recovery guide](/guides/trust-recovery) — reclassifying violations and recovering trust scores
+- [Reputation Scores](/concepts/reputation-scores) — how trust scores are computed and how reclassification affects them
+- [Alignment Card Schema](/specifications/alignment-card-schema) — the normative unified card schema CLPI operates on

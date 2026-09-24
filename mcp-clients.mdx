@@ -6,30 +6,23 @@ icon: "plug"
 keywords: ["MCP", "Model Context Protocol", "Claude", "Cursor", "VS Code"]
 ---
 
-# Connect over MCP
-
 Mnemom operates two public [Model Context Protocol](https://modelcontextprotocol.io) servers. Both use the streamable-HTTP transport, so any MCP client that supports remote HTTP servers can connect.
 
-<Columns cols={3}>
+<Columns cols={2}>
   <Card title="Control plane" icon="shield-check">
     `https://api.mnemom.ai/mcp`
 
-    62 tools mirroring the `mnemom` CLI — Trust Ratings, Alignment & Protection Cards, governance signals, postures, teams, webhooks, and API keys. `tools/list` is public; tool execution authenticates exactly as the [REST API](/api-reference/overview).
+    75 tools mirroring the `mnemom` CLI — Trust Ratings, Alignment & Protection Cards, governance signals, postures, teams, webhooks, and API keys. `tools/list` is public; tool execution authenticates exactly as the [REST API](/api-reference/overview).
   </Card>
   <Card title="Docs search" icon="book-open">
     `https://docs.mnemom.ai/mcp`
 
-    Read-only. Two tools — `search_mnemom_docs` and `query_docs_filesystem` — over this documentation and the OpenAPI spec. No authentication.
-  </Card>
-  <Card title="isittrustready scan" icon="certificate">
-    `https://api.isittrustready.ai/mcp`
-
-    One tool — `scan_trust` — grades any site's agent-readiness (verifiable identity, alignment, attestation, accountability, delegation+auth) and returns a signed, verifiable result. No authentication required.
+    Three tools — `search_mnemom_docs` and `query_docs_filesystem_mnemom_docs` (both read-only, over this documentation and the OpenAPI spec) plus `submit_feedback` (files a report about a documentation page). No authentication.
   </Card>
 </Columns>
 
 <Note>
-  The control plane authenticates with the same credentials as the REST API: a **Bearer JWT** or an **`X-Mnemom-Api-Key`**. See [Authentication](/api-reference/headers). The docs-search server needs no auth.
+  The control plane authenticates with the same credentials as the REST API: a **Bearer token** (an OAuth access token, obtained the same way `mnemom login` obtains one — see [OAuth device flow](/guides/oauth-device-flow)) or an **`X-Mnemom-Api-Key`**. See [Authentication](/api-reference/overview#authentication). The docs-search server needs no auth.
 </Note>
 
 ## Authentication
@@ -37,10 +30,14 @@ Mnemom operates two public [Model Context Protocol](https://modelcontextprotocol
 Set your token once in the environment, then reference it from each client config:
 
 ```bash
-export MNEMOM_TOKEN="<your Bearer JWT or mnm_… API key>"
+export MNEMOM_TOKEN="<your Bearer access token or mnm_… API key>"
 ```
 
 The control-plane server passes the value through as `Authorization: Bearer <token>`. To use an API key instead, send it as the `X-Mnemom-Api-Key` header.
+
+<Tip>
+An MCP client that implements OAuth 2.1 discovery does not need a manually-pasted token at all: an unauthenticated call gets a `401` with a `WWW-Authenticate` header pointing at `https://api.mnemom.ai/.well-known/oauth-protected-resource/mcp`, and the client can follow that to a normal browser sign-in. The manual `Authorization`/`X-Mnemom-Api-Key` header below is the explicit, scripted alternative for clients that don't do OAuth discovery.
+</Tip>
 
 ## Client setup
 
@@ -134,7 +131,7 @@ curl -sS -X POST https://api.mnemom.ai/mcp \
   | jq '.result.tools | length'
 ```
 
-You should see the tool count (62 for the control plane, 2 for docs search). Tool **execution** on the control plane enforces the same authorization as the equivalent REST call — an unauthenticated client can enumerate tools but not invoke privileged ones.
+You should see the tool count (75 for the control plane, 3 for docs search). Tool **execution** on the control plane enforces the same authorization as the equivalent REST call — an unauthenticated client can enumerate tools but not invoke privileged ones.
 
 ## Discovery
 

@@ -5,7 +5,7 @@ sidebarTitle: "Risk Engine"
 icon: "shield-halved"
 ---
 
-The risk engine provides real-time, context-aware risk scoring for AI agent actions. This guide covers integration patterns for both individual and team assessments using the TypeScript and Python SDKs.
+The risk engine provides real-time, context-aware risk scoring for AI agent actions. There is a TypeScript SDK ([`@mnemom/risk`](https://www.npmjs.com/package/@mnemom/risk)); there is no official Python SDK today, so Python examples below call the REST API directly with `httpx`.
 
 ## Quick start
 
@@ -15,14 +15,14 @@ Assess whether an agent should be allowed to perform a specific action:
 
 <CodeGroup>
 ```typescript TypeScript
-import { assessRisk, financialContext } from '@mnemom/risk';
+import { assessRisk } from '@mnemom/risk';
 
 const assessment = await assessRisk('agent-abc-123', {
   action_type: 'financial_transaction',
   risk_tolerance: 'conservative',
   amount: 50000,
   counterparty_id: 'vendor-xyz',
-});
+}, { apiKey: process.env.MNEMOM_API_KEY });
 
 console.log(assessment.risk_level);      // 'low' | 'medium' | 'high' | 'critical'
 console.log(assessment.recommendation);  // 'approve' | 'review' | 'deny'
@@ -30,19 +30,25 @@ console.log(assessment.risk_score);      // 0.0 – 1.0
 ```
 
 ```python Python
-from mnemom_risk import RiskClient
+import httpx
 
-client = RiskClient(api_key="your-api-key")
+response = httpx.post(
+    "https://api.mnemom.ai/v1/risk/assess",
+    headers={"Authorization": f"Bearer {token}"},
+    json={
+        "agent_id": "agent-abc-123",
+        "context": {
+            "action_type": "financial_transaction",
+            "risk_tolerance": "conservative",
+            "amount": 50000,
+            "counterparty_id": "vendor-xyz",
+        },
+    },
+)
+assessment = response.json()
 
-assessment = await client.assess_risk("agent-abc-123", {
-    "action_type": "financial_transaction",
-    "risk_tolerance": "conservative",
-    "amount": 50000,
-    "counterparty_id": "vendor-xyz",
-})
-
-print(assessment.risk_level)      # 'low' | 'medium' | 'high' | 'critical'
-print(assessment.recommendation)  # 'approve' | 'review' | 'deny'
+print(assessment["risk_level"])      # 'low' | 'medium' | 'high' | 'critical'
+print(assessment["recommendation"])  # 'approve' | 'review' | 'deny'
 ```
 </CodeGroup>
 
@@ -75,146 +81,157 @@ console.log(teamAssessment.synergy_type);          // 'synergistic' | 'neutral' 
 ```
 
 ```python Python
-from mnemom_risk import RiskClient
+import httpx
 
-client = RiskClient(api_key="your-api-key")
+team = httpx.post(
+    "https://api.mnemom.ai/v1/risk/assess/team",
+    headers={"Authorization": f"Bearer {token}"},
+    json={
+        "agent_ids": ["agent-a", "agent-b", "agent-c"],
+        "context": {
+            "action_type": "multi_agent_coordination",
+            "risk_tolerance": "moderate",
+            "team_task": "customer-support-pipeline",
+            "coordination_mode": "sequential",
+        },
+    },
+).json()
 
-team = await client.assess_team_risk(
-    agent_ids=["agent-a", "agent-b", "agent-c"],
-    context={
-        "action_type": "multi_agent_coordination",
-        "risk_tolerance": "moderate",
-        "team_task": "customer-support-pipeline",
-        "coordination_mode": "sequential",
-    }
-)
-
-print(team.team_recommendation)
-print(team.shapley_values)
+print(team["team_recommendation"])
+print(team["shapley_values"])
 ```
 </CodeGroup>
 
 ## Risk gates
 
-Risk gates are pre-configured decision functions that automatically approve, review, or deny actions based on risk thresholds. Use them to embed risk decisions directly into your agent pipelines.
+Risk gates wrap an assessment call with a pass/fail check against a maximum risk score and/or level, so you can embed a single boolean decision in your agent pipeline instead of interpreting a raw assessment.
 
 ### Individual gate
 
 <CodeGroup>
 ```typescript TypeScript
-import { createRiskGate } from '@mnemom/risk';
+import { createRiskGate, financialContext } from '@mnemom/risk';
 
 const gate = createRiskGate({
-  maxApproveScore: 0.30,   // auto-approve below this
-  maxReviewScore: 0.60,    // require review between 0.30–0.60
-  // above 0.60 → auto-deny
+  maxRiskLevel: 'medium',  // deny anything above 'medium'
+  maxRiskScore: 0.5,       // and/or deny above this raw score
+  apiKey: process.env.MNEMOM_API_KEY,
 });
 
-const decision = await gate.check('agent-abc-123', {
-  action_type: 'data_access',
-  risk_tolerance: 'moderate',
-});
+const result = await gate.check('agent-abc-123', financialContext(1000));
 
-if (decision.allowed) {
+if (result.allowed) {
   // proceed with the action
-} else if (decision.requiresReview) {
-  // escalate to human supervisor
 } else {
-  // block the action
-  console.log(decision.reason);
+  // block the action -- there is no separate "review" outcome from the gate
+  // itself; use result.assessment.recommendation for finer-grained triage
+  console.log(result.reason);
 }
 ```
 
 ```python Python
-from mnemom_risk import RiskGate
+import httpx
 
-gate = RiskGate(
-    max_approve_score=0.30,
-    max_review_score=0.60,
+RISK_LEVEL_ORDER = ["low", "medium", "high", "critical"]
+
+def check_risk_gate(agent_id, context, max_level="medium", token=None):
+    resp = httpx.post(
+        "https://api.mnemom.ai/v1/risk/assess",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"agent_id": agent_id, "context": context},
+    )
+    assessment = resp.json()
+    allowed = RISK_LEVEL_ORDER.index(assessment["risk_level"]) <= RISK_LEVEL_ORDER.index(max_level)
+    return allowed, assessment
+
+allowed, assessment = check_risk_gate(
+    "agent-abc-123",
+    {"action_type": "data_access", "risk_tolerance": "moderate"},
+    token=token,
 )
-
-decision = await gate.check("agent-abc-123", {
-    "action_type": "data_access",
-    "risk_tolerance": "moderate",
-})
-
-if decision.allowed:
+if allowed:
     pass  # proceed
-elif decision.requires_review:
-    pass  # escalate
 else:
-    print(decision.reason)  # blocked
+    print(assessment["recommendation"])  # 'review' or 'deny'
 ```
 </CodeGroup>
 
 ### Team gate
+
+The team gate has the same `{allowed, assessment, reason}` shape as the individual gate -- gate on `assessment.team_recommendation` for the finer-grained `approve_team` / `approve_individuals_only` / `deny` triage:
 
 <CodeGroup>
 ```typescript TypeScript
 import { createTeamRiskGate } from '@mnemom/risk';
 
 const teamGate = createTeamRiskGate({
-  maxApproveScore: 0.25,
-  allowIndividualsOnly: true, // if team is denied but individuals pass, allow solo ops
+  maxRiskLevel: 'medium',
+  apiKey: process.env.MNEMOM_API_KEY,
 });
 
-const teamDecision = await teamGate.check(
+const result = await teamGate.check(
   ['agent-a', 'agent-b', 'agent-c'],
-  { action_type: 'task_delegation', risk_tolerance: 'conservative' }
+  { action_type: 'task_delegation', risk_tolerance: 'conservative' },
 );
 
-switch (teamDecision.recommendation) {
-  case 'approve_team':
-    // full team operation allowed
-    break;
-  case 'approve_individuals_only':
-    // dispatch agents individually, no joint operations
-    break;
-  case 'deny':
-    // block everything
-    break;
+if (!result.allowed) {
+  console.log(result.reason);
+} else {
+  switch (result.assessment?.team_recommendation) {
+    case 'approve_team':
+      // full team operation allowed
+      break;
+    case 'approve_individuals_only':
+      // dispatch agents individually, no joint operations
+      break;
+    case 'deny':
+      // block everything
+      break;
+  }
 }
 ```
 
 ```python Python
-from mnemom_risk import TeamRiskGate
+import httpx
 
-gate = TeamRiskGate(
-    max_approve_score=0.25,
-    allow_individuals_only=True,
-)
+team = httpx.post(
+    "https://api.mnemom.ai/v1/risk/assess/team",
+    headers={"Authorization": f"Bearer {token}"},
+    json={
+        "agent_ids": ["agent-a", "agent-b", "agent-c"],
+        "context": {"action_type": "task_delegation", "risk_tolerance": "conservative"},
+    },
+).json()
 
-decision = await gate.check(
-    ["agent-a", "agent-b", "agent-c"],
-    {"action_type": "task_delegation", "risk_tolerance": "conservative"},
-)
+print(team["team_recommendation"])  # 'approve_team' | 'approve_individuals_only' | 'deny'
 ```
 </CodeGroup>
 
 ## Context builders
 
-Context builders provide convenience functions for common action types:
+`@mnemom/risk` exports convenience functions that build a `RiskContext` object for common action types:
 
 <CodeGroup>
 ```typescript TypeScript
 import { financialContext, delegationContext, dataAccessContext } from '@mnemom/risk';
 
 // Financial transaction with amount and counterparty
-const ctx1 = financialContext(50000, 'vendor-xyz', 'conservative');
+const ctx1 = financialContext(50000, 'vendor-xyz');
 
-// Task delegation with team context
+// Task delegation with a coordination mode
 const ctx2 = delegationContext('customer-support-pipeline', 'sequential');
 
 // Data access with use case
 const ctx3 = dataAccessContext('audit-report-generation');
 ```
 
-```python Python
-from mnemom_risk import financial_context, delegation_context, data_access_context
+There is no dedicated Python SDK; build the equivalent context object as a plain dict, e.g.:
 
-ctx1 = financial_context(amount=50000, counterparty="vendor-xyz", tolerance="conservative")
-ctx2 = delegation_context(task="customer-support-pipeline", mode="sequential")
-ctx3 = data_access_context(use_case="audit-report-generation")
+```python Python
+ctx1 = {"action_type": "financial_transaction", "amount": 50000, "counterparty_id": "vendor-xyz"}
+
+ctx2 = {"action_type": "task_delegation", "team_task": "customer-support-pipeline", "coordination_mode": "sequential"}
+ctx3 = {"action_type": "data_access", "use_case": "audit-report-generation"}
 ```
 </CodeGroup>
 
@@ -291,7 +308,8 @@ Fetch risk assessment history for trend analysis:
 ```typescript TypeScript
 import { getRiskHistory } from '@mnemom/risk';
 
-const history = await getRiskHistory('agent-abc-123', { limit: 50 });
+// signature is (agentId, options?, limit = 20) -- limit is a positional arg, not part of options
+const history = await getRiskHistory('agent-abc-123', { apiKey: process.env.MNEMOM_API_KEY }, 50);
 
 for (const assessment of history) {
   console.log(`${assessment.created_at}: ${assessment.risk_score} (${assessment.risk_level})`);
@@ -299,10 +317,16 @@ for (const assessment of history) {
 ```
 
 ```python Python
-history = await client.get_risk_history("agent-abc-123", limit=50)
+import httpx
 
-for assessment in history:
-    print(f"{assessment.created_at}: {assessment.risk_score} ({assessment.risk_level})")
+history = httpx.get(
+    "https://api.mnemom.ai/v1/risk/history/agent-abc-123",
+    headers={"Authorization": f"Bearer {token}"},
+    params={"limit": 50},
+).json()
+
+for assessment in history["assessments"]:
+    print(f"{assessment['created_at']}: {assessment['risk_score']} ({assessment['risk_level']})")
 ```
 </CodeGroup>
 
@@ -325,15 +349,20 @@ if (assessment.proof_status === 'verified') {
 ```
 
 ```python Python
-assessment = await client.get_assessment("ra_01HXY...")
+import httpx
 
-if assessment.proof_status == "verified":
+assessment = httpx.get(
+    "https://api.mnemom.ai/v1/risk/assessments/ra_01HXY...",
+    headers={"Authorization": f"Bearer {token}"},
+).json()
+
+if assessment["proof_status"] == "verified":
     print("Risk score is cryptographically proven correct")
 ```
 </CodeGroup>
 
 <Note>
-  Proofs are generated asynchronously. The risk score is returned immediately; the proof typically completes within seconds to minutes depending on complexity. Poll the assessment or use webhooks to get notified when the proof is ready.
+  Proofs are generated asynchronously and are best-effort -- the risk score is returned immediately and is valid regardless of whether a proof ever completes. Poll `GET /v1/risk/proofs/:proof_id` to follow a proof through to `verified` or `failed`.
 </Note>
 
 ## Choosing action types
@@ -358,19 +387,12 @@ Select the action type that best matches what the agent is about to do:
 | `aggressive` | Internal dev tools, non-critical pipelines | Wider thresholds, allows more latitude |
 
 <Warning>
-  Risk tolerance affects classification thresholds, not the underlying score. An agent with a 0.30 risk score gets classified as `medium` under conservative tolerance but `low` under moderate tolerance. The raw score is the same — the interpretation changes.
+  Risk tolerance affects classification thresholds, not the underlying score. An agent with a 0.20 risk score gets classified as `medium` under conservative tolerance (medium starts at 0.15) but `low` under moderate tolerance (low goes up to 0.25). The raw score is the same — the interpretation changes.
 </Warning>
 
 ## Billing
 
-Risk assessments are metered events. See [Pricing](/pricing/overview) for current rates.
-
-| Plan | Individual | Team | Included Quota | ZK Proofs |
-|------|-----------|------|----------------|-----------|
-| Free | Included | Not available | 50/month | No |
-| Developer | $0.001/ea | $0.01/ea | None | Yes |
-| Team | $0.0008/ea | $0.008/ea | 5,000 + 500 | Yes |
-| Enterprise | Custom | Custom | Unlimited | Yes |
+Mnemom uses μ-based usage pricing (1 μ = $0.01) with no fixed plan tiers -- risk assessments are metered events billed against your μ balance. See [Pricing](/pricing/overview) for current rates and what proof availability requires on your account.
 
 ## See also
 

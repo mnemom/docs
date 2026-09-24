@@ -5,7 +5,7 @@ sidebarTitle: "Risk Overview"
 icon: "gauge"
 ---
 
-The Risk API provides six endpoints for assessing, retrieving, and verifying risk scores for individual agents and teams.
+The Risk API provides seven endpoints for assessing, retrieving, and verifying risk scores for individual agents and teams.
 
 All endpoints require authentication via Bearer token or API key. GET endpoints that retrieve a stored resource by ID are account-scoped — a valid token from a different account returns `404` rather than `403` to avoid leaking resource existence. See [Authorization model](/concepts/risk-assessment#authorization-model) for the full specification.
 
@@ -17,7 +17,9 @@ All endpoints require authentication via Bearer token or API key. GET endpoints 
 POST /v1/risk/assess
 ```
 
-Compute a context-aware risk assessment for an individual agent.
+[Full reference ↗](/api-reference/endpoint/post-risk-assess)
+
+Compute a context-aware risk assessment for an individual agent. Requires the `risk_assessment` feature flag on the caller's plan.
 
 **Request body:**
 
@@ -26,9 +28,10 @@ Compute a context-aware risk assessment for an individual agent.
 | `agent_id` | string | Yes | The agent to assess |
 | `context.action_type` | string | Yes | One of: `financial_transaction`, `data_access`, `task_delegation`, `tool_invocation`, `autonomous_operation`, `multi_agent_coordination` |
 | `context.risk_tolerance` | string | No | `conservative`, `moderate` (default), or `aggressive` |
-| `context.amount` | number | No | Transaction amount (for financial context) |
+| `context.amount` | number | No | Transaction amount -- also scales the composite score for larger amounts (see [Amount scaling](/concepts/risk-assessment#amount-scaling)) |
 | `context.counterparty_id` | string | No | Counterparty agent or entity |
 | `context.use_case` | string | No | Free-text description of the use case |
+| `source` | string | No | `api` (default) or `playground` |
 
 **Example request:**
 
@@ -44,7 +47,7 @@ Compute a context-aware risk assessment for an individual agent.
 }
 ```
 
-**Response:** A `RiskAssessment` object with `risk_score`, `risk_level`, `recommendation`, `confidence`, `contributing_factors`, `suggested_thresholds`, `explanation`, `proof_id`, `proof_status` (`none` immediately after creation on the Free tier or when async proof dispatch does not complete; progresses to `pending` → `completed` or `failed` as the proof generates — see [proof lifecycle](/concepts/risk-assessment#proof-lifecycle-and-fail-open-behavior)), and `created_at`.
+**Response:** A `RiskAssessment` object with `risk_score`, `risk_level`, `recommendation`, `confidence`, `contributing_factors`, `suggested_thresholds`, `explanation`, `proof_id`, `proof_status` (`none`, `pending`, `proving`, `verified`, or `failed` -- see [proof lifecycle](/concepts/risk-assessment#proof-lifecycle-and-fail-open-behavior)), and `created_at`. Results are cached 5 minutes per `{agent_id, action_type, risk_tolerance, amount}` tuple.
 
 ---
 
@@ -54,17 +57,20 @@ Compute a context-aware risk assessment for an individual agent.
 POST /v1/risk/assess/team
 ```
 
+[Full reference ↗](/api-reference/endpoint/post-risk-assess-team)
+
 Compute a risk assessment for a team of agents, including three-pillar analysis, Shapley attribution, outlier detection, and synergy classification.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `agent_ids` | string[] | Yes | Array of agent IDs (minimum 2) |
+| `agent_ids` | string[] | One of `agent_ids` / `team_id` | Explicit agent roster |
+| `team_id` | string | One of `agent_ids` / `team_id` | Resolve the roster from this team instead |
 | `context.action_type` | string | Yes | Action type for the team operation |
 | `context.risk_tolerance` | string | No | Risk tolerance level |
 | `context.team_task` | string | No | Description of the team's task |
-| `context.coordination_mode` | string | No | `parallel`, `sequential`, `hierarchical`, or `consensus` |
+| `context.coordination_mode` | string | No | Free-text coordination mode (e.g. `sequential`) |
 
 **Example request:**
 
@@ -87,71 +93,109 @@ Compute a risk assessment for a team of agents, including three-pillar analysis,
 ### Get assessment
 
 ```
-GET /v1/risk/assessments/:assessment_id
+GET /v1/risk/assessments/{assessment_id}
 ```
 
-Retrieve a previously computed individual risk assessment by ID. Returns `404` for IDs that belong to a different account.
+[Full reference ↗](/api-reference/endpoint/get-risk-assessments-assessment-id)
+
+Retrieve a previously computed individual risk assessment by ID (`ra-...`). Requires an active `risk_assessment` entitlement (`403 feature_gated` otherwise); an assessment owned by another account, or absent, returns `404`.
 
 ---
 
 ### Get team assessment
 
 ```
-GET /v1/risk/team-assessments/:assessment_id
+GET /v1/risk/team-assessments/{assessment_id}
 ```
 
-Retrieve a previously computed team risk assessment by ID. Returns `404` for IDs that belong to a different account — see [Authorization model](/concepts/risk-assessment#authorization-model).
+[Full reference ↗](/api-reference/endpoint/get-risk-team-assessments-assessment-id)
+
+Retrieve a previously computed team risk assessment by ID (`tra-...`). Requires an active `team_risk_assessment` entitlement; a team assessment owned by another account, or absent, returns `404` -- see [Authorization model](/concepts/risk-assessment#authorization-model).
 
 ---
 
 ### Get risk history
 
 ```
-GET /v1/risk/history/:agent_id
+GET /v1/risk/history/{agent_id}
 ```
 
-Retrieve risk assessment history for an agent, ordered by most recent first.
+[Full reference ↗](/api-reference/endpoint/get-risk-history-agent-id)
+
+Retrieve risk assessment history for an agent, most recent first, scoped to the caller's account.
 
 **Query parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `limit` | number | 50 | Maximum number of assessments to return |
+| `limit` | number | 20 | 1--100 |
+| `offset` | number | 0 | Number of assessments to skip |
+| `include_playground` | boolean | false | Include playground/test-run assessments alongside production ones |
+
+**Response:** `{ assessments: RiskAssessment[], total, limit, offset }`
+
+---
+
+### Get team risk history
+
+```
+GET /v1/risk/team-history/{team_id}
+```
+
+[Full reference ↗](/api-reference/endpoint/get-risk-team-history-team-id)
+
+Retrieve team risk assessment history for a team, most recent first, scoped to the caller's account. Same `limit` (default 20) / `offset` query parameters as individual history.
+
+**Response:** `{ team_id, assessments: TeamRiskAssessment[], total, limit, offset }`
 
 ---
 
 ### Get proof
 
 ```
-GET /v1/risk/proofs/:proof_id
+GET /v1/risk/proofs/{proof_id}
 ```
 
-Retrieve the ZK proof status and receipt for a risk assessment. Returns `404` for IDs that belong to a different account.
+[Full reference ↗](/api-reference/endpoint/get-risk-proofs-proof-id)
 
-**Response includes:**
+Retrieve a ZK proof record (`rpf-...`) by id, generated fire-and-forget after `/risk/assess` or `/risk/assess/team`. Requires the entitlement for the assessment type the proof verifies; a proof owned by another account, or absent, returns `404`.
+
+**Response fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `proof_id` | string | Proof identifier |
-| `status` | string | `pending`, `proving`, `completed`, or `failed` — tracks computation progress inside the proving cluster; see [proof lifecycle](/concepts/risk-assessment#proof-lifecycle-and-fail-open-behavior) for the assessment-level `proof_status` |
-| `assessment_id` | string | The linked risk assessment |
-| `receipt` | object | The STARK proof receipt (when completed) |
-| `created_at` | string | When the proof was requested |
-| `verified_at` | string | When the proof completed (if applicable) |
+| `proof_type` | string | `individual_risk` or `team_coherence` |
+| `assessment_id` | string | The linked risk (or team risk) assessment |
+| `status` | string | `pending`, `proving`, `verified`, or `failed` |
+| `image_id` | string \| null | Proving-guest image identifier, once known |
+| `verified` | boolean \| null | Whether the proof independently verified |
+| `proving_duration_ms` | number \| null | How long proving took, once complete |
+| `retry_count` | number | Number of proving retries so far |
+| `error_message` | string \| null | Present when `status` is `failed` |
+| `created_at` / `updated_at` | string | Timestamps |
+
+---
 
 ## Feature gating
 
-Risk endpoints require the `risk_assessment` feature to be enabled on the caller's billing plan. Team risk requires the `team_risk_assessment` feature. ZK proofs require the `zk_proofs` feature.
-
-See [Pricing](/pricing/overview) for plan details.
+Individual assessment creation (`POST /v1/risk/assess`) requires the `risk_assessment` feature flag on the caller's plan (`402` if the plan lacks it). Reading a stored resource -- an assessment, a team assessment, history, or a proof -- additionally requires an **active** `risk_assessment` or `team_risk_assessment` entitlement depending on resource type; authenticated-but-not-entitled returns `403 feature_gated`. See [Pricing](/pricing/overview) for current μ-based rates and what's included.
 
 ## Error codes
 
 | Code | Meaning |
 |------|---------|
-| 401 | Missing or invalid authentication |
-| 403 | Feature not available on current plan |
-| 404 | Assessment or proof not found |
-| 422 | Invalid request body (missing required fields, invalid action type, etc.) |
+| 400 | Invalid request body (missing required fields, invalid action type, etc.) |
+| 401 | Missing or invalid authentication (anonymous or invalid token) |
+| 402 | Plan lacks the `risk_assessment` feature (on assessment creation) |
+| 403 | Authenticated but not entitled to read this resource type (`feature_gated`) |
+| 404 | Resource not found, or owned by a different account |
 | 429 | Rate limit exceeded |
+| 503 | The account/binding needed to scope this read could not be resolved |
 | 500 | Internal server error |
+
+## See also
+
+- [Risk Assessment Concepts](/concepts/risk-assessment) -- the scoring model and proof lifecycle
+- [Risk Engine Guide](/guides/risk-engine) -- SDK usage and gates
+- [Team Trust Rating](/concepts/team-reputation) -- team reputation built from team risk assessments

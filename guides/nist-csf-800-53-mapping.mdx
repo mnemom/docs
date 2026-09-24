@@ -21,7 +21,7 @@ Organizational context, risk management strategy, and policy — the preconditio
 
 | CSF category | Mnemom mechanism | 800-53 controls | Notes |
 |---|---|---|---|
-| **GV.OC** — Organizational Context | [Alignment Card](/concepts/alignment-cards) declares each agent's `principal`, autonomy envelope, and escalation triggers | PL-1 | The `principal` field identifies the accountable human or org; the autonomy envelope bounds what the agent may do |
+| **GV.OC** — Organizational Context | [Alignment Card](/concepts/alignment-cards) declares each agent's `principal`, autonomy bounds, and escalation triggers | PL-1 | The `principal` field identifies the accountable human or org; `autonomy` bounds what the agent may do |
 | **GV.RM** — Risk Management Strategy | [Trust posture](/concepts/trust-posture) and [risk assessment API](/api-reference/risk-overview) provide per-agent and per-team risk scores with evidence chains | RA-1, RA-3 | Trust posture aggregates alignment, protection, and reputation signals into a unified risk view |
 | **GV.PO** — Policy | [Policy DSL](/specifications/policy-dsl) and [CLPI policy engine](/concepts/clpi) enforce programmatic security policy on agent behavior; rules are version-controlled | PL-1, CM-6 | Policy rule changes are audited |
 | **GV.SC** — Supply Chain Risk | [AEGIS](/concepts/aegis) detects runtime behavior deviation consistent with a compromised dependency or substrate | SA-12 | AEGIS covers the runtime-behavior dimension; build-time package provenance is customer responsibility — see [supply-chain trust](/guides/supply-chain-trust) and the [SA-12 gap note](#sa-12--supply-chain-protection-build-time) |
@@ -50,12 +50,12 @@ Safeguards that manage cybersecurity risk — preventing or limiting the impact 
 | CSF category | Mnemom mechanism | 800-53 controls | Notes |
 |---|---|---|---|
 | **PR.AA** — Identity Management & Access Control | Three auth patterns: session cookie (AES-256-GCM, HttpOnly/Secure/SameSite=Lax), bearer JWT (JWKS-verified on every request), API key (SHA-256 hash stored — never plaintext) | IA-2, IA-5, AC-3 | The auth layer dual-resolves all three patterns into the same downstream principal |
-| **PR.AA** — Identity Management & Access Control | RBAC: Owner / Admin / Member roles enforced at the API layer via Supabase row-level security; org-scoped API keys inherit the creating role's permissions | AC-2, AC-3, AC-6 | Role-based access is the primary authorization surface |
+| **PR.AA** — Identity Management & Access Control | RBAC: Owner / Admin / Member roles enforced at the API layer via row-level authorization policy in Mnemom's managed database; org-scoped API keys inherit the creating role's permissions | AC-2, AC-3, AC-6 | Role-based access is the primary authorization surface |
 | **PR.AA** — Identity Management & Access Control | MFA (TOTP): `POST /v1/auth/mfa/enroll`, `POST /v1/auth/mfa/verify`; aal1 tokens never reach JavaScript | IA-2(1) | MFA step-up uses a short-lived `mnemom_mfa_pending` cookie between sign-in and verification |
 | **PR.AA** — Identity Management & Access Control | SSO (SAML/OIDC): `PUT /v1/orgs/{org_id}/sso`; SSO state is HMAC-signed to prevent CSRF | IA-8 | Federated identity for enterprise customers |
 | **PR.AA** — Identity Management & Access Control | API key rotation: `POST /v1/orgs/{org_id}/api-keys/{key_id}/rotate`; agent re-key: `POST /v1/agents/{agent_id}/rekey` — prior credential is invalidated, no key material is stored | IA-5(1) | Rotation is zero-downtime |
-| **PR.DS** — Data Security | TLS 1.2+ on all endpoints — Mnemom Gateway (Cloudflare Workers edge), Mnemom API (`api.mnemom.ai`), webhook delivery, cross-protocol communication | SC-8, SC-13 | Cloudflare terminates and re-encrypts; certificate management is automatic |
-| **PR.DS** — Data Security | Encryption at rest: Supabase Postgres with encryption at rest covering all persisted protocol artifacts (AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts) | SC-28 | No plaintext storage of any protocol artifact |
+| **PR.DS** — Data Security | TLS 1.2+ on all endpoints — Mnemom Gateway, Mnemom API (`api.mnemom.ai`), webhook delivery, cross-protocol communication | SC-8, SC-13 | TLS is terminated and re-encrypted at Mnemom's edge; certificate management is automatic |
+| **PR.DS** — Data Security | Encryption at rest: Mnemom's managed database encrypts all persisted protocol artifacts at rest (AP-Traces, Integrity Checkpoints, Alignment Cards, drift alerts) | SC-28 | No plaintext storage of any protocol artifact |
 | **PR.DS** — Data Security | Thinking block content is never written to any persistent storage — only its SHA-256 hash is retained in the Integrity Checkpoint | SI-12 | Protects agent reasoning privacy while preserving tamper evidence for audit |
 | **PR.DS** — Data Security | Back-door checkpoint (Safe House): outbound DLP screens for data exfiltration against declared `bounded_actions`; detects bulk-data requests and covert-channel patterns; also enforced independently by the Policy Engine | AC-4, SI-12 | `data_exfiltration` threat type; back-door checkpoint runs after agent turn, before response delivery |
 | **PR.PS** — Platform Security | Alignment Card `bounded_actions` and `forbidden_actions` enforce least-privilege action scopes per agent | AC-6, CM-6 | `bounded_actions` is the primary constraint surface; the Policy Engine enforces before any action reaches an external API |
@@ -88,15 +88,15 @@ Taking action regarding a detected cybersecurity incident.
 
 | CSF category | Mnemom mechanism | 800-53 controls | Notes |
 |---|---|---|---|
-| **RS.MA** — Incident Management | Four enforcement modes per agent: **Observe** (log only), **Nudge** (warn + log), **Enforce** (block + log), **Sovereign** (synchronous block, no async pass-through) | IR-4 | Mode set per agent via the protection card; Sovereign is the highest-assurance mode for regulated workloads |
+| **RS.MA** — Incident Management | Four Safe House modes per agent: **Off** (detectors do not run), **Observe** (detectors run, signals logged, no request-path action), **Nudge** (an advisory annotation is attached; the message proceeds), **Enforce** (detectors run synchronously; a match blocks the request) | IR-4 | Mode set per agent via the protection card |
 | **RS.MA** — Incident Management | Safe House quarantine: a blocked agent turn is held; operator can release, report, or delete via `/v1/safe-house/quarantine` | IR-4 | Quarantine preserves the full message and evaluation for forensic review |
 | **RS.MA** — Incident Management | Agent containment: pause, resume, kill, reactivate at the org level — `POST /v1/orgs/{org_id}/agents/{agent_id}/pause` and related endpoints | IR-4 | Kill is reversible via reactivate; the agent's audit trail and alignment card history are preserved |
 | **RS.AN** — Incident Analysis | Governance signal workflow: signals include evidence, severity, and affected alignment card fields; operators acknowledge, dismiss, or resolve via the signal API | IR-4, IR-5 | `/v1/governance/signals/{signal_id}/acknowledge` etc. |
 | **RS.AN** — Incident Analysis | AIP concern detail: each Integrity Checkpoint records concern category, severity, description, and a quoted evidence excerpt (max 200 characters) for human review; evidence redaction configurable | IR-4, AU-3 | Evidence excerpt is an intentional tradeoff between reasoning privacy and reviewability |
 | **RS.CO** — Incident Response Reporting | Webhook notifications: org webhooks and AIP webhooks deliver governance events, integrity verdicts, and threat signals to registered endpoints; HMAC-SHA256 authenticated | IR-6 | Replay-delivery, health, and event-replay endpoints available |
-| **RS.CO** — Incident Response Reporting | Responsible disclosure: 48-hour acknowledgment, 7-day fix/mitigation target for reported vulnerabilities via GitHub Security Advisories — not public issues | IR-6, IR-7 | See [SECURITY.md](https://github.com/mnemom/mnemom-platform/security) |
+| **RS.CO** — Incident Response Reporting | Responsible disclosure: acknowledgment within 3 business days, reproduction confirmed within 14 days, fix or mitigation within 90 days of acknowledgment | IR-6, IR-7 | See [trust.mnemom.ai](https://trust.mnemom.ai) for the full policy |
 | **RS.MI** — Incident Mitigation | Policy Engine rule enforcement blocks out-of-scope actions before they reach external APIs | IR-4, AC-3 | Primary mitigation for `privilege_escalation` and tool-misuse scenarios |
-| **RS.MI** — Incident Mitigation | Human escalation triggers: `autonomy_envelope.escalation_triggers` in the Alignment Card declare conditions requiring human review before action; enforced by the gateway | IR-4 | Escalation is policy-declared at card design time |
+| **RS.MI** — Incident Mitigation | Human escalation triggers: `autonomy.escalation_triggers` in the Alignment Card declare conditions requiring human review before action; enforced by the gateway | IR-4 | Escalation is policy-declared at card design time |
 
 ---
 
@@ -124,16 +124,16 @@ Reverse view: by control family, which Mnemom mechanisms apply. Coverage labels 
 | **AU** — Audit and Accountability | **Shipped** | AP-Traces (append-only, hash-chained), Integrity Checkpoints, Transparency Log (Merkle tree), Ed25519 verdict signatures, ZK proofs (SP1 STARK), on-chain Merkle anchoring, configurable retention (90+ days recommended), queryable trace API — audit chain is a core Mnemom design goal |
 | **CA** — Assessment, Authorization, and Monitoring | **Partial** | AIP continuous monitoring, AAP drift detection, AEGIS substrate fingerprinting, governance signals shipped. SOC 2 Type II readiness in progress — no Type II report currently available; independent formal assessment is an NDA artifact |
 | **CM** — Configuration Management | **Shipped** | Alignment Card as agent configuration baseline, posture versioning, card amendment history, Policy DSL version control |
-| **CP** — Contingency Planning | **Partial** | Trust recovery guide and agent restore/reactivate document recovery procedures. Database backups are Supabase-managed (vendor-side); no published customer-facing RTO/RPO for data recovery — see [CP-9 gap note](#cp-9--system-backup) |
+| **CP** — Contingency Planning | **Partial** | Trust recovery guide and agent restore/reactivate document recovery procedures. Database backups are managed by Mnemom's cloud infrastructure providers; no published customer-facing RTO/RPO for data recovery — see [CP-9 gap note](#cp-9--system-backup) |
 | **IA** — Identification and Authentication | **Shipped** | Session cookie (AES-256-GCM), bearer JWT (JWKS-verified), API key (SHA-256 hash stored), MFA (TOTP), SSO (SAML/OIDC), API key rotation, agent re-key |
 | **IR** — Incident Response | **Shipped** | Four enforcement modes, quarantine, agent containment, governance signal workflow, webhook notifications, responsible disclosure (48h ack / 7-day fix target) |
 | **MA** — Maintenance | **Partial** | API key rotation and agent re-keying shipped. Hardware maintenance not applicable (cloud SaaS) |
 | **MP** — Media Protection | **Gap** | Not applicable to a cloud SaaS deployment; Mnemom manages no physical media — see [gap note](#mp--media-protection) |
-| **PE** — Physical and Environmental Protection | **Gap** | Inherited from Cloudflare (gateway) and Supabase (database); Mnemom publishes no physical security attestations — see [gap note](#pe--physical-and-environmental-protection) |
-| **PL** — Planning | **Partial** | Alignment Card principal and autonomy envelope serve as per-agent planning artifacts; no enterprise security plan feature is shipped as a platform control |
+| **PE** — Physical and Environmental Protection | **Gap** | Inherited from Mnemom's cloud infrastructure providers; Mnemom publishes no physical security attestations of its own — see [gap note](#pe--physical-and-environmental-protection) |
+| **PL** — Planning | **Partial** | Alignment Card principal and autonomy bounds serve as per-agent planning artifacts; no enterprise security plan feature is shipped as a platform control |
 | **RA** — Risk Assessment | **Shipped** | Risk assessment API, fault-line analysis, AEGIS threat advisories, reputation scoring |
 | **SA** — System and Services Acquisition | **Partial** | AEGIS runtime behavior-deviation detection covers the runtime supply-chain dimension; build-time package provenance is customer responsibility — see [gap note](#sa-12--supply-chain-protection-build-time) |
-| **SC** — System and Communications Protection | **Shipped** | TLS 1.2+ on all endpoints, AES-256-GCM session tokens, HMAC-SHA256 webhook authentication, encryption at rest (Supabase Postgres) |
+| **SC** — System and Communications Protection | **Shipped** | TLS 1.2+ on all endpoints, AES-256-GCM session tokens, HMAC-SHA256 webhook authentication, encryption at rest in Mnemom's managed database |
 | **SI** — System and Information Integrity | **Shipped** | Safe House L1/L2/L3 detection (19 pattern families + LLM analysis + session model), AIP integrity checkpoints, thinking block content never persisted, back-door DLP, Managed Rules pattern library |
 
 ---
@@ -142,7 +142,7 @@ Reverse view: by control family, which Mnemom mechanisms apply. Coverage labels 
 
 ### PE — Physical and environmental protection
 
-Mnemom is a cloud-hosted SaaS. Physical and environmental controls are inherited from Cloudflare (gateway) and Supabase (database). Mnemom publishes no physical security attestations of its own. Refer to Cloudflare's and Supabase's SOC 2 reports for physical-layer coverage.
+Mnemom is a cloud-hosted SaaS. Physical and environmental controls are inherited from Mnemom's cloud infrastructure providers. Mnemom publishes no physical security attestations of its own. Refer to those providers' SOC 2 reports (available under NDA on request) for physical-layer coverage.
 
 ### CA-2, CA-8 — Security assessments and penetration testing
 
@@ -154,7 +154,7 @@ AEGIS covers the runtime-behavior dimension of supply chain risk: behavior devia
 
 ### CP-9 — System backup
 
-Database backups are managed by Supabase (Mnemom's database vendor). Mnemom does not publish customer-facing backup retention SLAs or RTO/RPO targets for data recovery. Availability SLOs — uptime, propagation latency, failover — are published at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos); these cover service availability, not data recovery.
+Database backups are managed by Mnemom's cloud infrastructure providers. Mnemom does not publish customer-facing backup retention SLAs or RTO/RPO targets for data recovery. Availability SLOs — uptime, propagation latency, failover — are published at [trust.mnemom.ai/slos](https://trust.mnemom.ai/slos); these cover service availability, not data recovery.
 
 ### AT-1, AT-2 — Awareness and training
 

@@ -11,8 +11,9 @@ This quickstart walks you through enabling Safe House on an existing agent via t
 
 ## Prerequisites
 
-- A Mnemom API token in `$MNEMOM_TOKEN`
+- A Mnemom API token in `$MNEMOM_TOKEN` (for the `/v1/protection/*` and `/v1/safe-house/*` API calls)
 - An agent ID in `$AGENT_ID` (e.g. `mnm-550e8400-e29b-41d4-a716-446655440000`)
+- Your provider API key in `$ANTHROPIC_API_KEY` (for the test messages sent through the gateway in Steps 2 and 5)
 
 ## Step 1 — Enable Safe House in observe mode
 
@@ -24,6 +25,7 @@ Surfaces are screening units, not a per-turn budget: the front door runs once pe
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d '{
     "card_version": "protection/2026-04-26",
     "agent_id": "'$AGENT_ID'",
@@ -48,7 +50,7 @@ curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   }'
 ```
 
-The full protection-card grammar is at [/specifications/protection-card-schema](/specifications/protection-card-schema); the canonical card the composer returns also includes `card_id`, `_composition`, and any platform / org defaults that flow into the agent's effective card.
+`Idempotency-Key` is required on every protection-card `PUT` — any client-generated string works, but a fresh one per distinct write (like `uuidgen` above) keeps retries safe without accidentally replaying a stale one. The full protection-card grammar is at [/specifications/protection-card-schema](/specifications/protection-card-schema); the canonical card the composer returns also includes `card_id`, `_composition`, and any platform / org defaults that flow into the agent's effective card.
 
 **CLI alternative.** Save the card as `protection.card.yaml` and publish with one command — no curl required:
 
@@ -81,15 +83,16 @@ mnemom protection publish protection.card.yaml
 
 ## Step 2 — Send a test threat message
 
-Send a BEC (business email compromise) style message through the gateway and check the response headers. This will not block anything in observe mode — but it will log a detection.
+Send a BEC (business email compromise) style message through the gateway and check the response headers. This will not block anything in observe mode — but it will log a detection. Route it through the [Gateway](/quickstart/gateway) exactly as you normally would — use the same `x-mnemom-agent` name this agent was registered under (or omit the header if it was created without one) so the request resolves to `$AGENT_ID`:
 
 ```bash
-curl -X POST https://gateway.mnemom.ai/v1/messages \
-  -H "Authorization: Bearer $MNEMOM_TOKEN" \
-  -H "X-Agent-Id: $AGENT_ID" \
-  -H "Content-Type: application/json" \
+curl -X POST https://gateway.mnemom.ai/anthropic/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "x-mnemom-agent: my-agent" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 256,
     "messages": [
       {
@@ -116,39 +119,35 @@ content-type: application/json
 In observe mode, `X-Mnemom-Verdict.front` reports `observed` so you can track what *would* have happened in enforce mode — the message still reaches the agent regardless. The `X-Mnemom-Advisory` header carries the detector findings as a JSON array; see [`/api-reference/headers#x-mnemom-advisory`](/api-reference/headers#x-mnemom-advisory--operator-actionable-advisory-entries).
 </Note>
 
-## Step 3 — Review detections in the observatory
+## Step 3 — Review detections in the dashboard
 
-Open the Observatory to see Safe House detections logged from your test:
+Open your Mnemom dashboard to see Safe House detections logged from your test — select the agent, then its **Security** tab. The test message should appear within a few seconds of the request completing.
 
-1. Go to [mnemom.ai/observatory](https://mnemom.ai/observatory)
-2. Select your agent from the sidebar
-3. Click **Security** in the top nav
-
-You will see a **Safe House Events** timeline with each detection, its threat category, L1/L2 scores, and verdict. The test message should appear within a few seconds of the request completing.
-
-You can also pull detection stats directly via the API. Safe House stats are **org-scoped** (one number rolled up across every agent in the org); filter by `agent_id` to scope to a specific agent:
+You can also pull aggregate detection stats directly via the API. Stats are **org-scoped** — one rollup across every agent in the org, over a trailing window in days (there is no per-agent filter):
 
 ```bash
-curl "https://api.mnemom.ai/v1/safe-house/stats?agent_id=$AGENT_ID&period=24h" \
+curl "https://api.mnemom.ai/v1/safe-house/stats?days=1" \
   -H "Authorization: Bearer $MNEMOM_TOKEN"
 ```
 
 ```json
 {
-  "period": "24h",
-  "total_messages": 47,
-  "detections": {
+  "verdicts": {
     "pass": 44,
     "warn": 2,
     "quarantine": 1,
     "block": 0
   },
-  "top_categories": [
-    { "category": "bec_fraud", "count": 2 },
-    { "category": "prompt_injection", "count": 1 }
-  ]
+  "threat_types": [
+    { "threat_type": "bec_fraud", "count": 2 },
+    { "threat_type": "prompt_injection", "count": 1 }
+  ],
+  "period_days": 1,
+  "total_messages": 47
 }
 ```
+
+`days` defaults to 7 and caps at 90.
 
 ## Step 4 — Switch to enforce mode
 
@@ -158,6 +157,7 @@ Once you are comfortable with what Safe House is catching, switch to enforce mod
 curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d '{
     "card_version": "protection/2026-04-26",
     "agent_id": "'$AGENT_ID'",
@@ -183,7 +183,7 @@ curl -X PUT https://api.mnemom.ai/v1/protection/agent/$AGENT_ID \
 ```
 
 <Warning>
-Enforce mode returns **HTTP 422** for quarantined messages and **HTTP 403** for blocked messages per the [Errors reference](/api-reference/errors). The 4-mode enum has **no `simulate`** — start with `observe` (no blocking) and progress through `nudge` (advisory injection, no blocking) before enabling `enforce`. See [Safe House concept](/concepts/safe-house) for the full mode semantics.
+Enforcing a quarantine or block does not fail the HTTP request — the gateway still returns a `2xx`. Instead the message content itself is replaced before it reaches the model, and `X-Mnemom-Verdict` reports `front=enforced` with a `safe_house.quarantine` advisory carrying the quarantine id. See [Safe House interventions are not error responses](/api-reference/errors#safe-house-interventions-are-not-error-responses) for the full status-code table. The 4-mode enum has **no `simulate`** — start with `observe` (no blocking) and progress through `nudge` (advisory injection, no blocking) before enabling `enforce`. See [Safe House concept](/concepts/safe-house) for the full mode semantics.
 </Warning>
 
 ## Step 5 — See a message get quarantined
@@ -191,12 +191,13 @@ Enforce mode returns **HTTP 422** for quarantined messages and **HTTP 403** for 
 Send the same BEC message again, this time in enforce mode:
 
 ```bash
-curl -X POST https://gateway.mnemom.ai/v1/messages \
-  -H "Authorization: Bearer $MNEMOM_TOKEN" \
-  -H "X-Agent-Id: $AGENT_ID" \
-  -H "Content-Type: application/json" \
+curl -X POST https://gateway.mnemom.ai/anthropic/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "x-mnemom-agent: my-agent" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 256,
     "messages": [
       {
@@ -208,33 +209,22 @@ curl -X POST https://gateway.mnemom.ai/v1/messages \
   -i
 ```
 
-This time the response is a 422 with a quarantine ID (the [canonical errors contract](/api-reference/errors#422--safe-house-quarantine)):
+The status is still `200`, but the verdict and advisory headers show the message was quarantined before the model ever saw it:
 
 ```
-HTTP/2 422
+HTTP/2 200
 X-Mnemom-Request-Id: 8f446ed6-ca87-4c1d-aa90-e2bc6e9ef580
 X-Mnemom-Verdict: front=enforced; autonomy=pass; integrity=pass; back=pass
+X-Mnemom-Advisory: [{"source":"safe_house.quarantine","text":"Request quarantined: qr_01HXYZ9ABCDEF123456789","severity":"critical","id":"qr_01HXYZ9ABCDEF123456789"}]
 content-type: application/json
-
-{
-  "error": {
-    "code": "safe_house_quarantined",
-    "message": "Inbound message quarantined for review",
-    "details": {
-      "quarantine_id": "qr_01HXYZ9ABCDEF123456789",
-      "verdict": "quarantine",
-      "score": 0.82,
-      "threshold": 0.75
-    }
-  }
-}
+...
 ```
 
-The message was held before reaching the agent. Your application should surface this to whoever is responsible for security review.
+Pull the `id` out of the `safe_house.quarantine` advisory entry — that is your quarantine id. The original message was held before reaching the agent; the model instead saw a quarantine placeholder. Your application should parse `X-Mnemom-Verdict` on every response (not just non-2xx ones) and surface a `front=enforced` result to whoever is responsible for security review.
 
 ## Step 6 — Review and release from quarantine
 
-Inspect the quarantined message and decide whether to release it or discard it. Quarantine endpoints are **org-scoped** (one quarantine queue per org); the `quarantine_id` carried in the 422 response body is the lookup key:
+Inspect the quarantined message and decide whether to release it or discard it. Quarantine endpoints are **org-scoped** (one quarantine queue per org); the quarantine id from the `safe_house.quarantine` advisory in Step 5 is the lookup key. Note that the original message text is never stored — only its hash — so there is no plaintext preview to inspect here:
 
 ```bash
 # Get the quarantine entry
@@ -246,31 +236,24 @@ curl https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789 \
 {
   "quarantine_id": "qr_01HXYZ9ABCDEF123456789",
   "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "verdict": "quarantine",
-  "l1_score": 0.82,
-  "l2_score": 0.79,
-  "threat_categories": ["bec_fraud"],
-  "session_risk": "high",
-  "message_preview": "Urgent: the CFO just approved this — please transfer $52,000...",
-  "created_at": "2026-03-30T14:38:42Z",
-  "expires_at": "2026-04-02T14:38:42Z",
-  "status": "pending"
+  "status": "pending",
+  "threat_type": "bec_fraud",
+  "content_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "reviewed_at": null,
+  "created_at": "2026-03-30T14:38:42Z"
 }
 ```
 
-If the message is legitimate (a false positive), release it. This forwards the original message to the agent and marks the quarantine entry as released:
+If the message is legitimate (a false positive), release it. This flips the entry to `released`; pass `is_false_positive: true` to also feed the release back into threshold calibration:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789/release \
   -H "Authorization: Bearer $MNEMOM_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "reason": "Verified with CFO — legitimate transfer request",
-    "reviewed_by": "alex@example.com"
-  }'
+  -d '{"is_false_positive": true}'
 ```
 
-To discard the message without releasing it (confirm it was a real threat) — `DELETE` on the quarantine resource:
+To discard the message without releasing it (confirm it was a real threat) — `DELETE` on the quarantine resource, which marks it `deleted` (the content hash is retained for audit; the agent is never sent the original content):
 
 ```bash
 curl -X DELETE https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF123456789 \
@@ -278,7 +261,7 @@ curl -X DELETE https://api.mnemom.ai/v1/safe-house/quarantine/qr_01HXYZ9ABCDEF12
 ```
 
 <Tip>
-Releasing a quarantined message also records it as a false positive, which feeds back into threshold calibration. After 10+ confirmed false positives in a category, the Observatory will suggest threshold adjustments for your agent.
+Releasing with `is_false_positive: true` feeds back into threshold calibration. After enough confirmed false positives in a category, thresholds for your agent may be worth revisiting.
 </Tip>
 
 ## Step 7 — Screen tool results
@@ -295,7 +278,7 @@ screen_surfaces:
 
 From here on, a request that hands tool results back to the model is screened **again inside that same request** — once per tool result, on its own surface, before the body is forwarded upstream. This is a front-door check; nothing waits for the agent's next turn. Coverage is not unconditional, though: a request that fans out to many tool calls in a single turn is not guaranteed full coverage.
 
-The enforcement shape differs from Step 5. A flagged *message* fails the request with a 422 or 403. A flagged *tool result* does not fail the request — it is removed from the body:
+A flagged tool result works the same way a flagged incoming message did in Step 5 — the request does not fail, the flagged content is removed from the body before the model sees it, and the verdict header reports it:
 
 | Per-tool verdict | What you see |
 |---|---|
@@ -324,7 +307,7 @@ Do not read a 200 as "the front door did nothing this turn." Parse `X-Mnemom-Ver
   <Card title="Enable outbound DLP" icon="arrow-right-from-bracket" href="/concepts/safe-house#bidirectional-screening">
     Scan agent responses for PII and secrets before they are returned to callers.
   </Card>
-  <Card title="Review the Observatory" icon="magnifying-glass" href="https://mnemom.ai/observatory">
+  <Card title="Review your dashboard" icon="magnifying-glass" href="https://mnemom.ai/dashboard">
     Security overview, session risk trends, and per-category detection breakdowns for all your agents.
   </Card>
 </CardGroup>

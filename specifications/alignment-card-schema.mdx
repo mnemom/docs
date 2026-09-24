@@ -12,11 +12,8 @@ The AAP protocol-level card (the 1.0 handshake card, stable for external interop
 ## Top-level structure
 
 ```yaml
-card_version: unified/2026-04-26      # required; format: /^unified\/\d{4}-\d{2}-\d{2}$/
-card_id: ac-<uuid>                    # required; stable ID for this card document (preserved through compose)
+card_version: unified/2026-04-26      # required; non-empty string (see §Versioning — not a fixed enum)
 agent_id: mnm-<uuid>                  # required; the agent this card belongs to
-issued_at: 2026-04-26T12:00:00Z       # required; ISO 8601 UTC
-expires_at: 2026-10-26T12:00:00Z      # optional; ISO 8601 UTC; null = no expiry
 
 # Two independent top-level master switches:
 autonomy_mode: enforce                 # required; off | observe | nudge | enforce
@@ -26,7 +23,7 @@ integrity_mode: enforce                # required; off | observe | nudge | enfor
                                        # gates the values/conscience pipeline (gateway AIP Haiku analysis
                                        # + observer drift detection + coherence scoring)
 
-principal: { ... }                     # optional; see §principal
+principal: { ... }                     # required; see §principal
 values: { ... }                        # required; see §values
 conscience: { ... }                    # optional; see §conscience
 autonomy: { ... }                      # required; see §autonomy
@@ -34,10 +31,17 @@ capabilities: { ... }                  # optional; see §capabilities
 enforcement: { ... }                   # optional; see §enforcement
 audit: { ... }                         # required; see §audit
 extensions: { ... }                    # optional; §extensions
+expires_at: 2026-10-26T12:00:00Z       # optional; ISO 8601 UTC; null = no expiry
 
-# System-managed — present on canonical cards, absent on raw agent-scope cards.
-_composition: { ... }                  # see §composition-metadata
+# Server-assigned response fields — do not send on PUT:
+card_id: ac-<uuid>                     # server-assigned
+issued_at: 2026-04-26T12:00:00Z        # response-only
+content_hash: sha256:<hex>             # response-only; also the ETag value
+version: 4                             # response-only; monotonic card version
+_composition: { ... }                  # response-only, and only when `?include_composition=true`; see §composition-metadata
 ```
+
+`PUT /v1/alignment/agent/{agent_id}` accepts `card_version`, `agent_id` (overwritten to match the URL), `autonomy_mode`, `integrity_mode`, `principal`, `values`, `conscience`, `autonomy`, `capabilities`, `enforcement`, `audit`, `extensions`, and `expires_at`. `card_id`, `issued_at`, `content_hash`, `version`, and `_composition` are server-assigned response fields — do not send them on a PUT.
 
 ### Master switches
 
@@ -50,9 +54,9 @@ The four-mode enum `off | observe | nudge | enforce` is shared with the [Protect
 
 Customers can control the two halves independently — e.g., "enforce conscience commitments at runtime, only observe action policy" or "off action-policing for cost, but enforce drift detection".
 
-## §principal
+## principal
 
-Declares who the agent serves and the nature of that relationship.
+Required. Declares who the agent serves and the nature of that relationship.
 
 ```yaml
 principal:
@@ -71,7 +75,7 @@ principal:
 
 *`identifier` is required when `type != unspecified`.
 
-## §values
+## values
 
 What the agent prioritizes. Core input to the [v2 coherence scorer](/concepts/fleet-coherence) and to [fault-line analysis](/guides/fault-line-analysis).
 
@@ -80,7 +84,10 @@ values:
   declared:
     - transparency
     - harm_prevention
-    - rollback_safety
+    # or a parameterized form over a catalog-v1 id:
+    - id: accuracy
+      domain: financial
+      severity_on_violation: critical
   definitions:
     transparency:
       description: "Agent decisions visible and auditable in traces"
@@ -96,17 +103,15 @@ values:
 
 | Field | Type | Required | Composition |
 |-------|------|----------|-------------|
-| `declared` | string[] | Yes | **Union** across scopes |
+| `declared` | array, ≥1 item; each entry is a catalog-v1 id string OR `{id, ...params}` (params: `intensity`, `domain`, `severity_on_violation`, `scope`, or org-defined) | Yes | **Union** across scopes (cascade folds parameters on id conflicts; bare string wins only when the merged entry carries zero parameters) |
 | `definitions.<name>.description` | string | No | Agent wins |
-| `definitions.<name>.priority` | number (0–1) | No | Agent wins |
+| `definitions.<name>.priority` | number | No | Agent wins |
 | `conflicts_with` | string[] | No | **Union** |
-| `hierarchy` | enum | No | Agent wins; platform default = `lexicographic` |
+| `hierarchy` | enum | No | Agent wins |
 
 **Validation:** every `definitions` key must be present in `declared`.
 
-**Composition note:** `bounded_actions` is composed as **union** across Platform → Org → Agent. (An earlier draft of this spec said "Agent-scoped" — that was incorrect; the unified card was always intended to let platform/org compose action sets, e.g. an org-wide `request_legal_review` action.)
-
-## §conscience
+## conscience
 
 Inviolable or near-inviolable commitments that constrain the agent's behavior. Structured for [Safe House](/concepts/safe-house) + [drift detection](/concepts/drift-detection) integration.
 
@@ -134,9 +139,9 @@ conscience:
 
 **Validation:** `BOUNDARY` entries with `severity: advisory` are rejected.
 
-## §autonomy
+## autonomy
 
-What the agent may do independently. Maps directly onto the AAP 1.0 `autonomy_envelope` for protocol-level verification — the unified shape renames it but keeps the semantics.
+What the agent may do independently. Maps directly onto the legacy AAP `autonomy_envelope` for protocol-level verification — the unified shape (AAP SDK 2.0.0+) renames it to `autonomy` but keeps the semantics.
 
 ```yaml
 autonomy:
@@ -172,7 +177,7 @@ autonomy:
 
 **Validation:** `bounded_actions` and `forbidden_actions` must be disjoint (no action in both).
 
-## §capabilities
+## capabilities
 
 Tool-use capabilities, keyed by capability name. Each entry maps to a glob pattern over MCP/A2A tool names or an explicit tool allowlist.
 
@@ -181,6 +186,7 @@ capabilities:
   query_database:
     description: "Read from the operational database"
     tools: ["mcp:postgres/*", "mcp:readonly-query"]
+    required_actions: ["query_database"]  # binds this capability to autonomy.bounded_actions entries
     severity_on_unmapped: medium    # "low" | "medium" | "high" | "critical"
   external_http:
     tools: ["mcp:fetch"]
@@ -192,12 +198,13 @@ capabilities:
 |-------|------|----------|-------------|
 | `<name>.description` | string | No | Agent wins |
 | `<name>.tools` | string[] (glob patterns) | Yes | **Union** within capability |
+| `<name>.required_actions` | string[] | No | Binds this capability to `autonomy.bounded_actions` entries; **union** within capability. `card_actions` is rejected — that name is policy-engine's internal binding, not a card field |
 | `<name>.allowed_domains` | string[] | No | **Platform → agent intersection** (compliance ceiling, mirrors Protection Card `trusted_sources`) |
 | `<name>.severity_on_unmapped` | enum | No | Strictest wins per name; default `medium` |
 
-Capabilities are consumed by `@mnemom/policy-engine`'s `evaluatePolicy({ card, tools })` to produce per-request policy decisions.
+Capabilities are consumed by `@mnemom/policy-engine`'s `evaluatePolicy({ context, card, tools })` to produce per-request policy decisions.
 
-## §enforcement
+## enforcement
 
 Policy-level knobs that affect how `capabilities` are enforced at runtime. The master switch lives at the top level (`autonomy_mode`); this section carries the fine-grained tool-use policy.
 
@@ -219,13 +226,13 @@ enforcement:
 | `forbidden_tools[].pattern` | string | Yes (per entry) | **Deny-overrides union** (with exemption removal) |
 | `forbidden_tools[].reason` | string | Yes (per entry) | — |
 | `forbidden_tools[].severity` | enum | Yes (per entry) | — |
-| `grace_period_hours` | number | No (default `24`) | Min across scopes |
+| `grace_period_hours` | number | No | **Min across scopes** (shorter grace = stricter); omitted from the composed card when no scope sets it, in which case the gateway falls back to 24h |
 
 <Warning>
-**`grace_period_hours` has a security trade-off.** The default 24h means brand-new tools get a one-day pass on enforce mode while operators amend the card. Under adversarial tool introduction (prompt injection, untrusted MCP servers, user-supplied tool definitions) that's a 24-hour exposure window. Set `grace_period_hours: 0` to make enforce strict from the moment a card is published. See [Enforcement § Grace period](/gateway/enforcement#grace-period-read-this-before-enabling-enforce) and [Policy Engine § Grace period](/concepts/policy-engine#grace-period).
+**`grace_period_hours` has a security trade-off.** The 24h fallback (when no scope sets a value) means brand-new tools get a one-day pass on enforce mode while operators amend the card. Under adversarial tool introduction (prompt injection, untrusted MCP servers, user-supplied tool definitions) that's a 24-hour exposure window. Set `grace_period_hours: 0` to make enforce strict from the moment a card is published. See [Enforcement § Grace period](/gateway/enforcement#grace-period-read-this-before-enabling-enforce) and [Policy Engine § Grace period](/concepts/policy-engine#grace-period).
 </Warning>
 
-## §audit
+## audit
 
 Commitments around trace format, retention, tamper evidence. These are **platform-scoped** — agents and orgs cannot weaken the audit floor.
 
@@ -240,50 +247,58 @@ audit:
 
 | Field | Type | Required | Composition |
 |-------|------|----------|-------------|
-| `trace_format` | string | Yes | **Platform-scoped** |
-| `retention_days` | number | Yes | **Max across scopes** (longest retention wins) |
+| `trace_format` | string | No | **Platform-scoped** — org/agent values are accepted but ignored on compose |
+| `retention_days` | number (≥ 0) | Yes | **Max across scopes** — the one field a lower scope may *strengthen* (propose longer retention) |
 | `queryable` | boolean | Yes | **Platform-scoped** |
-| `query_endpoint` | string (URL) | Yes | **Platform-scoped** |
+| `query_endpoint` | string (URL) | Cond.* | **Platform-scoped**; the composer synthesizes `{api_base}/v1/agents/{agent_id}/traces` if the platform sets `queryable: true` without an explicit endpoint |
 | `tamper_evidence` | enum | No | **Platform-scoped** |
 
-**Validation:** `audit.query_endpoint` is a composer-enforced invariant. The validator rejects cards without it; the composer ensures it's always present on canonical output.
+*`query_endpoint` is required when `queryable` is `true`.
 
-## §extensions
+**Validation:** `audit.query_endpoint` is required whenever `audit.queryable` is `true`; the composer guarantees the invariant holds on canonical output.
 
-Protocol-specific or user-defined additions. Free-form `Record<string, unknown>`. Mnemom reserves the `clpi.*` and `mnemom.*` namespaces.
+An `audit.storage` field appears in some historical card examples but is not read by the composer or any downstream consumer — do not rely on it.
+
+## extensions
+
+Protocol-specific or user-defined additions. Free-form `Record<string, unknown>`. Mnemom reads `extensions.clpi.role` (a free-form role label) for [fault-line](/guides/fault-line-analysis) complementary/conflicting classification across a fleet's agents; any other key is passed through unread.
 
 ```yaml
 extensions:
   clpi:
     role: remediator
-  mnemom:
-    showcase_color: green
-  a2a:
-    card_url: https://patch.example.com/a2a-card.json
 ```
 
-Extensions are agent-scoped and not composed across scopes by default. Callers that need scope-composed extensions must opt in via `_composition.extensions_composition_mode: merge`.
+Extensions are agent-scoped: the composer copies `agentCard.extensions` verbatim onto the canonical card. Platform/org/team scopes do not contribute to or merge with agent extensions.
 
-## §_composition (canonical-only)
+## _composition (canonical-only)
 
-Present on the canonical card, absent on raw agent-scope cards. Records the provenance of every composed field.
+Only returned from `GET`/`preview-compose` when the caller passes `?include_composition=true`; absent otherwise and absent on raw agent-scope cards. Records the provenance of every composed field.
 
 ```yaml
 _composition:
+  canonical_id: cc-88aa0011
   composed_at: 2026-04-17T18:23:41Z
   scopes_applied:
-    - platform
-    - "org:acme"
-    - "agent:mnm-patch-001"
-  versions:
-    platform: 3
-    "org:acme": 17
-    "agent:mnm-patch-001": 4
+    - scope: platform
+      version: 1
+    - scope: "org:acme"
+    - scope: "agent:mnm-patch-001"
+      card_id: ac-f47ac10b-58cc-4372-a567-0e02b2c3d479
   exemptions_applied:
     - exm-aabbcc     # exemption IDs honored during this composition
   source_card_id: ac-f47ac10b-58cc-4372-a567-0e02b2c3d479
-  canonical_id: can-cd-88aa0011
+  source_policy_id: pol-1a2b3c
 ```
+
+| Field | Type |
+|---|---|
+| `canonical_id` | string |
+| `composed_at` | string (ISO 8601 UTC) |
+| `scopes_applied[].scope` | string — `platform`, `org:<id>`, `team:<id>`, or `agent:<id>`, in cascade order |
+| `scopes_applied[].version` / `.template_version` / `.card_id` | optional, present when that scope contributed one |
+| `exemptions_applied` | string[] — exemption IDs honored during this composition |
+| `source_card_id` / `source_policy_id` | optional string |
 
 `_composition` is read-only on the wire. Mutating it via API is a 400.
 
@@ -293,24 +308,16 @@ All `yaml.load()` calls in the Mnemom stack use `{ schema: yaml.CORE_SCHEMA }` �
 
 ## Body-size limits
 
-- Full alignment card payload: **128 KB** max (Content-Length + rawBody double-check).
-- `values.declared`: recommended under 200 values per scope for coherence-scoring performance.
-
-These limits are enforced at the API boundary. `413 Payload Too Large` for oversize bodies; no grace period. If a legitimate card is getting 413'd, file an issue — the limits are currently conservative and will relax with production data.
+Full alignment card payload: **128 KB** max, enforced at the API boundary from both `Content-Length` and the actual body size. Oversize bodies get `413 Payload Too Large`.
 
 ## Versioning
 
-`card_version` is a date-anchored schema identifier. Accepted values as of 2026-04-17:
-
-- `unified/2026-04-15` — current. All canonical cards emit this version.
-- (legacy) — the legacy AAP-shape card is no longer accepted at the alignment-card endpoint. Convert via the migration script before publishing.
-
-A version bump is an additive + deprecation-by-date convention; breaking changes are negotiated via the same `X-Mnemom-Version` request-header mechanism used elsewhere in the API.
+`card_version` is a required, non-empty string. The composer stamps every canonical card with `unified/<YYYY-MM-DD>` using the composition date — treat the prefix (`unified/`) as the stable signal, not the date suffix, which changes on every recompose. Breaking changes are negotiated via the `X-Mnemom-Version: YYYY-MM-DD` request header used elsewhere in the API.
 
 ## See also
 
 - [Agent Cards](/concepts/agent-cards) — the two-card product story
 - [Card Composition](/concepts/card-composition) — scope composition rules + exemptions
 - [Protection Card Schema](/specifications/protection-card-schema) — companion normative spec
-- [Alignment Card (AAP 1.0 surface)](/concepts/alignment-cards) — the protocol-level card
+- [Alignment Card (AAP protocol surface)](/concepts/alignment-cards) — the protocol-level card
 - [Policy Engine](/concepts/policy-engine) — how `capabilities` + `enforcement` become runtime policy

@@ -17,7 +17,7 @@ Pasting a URL in chat already produces a rich human preview (the OG image). For 
 
 ## How discovery works
 
-Every prerendered URL on a compliant site exposes a sibling preview manifest at `<url>.preview.json` (root: `/index.preview.json`). The HTML page advertises it via `<link rel="alternate">` in `<head>`. Crawlers and humans ignore the unknown MIME; aware agents follow it.
+Every prerendered URL on a compliant site exposes a sibling preview manifest, advertised via `<link rel="alternate">` in `<head>`. Crawlers and humans ignore the unknown MIME; aware agents follow the link — they do not need to construct the sibling path themselves, but the general convention is: a URL ending in `/` gets an `index.preview.json` appended (`https://example.com/methodology/` → `https://example.com/methodology/index.preview.json`); a URL not ending in `/` gets a `.preview.json` suffix instead (`https://example.com/methodology` → `https://example.com/methodology.preview.json`). The site root follows the trailing-slash rule (`/` → `/index.preview.json`).
 
 ```html
 <link rel="alternate"
@@ -27,7 +27,7 @@ Every prerendered URL on a compliant site exposes a sibling preview manifest at 
 
 ### MIME type
 
-```
+```text
 application/vnd.agent-preview+json
 ```
 
@@ -142,7 +142,7 @@ Future schema changes go to v2 with a new MIME (`application/vnd.agent-preview+j
 
 If you publish marketing or content URLs that agents might encounter:
 
-1. **Generate a `<url>.preview.json` sibling at build time** for every public URL. Walk your prerendered HTML, extract title / description / canonical / og:image, classify the type, write the manifest. (For a reference implementation in TypeScript/Node, see Mnemom's [`scripts/build-preview-cards.mjs`](https://github.com/mnemom/mnemom-website/blob/main/scripts/build-preview-cards.mjs).)
+1. **Generate a preview-manifest sibling at build time** for every public URL, following the path convention in [How discovery works](#how-discovery-works) above. Walk your prerendered HTML, extract title / description / canonical / og:image, classify the type, write the manifest.
 
 2. **Emit the `<link rel="alternate">`** in every page's `<head>`:
    ```html
@@ -153,22 +153,18 @@ If you publish marketing or content URLs that agents might encounter:
 
 3. **Serve the file with the right Content-Type** (`application/vnd.agent-preview+json` is preferred; `application/json` is acceptable for CDNs that strip vendor MIMEs).
 
-4. **Write a verifier** that validates your manifests against the v1 schema and runs in CI. Mnemom's [verifier](https://github.com/mnemom/mnemom-website/blob/main/scripts/verify/preview-surface.ts) is Apache 2.0.
+4. **Write a verifier** that validates your manifests against the v1 schema and runs in CI.
 
 5. **Cross-reference from your `/agents.txt`**:
    ```
    agent-preview-spec: https://www.mnemom.ai/spec/agent-preview/v1/
    agent-preview-mime: application/vnd.agent-preview+json
-   agent-preview-discovery: <link rel="alternate" type="application/vnd.agent-preview+json" href="<url>.preview.json">
-   agent-preview-example: https://yoursite.com/methodology.preview.json
+   agent-preview-discovery: <link rel="alternate" type="application/vnd.agent-preview+json" href="<url>index.preview.json">  # <url> is the page's trailing-slash URL, e.g. /methodology/index.preview.json
+   agent-preview-example: https://yoursite.com/methodology/index.preview.json
    ```
 
 ## Compliance + reference implementation
 
 Mnemom verifies the surface nightly. The live status is at [https://www.mnemom.ai/agent-readiness-status.json](https://www.mnemom.ai/agent-readiness-status.json) (`preview-surface` commitment). The public commitment renders on [/for-agents](https://www.mnemom.ai/for-agents/).
 
-The reference implementation is open source under Apache 2.0:
-- Build-time generator: [scripts/build-preview-cards.mjs](https://github.com/mnemom/mnemom-website/blob/main/scripts/build-preview-cards.mjs)
-- Verifier: [scripts/verify/preview-surface.ts](https://github.com/mnemom/mnemom-website/blob/main/scripts/verify/preview-surface.ts)
-- TypeScript types: [client/lib/preview-types.ts](https://github.com/mnemom/mnemom-website/blob/main/client/lib/preview-types.ts)
-- Discovery emitter: [client/lib/route-meta.ts](https://github.com/mnemom/mnemom-website/blob/main/client/lib/route-meta.ts)
+Mnemom's own implementation covers the full round-trip: a build-time generator that writes each route's manifest, a discovery emitter that adds the `<link rel="alternate">` tag, and a CI verifier that checks every manifest against this schema before deploy.

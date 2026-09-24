@@ -40,7 +40,7 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [expansi
 | `manual.*` | mnemom-api admin handlers (human-attached) | `manual.admin` |
 
 <Warning>
-**Surface-separation invariant.** As of 2026-05-07, `sideband.*` sources are no longer accepted into `pending_advisories`. Cron-driven, fleet-shaped observations (the four legacy `sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` rows) now write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table, never to `pending_advisories`. A `NOT VALID` CHECK constraint on `pending_advisories.source` rejects new sideband.* writes; pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'` by migration 193.
+**Surface-separation invariant.** `sideband.*` sources are no longer accepted into `pending_advisories` — a CHECK constraint on `pending_advisories.source` rejects new `sideband.*` writes (pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'`). The fleet-sweep detectors (`sideband.coherence` / `sideband.fault_line` / `sideband.fleet`) write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table instead.
 </Warning>
 
 ### Current ratified values (post-cutover)
@@ -54,7 +54,7 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [expansi
 | `runtime.back_door.modification` | gateway (back-door handler) | No | (none) |
 | `manual.admin` | mnemom-api admin attach handler | No | future `manual.advisory_attached` |
 
-`sideband.drift` / `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here. They moved to [`governance_signals`](/specifications/governance-signals-schema) with the 2026-05-07 cutover; the four legacy `sideband.*.fired` and `drift.detected` webhook event names continue to fire for D+30 backwards-compat through 2026-06-07.
+`sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here; the fleet-sweep detectors behind them now write to [`governance_signals`](/specifications/governance-signals-schema) instead. Runtime drift detection is a separate, agent-scoped detector (not fleet-sweep-driven, not written to `pending_advisories` or `governance_signals`) that fires the `sideband.drift.fired` webhook event directly — see [Webhook events](#webhook-events) below. The legacy `drift.detected` event name has been removed with no replacement alias; subscribers must use `sideband.drift.fired`.
 
 ## `source_ref` shapes
 
@@ -90,7 +90,7 @@ For `sideband.*` `source_ref` shapes, see the [`governance_signals` table](/spec
 
 Every advisory's `text` follows a stable wrapper:
 
-```
+```text
 [Mnemom advisory: <one-sentence finding>. <one-sentence recommendation>.]
 ```
 
@@ -145,27 +145,27 @@ To add a new value to `source`, a single PR train MUST land all of:
 
 ## Webhook events
 
-Each source's webhook event name follows `<source>.fired` — with one documented carve-out: `sideband.drift` keeps its legacy `drift.detected` name. Subscribers receive the standard webhook envelope:
+`sideband.drift.fired` fires today for runtime (in-session) drift detection — the legacy `drift.detected` name was removed with no replacement alias, so subscribers must use `sideband.drift.fired`. `sideband.coherence.fired` / `sideband.fault_line.fired` / `sideband.fleet.fired` remain registered event types you can subscribe to, but their detectors currently deliver findings through [`governance_signals`](/specifications/governance-signals-schema) instead — do not rely on them firing today. Subscribers receive the standard webhook envelope:
 
 ```json
 {
-  "id": "wh-evt-1f2a8e9c",
-  "type": "sideband.coherence.fired",
+  "id": "evt-1f2a8e9c",
+  "type": "sideband.drift.fired",
   "created_at": "2026-05-04T15:32:00Z",
-  "account_id": "acct-acme-banking",
+  "account_id": "acct-3f9c2b1a",
   "data": {
-    "team_id": "tm-acme-banking",
-    "reasons": ["pairwise_governance_floor=0.42 < 0.5"],
-    "pairwise_governance_floor": 0.42,
-    "conflict_edge_count": 3,
-    "outlier_agent_ids": ["agt-monitor-3"],
+    "alert_id": "ida-92e1d8b3",
+    "agent_id": "mnm-a3f29c1e",
+    "session_id": "sess-7d1e2f3a",
     "severity": "medium",
-    "detected_at": "2026-05-04T15:32:00Z"
+    "drift_direction": "value_erosion",
+    "sustained_checks": 5,
+    "message": "Detected 5 consecutive non-clear verdicts in session sess-7d1e2f3a"
   }
 }
 ```
 
-See [Subscribing to Safe House webhooks](/guides/safe-house-webhooks) for the full subscription + signature-verification flow.
+See [Webhooks](/guides/webhooks) for the full subscription + signature-verification flow.
 
 ## See also
 

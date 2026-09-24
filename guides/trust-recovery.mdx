@@ -76,21 +76,23 @@ Or check the agent's canonical alignment card and evaluate it against the tools 
 curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   "https://api.mnemom.ai/v1/alignment/agent/{agent_id}?include_composition=true"
 
-# Or evaluate a tool set against the current policy to see coverage + violations.
-# `policy` carries the policy DSL (parsed YAML → JSON); see /specifications/policy-dsl.
+# Or evaluate a tool set against the agent's current canonical card to see
+# coverage + violations. The policy is derived server-side from the card --
+# you pass the agent and the tools, not a policy document.
 curl -X POST https://api.mnemom.ai/v1/policies/evaluate \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "policy": { "meta": { "schema_version": "1.0", "name": "current-policy", "scope": "agent" } },
     "agent_id": "{agent_id}",
-    "tools": [{ "name": "mcp__browser__navigate" }, { "name": "mcp__filesystem__read_file" }]
+    "tools": [{ "name": "mcp__browser__navigate" }, { "name": "mcp__filesystem__read_file" }],
+    "dry_run": true
   }'
 ```
 
 Look for checkpoints where:
-- The `concern_type` is `autonomy_violation` or `boundary_violation`
+- The `verdict` is `boundary_violation`
 - The agent's action was correct given its real capabilities
+- The checkpoint's `concerns[]` (each with a `category`, `severity`, and `evidence`) describe a capability the card didn't declare, rather than a genuine policy breach
 - The card's `bounded_actions` or `escalation_triggers` did not cover the action
 
 <Note>
@@ -119,7 +121,7 @@ const response = await fetch(
   {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
+      'X-Mnemom-Api-Key': apiKey,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -136,7 +138,7 @@ import httpx
 
 response = httpx.post(
     f"https://api.mnemom.ai/v1/agents/{agent_id}/reclassify",
-    headers={"Authorization": f"Bearer {api_key}"},
+    headers={"X-Mnemom-Api-Key": api_key},
     json={
         "checkpoint_id": "ic-abc12345",
         "reason": "Agent correctly used mcp__browser__navigate for research, but web_fetch was missing from card bounded_actions",
@@ -152,32 +154,20 @@ The API returns a reclassification record with a unique ID and status. Reclassif
 
 Reclassification removes the penalty for past violations, but without updating the card, the same violation will recur on the next checkpoint. Always amend the card alongside reclassification.
 
-Update the card to include the missing capability. The full unified-card shape is in [/specifications/alignment-card-schema](/specifications/alignment-card-schema); this example shows just the section that needs to change:
+Update the card to include the missing capability. You can PUT a full replacement card (the full unified-card shape is in [/specifications/alignment-card-schema](/specifications/alignment-card-schema)), or, since only `autonomy.bounded_actions` needs to change here, PATCH just that sub-resource:
 
 ```bash
-curl -X PUT https://api.mnemom.ai/v1/alignment/agent/{agent_id} \
+curl -X PATCH https://api.mnemom.ai/v1/alignment/agent/{agent_id}/autonomy \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  -H "Content-Type: text/yaml" \
   -H "Idempotency-Key: $(uuidgen)" \
-  --data-binary @- <<'YAML'
-card_version: unified/2026-04-15
-card_id: ac-your-card-id
-agent_id: {agent_id}
-issued_at: "2026-02-21T00:00:00Z"
-
-values:
-  declared: [transparency, honesty]
-
-autonomy:
-  bounded_actions: [inference, read, write, web_fetch, web_search]
-  forbidden_actions: [exfiltrate_data]
-
-audit:
-  trace_format: ap-trace-v1
-  retention_days: 90
-  tamper_evidence: append_only
-YAML
+  -H 'If-Match: "sha256:<current-content-hash>"' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bounded_actions": ["inference", "read", "write", "web_fetch", "web_search"]
+  }'
 ```
+
+`If-Match` is required on this sub-resource endpoint (optimistic concurrency) -- read the current hash from the card's `content_hash` field (`GET /v1/alignment/agent/{agent_id}`) first. This is a JSON merge patch: `bounded_actions` here replaces the whole array, so include the agent's existing bounded actions alongside the new one -- not just `web_fetch`.
 
 Or link the card amendment directly to the reclassification for a cleaner audit trail:
 
@@ -209,15 +199,9 @@ The recomputation recalculates all five scoring components (Integrity Ratio, Com
 
 ### Step 5: Monitor trust graph propagation
 
-Score changes do not stop at the reclassified agent. If the agent is part of a team or fleet, score changes propagate through the trust graph to related agents.
+Score changes do not stop at the reclassified agent. A recurring sweep looks back over recent reclassifications and walks outward from each reclassified agent through recorded trust edges (team membership and other explicit trust relationships), breadth-first, up to 3 hops and 50 agents per sweep. Every agent it reaches gets its own Trust Rating fully recomputed from its own checkpoint data — see [Trust Graph Propagation](/concepts/card-lifecycle#trust-graph-propagation) for the full mechanics and its bounds.
 
-Propagation mechanics:
-- **BFS traversal** from the affected agent outward
-- **Max depth:** 3 hops
-- **Max agents:** 50 per propagation event
-- **Decay factor:** 0.85 per hop (a 100-point improvement on the source agent produces an ~85-point signal at hop 1, ~72 at hop 2, ~61 at hop 3)
-
-Monitor propagation via the dashboard or subscribe to webhook events:
+Subscribe to webhook events to be notified as connected agents' scores move:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks \
@@ -253,8 +237,8 @@ The export is a JSON document suitable for regulatory review, SOC 2 evidence, or
   <Card title="Always amend the card" icon="pen-to-square">
     Reclassification without a card amendment is incomplete. The same action will trigger the same violation on the next checkpoint. Close the loop.
   </Card>
-  <Card title="Use policy recommendations" icon="lightbulb">
-    The policy engine surfaces systematic card gaps in its recommendations. Review `policy/resolved` output regularly to catch gaps before they become violations.
+  <Card title="Evaluate before gaps become violations" icon="lightbulb">
+    Run `POST /v1/policies/evaluate` against your agent's real tools regularly. Its `card_gaps` field surfaces systematic gaps between what your agent does and what the card declares before they turn into checkpoint violations.
   </Card>
   <Card title="Document reasons clearly" icon="file-lines">
     Reclassification reasons are stored in the audit trail. Write reasons that a reviewer (human or automated) can understand months later.

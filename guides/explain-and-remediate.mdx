@@ -9,11 +9,13 @@ When an agent's spec doesn't behave the way you expect, the **explain** endpoint
 
 ## What explain tells you
 
+`explain` evaluates one specific tool call against the agent's composed card, so the request names the tool: pass `request_snippet.tool_name`. A request that names no tool is rejected with `400 missing_tool_name` -- a toolless call has nothing to check, so it isn't offered a verdict.
+
 ```bash
 curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}' | jq .
+  -d '{"request_snippet": {"tool_name": "campfire_send_message"}}' | jq .
 ```
 
 The response has three useful sections:
@@ -75,6 +77,8 @@ curl -X PATCH https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/capabiliti
   }'
 ```
 
+PATCH here is a JSON merge patch (RFC 7396): top-level capability keys you omit are left alone, but an array field you *do* send (like `tools`) replaces the existing array wholesale rather than appending to it -- include every tool the capability should end up with, not just the new one.
+
 ### `unmapped_denied`
 
 The agent used a tool that has no capability mapping, AND `enforcement.allow_unmapped_tools: false` (the default).
@@ -116,7 +120,9 @@ Warnings don't block; they surface drift the operator may want to address.
 {
   "for": "warning",
   "index": 0,
-  "remediation": "Mapping `filesystem_read` to a capability would replace this warning with explicit coverage."
+  "remediation": "Mapping `filesystem_read` to a capability would replace this warning with explicit coverage. Run `PATCH /v1/alignment/agent/smolt-512448e7/capabilities`.",
+  "method": "PATCH",
+  "url": "/v1/alignment/agent/smolt-512448e7/capabilities"
 }
 ```
 
@@ -128,7 +134,9 @@ Warnings don't block; they surface drift the operator may want to address.
 {
   "for": "card_gap",
   "index": 0,
-  "remediation": "The `comms` capability would benefit from explicit `actions: [\"slack_post\", \"email_send\"]`. Currently the tool exists but the action surface isn't declared."
+  "remediation": "The `comms` capability would benefit from explicit `actions: [\"slack_post\", \"email_send\"]`. Currently the tool exists but the action surface isn't declared.",
+  "method": "PATCH",
+  "url": "/v1/alignment/agent/smolt-512448e7/capabilities"
 }
 ```
 
@@ -140,29 +148,16 @@ If you want long-form prose explanations (useful for non-technical reviewers), p
 curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"enrich": true}'
+  -d '{"request_snippet": {"tool_name": "campfire_send_message"}, "enrich": true}'
 ```
 
 The endpoint calls Claude via the [LLM substrate](/concepts/ai-helpers) and expands the structured remediations into 4-6 sentences of care-framed prose. The pure-sync path is the floor; the LLM enrichment is additive. LLM failure doesn't break explain — the structured `reasoning` always renders.
 
 Enrichment consumes the per-principal LLM budget (10/hour/user; 100/hour/org). Off by default.
 
-## Targeted explain — bind to a specific gateway turn
-
-If you saw a verdict in production logs and want to explain THAT specific evaluation, pass the `turn_id`:
-
-```bash
-curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
-  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"turn_id": "ttx-abc123"}'
-```
-
-The endpoint loads the spec state as it was at that turn (where available) and replays the evaluation. Useful for post-incident review.
-
 ## Hypothetical explain — what would happen?
 
-You can also explain a hypothetical tool call against the current spec:
+Explain a hypothetical tool call against the agent's *current* composed card by naming the tool:
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
@@ -170,11 +165,14 @@ curl -X POST https://api.mnemom.ai/v1/alignment/agent/smolt-512448e7/explain \
   -H "Content-Type: application/json" \
   -d '{
     "request_snippet": {
-      "tool_name": "campfire_send_message",
-      "tool_args": {"channel": "treasury"}
+      "tool_name": "campfire_send_message"
     }
   }'
 ```
+
+<Note>
+  The request body also accepts `turn_id`, but the endpoint does not yet use it to load historical spec state or replay a specific past evaluation -- every `explain` call evaluates against the agent's *current* composed card. Only `request_snippet.tool_name` affects the verdict; a `request_snippet.tool_args` value is accepted but not evaluated.
+</Note>
 
 For "would this specific call pass?" use [simulate](/guides/simulate-before-commit) instead — it runs both gateway and observer contexts and combines them into an allowed-verdict.
 

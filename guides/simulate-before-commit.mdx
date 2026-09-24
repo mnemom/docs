@@ -32,7 +32,11 @@ Two body fields, either or both:
 }
 ```
 
-If `candidate_tool_call` is set without `candidate_input`, the platform synthesizes an assistant message carrying the `toolUses` block. If both are set, the explicit `candidate_input.messages` wins. If neither is set, simulate runs against the empty conversation (useful for "does this agent's spec compose cleanly?").
+If `candidate_tool_call` is set without `candidate_input`, the platform synthesizes an assistant message carrying the `toolUses` block. If both are set, the explicit `candidate_input.messages` wins for what gets evaluated as conversation context, but tool identifiers are collected from *both*: `candidate_tool_call.tool_name` and any `candidate_input.messages[].toolUses[].name` entries.
+
+<Warning>
+  Simulate needs at least one named tool to produce a meaningful verdict. A plain conversational `candidate_input.messages` (user/assistant text with no `toolUses[]` block) names zero tools, and so does an empty or omitted body — either way the response comes back `allowed: "false"` with a `no_tool_named` condition, not a "this spec composes cleanly" green light. Always include a `candidate_tool_call.tool_name` (or a `toolUses[]` entry) for the call you actually want a verdict on.
+</Warning>
 
 ## The response shape
 
@@ -54,9 +58,12 @@ If `candidate_tool_call` is set without `candidate_input`, the platform synthesi
     "violations": [],
     "warnings": []
   },
+  "tools_evaluated": 1,
   "evaluated_at": "2026-05-21T18:42:13Z"
 }
 ```
+
+`tools_evaluated` counts how many caller-supplied tool identifiers were actually checked. `gateway_decision.verdict` and `observer_assessment.verdict` are the raw per-context engine output, and the engine only produces a finding while iterating over that list — so when `tools_evaluated` is `0`, both verdicts read `"pass"` with no violations because nothing was checked, not because anything was approved. `allowed` is the field to trust; it's derived to fail closed on that case (see below).
 
 ## The `allowed` verdict
 
@@ -70,14 +77,15 @@ If `candidate_tool_call` is set without `candidate_input`, the platform synthesi
 
 The derivation table:
 
-| Gateway | Observer | + missing receipts? | `allowed` |
-|---|---|---|---|
-| pass | pass | no | `"true"` |
-| fail | * | * | `"false"` |
-| * | fail | * | `"false"` |
-| warn | * | * | `"conditional"` |
-| * | warn | * | `"conditional"` |
-| pass | pass | yes | `"conditional"` |
+| Tools evaluated | Gateway | Observer | + missing receipts? | `allowed` |
+|---|---|---|---|---|
+| 0 | * | * | * | `"false"` (`no_tool_named`) |
+| > 0 | pass | pass | no | `"true"` |
+| > 0 | fail | * | * | `"false"` |
+| > 0 | * | fail | * | `"false"` |
+| > 0 | warn | * | * | `"conditional"` |
+| > 0 | * | warn | * | `"conditional"` |
+| > 0 | pass | pass | yes | `"conditional"` |
 
 ## Common patterns
 
@@ -162,11 +170,11 @@ jobs:
 
 ## Pure-sync only
 
-Simulate calls `@mnemom/policy-engine` directly twice (once with `context: "gateway"`, once with `context: "observer"`) using `dryRun: true`. It never crosses worker boundaries — no real gateway state change, no observer ledger entry. The evaluation is deterministic for a given (spec, candidate) pair.
+Simulate calls `@mnemom/policy-engine` directly twice (once with `context: "gateway"`, once with `context: "observer"`) using `dryRun: true`. It never crosses process boundaries — no real gateway state change, no observer ledger entry. The evaluation is deterministic for a given (spec, candidate) pair.
 
 ## Protection scope
 
-`POST /v1/protection/agent/<id>/simulate` returns a Phase 5 deferred shape — the dedicated protection-policy evaluator isn't shipped yet. For V1, the endpoint exists so the URL surface is symmetric; the protection card itself still composes through the same scope cascade as alignment, surfacable via `GET /v1/protection/agent/<id>/effective`.
+`POST /v1/protection/agent/<id>/simulate` exists so the URL surface is symmetric with alignment, but the dedicated protection-policy evaluator isn't shipped yet: it always returns `allowed: "conditional"` with a `protection_evaluator_pending_phase_5` condition, `gateway_decision`/`observer_assessment` both `verdict: "warn"`, and `tools_evaluated: 0` — it never actually calls the policy engine. The protection card itself still composes through the same scope cascade as alignment, surfacable via `GET /v1/protection/agent/<id>/effective`.
 
 ## Rate limits + cost
 

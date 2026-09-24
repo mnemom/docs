@@ -1,11 +1,15 @@
 ---
 title: "Policy DSL Specification"
-description: "Normative schema definition for Mnemom Policy YAML — capability mappings, forbidden rules, escalation triggers, and defaults"
+description: "Normative schema for the policy-engine's internal Policy shape — capability mappings, forbidden rules, escalation triggers, and defaults — as derived from an alignment card's capabilities + enforcement sections."
 sidebarTitle: "Policy DSL"
 icon: "file-code"
 ---
 
-This document is the normative schema definition for Mnemom Policy YAML files. A policy file declares what an agent is allowed to do, what is forbidden, when to escalate, and how to handle unmapped tools. The policy engine evaluates every tool call against the active policy before execution.
+This document is the normative schema for `@mnemom/policy-engine`'s internal `Policy` shape — capability mappings, forbidden rules, escalation triggers, and defaults. The policy engine evaluates every tool call against this shape before execution.
+
+<Note>
+**You do not author a standalone Policy YAML file.** A `Policy` object is derived at evaluation time from an agent's canonical alignment card via `extractPolicyFromCard()` — `capability_mappings` comes from the card's `capabilities` section, `forbidden` from `enforcement.forbidden_tools`, `escalation_triggers` from `autonomy.escalation_triggers`, and `defaults` from `enforcement.{allow_unmapped_tools,fail_open,mode,grace_period_hours}`. To author policy, edit the card — see [Alignment Card Schema](/specifications/alignment-card-schema) — and validate/publish it with `mnemom card validate` / `mnemom card publish`. The `mnemom policy init/validate/publish` commands this page's examples once referenced were removed; use the `card` equivalents. This page remains the source of truth for anyone implementing a policy-engine client, writing CI checks against the evaluator's shape directly, or reading `evaluatePolicy()`'s output.
+</Note>
 
 ---
 
@@ -48,13 +52,13 @@ meta:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `schema_version` | string | Yes | Must be a recognized version. Currently `"1.0"`. |
-| `name` | string | Yes | Human-readable name for the policy. Must be non-empty. |
+| `schema_version` | string | Yes | Must be a recognized version. Currently `"1.0"`. When extracted from a card, this is set to the card's own `card_version` instead (e.g. `unified/2026-04-26`), not the DSL's `"1.0"`. |
+| `name` | string | Yes | Human-readable name for the policy. Must be non-empty. When extracted from a card, this is synthesized as `<card_id>/derived`. |
 | `description` | string | No | Free-text description of the policy's purpose. |
-| `scope` | string | Yes | Either `"org"` (organization-wide baseline) or `"agent"` (agent-specific overlay). Determines how this policy merges with others. See [Merge Semantics](#merge-semantics). |
+| `scope` | string | Yes | Either `"org"` (organization-wide baseline) or `"agent"` (agent-specific overlay). |
 
 <Tip>
-Use `scope: "org"` for organization-wide security baselines that apply to all agents. Use `scope: "agent"` for per-agent customizations that layer on top of the org policy.
+`scope` is a vestige of the pre-card-composition design: today, every `Policy` extracted from a card is hardcoded `scope: "agent"`, because org-level policy is no longer a standalone concept — it lives in org/team card templates instead (see [Card Composition](/concepts/card-composition)), and that composition happens before the evaluator ever sees a `Policy` (see [Merge semantics](#merge-semantics)).
 </Tip>
 
 ---
@@ -91,11 +95,7 @@ Tool patterns use glob syntax for matching:
 Each tool call is matched against patterns **in declaration order** -- the first matching capability wins. If a tool matches multiple capabilities, only the first match is used for policy evaluation. Order your capability mappings from most specific to least specific.
 </Warning>
 
-The `card_actions` array must reference entries defined in the agent's alignment card under `autonomy.bounded_actions` (unified) / `autonomy_envelope.bounded_actions` (AAP protocol). A mismatch between policy `card_actions` and the alignment card produces a validation warning.
-
-<Note>
-**Policy as a card section.** In the [unified card model](/concepts/agent-cards), what this specification describes as a standalone Policy YAML is now embedded in the alignment card under `capabilities` + `enforcement`. The DSL grammar below still describes the evaluator's internal representation and is the source of truth for anyone implementing a policy-engine client or writing CI checks against the DSL directly. But if you are authoring a card for Mnemom, you edit the card's YAML sections, not a separate policy file.
-</Note>
+The `card_actions` array must reference entries defined in the agent's alignment card under `autonomy.bounded_actions` (unified) / `autonomy_envelope.bounded_actions` (AAP protocol) — on the card itself this binding is authored as `capabilities.<name>.required_actions` (see [Alignment Card Schema §capabilities](/specifications/alignment-card-schema#capabilities)); the extractor renames it to `card_actions` for the evaluator's internal shape.
 
 ---
 
@@ -170,7 +170,7 @@ escalation_triggers:
 
 The `condition` field currently supports one expression type:
 
-```
+```text
 tool_matches('glob_pattern')
 ```
 
@@ -191,16 +191,16 @@ defaults:
   unmapped_severity: "critical" | "high" | "medium" | "low"  # Required
   fail_open: boolean       # Required
   enforcement_mode: "warn" | "enforce" | "off"  # Optional, defaults to "warn"
-  grace_period_hours: number  # Optional, defaults to 24
+  grace_period_hours: number  # Optional; unset unless a scope sets it (gateway falls back to 24)
 ```
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `unmapped_tool_action` | string | Yes | -- | How to handle tools that do not match any capability or forbidden rule. `"allow"` permits them silently, `"warn"` permits with a warning, `"deny"` blocks them. |
-| `unmapped_severity` | string | Yes | -- | Severity level assigned to unmapped tool violations or warnings. |
+| `unmapped_tool_action` | string | Yes | -- | How to handle tools that do not match any capability or forbidden rule. `"allow"` permits them silently, `"warn"` permits with a warning, `"deny"` blocks them. When extracted from a card, this is derived from `enforcement.allow_unmapped_tools` (`false` → `"deny"`, `true` → `"allow"`; a card that omits the field entirely also resolves to `"deny"`). |
+| `unmapped_severity` | string | Yes | -- | Severity level assigned to unmapped tool violations or warnings. **When extracted from a card, this is computed from `unmapped_tool_action`** (`deny` → `high`, `warn` → `medium`, `allow` → `low`) — the card's own `enforcement.default_unmapped_severity` field is not consulted for this. |
 | `fail_open` | boolean | Yes | -- | If `true`, policy engine errors (e.g., malformed policy, evaluation timeout) result in the tool call being **allowed**. If `false`, errors result in the call being **denied**. |
 | `enforcement_mode` | string | No | `"warn"` | Global enforcement mode. `"off"` disables policy evaluation entirely. `"warn"` evaluates but only records warnings. `"enforce"` actively blocks violations. |
-| `grace_period_hours` | number | No | `24` | Hours after a new policy is deployed before `enforce` mode takes effect. During the grace period, the policy operates in `warn` mode regardless of the `enforcement_mode` setting. |
+| `grace_period_hours` | number | No | *(unset)* | Hours after a new policy is deployed before `enforce` mode takes effect. When extracted from a card, this is `enforcement.grace_period_hours` verbatim (unset when no scope sets it) — the gateway, not this field, is what falls back to a 24h default at consumption time. |
 
 <Warning>
 Setting `fail_open: true` means that if the policy engine encounters an internal error, **all tool calls will be permitted**. This maximizes availability but reduces safety guarantees. For high-risk agents, set `fail_open: false` to ensure errors fail safely.
@@ -399,103 +399,23 @@ defaults:
 
 ## Merge semantics
 
-When an agent has both an org-scoped policy and an agent-scoped policy, the policy engine merges them into a single effective policy. The merge follows deterministic rules designed so that org policies set a security floor and agent policies can only strengthen (never weaken) it.
+<Warning>
+`policy-engine`'s own `mergePolicies(org, agent)` function has been **removed**. Org+agent merging of everything this DSL describes now happens upstream, in mnemom-api's canonical-card composer, over the card's `capabilities` and `enforcement` sections — before `extractPolicyFromCard()` ever produces a `Policy` object. See [Alignment Card Schema §capabilities](/specifications/alignment-card-schema#capabilities) and [§enforcement](/specifications/alignment-card-schema#enforcement) for the real, current per-field composition rules (union within a capability's `tools`/`required_actions`, platform→agent intersection for `allowed_domains`, strictest-wins for `enforcement.*`, deny-overrides union for `forbidden_tools`, min-across-scopes for `grace_period_hours`). By the time the evaluator sees a `Policy`, it is already a single, pre-merged, agent-scoped view — there is no separate org-vs-agent merge step left to reason about at this layer.
+</Warning>
 
-<Tabs>
-  <Tab title="capability_mappings">
+The one merge function that remains in `policy-engine` is `mergeTransactionGuardrails(basePolicy, txnPolicy)` — an **ephemeral, per-request** restriction layered on top of the (already-merged) card-derived policy for a single transaction. It is not org/agent composition, and it is not multi-agent/counterparty coordination.
 
-### capability_mappings: union
+| Field | Merge strategy in `mergeTransactionGuardrails` |
+|---|---|
+| `capability_mappings` | **Intersection** — a capability survives only if present (by name) in both, and its `tools`/`card_actions` are each intersected too; a capability that intersects to zero tools or zero actions is dropped entirely |
+| `forbidden` | Union, deduplicated by `pattern` (the transaction can only add more forbidden patterns) |
+| `escalation_triggers` | Concatenation — base triggers first, then transaction triggers |
+| `defaults.unmapped_tool_action` | Stronger wins: `allow` < `warn` < `deny` |
+| `defaults.unmapped_severity` | Stronger wins: `low` < `medium` < `high` < `critical` |
+| `defaults.fail_open` | The transaction cannot weaken a base `fail_open: false` back to `true` |
+| `defaults.enforcement_mode` | Stronger wins: `off` < `warn` < `enforce` |
 
-The effective capability mappings are the **union** of org and agent mappings.
-
-- If the same capability name appears in both, the **agent definition replaces** the org definition entirely (not a deep merge).
-- Capabilities defined only in org or only in agent are included as-is.
-
-```
-effective.capability_mappings = org.capability_mappings + agent.capability_mappings
-# agent entries override org entries with the same key
-```
-
-<Note>
-In **transaction guardrails** (multi-agent coordination), capability mappings use **intersection** instead of union. A tool call is only permitted if it is mapped in both the initiating agent's and the counterparty's effective policies. This prevents one agent from granting capabilities the other has not approved.
-</Note>
-
-  </Tab>
-  <Tab title="forbidden">
-
-### forbidden: union
-
-The effective forbidden list is the **union** of all rules from both policies.
-
-- All org forbidden rules are enforced.
-- All agent forbidden rules are also enforced.
-- Duplicates (same pattern) are kept -- both rules fire independently.
-
-```
-effective.forbidden = org.forbidden + agent.forbidden
-```
-
-An agent policy cannot remove or weaken an org-level forbidden rule.
-
-  </Tab>
-  <Tab title="escalation_triggers">
-
-### escalation_triggers: concatenation
-
-Escalation triggers are concatenated with org triggers first, then agent triggers.
-
-- Org triggers are evaluated first.
-- Agent triggers are evaluated second.
-- All matching triggers fire (not short-circuited).
-
-```
-effective.escalation_triggers = org.escalation_triggers + agent.escalation_triggers
-```
-
-An agent policy cannot remove org-level escalation triggers.
-
-  </Tab>
-  <Tab title="defaults">
-
-### defaults: org floor, agent strengthens
-
-The org policy sets the floor. The agent policy can only make defaults **stricter**, never more permissive.
-
-**`unmapped_tool_action`** -- Strength order: `allow` < `warn` < `deny`. The stronger (more restrictive) value wins.
-
-```
-# If org says "warn" and agent says "allow", effective = "warn"
-# If org says "warn" and agent says "deny", effective = "deny"
-```
-
-**`unmapped_severity`** -- Strength order: `low` < `medium` < `high` < `critical`. The stronger value wins.
-
-**`fail_open`** -- If either policy sets `fail_open: false`, the effective value is `false`. (The stricter setting wins.)
-
-**`enforcement_mode`** -- Strength order: `off` < `warn` < `enforce`. The stronger value wins.
-
-```
-# If org says "warn" and agent says "enforce", effective = "enforce"
-# If org says "enforce" and agent says "off", effective = "enforce"
-```
-
-**`grace_period_hours`** -- The **shorter** grace period wins (more restrictive means less time before enforcement activates).
-
-  </Tab>
-</Tabs>
-
-### Merge summary table
-
-| Field | Merge Strategy | Direction |
-|---|---|---|
-| `capability_mappings` | Union (agent overrides same-name keys) | Additive |
-| `forbidden` | Union (all rules kept) | Additive |
-| `escalation_triggers` | Concatenation (org first, then agent) | Additive |
-| `defaults.unmapped_tool_action` | Stronger wins | `allow` < `warn` < `deny` |
-| `defaults.unmapped_severity` | Stronger wins | `low` < `medium` < `high` < `critical` |
-| `defaults.fail_open` | AND (false wins) | Stricter wins |
-| `defaults.enforcement_mode` | Stronger wins | `off` < `warn` < `enforce` |
-| `defaults.grace_period_hours` | Minimum wins | Shorter = stricter |
+A transaction guardrail can only **restrict** the base policy it's layered on — never expand it. Use this when a single transaction (e.g. a high-value action) needs a tighter, request-scoped policy than the agent's standing card-derived one.
 
 ---
 
@@ -514,5 +434,5 @@ When a tool call is evaluated against the effective policy, the engine follows t
 ## See also
 
 - [Policy Engine](/concepts/policy-engine) -- Architecture and runtime behavior of the policy evaluation engine
-- [Policy CLI Reference](/gateway/policy-cli) -- CLI commands for validating, inspecting, and deploying policies
+- [CLI Reference](/gateway/cli) -- CLI commands including `card validate`, `card evaluate`, and `card publish`
 - [Policy Management Guide](/guides/policy-management) -- End-to-end guide for writing and managing policies

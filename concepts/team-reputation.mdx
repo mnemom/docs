@@ -200,51 +200,32 @@ Team Trust Ratings and individual Trust Ratings are related but independent:
 | **Eligibility** | 50 integrity checkpoints | 10 team risk assessments |
 | **Components** | Integrity ratio, compliance, drift, traces, coherence | Coherence history, member quality, ops record, stability, density |
 | **Data source** | AIP checkpoints | Team risk assessments |
-| **Update frequency** | Hourly | Every 6 hours + on-demand |
+| **Update frequency** | Every 6 hours | Every 6 hours + on-demand |
 | **Mutual dependency** | None (individual scores are independent) | Member Quality reads individual scores (read-only) |
 
 The Member Quality component creates a one-way dependency: team scores read individual scores, but never write to them. Improving an individual member's score will improve the team's Member Quality component.
 
 ---
 
-## ZK proofs for team reputation
+## Cryptographic verification for teams
 
-Team reputation scores support the same cryptographic verification as individual scores. The verification endpoint returns proof data that independently confirms the score was computed correctly:
+Team reputation scores have their own verification endpoint, public and requiring no authentication:
 
 ```
 GET /v1/teams/{team_id}/reputation/verify
 ```
 
-Team proofs chain individual proof attestations — the team's proof references the proof hashes of member scores used in the Member Quality computation, creating a verifiable dependency tree.
+It returns the team's `score` and `grade` alongside a `verification` block with a `proof_hash`, the `computed_at` timestamp, and `total_assessments` — enough for a third party to confirm the returned score matches what Mnemom last computed for that team.
 
 <Note>
-ZK proofs are available on Developer, Team, and Enterprise plans. Free-tier team assessments do not include proofs.
+This is a hash-based verification bundle, not a zero-knowledge proof. For ZK-proven risk computations (a different, related surface), see [Risk Assessment](/concepts/risk-assessment#zero-knowledge-proofs).
 </Note>
 
 ---
 
 ## A2A trust extension for teams
 
-The team reputation API includes a pre-built trust block for inter-team reputation sharing via A2A:
-
-```json
-{
-  "a2a_trust_extension": {
-    "extension_uri": "https://mnemom.ai/ext/team-trust/v1",
-    "provider": "mnemom",
-    "score": 812,
-    "grade": "AA",
-    "confidence": "medium",
-    "member_count": 5,
-    "verified_url": "https://api.mnemom.ai/v1/teams/team-xyz/reputation/verify",
-    "badge_url": "https://api.mnemom.ai/v1/teams/team-xyz/badge.svg",
-    "methodology_url": "https://docs.mnemom.ai/concepts/team-reputation",
-    "last_updated": "2026-02-25T06:00:00.000Z"
-  }
-}
-```
-
-Embed this in the team's A2A Agent Card to enable other agents and teams to make trust decisions about the team programmatically.
+The `@mnemom/reputation` client exposes a `getTeamA2AReputationExtension()` helper and the shared type library defines an `A2ATeamTrustExtension` shape, mirroring the [individual A2A trust extension](/concepts/reputation-scores#a2a-trust-extension). As of this writing the team reputation endpoint does not yet populate an `a2a_trust_extension` field on its response, so calling the helper against a live team throws rather than returning a trust block. Use the [plain team reputation response](#api-reference) (`score`, `grade`, `confidence`) for A2A trust signaling until this ships.
 
 ---
 
@@ -256,18 +237,18 @@ The primary endpoint for fetching team reputation data:
 GET /v1/teams/{team_id}/reputation
 ```
 
-No authentication required for public teams. Returns the full score with all components.
+Requires a Bearer token or API key. Returns the full score with all components for teams the caller can access.
 
 **Response:**
 
 ```json
 {
   "team_id": "team-abc123",
-  "team_name": "Support Pipeline Alpha",
   "score": 812,
   "grade": "AA",
   "confidence": "medium",
   "is_eligible": true,
+  "total_assessments": 32,
   "components": [
     {
       "key": "coherence_history",
@@ -310,14 +291,13 @@ No authentication required for public teams. Returns the full score with all com
       "factors": ["32 assessments, most recent 2 days ago"]
     }
   ],
-  "total_assessments": 32,
-  "last_assessed": "2026-02-23T10:00:00.000Z",
   "trend_30d": 18,
   "visibility": "public",
-  "computed_at": "2026-02-25T06:00:00.000Z",
-  "member_count": 5
+  "computed_at": "2026-02-25T06:00:00.000Z"
 }
 ```
+
+The public [directory search](/api-reference/team-overview) and compare endpoints additionally enrich each row with `name`, `avatar_url`, `member_count`, and `assessment_count` -- those fields are not present on the plain per-team GET above.
 
 For the complete API reference, see the [Teams API](/api-reference/team-overview).
 
@@ -328,25 +308,32 @@ For the complete API reference, see the [Teams API](/api-reference/team-overview
 ### TypeScript
 
 ```typescript
-import { fetchTeamReputation, fetchTeamReputationHistory } from '@mnemom/reputation';
+import { getTeamReputation, createTeamReputationGate } from '@mnemom/reputation';
 
 // Get current team reputation
-const reputation = await fetchTeamReputation('team-abc123');
+const reputation = await getTeamReputation('team-abc123');
 
-if (reputation) {
-  console.log(`Score: ${reputation.score}`);
-  console.log(`Grade: ${reputation.grade}`);
-  console.log(`Confidence: ${reputation.confidence}`);
-  console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
+console.log(`Score: ${reputation.score}`);
+console.log(`Grade: ${reputation.grade}`);
+console.log(`Confidence: ${reputation.confidence}`);
+console.log(`30-day trend: ${reputation.trend_30d > 0 ? '+' : ''}${reputation.trend_30d}`);
 
-  for (const component of reputation.components) {
-    console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
-  }
+for (const component of reputation.components) {
+  console.log(`  ${component.label}: ${component.score}/1000 (weight: ${component.weight})`);
 }
 
-// Get weekly history for trend analysis
-const history = await fetchTeamReputationHistory('team-abc123');
-for (const snapshot of history) {
+// Gate a decision on a minimum team score or grade
+const gate = createTeamReputationGate({ minScore: 700, minGrade: 'A' });
+const result = await gate.check('team-abc123');
+if (!result.allowed) {
+  console.log('Denied:', result.reason);
+}
+
+// Weekly history has no dedicated SDK helper -- call the endpoint directly
+const history = await fetch('https://api.mnemom.ai/v1/teams/team-abc123/reputation/history', {
+  headers: { Authorization: `Bearer ${token}` },
+}).then(r => r.json());
+for (const snapshot of history.snapshots) {
   console.log(`${snapshot.week_start}: ${snapshot.score} (${snapshot.grade})`);
 }
 ```
@@ -357,9 +344,10 @@ for (const snapshot of history) {
 import httpx
 
 API_BASE = "https://api.mnemom.ai"
+headers = {"Authorization": f"Bearer {token}"}
 
-# Get current team reputation (public endpoint)
-response = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation")
+# Get current team reputation (requires auth)
+response = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation", headers=headers)
 reputation = response.json()
 
 print(f"Score: {reputation['score']}")
@@ -371,7 +359,7 @@ for component in reputation["components"]:
     print(f"  {component['label']}: {component['score']}/1000 (weight: {component['weight']})")
 
 # Get weekly history
-history = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation/history")
+history = httpx.get(f"{API_BASE}/v1/teams/team-abc123/reputation/history", headers=headers)
 for snapshot in history.json()["snapshots"]:
     print(f"{snapshot['week_start']}: {snapshot['score']} ({snapshot['grade']})")
 ```

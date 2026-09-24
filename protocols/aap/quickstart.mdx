@@ -15,20 +15,23 @@ pip install agent-alignment-protocol
 
 ## Step 1: Define your Alignment Card
 
-An Alignment Card declares what your agent is, what values it holds, and what it will and won't do autonomously.
+An Alignment Card declares what your agent is, what values it holds, and what it will and won't do autonomously. This is the unified card shape (SDK v2.0.0) -- if you have a card from before mid-2026, see the [migration note](/protocols/aap/specification#410-migrating-from-the-legacy-050-card-shape) in the specification.
 
 ```python
-from aap import AlignmentCard, Principal, Values, AutonomyEnvelope, AuditCommitment
+from aap import AlignmentCard, Principal, Values, Autonomy, Audit
 
 # Build the card programmatically
 card = AlignmentCard(
-    aap_version="1.0.0",
+    card_version="unified/2026-04-26",
     card_id="ac-my-shopping-agent-001",
     agent_id="shopping-assistant",
     issued_at="2026-01-31T12:00:00Z",
+    autonomy_mode="observe",   # off | observe | nudge | enforce
+    integrity_mode="observe",
 
     principal=Principal(
         type="human",
+        identifier="shopping-assistant-owner",
         relationship="delegated_authority",
     ),
 
@@ -37,7 +40,7 @@ card = AlignmentCard(
         conflicts_with=["deceptive_marketing", "hidden_fees"],
     ),
 
-    autonomy_envelope=AutonomyEnvelope(
+    autonomy=Autonomy(
         bounded_actions=["search", "compare", "recommend", "add_to_cart"],
         escalation_triggers=[
             {"condition": "action_type == \"purchase\"", "action": "escalate", "reason": "Purchases require approval"},
@@ -46,7 +49,7 @@ card = AlignmentCard(
         forbidden_actions=["share_credentials", "subscribe_to_services"],
     ),
 
-    audit_commitment=AuditCommitment(
+    audit=Audit(
         trace_format="ap-trace-v1",
         retention_days=90,
         queryable=True,
@@ -54,12 +57,18 @@ card = AlignmentCard(
 )
 
 # Export to dict for verification
-card_dict = card.model_dump()
+card_dict = card.model_dump(mode="json", exclude_none=True)
 
 # Or save to JSON file
 import json
 with open("alignment-card.json", "w") as f:
     json.dump(card_dict, f, indent=2)
+```
+
+You can also generate a starter card from the CLI, which always emits the current unified shape:
+
+```bash
+aap init --values "principal_benefit,transparency,minimal_data" --output alignment-card.json
 ```
 
 ## Step 2: Generate AP-Traces for decisions
@@ -134,6 +143,7 @@ from aap import verify_trace
 result = verify_trace(trace_dict, card_dict)
 
 print(f"Verified: {result.verified}")
+print(f"Recommended action: {result.recommended_action}")  # "proceed" | "review" | "deny"
 print(f"Similarity: {result.similarity_score:.2f}")
 
 if not result.verified:
@@ -147,10 +157,12 @@ for warning in result.warnings:
 
 # Example output for a compliant trace:
 # Verified: True
+# Recommended action: proceed
 # Similarity: 0.82
 #
 # Example output for a low-similarity trace (structural pass, behavioral warning):
 # Verified: True
+# Recommended action: review
 # Similarity: 0.38
 # WARNING: low_behavioral_similarity
 #   Trace passes structural checks but behavioral similarity (0.38) is below threshold (0.5)
@@ -240,31 +252,33 @@ Here's a minimal but complete example you can run:
 
 ```python
 from aap import (
-    AlignmentCard, Principal, Values, AutonomyEnvelope, AuditCommitment,
+    AlignmentCard, Principal, Values, Autonomy, Audit,
     APTrace, Action, Decision, Alternative, Escalation,
     verify_trace, check_coherence, detect_drift,
 )
 
 # 1. Create alignment card
 card = AlignmentCard(
-    aap_version="1.0.0",
+    card_version="unified/2026-04-26",
     card_id="ac-demo-001",
     agent_id="demo-agent",
     issued_at="2026-01-31T12:00:00Z",
-    principal=Principal(type="human", relationship="delegated_authority"),
+    autonomy_mode="observe",
+    integrity_mode="observe",
+    principal=Principal(type="human", identifier="demo-agent-owner", relationship="delegated_authority"),
     values=Values(declared=["principal_benefit", "transparency"]),
-    autonomy_envelope=AutonomyEnvelope(
+    autonomy=Autonomy(
         bounded_actions=["search", "recommend"],
         escalation_triggers=[],
         forbidden_actions=["delete"],
     ),
-    audit_commitment=AuditCommitment(
+    audit=Audit(
         trace_format="ap-trace-v1",
         retention_days=30,
         queryable=False,
     ),
 )
-card_dict = card.model_dump()
+card_dict = card.model_dump(mode="json", exclude_none=True)
 
 # 2. Create a trace
 trace = APTrace(
@@ -304,7 +318,7 @@ print(f"Warnings: {len(result.warnings)}")
 
 ## Next steps
 
-- **Interactive Playground** -- Try verification in your browser with SSM visualization (coming soon)
+- **[Interactive Playground](https://mnemom.github.io/aap/playground/)** -- Try verification in your browser with SSM visualization, no server required (runs client-side via WebAssembly)
 - **[specification](/protocols/aap/specification)** -- Full protocol specification for implementers
 - **[limitations](/protocols/aap/limitations)** -- What AAP can and cannot guarantee (read this)
 - **[calibration](/protocols/aap/calibration)** -- How similarity thresholds were derived

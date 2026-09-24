@@ -29,19 +29,14 @@ The canonical implementation is `mnemom-api/src/trust/iocs.ts`.
 
 ### Pagination
 
-When the response carries `?limit` rows and there are further rows available, the bundle includes a Mnemom extension `next_after` at the bundle level whose value is the ISO-8601 `last_seen_at` timestamp of the final indicator in the bundle. Resume by passing that value as `?after=` on the next request. STIX consumers that do not understand the extension ignore it.
+When the response carries exactly `limit` rows (i.e. there may be further rows available), the bundle includes a plain top-level `next_after` field — not wrapped in a STIX `extensions` block — whose value is the ISO-8601 `last_seen_at` timestamp of the final indicator in the bundle. Resume by passing that value as `?after=` on the next request. STIX consumers that do not recognize the field ignore it (it is outside the `bundle` object's defined STIX properties).
 
 ```jsonc
 {
   "type": "bundle",
   "id": "bundle--<uuid>",
   "objects": [ /* ... */ ],
-  "extensions": {
-    "extension-definition--mnemom-aegis-2026-05": {
-      "extension_type": "property-extension",
-      "next_after": "2026-05-30T12:14:07Z"
-    }
-  }
+  "next_after": "2026-05-30T12:14:07Z"
 }
 ```
 
@@ -129,7 +124,7 @@ Mnemom's traffic-light protocol (TLP) value is mapped to STIX 2.1 marking-defini
 
 The Mnemom property-extension is identified by the stable extension-definition ID:
 
-```
+```text
 extension-definition--mnemom-aegis-2026-05
 ```
 
@@ -198,21 +193,21 @@ The IoC feed is served at `GET /v1/trust/iocs`.
 | Query parameter | Type | Default | Notes |
 |---|---|---|---|
 | `type` | enum | (all) | Single-type filter: `sha256`, `domain`, `url`, `substrate_fingerprint`, `technique_id`. |
-| `after` | ISO-8601 string | (none) | Pagination cursor matching the indicator's `last_seen_at`. |
+| `after` | ISO-8601 string | (none) | Pagination cursor: returns rows with `last_seen_at` strictly before this value. |
 | `limit` | integer | 100 | Max 1000. Determines the maximum number of indicators in the response bundle. |
 
 **Ordering:** `last_seen_at DESC`. Pagination via `?after=<last value seen>` is the canonical resume pattern; the `next_after` bundle-level extension (§1) surfaces the cursor for the next call.
 
-**Auth:** customer API key via `X-Mnemom-Api-Key: $MNEMOM_KEY`.
+**Auth:** none. This is a public, unauthenticated endpoint — no API key required.
 
-**Rate limit:** 1 request per second per IP (KV-backed; fail-open if the rate-limit KV namespace is unbound). Cloudflare Workers KV has a 60 s minimum TTL, so the *effective* practical bound is closer to 1 request per minute per IP. Recommended polling cadence: every 5-15 minutes via cron. See the [IoC feed consumption guide](/guides/ioc-feed-consumption) for a runnable integration.
+**Rate limit:** nominally 1 request per second per IP (best-effort; fails open if the rate-limit store is unavailable), but the rate-limit counter has a 60 s minimum window, so the *effective* practical bound is 1 request per minute per IP. Recommended polling cadence: every 5-15 minutes via cron. See the [IoC feed consumption guide](/guides/ioc-feed-consumption) for a runnable integration.
 
 ## 9. Bundle-level signing
 
 <Note>
 At GA, the STIX bundle is **not** cryptographically signed. The IoC entries themselves are produced from rows in the internal `iocs` table. The Managed Rule envelope signing chain (see [Managed rule envelope schema](/specifications/managed-rule-envelope-schema)) protects the Managed Rule pipeline; the IoC bundle is a derived view of network-level signal output.
 
-Customers wanting cryptographic attestation for cross-tenant detection content should rely on the append-only audit chain (`recipe_review_actions`) plus the [`recipe.promoted`](/api-reference/webhook-events) and [`advisory.published`](/api-reference/webhook-events) webhook events plus the published [`/trust/slos`](https://trust.mnemom.ai/slos) commitments.
+Customers wanting cryptographic attestation for cross-tenant detection content should rely on the append-only audit chain (`recipe_review_actions`) plus the published [`/trust/slos`](https://www.mnemom.ai/trust/slos) commitments. (`recipe.promoted` and `advisory.published` are Mnemom-internal operations signals, not customer-subscribable webhooks — see the note on [Webhook Event Catalog](/api-reference/webhook-events#detection-reports).)
 </Note>
 
 ## See also

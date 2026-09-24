@@ -11,7 +11,7 @@ This page documents the personal-org model, when it applies, and how it interact
 
 ## Why personal organizations exist
 
-The Mnemom safe house composes governance state across up to four scopes: **platform**, **org**, **team** (optional), **agent**. Every agent inherits from the layers that apply to it. Solo agents (zero teams) compose under the 3-layer cascade `platform → org → agent`; teamed agents pick up an additional Team layer (see [Team Scope](./team-scope)).
+The Mnemom safe house composes governance state across up to four scopes: **platform**, **org**, **team** (optional), **agent**. Every agent inherits from the layers that apply to it. Solo agents (zero teams) compose under the 3-layer cascade `platform → org → agent`; teamed agents pick up an additional Team layer (see [Team Scope](/concepts/team-scope)).
 
 Before the personal-org model, solo users sat in a degraded special case: their agents had no org context, the composer skipped the org layer silently, and several operations (granting exemptions, applying org-level templates, surfacing audit history) returned errors or empty results. Adding a sub-org **team** scope on top of that inconsistency would have propagated the special-casing across more code paths.
 
@@ -38,10 +38,11 @@ Your **personal org** is the default context for any agent you create that is no
 
 ```
 Platform defaults
-  → Personal org defaults (just-in-time mirror of platform; no org admin to change them)
-    → Default team (auto-created per personal org)
-      → Agent (your alignment + protection cards)
+  → Personal org template (you can edit it, same as any org owner)
+    → Agent (your alignment + protection cards)
 ```
+
+There's no auto-created default team — [teams are an explicit, opt-in grouping primitive](/concepts/team-scope), so a personal-org agent composes under the same 3-layer `platform → org → agent` cascade as any solo agent, unless you deliberately create a team and add the agent to it.
 
 When you join a multi-user organization (e.g., an enterprise admin invites you), you do **not** lose your personal org. Your existing personal-org agents stay personal. New agents you create within the multi-user org live there. You can switch contexts in the dashboard's org switcher.
 
@@ -80,20 +81,15 @@ GET /v1/orgs
 Per the composition rules ([Card Composition](/concepts/card-composition)), strictest-wins applies at every layer of the cascade. For personal-org agents:
 
 - **Platform** — Mnemom's compliance ceiling and sensible defaults.
-- **Org** (personal) — defaults seeded from platform; the user can edit their personal-org templates the same way an enterprise admin edits theirs.
-- **Team** (default team) — the auto-created default team for the personal org. The user can edit the default team's templates if finer per-agent control is desired.
+- **Org** (personal) — defaults seeded from platform; the user can edit their personal-org templates the same way any org owner edits theirs.
+- **Team** *(optional)* — only present if the user creates a team and adds the agent to it. Most personal-org agents have no team layer at all — see [Team Scope](/concepts/team-scope).
 - **Agent** — the user's per-agent overrides.
 
-Because the user is both the owner and the only member of their personal org, they have administrator privileges across all four layers within their own scope. They cannot, however, weaken below the platform compliance ceiling.
+Because the user is both the owner and the only member of their personal org, they have administrator privileges across every layer within their own scope. They cannot, however, weaken below the platform compliance ceiling.
 
 ## Audit trail
 
-Personal-org provisioning is audit-logged the same way every org mutation is, via `governance_audit_log`:
-
-- `personal_org.provision` — when the personal org is auto-created (signup hook or migration 161 backfill).
-- `personal_org.default_team.provision` — when the default team is auto-created.
-
-Personal users can view their own audit log via the standard org audit endpoint scoped to their personal `org_id`.
+Personal-org auto-provisioning itself is not currently written to `governance_audit_log` — it's a one-time, idempotent server-side step, not an org mutation a person or agent performed. Once your personal org exists, everything you do inside it (publishing cards, editing templates, granting exemptions) is audit-logged the same way as in any multi-user org, and you can view your own audit log via the standard org audit endpoint scoped to your personal `org_id`.
 
 ## Compliance and data residency
 

@@ -26,7 +26,7 @@ Two notes worth pinning:
 - **Only owners change roles.** The owner can promote a member to admin or set anyone's role; admins cannot. Ownership transfer is not an API operation — contact support if you need it.
 - **`auditor` is the read-only-with-billing-and-compliance role.** Auditors can read invoices, costs, the audit log, and webhook health, but cannot mutate anything. They're the SOC 2 / SOX / DORA review role.
 
-The `viewer` and `auditor` roles require the **RBAC** feature flag on your plan. They're not available on free or starter tiers.
+The `viewer` and `auditor` roles require the **RBAC** capability on your account. If it isn't enabled, assigning either role fails with a message pointing at [Pricing](/pricing/overview).
 
 ## Surfaces an org admin operates
 
@@ -58,10 +58,12 @@ Configure webhook endpoints for org events; check delivery health; redeliver fai
 
 ### SSO (SAML)
 
-Configure SAML SSO with your IdP (Okta, Azure AD, Google Workspace, etc.). Owner-only because misconfiguration can lock everyone out of the org.
+Configure SAML SSO with your IdP (Okta, Azure AD, Google Workspace, etc.).
 
-- [`PUT /v1/orgs/{org_id}/sso`](/api-reference/endpoint/put-orgs-org-id-sso) — configure
-- [`POST /v1/orgs/{org_id}/sso/test`](/api-reference/endpoint/post-orgs-org-id-sso-test) — test before saving
+- [`GET /v1/orgs/{org_id}/sso`](/api-reference/endpoint/get-orgs-org-id-sso) — read the current config (owner or admin)
+- [`PUT /v1/orgs/{org_id}/sso`](/api-reference/endpoint/put-orgs-org-id-sso) — configure (owner-only — misconfiguration can lock everyone out of the org)
+- [`POST /v1/orgs/{org_id}/sso/test`](/api-reference/endpoint/post-orgs-org-id-sso-test) — test before saving (owner or admin)
+- [`DELETE /v1/orgs/{org_id}/sso`](/api-reference/endpoint/delete-orgs-org-id-sso) — remove (owner-only)
 
 ### Usage + costs
 
@@ -105,7 +107,7 @@ These capabilities exist in Mnemom but are **not** exposed to org admins via the
 | You want to... | Where to do it instead |
 |---|---|
 | Change your billing plan | Stripe Customer Portal (`POST /v1/orgs/{org_id}/billing/portal-session`) or contact support |
-| Apply a credit, extend a trial, issue a credit note | Email support@mnemom.ai |
+| Apply a credit, issue a credit note | Email support@mnemom.ai |
 | Apply a coupon mid-cycle | Stripe Customer Portal or support |
 | Override a plan's quota for one member | Not self-service — contact support |
 | Impersonate another member to debug | Not supported — use the audit log to see what they did, or ask them directly |
@@ -118,6 +120,8 @@ The pattern: **revenue-affecting changes go through a human at Mnemom**, **audit
 
 The user who creates an org becomes its owner. Owners can promote any member to admin via `PATCH /v1/orgs/{org_id}/members/{user_id}` with `{"role": "admin"}`. There is no self-service request-to-be-admin flow — escalation goes through the existing owner.
 
+A newly created org does **not** inherit any invite-gated product access (e.g. Mnemom Agent) you hold personally — that access is granted per account, and a brand-new shared org starts with none. Check `GET /v1/code/entitlement?org_id={org_id}` before relying on it there; if it's not enabled, ask your Mnemom contact for an org-scoped invitation.
+
 ## Common tasks
 
 **Onboard a new admin.** Invite via `POST /v1/orgs/{org_id}/invitations` with `role: "admin"`. They accept via the link in the invitation email. Once accepted, they have admin permissions immediately.
@@ -126,7 +130,7 @@ The user who creates an org becomes its owner. Owners can promote any member to 
 
 **Investigate a suspicious event.** `GET /v1/orgs/{org_id}/audit-log?limit=200` for the request log; cross-reference with [webhook delivery log](/api-reference/endpoint/get-orgs-org-id-webhooks-deliveries) if external systems were notified.
 
-**Hand off ownership when an admin leaves.** Today: not self-service — contact support. Roadmap: ownership transfer endpoint, gated by 2FA reverify and email confirmation.
+**Hand off ownership when an admin leaves.** Not self-service — [contact support](mailto:support@mnemom.ai).
 
 **Delegate management of one team without granting org-wide admin.** Use the [Team Admin role](/concepts/team-admin-role): `POST /v1/teams/:team_id/admins` with the target user's `user_id`, or use the dashboard's Roster tab on the team detail page. The grant covers that team's templates, posture assignment, and roster — nothing else. Org admins still implicitly act as team admins for every team, so this is purely additive scoping.
 

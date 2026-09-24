@@ -9,8 +9,8 @@ Policy gates prevent misconfigurations from reaching production. By embedding po
 
 There are two types of gates:
 
-1. **Static validation** -- `mnemom card validate` checks schema correctness. It is fast, offline, and makes no API calls.
-2. **Card evaluation** -- `mnemom card evaluate` checks the card's policy against a set of tools. It can run locally or against live agent data.
+1. **Static validation** -- `mnemom card validate` checks schema correctness. Without `--agent` (or `MNEMOM_AGENT`) set it makes no API calls; pass `--agent <name>` to validate server-side against your org/platform floor instead.
+2. **Card evaluation** -- `mnemom card evaluate` checks the card's policy against a set of tools you supply. It always runs entirely locally against the embedded policy engine -- no API key, and no agent lookup, either way.
 
 Both commands return CI-friendly exit codes: `0` on pass, `1` on failure. This means any CI system that interprets exit codes (GitHub Actions, GitLab CI, Jenkins, CircleCI, etc.) will correctly pass or fail the pipeline step.
 
@@ -81,11 +81,11 @@ GitLab's `only:changes` directive provides the same path-scoped triggering as Gi
 
 ## Card evaluation gate
 
-Card evaluation goes beyond schema validation. It evaluates your card's policy against the agent's tools -- checking capability mapping coverage, verifying tool permissions, and scoring the card against tool usage. This can run locally or with an API key for live agent data.
+Card evaluation goes beyond schema validation. It evaluates your card's policy against a tool list you provide -- checking capability mapping coverage, verifying tool permissions, and scoring the card against that tool usage. It runs entirely locally against the embedded policy engine, so it needs no `MNEMOM_API_KEY` and makes no network call.
 
-<Warning>
-  The evaluation gate may make API calls and read live agent data when using `--agent`. Only run it in trusted CI environments where your API key is stored as a secret. Never log the full evaluation response in public build logs if it contains agent identifiers or tool names you consider sensitive.
-</Warning>
+<Tip>
+  Because `card evaluate` is fully local, it only checks the tools you pass via `--tools`/`--tool-manifest`. It does not read your agent's actual traffic -- for that, evaluate against real recent traces with `POST /v1/policies/evaluate/historical` (see [Policy Management](/guides/policy-management#historical-evaluation)).
+</Tip>
 
 <Tabs>
   <Tab title="GitHub Actions">
@@ -100,8 +100,6 @@ on:
 jobs:
   evaluate-card:
     runs-on: ubuntu-latest
-    env:
-      MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -109,10 +107,10 @@ jobs:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
       - name: Evaluate card
-        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent --strict
+        run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --strict
 ```
 
-This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM_API_KEY` is read from GitHub Secrets and exposed as an environment variable.
+This workflow runs on pushes to `main`, making it a pre-deploy gate.
 
   </Tab>
   <Tab title="GitLab CI">
@@ -122,16 +120,12 @@ This workflow runs on pushes to `main`, making it a pre-deploy gate. The `MNEMOM
 evaluate-card:
   stage: deploy
   image: node:20
-  variables:
-    MNEMOM_API_KEY: $MNEMOM_API_KEY
   script:
     - npm install -g @mnemom/mnemom
-    - mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
+    - mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --strict
   only:
     - main
 ```
-
-In GitLab, store `MNEMOM_API_KEY` as a CI/CD variable (Settings > CI/CD > Variables) with the "Masked" option enabled.
 
   </Tab>
 </Tabs>
@@ -156,7 +150,6 @@ No special configuration is needed. If the command exits with `1`, the pipeline 
 ```bash
 mnemom card evaluate card.yaml \
   --tools mcp__browser__navigate,mcp__filesystem__delete \
-  --agent my-agent \
   --strict
 ```
 
@@ -189,9 +182,7 @@ jobs:
           node-version: '20'
       - run: npm install -g @mnemom/mnemom
       - run: mnemom card validate card.yaml
-      - run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --agent my-agent
-        env:
-          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+      - run: mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_message --strict
 
   reputation-gate:
     runs-on: ubuntu-latest
@@ -219,7 +210,7 @@ Here is a complete end-to-end workflow that validates on every PR and evaluates 
 
 ### Add your API key as a secret
 
-In GitHub, go to Settings > Secrets and variables > Actions, then add `MNEMOM_API_KEY` with your API key. In GitLab, go to Settings > CI/CD > Variables and add it there with the "Masked" option enabled.
+`card validate` and `card evaluate` need no API key for the local checks above, but the reputation gate (and a server-authoritative `card validate --agent <name>`, if you use one) do. In GitHub, go to Settings > Secrets and variables > Actions, then add `MNEMOM_API_KEY` with your API key. In GitLab, go to Settings > CI/CD > Variables and add it there with the "Masked" option enabled.
 
 ### Create the validation workflow
 

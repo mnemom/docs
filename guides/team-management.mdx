@@ -10,36 +10,16 @@ icon: "people-group"
 This guide covers the full team lifecycle: creation, roster management, alignment cards, reputation monitoring, and team badges.
 
 <Info>
-Team operations require the `team_reputation` feature flag, available on Team and Enterprise plans. See [Pricing](/pricing/overview) for details.
+Team operations require your org's plan to include the `team_reputation` capability. If it isn't enabled, team endpoints return `403 feature_gated` with an `upgrade_url` pointing at [Pricing](/pricing/overview).
 </Info>
 
 ---
 
 ## Quick start
 
-Create a team, add members, and derive a card in three API calls:
+Create a team, add members, and derive a card in three API calls, using the REST API directly or `@mnemom/sdk`'s generic HTTP client:
 
 <CodeGroup>
-```typescript TypeScript
-import { createTeam, deriveTeamCard } from '@mnemom/teams';
-
-// 1. Create a team with initial members
-const team = await createTeam({
-  org_id: 'org-abc123',
-  name: 'Support Pipeline Alpha',
-  description: 'Customer support agent team',
-  agent_ids: ['agent-a', 'agent-b', 'agent-c'],
-});
-
-console.log(`Team created: ${team.team.id}`);
-console.log(`Members: ${team.members.length}`);
-
-// 2. Derive a team alignment card from member cards
-const derived = await deriveTeamCard(team.team.id);
-console.log(`Card derived from ${derived.members_with_cards} members`);
-console.log(`Card source: ${derived.card_source}`);
-```
-
 ```python Python
 import httpx
 
@@ -54,12 +34,13 @@ response = httpx.post(f"{API_BASE}/v1/teams", headers=HEADERS, json={
     "agent_ids": ["agent-a", "agent-b", "agent-c"],
 })
 team = response.json()
-team_id = team["team"]["id"]
+team_id = team["id"]
 print(f"Team created: {team_id}")
 
-# 2. Derive a team alignment card from member cards
-card = httpx.post(f"{API_BASE}/v1/teams/{team_id}/card/derive", headers=HEADERS)
-print(f"Card derived from {card.json()['members_with_cards']} members")
+# 2. Derive a team alignment card from member cards (at least 2 members
+#    need active alignment cards first)
+derived = httpx.post(f"{API_BASE}/v1/teams/{team_id}/card/derive", headers=HEADERS)
+print(f"Derived card: {derived.json()['card_json']}")
 ```
 </CodeGroup>
 
@@ -77,7 +58,7 @@ POST      POST           POST           GET              DELETE
 
 ### 1. Create a team
 
-Teams require an organization, a name, and at least 2 initial members (max 50).
+Teams require an organization and a name. You can add up to 50 initial members, or create the team empty and add members afterward — at least 2 members with active alignment cards are needed before you can derive a card (step 3).
 
 ```bash
 curl -X POST https://api.mnemom.ai/v1/teams \
@@ -213,10 +194,10 @@ curl -X DELETE https://api.mnemom.ai/v1/teams/{team_id} \
 Embed team reputation badges anywhere -- READMEs, documentation, dashboards.
 
 ```
-GET https://api.mnemom.ai/v1/teams/{team_id}/badge.svg?variant={variant}
+GET https://api.mnemom.ai/v1/teams/{team_id}/badge.svg?variant={variant}&style={style}
 ```
 
-Six badge variants are available:
+`style` is `light` (default) or `dark`. Six badge variants are available:
 
 | Variant | Display |
 |---------|---------|
@@ -270,29 +251,18 @@ Badges are cached for 60 minutes at the CDN edge. For real-time data, use the AP
 
 | Operation | Required Role |
 |-----------|--------------|
-| Create team | `owner` or `admin` |
-| Update team | `owner` or `admin` |
-| Archive team | `owner` or `admin` |
-| Add/remove members | `owner` or `admin` |
-| Set team card | `owner` or `admin` |
-| Derive team card | `owner` or `admin` |
+| Create team | Org `owner` or `admin` |
+| Update team | Org `owner`/`admin`, or a delegated `team_admin` grant on that team |
+| Archive team | Org `owner` or `admin` |
+| Add/remove members | Org `owner`/`admin`, or a delegated `team_admin` grant on that team |
+| Set team card | Org `owner`/`admin`, or a delegated `team_admin` grant on that team |
+| Derive team card | Org `owner`/`admin`, or a delegated `team_admin` grant on that team |
 | View team details | Any org member |
 | View roster history | Any org member |
 | View card history | Any org member |
 | View reputation | Public (no auth for public teams) |
 
----
-
-## Feature requirements
-
-Team operations require the `team_reputation` feature flag:
-
-| Plan | Team Features |
-|------|--------------|
-| Free | Not available |
-| Developer | Not available |
-| Team | 200 team reputation computations included/mo ($0.005/ea overage) |
-| Enterprise | Unlimited |
+A `team_admin` grant delegates day-to-day management of one team without full org `admin` — manage grants with `mnemom team admin grant`/`revoke`/`list` or `GET/POST /v1/teams/{team_id}/admins`.
 
 ---
 

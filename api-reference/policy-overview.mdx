@@ -5,315 +5,79 @@ sidebarTitle: "Policy API"
 icon: "shield-halved"
 ---
 
-# Policy API
-
 <Note>
   Part of **[CLPI](/concepts/clpi) Phase 1: Policy Engine**. The Policy API is the programmatic interface to policy **evaluation**.
 </Note>
 
-The Policy API provides programmatic access to **policy evaluation** — evaluate tool usage against an agent's resolved policy, and replay historical traces against the current policy for pre-enforcement auditing.
+The Policy API evaluates tool usage against an agent's resolved policy, and replays historical traces against the current policy for pre-enforcement auditing.
 
 <Warning>
-  **Setting a policy is done through the alignment card.** Agent and org policy are no longer standalone resources — they are part of the unified [alignment card](/concepts/alignment-cards) surface. Set an agent's policy via `PUT /v1/alignment/agent/{agent_id}` and an org's baseline via the org-card surface. See [Agent cards](/concepts/agent-cards) and the [Policy Management guide](/guides/policy-management). The evaluation endpoints below are the canonical way to test tools against a resolved policy.
+  **Setting a policy is done through the alignment card.** Agent and org policy are not standalone resources — they live in the unified [alignment card](/concepts/alignment-cards)'s `capabilities` and `enforcement` sections. Set an agent's policy via `PUT /v1/alignment/agent/{agent_id}`. See [Agent cards](/concepts/agent-cards) and the [Policy Management guide](/guides/policy-management). The two evaluation endpoints below are the way to test tools against a resolved policy — there is no separate policy CRUD surface.
 </Warning>
 
-**Base URL:** `https://api.mnemom.ai/v1`
-
----
-
-## Authentication
-
-| Endpoint | Auth Required | Notes |
-|----------|--------------|-------|
-| `POST /v1/policies/evaluate` | API key or Bearer JWT | Evaluate tools against an agent's resolved policy |
-| `POST /v1/policies/evaluate/historical` | API key or Bearer JWT | Replay historical traces against the current policy |
-
-**API key authentication:** Pass in the `X-Mnemom-Api-Key` header:
-
-```
-X-Mnemom-Api-Key: mnm_your_key_here
-```
-
-**Bearer JWT authentication:** Pass in the `Authorization` header:
-
-```
-Authorization: Bearer {token}
-```
-
-API keys can be created in your dashboard under Settings or via `POST /v1/api-keys`.
-
----
-
-## Rate limits
-
-| Endpoint | Rate Limit | Window |
-|----------|-----------|--------|
-| `POST /policies/evaluate` | 60 requests | per minute |
-| `POST /policies/evaluate/historical` | 30 requests | per minute |
-
-Rate-limited responses return HTTP `429` with a `Retry-After` header.
-
----
+For authentication, the base URL, rate limits, and the error envelope shared by every `/v1/*` endpoint, see the [API overview](/api-reference/overview) and [Errors](/api-reference/errors).
 
 ## Endpoints
 
-### POST /v1/policies/evaluate
+<CardGroup cols={2}>
+  <Card title="POST /policies/evaluate" icon="check" href="/api-reference/endpoint/post-policies-evaluate">
+    Evaluate a caller-supplied list of tools against the policy derived from an agent's published canonical alignment card. Returns a verdict, any violations/warnings/card gaps, and a coverage report.
+  </Card>
+  <Card title="POST /policies/evaluate/historical" icon="clock-rotate-left" href="/api-reference/endpoint/post-policies-evaluate-historical">
+    Replay an agent's most recent traces (up to 200) against its current canonical card, or against a hypothetical `card_json`, to see which past tool calls would violate today's policy.
+  </Card>
+</CardGroup>
 
-Evaluate a policy against a set of tools. Returns a verdict indicating whether the tools are permitted, any violations or warnings, and coverage analysis against the agent's card actions.
+Both endpoints derive the policy from the agent's canonical alignment card server-side — you never pass a policy document in the request body. See each endpoint's page for the exact request/response schema, or the [Policy Management guide](/guides/policy-management#evaluate-tools-against-the-active-policy) for worked examples.
 
-**Request body:**
-
-```json
-{
-  "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
-  "context": "gateway"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agent_id` | string | Yes | Agent identifier whose resolved policy will be evaluated |
-| `tools` | string[] | Yes | List of tool names to evaluate against the policy |
-| `context` | string | No | Evaluation context: `"gateway"`, `"runtime"`, or `"audit"` (default: `"gateway"`) |
-
-**Response:** `200 OK`
-
-```json
-{
-  "verdict": "fail",
-  "violations": [
-    {
-      "type": "forbidden",
-      "tool": "mcp__filesystem__delete",
-      "reason": "Deletion not permitted",
-      "severity": "critical"
-    }
-  ],
-  "warnings": [],
-  "card_gaps": [],
-  "coverage": {
-    "total_card_actions": 5,
-    "mapped_card_actions": ["web_fetch", "web_search"],
-    "unmapped_card_actions": ["read", "write", "send_response"],
-    "coverage_pct": 40
-  },
-  "policy_id": "pol-abc123",
-  "policy_version": 3,
-  "evaluated_at": "2026-02-25T14:00:00.000Z",
-  "context": "gateway",
-  "duration_ms": 12
-}
-```
-
-**Response fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `verdict` | string | Overall result: `"pass"`, `"fail"`, or `"warn"` |
-| `violations` | array | Policy violations found during evaluation |
-| `warnings` | array | Non-blocking warnings (e.g., unmapped tools in `"warn"` mode) |
-| `card_gaps` | array | Card actions that are declared but have no tool mapping |
-| `coverage` | object | Coverage analysis of card actions vs. capability mappings |
-| `policy_id` | string | ID of the policy that was evaluated |
-| `policy_version` | number | Version of the policy that was evaluated |
-| `evaluated_at` | string | ISO 8601 timestamp of evaluation |
-| `context` | string | Evaluation context used |
-| `duration_ms` | number | Time taken for evaluation in milliseconds |
-
-**Violation object:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Violation type: `"forbidden"`, `"unmapped"`, or `"escalation"` |
-| `tool` | string | Tool name that triggered the violation |
-| `reason` | string | Human-readable explanation |
-| `severity` | string | Severity level: `"low"`, `"medium"`, `"high"`, or `"critical"` |
-
-**`coverage` object:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `total_card_actions` | number | Total number of card actions declared for the agent |
-| `mapped_card_actions` | string[] | Card actions that have at least one tool mapping |
-| `unmapped_card_actions` | string[] | Card actions with no tool mapping |
-| `coverage_pct` | number | Percentage of card actions covered by capability mappings (0 -- 100) |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `400` | Invalid request body (missing `agent_id` or `tools`) |
-| `401` | API key required or invalid |
-| `404` | Agent not found or no policy exists |
-
----
-
-### POST /v1/policies/evaluate/historical
-
-Evaluate a policy against historical traces for an agent. Replays past tool invocations through the current policy to surface retroactive violations. Useful for auditing policy changes before enforcement.
-
-**Request body:**
-
-```json
-{
-  "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "time_range": {
-    "start": "2026-02-18T00:00:00.000Z",
-    "end": "2026-02-25T23:59:59.000Z"
-  },
-  "context": "audit"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agent_id` | string | Yes | Agent identifier |
-| `time_range` | object | Yes | Time range with `start` and `end` ISO 8601 timestamps |
-| `context` | string | No | Evaluation context (default: `"audit"`) |
-
-**Response:** `200 OK`
-
-```json
-{
-  "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-  "traces_evaluated": 142,
-  "verdict": "fail",
-  "violation_count": 7,
-  "violations": [
-    {
-      "type": "forbidden",
-      "tool": "mcp__filesystem__delete",
-      "reason": "Deletion not permitted",
-      "severity": "critical",
-      "trace_id": "tr-abc123",
-      "occurred_at": "2026-02-22T09:15:00.000Z"
-    }
-  ],
-  "summary": {
-    "pass": 135,
-    "warn": 0,
-    "fail": 7
-  },
-  "policy_id": "pol-abc123",
-  "policy_version": 3,
-  "evaluated_at": "2026-02-25T14:05:00.000Z",
-  "duration_ms": 340
-}
-```
-
-**Response fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `agent_id` | string | Agent identifier |
-| `traces_evaluated` | number | Number of historical traces evaluated |
-| `verdict` | string | Overall result: `"pass"`, `"fail"`, or `"warn"` |
-| `violation_count` | number | Total number of violations found |
-| `violations` | array | Violation details including `trace_id` and `occurred_at` |
-| `summary` | object | Breakdown of trace verdicts: `pass`, `warn`, and `fail` counts |
-| `policy_id` | string | ID of the policy evaluated against |
-| `policy_version` | number | Version of the policy evaluated against |
-| `evaluated_at` | string | ISO 8601 timestamp of evaluation |
-| `duration_ms` | number | Time taken for evaluation in milliseconds |
-
-**Error responses:**
-
-| Status | Meaning |
-|--------|---------|
-| `400` | Invalid request body or time range |
-| `401` | API key required or invalid |
-| `404` | Agent not found or no policy exists |
-| `422` | Time range exceeds maximum (30 days) |
-
----
-
-## Error codes
-
-| Status | Code | Description |
-|--------|------|-------------|
-| `400` | `invalid_request` | Missing or invalid parameters |
-| `401` | `unauthorized` | API key required but not provided or invalid |
-| `404` | `not_found` | Agent or policy not found |
-| `422` | `validation_error` | Semantic validation failed (e.g., invalid time range) |
-| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
-| `500` | `internal_error` | Server error; retry with exponential backoff |
-
-All error responses follow the standard envelope:
-
-```json
-{
-  "error": {
-    "code": "not_found",
-    "message": "No policy found for agent 'mnm-550e8400-e29b-41d4-a716-446655440000'"
-  }
-}
-```
-
----
+<Note>
+  A related endpoint, [`POST /teams/recommend-policy`](/api-reference/endpoint/post-teams-recommend-policy), generates a starting policy from a risk forecast rather than evaluating one. See [Policy Management → Using policy recommendations](/guides/policy-management#using-policy-recommendations).
+</Note>
 
 ## SDK usage
 
-<Note>
-Policy evaluation is not yet wrapped by the `@mnemom/sdk` client (which currently covers the `agents` and `catalog` namespaces). Call `/v1/policies/evaluate` directly over HTTP until an SDK helper ships.
-</Note>
+`@mnemom/sdk` does not yet include a dedicated helper for policy evaluation. Call `/v1/policies/evaluate` (or `/evaluate/historical`) directly over HTTP:
 
 <CodeGroup>
 
 ```typescript TypeScript
-const API_BASE = 'https://api.mnemom.ai';
-
-// Evaluate tools against the agent's resolved policy
-const result = await fetch(`${API_BASE}/v1/policies/evaluate`, {
+const result = await fetch('https://api.mnemom.ai/v1/policies/evaluate', {
   method: 'POST',
   headers: {
-    Authorization: `Bearer ${process.env.MNEMOM_API_KEY}`,
+    'X-Mnemom-Api-Key': process.env.MNEMOM_API_KEY,
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
     agent_id: 'mnm-550e8400-e29b-41d4-a716-446655440000',
-    tools: ['mcp__browser__navigate', 'mcp__filesystem__delete'],
-    context: 'gateway',
+    tools: [{ name: 'mcp__browser__navigate' }, { name: 'mcp__filesystem__delete' }],
   }),
 }).then((r) => r.json());
 
-console.log(result.verdict);                // "fail"
-console.log(result.violations);             // [{ tool: "mcp__filesystem__delete", ... }]
-console.log(result.coverage.coverage_pct);  // 40
+console.log(result.verdict); // "pass" | "warn" | "fail"
+console.log(result.coverage.coverage_pct);
 ```
 
 ```python Python
 import httpx
 
-API_BASE = "https://api.mnemom.ai"
-headers = {"Authorization": f"Bearer {api_key}"}
-
-# Evaluate tools against the agent's resolved policy
 result = httpx.post(
-    f"{API_BASE}/v1/policies/evaluate",
-    headers=headers,
+    "https://api.mnemom.ai/v1/policies/evaluate",
+    headers={"X-Mnemom-Api-Key": api_key},
     json={
         "agent_id": "mnm-550e8400-e29b-41d4-a716-446655440000",
-        "tools": ["mcp__browser__navigate", "mcp__filesystem__delete"],
-        "context": "gateway",
+        "tools": [{"name": "mcp__browser__navigate"}, {"name": "mcp__filesystem__delete"}],
     },
 ).json()
 
-print(f"Verdict: {result['verdict']}")          # "fail"
-print(f"Violations: {result['violations']}")    # [{"tool": "mcp__filesystem__delete", ...}]
-print(f"Coverage: {result['coverage']['coverage_pct']}%")  # 40%
+print(result["verdict"])
+print(result["coverage"]["coverage_pct"])
 ```
 
 </CodeGroup>
 
-To set or update an agent's policy, use the unified alignment-card endpoint — see the [Policy Management guide](/guides/policy-management).
-
----
-
 ## See also
 
-- [Policy Engine](/concepts/policy-engine) -- How policies are evaluated and enforced
-- [Policy DSL Specification](/specifications/policy-dsl) -- Full schema reference for policy documents
-- [Policy CLI](/gateway/policy-cli) -- Manage policies from the command line
-- [Policy Management Guide](/guides/policy-management) -- Best practices for writing and deploying policies
-- [Alignment cards](/concepts/alignment-cards) -- Where agent and org policy is now declared
+- [Policy Engine](/concepts/policy-engine) -- how policies are evaluated and enforced
+- [Policy Management Guide](/guides/policy-management) -- creating, testing, and publishing a card's policy
+- [CI/CD Policy Gates](/guides/ci-cd-policy-gates) -- gating a pipeline on `mnemom card evaluate`
+- [Alignment cards](/concepts/alignment-cards) -- where agent and org policy is declared

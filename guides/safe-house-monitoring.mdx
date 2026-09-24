@@ -185,7 +185,7 @@ curl -X PUT "https://api.mnemom.ai/v1/protection/agent/${AGENT_ID}" \
   --data-binary @protection.card.yaml
 ```
 
-The publish triggers a protection-card recompose against the org template and platform floor. If the org sets a stricter threshold than your suggestion, the canonical card clamps to the org value (strictest-wins; see [card composition](/concepts/card-composition)). The legacy `PUT /v1/agents/{id}/safe-house/config` endpoint was removed in the 2026-04-15 unified-cards consolidation — use the protection card.
+The publish triggers a protection-card recompose against the org template and platform floor. If the org sets a stricter threshold than your suggestion, the canonical card clamps to the org value (strictest-wins; see [card composition](/concepts/card-composition)). A legacy `PUT /v1/agents/{id}/safe-house/config` endpoint has since been retired — use the protection card.
 
 <Tip>
 When the calibration engine produces suggestions for multiple threat types on the same agent, apply them one at a time over successive days rather than all at once. This lets you observe the effect of each change in isolation.
@@ -223,14 +223,13 @@ curl "https://api.mnemom.ai/v1/safe-house/metrics/timeseries?threat_type=prompt_
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `agent_id` | string | Filter to a specific agent |
-| `verdict` | `warn` \| `quarantine` \| `block` | Filter by verdict |
+| `verdict` | string | Filter by verdict (e.g. `warn`, `quarantine`, `block`) |
 | `threat_type` | string | Filter by threat category |
 | `min_risk` | float | Minimum overall risk score (0–1) |
-| `detection_layer` | `l1` \| `l2` \| `l3` | Which detection layer produced the verdict |
 | `from` | ISO 8601 | Start of time range |
 | `to` | ISO 8601 | End of time range |
-| `limit` | integer | Results per page (max 200) |
-| `cursor` | string | Pagination cursor from previous response |
+| `limit` | integer | Results per page (default 25, max 100) |
+| `after` | string | Pagination cursor from previous response |
 
 ---
 
@@ -262,7 +261,6 @@ Audit log entries are included in the EU AI Act compliance export (`GET /v1/comp
 ## See also
 
 - [Safe House Threat Model](/guides/safe-house-threat-model) — What each threat type is and how detection works
-- [Safe House Webhooks](/guides/safe-house-webhooks) — Integrate threat events into your ops stack
+- [Webhook Notifications](/guides/webhooks) — Integrate threat events into your ops stack via `sh.*` webhooks
 - [Safe House API Reference](/api-reference/safe-house-overview) — Full endpoint reference
 - [EU AI Act Compliance](/guides/eu-compliance) — How Safe House audit data maps to Article 50 obligations
-- [Observability](/guides/observability) — Export Safe House metrics to your observability platform via OpenTelemetry

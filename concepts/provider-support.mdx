@@ -23,7 +23,11 @@ Models the v1 promise applies to. Listed in the gateway's `/models.json` registr
 {/* <!-- model-coverage:supported:start --> */}
 <CardGroup cols={3}>
   <Card title="Anthropic" icon="brain">
+    Claude Fable 5.1
+    Claude Opus 5
+    Claude Sonnet 5
     Claude Opus 4.8
+    Claude Fable 5
     Claude Opus 4.7
     Claude Sonnet 4.6
     Claude Haiku 4.5
@@ -36,6 +40,7 @@ Models the v1 promise applies to. Listed in the gateway's `/models.json` registr
     GPT-5.6 Sol
     GPT-5.6 Terra
     GPT-5.6 Luna
+    GPT-6 Astra
   </Card>
   <Card title="Gemini" icon="gem">
     Gemini 2.5 Pro
@@ -53,7 +58,11 @@ Models the v1 promise applies to. Listed in the gateway's `/models.json` registr
 # but carry no v1 promise.
 supported_models:
   anthropic:
+    - claude-fable-5-1
+    - claude-opus-5
+    - claude-sonnet-5
     - claude-opus-4-8
+    - claude-fable-5
     - claude-opus-4-7
     - claude-sonnet-4-6
     - claude-haiku-4-5-20251001
@@ -65,6 +74,7 @@ supported_models:
     - gpt-5.6-sol
     - gpt-5.6-terra
     - gpt-5.6-luna
+    - gpt-6-astra
   gemini:
     - gemini-2.5-pro
     - gemini-2.5-flash
@@ -87,7 +97,7 @@ Each cell describes the v1 commitment level. Symbols:
 |---|---|---|---|
 | Streaming (SSE) | ✓ | ✓ | ✓ |
 | Tool use / function calling | ✓ | ✓ | ✓ |
-| **Thinking-trace inspection** (AIP) | ✓ <sup>[1]</sup> | ⚠ Partial <sup>[2]</sup> | ✓ <sup>[3]</sup> |
+| **Thinking-trace inspection** (AIP) | ✓ <sup>[1]</sup> | Not available <sup>[2]</sup> | ✓ <sup>[3]</sup> |
 | Multimodal (image inputs) | ✓ | ✓ | ✓ |
 | Prompt caching | ✓ <sup>[4]</sup> | ⚠ Partial <sup>[5]</sup> | ⚠ Partial <sup>[6]</sup> |
 | Batch API | ✓ | ✓ | ✓ |
@@ -96,16 +106,16 @@ Each cell describes the v1 commitment level. Symbols:
 
 Anthropic models expose full **extended thinking blocks** through the response API. AIP reads completed thinking blocks post-response (before delivery in `enforce`, which adds latency; post-delivery in `observe`/`nudge`), and the verifier (Claude Haiku 4.5) has full chain-of-thought visibility. This is the most complete AIP coverage Mnemom offers — and the baseline against which other providers are compared.
 
-### [2] OpenAI — reasoning summaries only
+### [2] OpenAI — no thinking-trace inspection through the gateway today
 
-OpenAI's reasoning APIs (`o3`, `o3-mini`) expose **reasoning summaries**, not raw chain-of-thought. AIP can inspect these summaries, but the depth of analysis is bounded by what OpenAI chose to summarize. Non-reasoning models (`gpt-5`, `gpt-5-codex`, `gpt-4o`) expose no internal reasoning at all — AIP degrades to surface-only analysis on these.
+OpenAI's reasoning summaries are a **Responses API** feature (`reasoning.summary`), not something the Chat Completions API returns. The gateway's default `/openai` door proxies Chat Completions — the shape OpenAI clients send by default — and that shape never carries reasoning content back, for any OpenAI model, reasoning or not. AIP's thinking-extraction step returns empty by construction for every `/openai/*` request today, including through the `/openai/v1/responses` passthrough path. There is no per-model split here: it is uniform across `o3`, `o3-mini`, `gpt-5`, `gpt-5-codex`, `gpt-5.6-*`, and `gpt-6-astra`.
 
 **What this means in practice:**
-- Boundary violations that surface in the model's final response are caught equally well across all providers.
-- Boundary violations that would have surfaced in the model's hidden reasoning, but never reach the final response, are caught with **lower confidence** on OpenAI than on Anthropic or Gemini.
-- The AIP integrity-checkpoint **verdict** is still emitted on OpenAI; the **certainty** of that verdict is provider-conditional.
+- Boundary violations that surface in the model's final response are still caught equally well on OpenAI — Safe House and CLPI don't depend on the thinking trace.
+- Boundary violations that would only have surfaced in the model's hidden reasoning are **not caught** on OpenAI — AIP has nothing to analyze, so a checkpoint below the minimum-evidence threshold is emitted as a synthetic `clear` without an analysis-LLM call, not a partial-confidence verdict.
+- If your application relies on AIP catching boundary violations in the model's *reasoning* specifically, use Anthropic or Gemini for that workload. OpenAI models remain fully supported for inference, Safe House, and CLPI — just not for thinking-trace inspection.
 
-This is the load-bearing honesty disclosure. Mnemom does not claim uniform AIP coverage across providers.
+This is the load-bearing honesty disclosure: Mnemom does not claim AIP thinking-trace coverage on OpenAI, on any model, through the gateway as it exists today.
 
 ### [3] Gemini — full `thoughts` exposure
 
@@ -121,29 +131,26 @@ OpenAI's prompt caching is **automatic** — the API decides what to cache based
 
 ### [6] Gemini — separate `CachedContent` API
 
-Gemini exposes prompt caching as a separate `CachedContent` resource (explicit cache lifecycle, named caches with TTL). The gateway today does not surface or use this API; requests are sent without referencing cached content. Customers using Gemini's cache outside Mnemom will see lower latency than they see through Mnemom — this is a known gap on our roadmap.
+Gemini exposes prompt caching as a separate `CachedContent` resource (explicit cache lifecycle, named caches with TTL). The gateway today does not surface or use this API; requests are sent without referencing cached content. Customers using Gemini's cache outside Mnemom will see lower latency than they see through Mnemom.
 
 ## AIP coverage by provider — the headline commitment
 
-Of all per-provider gaps, **integrity-checkpoint coverage** is the load-bearing one. Mnemom's public SLO commitment is:
+Of all per-provider gaps, **thinking-trace coverage** is the load-bearing one:
 
-| Provider | Target AIP coverage <sup>[*]</sup> |
+| Provider | Thinking-trace coverage |
 |---|---|
-| Anthropic (Opus 4.8, Opus 4.7, Sonnet 4.6, Haiku 4.5) | **≥ 99%** |
-| Gemini (2.5 Pro, 2.5 Flash, 3.8 Flash, 3.5 Flash-Lite) | **≥ 95%** |
-| OpenAI o-series (`o3`, `o3-mini`) | **≥ 50%** |
-| OpenAI non-thinking (`gpt-5`, `gpt-5-codex`, `gpt-4o`) | Excluded — AIP runs in degraded "surface-only" mode |
+| Anthropic (all supported models) | Full — native extended-thinking blocks, read directly |
+| Gemini (2.5 Pro, 2.5 Flash, 3.8 Flash, 3.5 Flash-Lite) | Full — native `thoughts` content parts, read directly |
+| OpenAI (all supported models) | None through the gateway today — see [2] above |
 
-<sup>[*]</sup> "AIP coverage" is defined as the percentage of customer-facing AIP analysis cycles where the verifier had full thinking-trace inspection. Anthropic and Gemini expose full traces; OpenAI o-series exposes reasoning summaries only; non-reasoning OpenAI models expose no internal reasoning. Coverage is measured on a rolling 30-day window.
-
-**If your application relies on AIP catching boundary violations in the model's reasoning** — particularly violations that would not surface in the final response — choose Anthropic or Gemini. OpenAI o-series is supported, with the documented coverage limitation. OpenAI non-thinking models are supported for inference but are not the right choice when AIP is the load-bearing safety layer.
+**If your application relies on AIP catching boundary violations in the model's reasoning** — particularly violations that would not surface in the final response — choose Anthropic or Gemini. OpenAI models are fully supported for inference, Safe House screening, and CLPI tool-use governance; they are not the right choice when AIP thinking-trace analysis is the load-bearing safety layer.
 
 ## Latency expectations
 
 In aggregate:
 
 - **Safe House dispatch** adds ~15 ms P50 / ~60 ms P95 across all providers (the dispatch path is provider-agnostic).
-- **AIP analysis** runs post-response (before delivery in `enforce`, which adds the latency below; post-delivery in `observe`/`nudge`). Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash and OpenAI non-thinking models emit thin traces and complete AIP analysis in P50 ≤ 800 ms.
+- **AIP analysis** runs post-response (before delivery in `enforce`, which adds the latency below; post-delivery in `observe`/`nudge`), only when a thinking trace was extracted. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash emits thinner traces and completes AIP analysis in P50 ≤ 800 ms. OpenAI requests skip the analysis-LLM call entirely (no trace to analyze) and add no AIP latency.
 
 The gateway does not interrupt a response mid-stream. In `enforce`, AIP runs after the upstream response completes but before the gateway delivers it to the customer, so a violating response is gated before delivery (adding latency); this holds on every provider. In `observe` and `nudge`, the response is delivered first and the verdict is recorded post-hoc.
 
@@ -156,12 +163,10 @@ Mnemom's gateway adapter — the code that parses each provider's response forma
 | **Static-shape** | Every PR to the gateway | "Did our parser break?" Asserts the adapter handles captured response fixtures correctly. |
 | **Live** | Nightly | "Did the upstream provider ship a breaking change?" Real upstream call → real response → real parse. |
 
-All three providers (Anthropic, OpenAI, Gemini) run **both layers** as of 2026-05-12. Live tests fire nightly against real upstream APIs and detect breaking changes within 24 hours.
+All three providers (Anthropic, OpenAI, Gemini) run both layers. Live tests fire nightly against real upstream APIs and detect breaking changes within 24 hours.
 
 <Note>
-**Streaming OpenAI thinking visibility:** OpenAI's STREAMING Chat Completions API does not emit reasoning summaries via `delta.reasoning_content` for o-series models. Reasoning happens server-side and is reported in `usage.completion_tokens_details.reasoning_tokens`, but the reasoning text itself does not reach the streamed response. Customers using OpenAI's non-streaming Responses API see reasoning summaries; streaming customers do not.
-
-This is upstream behavior, not a Mnemom limitation. The AIP coverage commitment of **≥50% on OpenAI o-series** applies to non-streaming consumers; streaming OpenAI o-series degrades to surface-only treatment. Mnemom's gateway parser correctly reports empty thinking content for streaming OpenAI responses regardless of model.
+**OpenAI reasoning content, streaming or not:** OpenAI's Chat Completions API — streaming or non-streaming — does not return reasoning content for any model. Server-side reasoning token usage is reported in `usage.completion_tokens_details.reasoning_tokens`, but the reasoning text itself never reaches the response body Mnemom's gateway proxies. This is upstream API behavior, not a Mnemom limitation, and it is why OpenAI has no thinking-trace coverage today regardless of streaming mode — see [2] above.
 </Note>
 
 ## Deprecation policy

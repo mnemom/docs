@@ -45,14 +45,18 @@ The token **doesn't carry the card body** — consumers fetch the body separatel
 
 The full verification flow ([`mnemom verify-card`](/guides/verify-card) executes this for you):
 
-1. Fetch `<iss>/v1/.well-known/jwks.json`.
+1. Fetch `https://api.mnemom.ai/v1/.well-known/jwks.json` (the API host — not the `iss` claim's host; see note below).
 2. Locate the key with `kid` matching the token's header.
 3. Verify the Ed25519 signature.
-4. Check `iss` matches the expected issuer (`https://mnemom.ai` for production).
+4. Check `iss` matches the expected issuer (`https://mnemom.ai` for production — this is a domain-identity check, not a fetchable location).
 5. Check `now() < exp` (the verifier may apply a small clock-skew grace; default 60 seconds).
 6. Check the canonical card body's `content_hash` matches the attestation's `content_hash`.
 
-If you'd benefit from a code reference, the runtime verifier lives at [`mnemom-api/src/attestation/verifier.ts`](https://github.com/mnemom/mnemom-api/blob/main/src/attestation/verifier.ts) and the CLI verifier at [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts).
+<Note>
+The token's `iss` claim (`https://mnemom.ai`) and the JWKS host (`api.mnemom.ai`) are deliberately different: `iss` names Mnemom as the issuing identity, while the JWKS is served from the API host that also serves everything else in this section. Don't construct the JWKS URL from `iss` — always use `https://api.mnemom.ai/v1/.well-known/jwks.json` (or the `jwks_uri` given alongside the token, e.g. in the [A2A export](/concepts/a2a-export)).
+</Note>
+
+If you'd benefit from a code reference, the CLI verifier lives at [`mnemom-platform/cli/src/commands/verify-card.ts`](https://github.com/mnemom/mnemom-platform/blob/main/cli/src/commands/verify-card.ts) (the API's own verifier is internal, but any JOSE/EdDSA library implements the same six steps above).
 
 ## Key rotation + JWKS lifetime
 

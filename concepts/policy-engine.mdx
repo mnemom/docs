@@ -6,7 +6,7 @@ icon: "shield-halved"
 ---
 
 <Note>
-The Policy Engine is **Phase 1 of [CLPI (Card Lifecycle & Policy Intelligence)](/concepts/clpi)** — the governance layer that transforms alignment cards into lifecycle-managed artifacts with policy enforcement, trust recovery, risk intelligence, and on-chain anchoring.
+The Policy Engine is the always-on part of **[CLPI](/concepts/clpi)** — Mnemom's governance layer built on top of alignment cards, which also covers violation reclassification/trust recovery and fleet intelligence (most of which are separately-entitled capabilities).
 </Note>
 
 The policy engine translates [Alignment Card](/concepts/alignment-cards) declarations into enforceable rules over concrete tools. An alignment card says an agent may perform `web_fetch`. The `capabilities` section of the same card says `web_fetch` means `mcp__browser__navigate` and `mcp__browser__click` — but not `mcp__filesystem__delete`. The card declares intent. The `enforcement` section enforces it.
@@ -16,7 +16,7 @@ The policy engine translates [Alignment Card](/concepts/alignment-cards) declara
 </Note>
 
 <Note>
-The policy engine is a parallel enforcement layer to [alignment enforcement](/gateway/enforcement) (observe/nudge/enforce). Alignment enforcement checks agent behavior against card values. Policy enforcement checks tool usage against the card's `capabilities` + `enforcement` sections. Both run independently and produce separate verdicts.
+The policy engine does **not** have its own on/off/enforce switch. It checks tool usage against the card's `capabilities` + `enforcement` sections, but whether a violation is logged or blocked is decided by the card's top-level `autonomy_mode` (the same switch documented in [Enforcement Modes](/gateway/enforcement)) — `off` skips policy evaluation entirely, `observe` and `nudge` both log without blocking, and `enforce` blocks on `critical`/`high` violations. There's a separate, genuinely independent switch — `integrity_mode` — for the values/conscience (AIP) pipeline, but there is no third, policy-specific mode field on the card. A legacy `enforcement.mode` (or `default_mode`) key is accepted on input for backward compatibility but is dropped during composition and has no effect on a canonical card — `autonomy_mode` is authoritative.
 </Note>
 
 ## How the engine reads the card
@@ -26,8 +26,9 @@ The policy engine reads three sections of the canonical (composed) alignment car
 | Section | Purpose |
 |---|---|
 | `capabilities` | Bridge card-level semantic actions (`web_fetch`, `read_file`) to concrete tool glob patterns (`mcp__browser__*`) |
-| `enforcement.forbidden` | Tools that are always blocked, regardless of mappings |
-| `enforcement` (top-level knobs) | Fallback behavior for unmatched tools — `default_mode`, `unmapped_tool_action`, `grace_period_hours` |
+| `enforcement.forbidden_tools` | Tools that are always blocked, regardless of mappings |
+| `enforcement` (top-level knobs) | Fallback behavior for unmatched tools — `allow_unmapped_tools`, `grace_period_hours` |
+| `autonomy_mode` (card top-level) | Whether an evaluated violation is skipped, logged, or blocked — see [Enforcement modes](#enforcement-modes) below |
 
 Two optional card sections extend the model:
 
@@ -48,7 +49,7 @@ capabilities:
     description: "Browser-based research and navigation"
     tools:
       - "mcp__browser__*"
-    card_actions:
+    required_actions:
       - web_fetch
       - web_search
 
@@ -56,15 +57,14 @@ capabilities:
     tools:
       - "mcp__filesystem__read*"
       - "mcp__filesystem__list*"
-    card_actions:
+    required_actions:
       - read_file
 
 enforcement:
-  default_mode: warn              # warn | enforce | off
-  unmapped_tool_action: warn      # allow | warn | deny
-  unmapped_severity: medium
+  mode: warn                      # off | warn | enforce
+  allow_unmapped_tools: false     # true = allow, false = deny (no card-level "warn" state)
   grace_period_hours: 24
-  forbidden:
+  forbidden_tools:
     - pattern: "mcp__filesystem__delete*"
       reason: "File deletion not permitted"
       severity: critical
@@ -97,8 +97,8 @@ mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__slack__post_m
 **What it checks:**
 
 - Card YAML conforms to the unified schema (capability glob validity, enforcement-mode enums, forbidden-rule structure).
-- Capability `card_actions` reference actions that exist in `autonomy.bounded_actions`.
-- Each tool in the `--tools` list matches a capability, hits a forbidden rule, or falls through to the `unmapped_tool_action` default.
+- Capability `required_actions` reference actions that exist in `autonomy.bounded_actions`.
+- Each tool in the `--tools` list matches a capability, hits a forbidden rule, or falls through to the `allow_unmapped_tools` default.
 - Coverage report identifies card actions with no backing capability mapping.
 
 **Use case:** pre-deploy gates. See the [CI/CD policy gates guide](/guides/ci-cd-policy-gates) for GitHub Actions + GitLab CI templates.
@@ -113,10 +113,10 @@ Live evaluation runs in real-time as requests pass through the Mnemom gateway. T
 **How it works:**
 
 1. Request arrives at the gateway.
-2. Gateway reads the canonical alignment card (KV-cached, 5-min TTL).
-3. Each tool in the request is checked against `enforcement.forbidden` first.
+2. Gateway reads the canonical alignment card (cached, 5-min TTL).
+3. Each tool in the request is checked against `enforcement.forbidden_tools` first.
 4. Remaining tools are matched against `capabilities[*].tools` globs.
-5. Unmatched tools fall through to `enforcement.unmapped_tool_action`.
+5. Unmatched tools fall through to `enforcement.allow_unmapped_tools`.
 6. A verdict is returned via the `X-Policy-Verdict` response header.
 
 **Verdict headers:**
@@ -127,12 +127,12 @@ Live evaluation runs in real-time as requests pass through the Mnemom gateway. T
 | `X-Policy-Verdict: warn` | One or more tools triggered warnings (logged, not blocked) |
 | `X-Policy-Verdict: fail` | One or more tools violated policy (blocked in enforce mode) |
 
-**Enforcement interaction:** `enforcement.default_mode` determines the gateway response:
+**Enforcement interaction:** the card's top-level `autonomy_mode` determines the gateway response (`observe` and `nudge` both resolve to the `warn` row below):
 
-| `default_mode` | `pass` | `warn` | `fail` |
+| `autonomy_mode` | `pass` | `warn` | `fail` |
 |---|---|---|---|
 | `off` | No evaluation | No evaluation | No evaluation |
-| `warn` | Allow | Allow + log | Allow + log |
+| `observe` / `nudge` | Allow | Allow + log | Allow + log |
 | `enforce` | Allow | Allow + log | Gated same-turn on both transports: HTTP 403 (non-streaming); gated before delivery (streaming, adds latency) |
 
   </Tab>
@@ -170,7 +170,7 @@ capabilities:
       - "mcp__browser__navigate"
       - "mcp__browser__click"
       - "mcp__browser__screenshot"
-    card_actions:
+    required_actions:
       - web_fetch
       - web_search
 
@@ -178,7 +178,7 @@ capabilities:
     tools:
       - "mcp__postgres__query"
       - "mcp__postgres__list_tables"
-    card_actions:
+    required_actions:
       - read_data
 ```
 
@@ -201,52 +201,51 @@ Start with broad globs during initial card development, then tighten them as you
 
 When the policy engine evaluates a tool, it follows this order:
 
-1. **Forbidden check:** does the tool match any `enforcement.forbidden[].pattern`? If yes, the tool is a violation regardless of capability mappings.
+1. **Forbidden check:** does the tool match any `enforcement.forbidden_tools[].pattern`? If yes, the tool is a violation regardless of capability mappings.
 2. **Capability match:** does the tool match any `capabilities[*].tools` glob? If yes, the tool is allowed and mapped to the corresponding card actions.
-3. **Default fallback:** if neither forbidden nor mapped, apply `enforcement.unmapped_tool_action`.
+3. **Default fallback:** if neither forbidden nor mapped, apply `enforcement.allow_unmapped_tools`.
 
 A tool can match multiple capabilities. This isn't an error — it means the tool satisfies multiple card actions (e.g., a file-read tool satisfying both `read_file` and `read_source_code`).
 
 ## Enforcement modes
 
-`enforcement.default_mode` is the card's policy-enforcement posture:
+Policy evaluation always runs against the card's `capabilities` + `enforcement` sections, but what happens to a violation is governed by the card's top-level `autonomy_mode` — there is no separate policy-specific mode field on a canonical card:
 
 <CardGroup cols={3}>
-  <Card title="Warn" icon="triangle-exclamation">
-    Log violations but do not block. `X-Policy-Verdict: warn` header returned. **Default mode.**
+  <Card title="autonomy_mode: observe / nudge" icon="triangle-exclamation">
+    Violations are evaluated and logged but never block the request. `X-Policy-Verdict: warn` header returned. **`observe` and `nudge` map to the same policy behavior** — CLPI does not yet render a distinct nudge annotation for policy violations.
   </Card>
-  <Card title="Enforce" icon="ban">
-    Block requests with policy violations, same-turn on both transports. `X-Policy-Verdict: fail` header returned. HTTP 403 for non-streaming requests; streaming responses are gated before delivery (which adds latency).
+  <Card title="autonomy_mode: enforce" icon="ban">
+    `critical`/`high` violations block the request, same-turn on both transports. `X-Policy-Verdict: fail` header returned. HTTP 403 for non-streaming requests; streaming responses are gated before delivery (which adds latency). Lower-severity violations still only warn.
   </Card>
-  <Card title="Off" icon="power-off">
+  <Card title="autonomy_mode: off" icon="power-off">
     Skip policy evaluation entirely. No `X-Policy-Verdict` header. No performance overhead.
   </Card>
 </CardGroup>
 
-<Warning>
-Policy enforcement (`enforcement.default_mode`), action-policing alignment (`autonomy_mode`), and values-policing alignment (`integrity_mode`) are three parallel systems with three independent master switches. Setting one to `enforce` does not affect the others — an agent can sit at `autonomy_mode: observe` + `integrity_mode: enforce` + `enforcement.default_mode: nudge` simultaneously, each on its own independent ladder.
-</Warning>
+<Note>
+A card that predates this cutover may still carry a legacy `enforcement.mode` (or `default_mode`) field. It is read only as a fallback when `autonomy_mode` is absent from the canonical card, and it is never emitted on a newly composed canonical card — set `autonomy_mode` instead.
+</Note>
 
-### Relationship to the alignment master switches
+### Relationship to the other master switches
 
 | System | Master switch | What it checks | Verdict source |
 |---|---|---|---|
-| **Action-policing alignment** | `autonomy_mode` (alignment card, top-level) | Tool calls + bounded-action envelope | CLPI tool-use policy + observer trace verification |
+| **Action-policing alignment + policy enforcement** | `autonomy_mode` (alignment card, top-level) | Tool calls against the bounded-action envelope **and** against the card's `capabilities`/`enforcement` policy sections | CLPI tool-use policy + observer trace verification |
 | **Values-policing alignment** | `integrity_mode` (alignment card, top-level) | Agent behavior against card values + conscience | AIP integrity checkpoints + drift detection |
-| **Policy enforcement** | `enforcement.default_mode` (alignment card, nested) | Tool usage against policy rules + capability mappings | Policy engine evaluation |
 | **Content screening** | `mode` (protection card, top-level) | Content on each enabled surface — inbound message, tool results carried by the same request, tool calls, outbound response | [Safe House](/concepts/safe-house) front door + back door |
 
-Both systems produce independent verdicts. Both are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
+There are two genuinely independent card-level master switches — `autonomy_mode` and `integrity_mode` — plus the protection card's own `mode`. Policy enforcement is not a third independent switch: it shares `autonomy_mode` with action-policing alignment, so the two always move together. Both `autonomy_mode`-driven checks and the `integrity_mode` check are surfaced in the [conscience timeline](/gateway/enforcement) and [observability exports](/guides/observability).
 
 The policy engine polices *tool calls* — what the agent asks to run. It does not police what a tool hands back. That is the protection card's job, and it happens in the same request: the front door screens each `tool_result` the request carries and withholds or decorates it before the body is forwarded, rather than leaving it for a later turn. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
 ## Forbidden rules
 
-`enforcement.forbidden` defines tools that must never be used, regardless of capability mappings. They're always checked first in the evaluation pipeline.
+`enforcement.forbidden_tools` defines tools that must never be used, regardless of capability mappings. They're always checked first in the evaluation pipeline.
 
 ```yaml
 enforcement:
-  forbidden:
+  forbidden_tools:
     - pattern: "mcp__filesystem__delete*"
       reason: "File deletion not permitted"
       severity: critical
@@ -270,39 +269,36 @@ Each rule has three fields:
 | `severity` | enum | `critical`, `high`, `medium`, or `low` |
 
 <Note>
-Policy `enforcement.forbidden` rules complement alignment card `autonomy.forbidden_actions`. Card forbidden actions declare intent ("this agent must never delete files"). Policy forbidden rules enforce that intent at the tool level ("block all tools matching `mcp__filesystem__delete*`"). Both are checked — card-level by alignment enforcement, tool-level by policy enforcement.
+Policy `enforcement.forbidden_tools` rules complement alignment card `autonomy.forbidden_actions`. Card forbidden actions declare intent ("this agent must never delete files"). Policy forbidden rules enforce that intent at the tool level ("block all tools matching `mcp__filesystem__delete*`"). Both are checked — card-level by alignment enforcement, tool-level by policy enforcement.
 </Note>
 
 ## Unmapped tool handling
 
-When a tool does not match any capability or forbidden rule, `enforcement.unmapped_tool_action` determines what happens.
+When a tool does not match any capability or forbidden rule, `enforcement.allow_unmapped_tools` determines what happens. It is a boolean, not a three-state field — the card itself can only say "let it through" or "deny it":
 
 ```yaml
 enforcement:
-  unmapped_tool_action: warn
-  unmapped_severity: medium
+  allow_unmapped_tools: false     # default: false (deny)
   grace_period_hours: 24
 ```
 
+Severity for an unmapped-tool denial is derived, not configured: a denied unmapped tool is always logged at `high` severity (it's a hard violation); an allowed one is `low` (informational only). There's no card field to change this.
+
 ### Unmapped tool actions
 
-| Action | Behavior |
-|---|---|
-| `deny` | Treat the unmapped tool as a violation. Blocked in enforce mode. |
-| `warn` | Log a warning but allow the tool invocation. **Default.** |
-| `allow` | Silently permit the tool. No log entry. |
+| `allow_unmapped_tools` | Resulting action | Behavior |
+|---|---|---|
+| `false` (or the field omitted) | `deny` | Treat the unmapped tool as a violation (severity `high`). Blocked in enforce mode. **This is the default** — an omitted field resolves to `deny`, not `allow`. |
+| `true` | `allow` | Silently permit the tool (severity `low`, informational only). No violation raised. |
 
 ### Choosing the right default
 
 <Tabs>
-  <Tab title="Development">
-    Use `allow` during early development when tool sets are still evolving. This avoids noise from constantly changing tool inventories.
+  <Tab title="Early development">
+    Set `allow_unmapped_tools: true` while tool sets are still evolving, to avoid noise from a constantly changing tool inventory.
   </Tab>
-  <Tab title="Staging">
-    Use `warn` in staging environments. This surfaces unmapped tools in logs and coverage reports without blocking agent functionality. This is the default.
-  </Tab>
-  <Tab title="Production">
-    Use `deny` in production when you have a mature, stable card. Every tool the agent uses should be explicitly mapped or explicitly forbidden.
+  <Tab title="Mature / production card">
+    Leave `allow_unmapped_tools` at its default (`false`/deny) once the card is stable. Every tool the agent uses should be explicitly mapped in `capabilities` or explicitly listed in `forbidden_tools`.
   </Tab>
 </Tabs>
 
@@ -320,7 +316,7 @@ enforcement:
 1. The policy engine tracks when each tool is first seen via `tool_first_seen` records.
 2. When an unmapped or forbidden tool is encountered, the engine checks how long ago it was first seen.
 3. If the tool was first seen within the grace period window, the violation is **downgraded to a warning** (the verdict drops from `fail` to `warn`), and the request proceeds. Under enforce mode, this means the request is **not blocked**.
-4. After the grace period expires, the tool falls back to the configured `unmapped_tool_action` (or its forbidden severity, for forbidden-pattern matches).
+4. After the grace period expires, the tool falls back to the configured `allow_unmapped_tools` result (or its forbidden severity, for forbidden-pattern matches).
 
 The window is per-(agent, tool): each agent's first observation of each tool starts its own clock. The clock cannot be back-dated.
 
@@ -348,22 +344,23 @@ In organizations with multiple agents, the `capabilities` and `enforcement` sect
 
 | Section | Merge strategy | Effect |
 |---|---|---|
-| `capabilities` | Union | Agent can add new capabilities but cannot remove platform or org capabilities |
-| `enforcement.forbidden` | Deny-overrides union | Both org and agent forbidden rules are enforced; agent cannot subtract |
-| `enforcement.default_mode` | Strictest wins (`enforce` > `warn` > `off`) | Agent can tighten, not loosen |
-| `enforcement.unmapped_tool_action` | Org is floor | Agent can strengthen (`allow` → `warn` → `deny`) but cannot weaken |
-| `autonomy.escalation_triggers` | Union | Both org and agent triggers are evaluated |
+| `capabilities` | Union | Agent can add new capabilities but cannot remove platform, org, or team capabilities |
+| `enforcement.forbidden_tools` | Union (then exemptions applied) | Platform, org, team, and agent forbidden rules are all enforced; agent cannot subtract |
+| `autonomy_mode` | Strictest wins (`enforce` > `nudge` > `observe` > `off`) | Governs policy enforcement *and* action-policing alignment together; agent can tighten, not loosen |
+| `enforcement.allow_unmapped_tools` | Strictest wins — `false` (deny) beats `true` (allow) at any scope | Agent can strengthen (`true` → `false`) but cannot weaken a `false` set upstream |
+| `enforcement.grace_period_hours` | Min across scopes | The shortest grace window set at any scope wins |
+| `autonomy.escalation_triggers` | Union | Triggers from every scope are evaluated |
 
 ### Strengthening enforcement
 
-The org mode acts as a floor; the agent can only move in the stricter direction:
+Upstream scopes act as a floor; a downstream scope can only move in the stricter direction:
 
 ```
-allow → warn → deny     (unmapped_tool_action)
-off   → warn → enforce  (default_mode)
+true  → false                          (allow_unmapped_tools; false = deny)
+off → observe/nudge → enforce          (autonomy_mode)
 ```
 
-If the org sets `unmapped_tool_action: warn`, an agent can set it to `deny` (stricter) but not `allow` (weaker).
+If the org sets `allow_unmapped_tools: true`, an agent can override it to `false` (stricter, i.e. deny) but cannot force a `false` set upstream back to `true`.
 
 ### Transaction guardrails
 
@@ -417,7 +414,7 @@ Every `mnemom card evaluate` run produces a coverage report that quantifies how 
 ```
 
 <Warning>
-A coverage percentage below 100% means some card actions have no backing capability mapping. Tools implementing those actions will fall through to `enforcement.unmapped_tool_action`. Aim for 100% coverage in production cards.
+A coverage percentage below 100% means some card actions have no backing capability mapping. Tools implementing those actions will fall through to `enforcement.allow_unmapped_tools`. Aim for 100% coverage in production cards.
 </Warning>
 
 ### Using coverage in CI/CD
@@ -443,6 +440,7 @@ card_version: unified/2026-04-15
 card_id: ac-research-agent-v2
 agent_id: mnm-your-agent-id
 issued_at: "2026-03-04T00:00:00Z"
+autonomy_mode: enforce   # governs both bounded-action policing and the policy sections below
 
 principal:
   type: human
@@ -471,26 +469,24 @@ capabilities:
       - "mcp__browser__click"
       - "mcp__browser__screenshot"
       - "mcp__browser__evaluate_script"
-    card_actions: [web_fetch, web_search]
+    required_actions: [web_fetch, web_search]
 
   file_reading:
     tools:
       - "mcp__filesystem__read_file"
       - "mcp__filesystem__list_directory"
-    card_actions: [read_file]
+    required_actions: [read_file]
 
   search:
     tools:
       - "mcp__search__query"
       - "mcp__search__suggest"
-    card_actions: [search]
+    required_actions: [search]
 
 enforcement:
-  default_mode: warn
-  unmapped_tool_action: warn
-  unmapped_severity: medium
+  allow_unmapped_tools: false
   grace_period_hours: 24
-  forbidden:
+  forbidden_tools:
     - pattern: "mcp__filesystem__delete*"
       reason: "File deletion not permitted for research agents"
       severity: critical
@@ -504,7 +500,6 @@ enforcement:
 audit:
   trace_format: ap-trace-v1
   retention_days: 90
-  tamper_evidence: append_only
 ```
 
 ## Limitations
@@ -516,7 +511,7 @@ audit:
 
 ## Policy engine and AEGIS Managed Rules
 
-The Policy Engine is **Phase 1 of CLPI**; AEGIS [Managed Rules](/concepts/managed-rules) are a separate (but composable) layer. When a Managed Rule promotes, the gateway loads it via the tiered KV → R2 → in-isolate read substrate. The policy engine still enforces card-defined capability mappings; the Managed Rule adds detection thresholds that screen the inputs and outputs the policy engine then allows or denies. Both compose through the same [cards composition primitive](/concepts/aegis) — the recipe (detection content) and the rule (control-plane state) flow into the cards cascade Platform → Org → Team → Agent under strictest-wins composition.
+The Policy Engine is the always-on layer of **[CLPI](/concepts/clpi)**; AEGIS [Managed Rules](/concepts/managed-rules) are a separate (but composable) layer. When a Managed Rule promotes, the gateway loads it via a tiered, multi-layer read substrate with independent fallback tiers. The policy engine still enforces card-defined capability mappings; the Managed Rule adds detection thresholds that screen the inputs and outputs the policy engine then allows or denies. Both compose through the same [cards composition primitive](/concepts/aegis) — the recipe (detection content) and the rule (control-plane state) flow into the cards cascade Platform → Org → Team → Agent under strictest-wins composition.
 
 ## See also
 
@@ -526,4 +521,4 @@ The Policy Engine is **Phase 1 of CLPI**; AEGIS [Managed Rules](/concepts/manage
 - [CI/CD Policy Gates](/guides/ci-cd-policy-gates) — `mnemom card evaluate` in GitHub Actions and GitLab CI
 - [Card Lifecycle](/concepts/card-lifecycle) — how alignment cards evolve and interact with policy
 - [Card Composition](/concepts/card-composition) — how platform / org / agent scopes merge
-- [Enforcement Modes](/gateway/enforcement) — alignment enforcement (observe/nudge/enforce) vs. policy enforcement
+- [Enforcement Modes](/gateway/enforcement) — the full `autonomy_mode` / `integrity_mode` verdict ladder, including how policy enforcement fits in

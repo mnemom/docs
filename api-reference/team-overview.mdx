@@ -1,60 +1,48 @@
 ---
 title: "Teams API"
-description: "Complete API reference for team CRUD, alignment cards, reputation, and badges"
+description: "API reference for team CRUD, alignment cards, and team reputation"
 sidebarTitle: "Teams API"
 icon: "users-gear"
 ---
 
-# Teams API
-
-The Teams API provides programmatic access to team management, team alignment cards, team reputation scores, and embeddable team badges. Teams are first-class meta-agents with persistent identity and accumulated reputation.
+Teams are first-class meta-agents with persistent identity and accumulated reputation. This page covers team management, team alignment cards, team-admin grants, and team reputation scores. For the reputation model itself, see [Team Trust Rating](/concepts/team-reputation).
 
 **Base URL:** `https://api.mnemom.ai/v1`
 
----
-
 ## Authentication
 
-| Endpoint | Auth Required | Notes |
+Team endpoints accept either an API key or a Bearer token — see [Authentication](/api-reference/overview#authentication) for both. Reputation-verification and the embeddable badge are the only public (no-auth) endpoints.
+
+```bash
+curl https://api.mnemom.ai/v1/teams/{team_id} \
+  -H "X-Mnemom-Api-Key: <key>"
+```
+
+| Endpoint | Auth required | Notes |
 |----------|--------------|-------|
-| `POST /v1/teams` | API key | Create team (owner/admin) |
-| `GET /v1/teams/{team_id}` | API key | Get team details |
-| `PATCH /v1/teams/{team_id}` | API key | Update team (owner/admin) |
-| `DELETE /v1/teams/{team_id}` | API key | Archive team (owner/admin) |
-| `POST /v1/teams/{team_id}/members` | API key | Add members (owner/admin) |
-| `DELETE /v1/teams/{team_id}/members/{agent_id}` | API key | Remove member (owner/admin) |
-| `GET /v1/teams/{team_id}/roster-history` | API key | Roster audit trail |
-| `GET /v1/orgs/{org_id}/teams` | API key | List org teams |
-| `GET /v1/teams/{team_id}/card` | API key | Get team alignment card |
-| `PUT /v1/teams/{team_id}/card` | API key | Set team card (owner/admin) |
-| `POST /v1/teams/{team_id}/card/derive` | API key | Auto-derive card (owner/admin) |
-| `GET /v1/teams/{team_id}/card/history` | API key | Card version history |
-| `GET /v1/teams/{team_id}/reputation` | No | Public score retrieval |
-| `GET /v1/teams/{team_id}/reputation/history` | No | Public history |
-| `GET /v1/teams/{team_id}/reputation/verify` | No | Cryptographic verification |
-| `GET /v1/teams/{team_id}/badge.svg` | No | Public badge |
+| `POST /v1/teams` | Yes | Create team (`owner`/`admin`) |
+| `GET /v1/teams/{team_id}` | Yes | Any org member |
+| `PATCH /v1/teams/{team_id}` | Yes | Update team (`owner`/`admin`) |
+| `DELETE /v1/teams/{team_id}` | Yes | Archive team, soft-delete (`owner`/`admin`) |
+| `POST /v1/teams/{team_id}/members` | Yes | Add members (`owner`/`admin`) |
+| `DELETE /v1/teams/{team_id}/members/{agent_id}` | Yes | Remove member (`owner`/`admin`) |
+| `GET /v1/teams/{team_id}/roster-history` | Yes | Any org member |
+| `GET /v1/orgs/{org_id}/teams` | Yes | Any org member |
+| `GET /v1/teams/{team_id}/card` | Yes | Any org member |
+| `PUT /v1/teams/{team_id}/card` | Yes | Set team card (`owner`/`admin`) |
+| `POST /v1/teams/{team_id}/card/derive` | Yes | Auto-derive card from members (`owner`/`admin`) |
+| `GET /v1/teams/{team_id}/card/history` | Yes | Any org member |
+| `GET /v1/teams/{team_id}/admins` | Yes | List team-admin grants; any org member |
+| `POST /v1/teams/{team_id}/admins` | Yes | Grant team-admin role (`owner`/`admin`) |
+| `DELETE /v1/teams/{team_id}/admins/{user_id}` | Yes | Revoke team-admin role (`owner`/`admin`, or self) |
+| `GET /v1/teams/{team_id}/reputation` | Yes | Any org member |
+| `GET /v1/teams/{team_id}/reputation/history` | Yes | Any org member |
+| `GET /v1/teams/{team_id}/reputation/verify` | **No** | Public — cryptographic verification |
+| `GET /v1/teams/{team_id}/badge.svg` | **No** | Public — embeddable badge |
 
-**API key authentication:** Pass in the `Authorization` header:
+## Rate limits and feature gating
 
-```
-Authorization: Bearer {api_key}
-```
-
----
-
-## Rate limits
-
-| Endpoint | Rate Limit | Window |
-|----------|-----------|--------|
-| Team CRUD endpoints | 60 requests | per minute |
-| Member management | 60 requests | per minute |
-| Card endpoints | 60 requests | per minute |
-| Reputation endpoints | 100 requests | per minute |
-| Badge endpoint | 300 requests | per minute |
-
-Rate-limited responses return HTTP `429` with a `Retry-After` header.
-
----
+Team endpoints share the standard per-IP REST rate limit — see [Rate limits](/api-reference/overview#rate-limits). All of them additionally require the `team_reputation` feature flag on your organization; an org without it gets a `403` on every team endpoint. See [Pricing](/pricing/overview) for how usage-based access is granted.
 
 ## Endpoints
 
@@ -71,7 +59,7 @@ Rate-limited responses return HTTP `429` with a `Retry-After` header.
 | `GET` | `/v1/teams/{team_id}/roster-history` | [Roster history](/api-reference/endpoint/get-teams-team-id-roster-history) |
 | `GET` | `/v1/orgs/{org_id}/teams` | [List org teams](/api-reference/endpoint/get-orgs-org-id-teams) |
 
-### Team Alignment Cards
+### Team alignment cards
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -79,6 +67,16 @@ Rate-limited responses return HTTP `429` with a `Retry-After` header.
 | `PUT` | `/v1/teams/{team_id}/card` | [Set team card](/api-reference/endpoint/put-teams-team-id-card) |
 | `POST` | `/v1/teams/{team_id}/card/derive` | [Derive card from members](/api-reference/endpoint/post-teams-team-id-card-derive) |
 | `GET` | `/v1/teams/{team_id}/card/history` | [Card version history](/api-reference/endpoint/get-teams-team-id-card-history) |
+
+### Team-admin grants
+
+A team-admin grant is scoped to one team, distinct from the org-level `owner`/`admin` role used elsewhere on this page.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/v1/teams/{team_id}/admins` | [List team-admin grants](/api-reference/endpoint/get-teams-team-id-admins) |
+| `POST` | `/v1/teams/{team_id}/admins` | [Grant team-admin](/api-reference/endpoint/post-teams-team-id-admins) |
+| `DELETE` | `/v1/teams/{team_id}/admins/{user_id}` | [Revoke team-admin](/api-reference/endpoint/delete-teams-team-id-admins-user-id) |
 
 ### Team reputation
 
@@ -89,121 +87,82 @@ Rate-limited responses return HTTP `429` with a `Retry-After` header.
 | `GET` | `/v1/teams/{team_id}/reputation/verify` | [Cryptographic verification](/api-reference/endpoint/get-teams-team-id-reputation-verify) |
 | `GET` | `/v1/teams/{team_id}/badge.svg` | [Team trust badge](/api-reference/endpoint/get-teams-team-id-badge-svg) |
 
----
-
 ## RBAC requirements
 
-| Operation | Required Role |
+| Operation | Required role |
 |-----------|--------------|
 | Create team | `owner` or `admin` |
-| View team | Any org member |
-| Update team | `owner` or `admin` |
-| Archive team | `owner` or `admin` |
+| View team, roster/card history, list org teams | Any org member |
+| Update, archive team | `owner` or `admin` |
 | Add/remove members | `owner` or `admin` |
 | Set/derive team card | `owner` or `admin` |
-| View card/roster history | Any org member |
-| View reputation | Public (no auth for public teams) |
-
----
-
-## Feature gating
-
-All team endpoints require the `team_reputation` feature flag, available on Team and Enterprise plans.
-
-| Plan | Access |
-|------|--------|
-| Free | Not available |
-| Developer | Not available |
-| Team | 200 team reputation computations/mo ($0.005/ea overage) |
-| Enterprise | Unlimited |
-
-See [Pricing](/pricing/overview) for plan details.
-
----
+| Grant/revoke team-admin | `owner`/`admin` (revoke also permits self) |
+| View reputation | Any org member |
+| Verify reputation, view badge | Public, no auth |
 
 ## Error codes
 
-| Status | Code | Description |
-|--------|------|-------------|
-| `400` | `invalid_request` | Missing or invalid parameters |
-| `401` | `unauthorized` | API key required but not provided or invalid |
-| `403` | `forbidden` | Insufficient permissions (wrong org role) or feature not available |
-| `404` | `not_found` | Team not found |
-| `409` | `conflict` | Team name already exists in organization |
-| `429` | `rate_limited` | Too many requests; check `Retry-After` header |
-| `500` | `internal_error` | Server error; retry with exponential backoff |
+Team endpoints follow the standard [error envelope](/api-reference/errors). The codes you'll actually branch on here:
 
-All error responses follow the standard envelope:
+| Status | Code | When |
+|--------|------|------|
+| `400` | `bad_request` | Missing/invalid parameters (e.g. team `name`). |
+| `401` | `unauthorized` | No credentials, or credentials don't resolve to a principal. |
+| `403` | `forbidden` | Authenticated, but not `owner`/`admin` for the operation, or the org lacks the `team_reputation` feature flag. |
+| `404` | `not_found` | Team doesn't exist, or doesn't belong to your org. |
+| `409` | `conflict` | A team with this name already exists in the organization. |
+| `429` | `rate_limited` | Too many requests — see [Rate limits](/api-reference/overview#rate-limits). |
 
-```json
-{
-  "error": {
-    "code": "conflict",
-    "message": "Team name already exists in this organization"
-  }
-}
-```
+See [Errors](/api-reference/errors) for the full status/retry contract.
 
----
+## Usage examples
 
-## SDK usage
+Use the REST API directly, or the `mnemom team` CLI commands where noted.
 
-### TypeScript
+### REST
 
-```typescript
-import { createTeam, getTeam, addMembers, deriveTeamCard } from '@mnemom/teams';
-import { fetchTeamReputation } from '@mnemom/reputation';
-
-// Create a team
-const { team, members } = await createTeam({
-  org_id: 'org-abc123',
-  name: 'Pipeline Alpha',
-  agent_ids: ['agent-a', 'agent-b', 'agent-c'],
-});
-
-// Add more members
-await addMembers(team.id, ['agent-d']);
-
-// Derive alignment card from member cards
-const { derived_card } = await deriveTeamCard(team.id);
-
-// Check team reputation
-const reputation = await fetchTeamReputation(team.id);
-if (reputation?.is_eligible) {
-  console.log(`Team score: ${reputation.score} (${reputation.grade})`);
-}
-```
-
-### Python
-
-```python
-import httpx
-
-API_BASE = "https://api.mnemom.ai"
-HEADERS = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
+```bash
 # Create a team
-team = httpx.post(f"{API_BASE}/v1/teams", headers=HEADERS, json={
-    "org_id": "org-abc123",
-    "name": "Pipeline Alpha",
-    "agent_ids": ["agent-a", "agent-b", "agent-c"],
-}).json()
+curl -X POST https://api.mnemom.ai/v1/teams \
+  -H "X-Mnemom-Api-Key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Pipeline Alpha"}'
 
-team_id = team["team"]["id"]
+# Add members
+curl -X POST https://api.mnemom.ai/v1/teams/{team_id}/members \
+  -H "X-Mnemom-Api-Key: <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_ids": ["agent-a", "agent-b", "agent-c"]}'
 
-# Derive card
-httpx.post(f"{API_BASE}/v1/teams/{team_id}/card/derive", headers=HEADERS)
+# Derive an alignment card from the team's members
+curl -X POST https://api.mnemom.ai/v1/teams/{team_id}/card/derive \
+  -H "X-Mnemom-Api-Key: <key>"
 
-# Check reputation (public, no auth)
-reputation = httpx.get(f"{API_BASE}/v1/teams/{team_id}/reputation").json()
-print(f"Score: {reputation['score']}, Grade: {reputation['grade']}")
+# Reputation (requires auth)
+curl https://api.mnemom.ai/v1/teams/{team_id}/reputation \
+  -H "X-Mnemom-Api-Key: <key>"
+
+# Cryptographic verification (public, no auth)
+curl https://api.mnemom.ai/v1/teams/{team_id}/reputation/verify
 ```
 
----
+### CLI
+
+The `mnemom` CLI covers a team's alignment/protection templates and team-admin grants directly (see `mnemom team --help`):
+
+```bash
+mnemom team list
+mnemom team show <team_id>
+mnemom team alignment-template <team_id> --set alignment.yaml
+mnemom team protection-template <team_id> --set protection.yaml
+mnemom team admin grant <team_id> --user <user_id>
+mnemom team admin list <team_id>
+mnemom team coverage <team_id>
+```
 
 ## Webhook events
 
-Nine webhook events are emitted for team operations. See [Webhook Notifications](/guides/webhooks) for delivery details.
+Team operations emit these events (see the [Webhook event catalog](/api-reference/webhook-events) for the full payload shape of each, and the [Webhooks guide](/guides/webhooks) for delivery and signature verification):
 
 | Event | Trigger |
 |-------|---------|
@@ -212,17 +171,13 @@ Nine webhook events are emitted for team operations. See [Webhook Notifications]
 | `team.member_added` | Agent added to team |
 | `team.member_removed` | Agent removed from team |
 | `team.card_updated` | Team alignment card changed |
-| `team_reputation.score_changed` | Team score changed by more than 10 points |
-| `team_reputation.grade_changed` | Team letter grade changed |
-| `quota.team_reputation_exceeded` | Team reputation usage exceeded plan limit |
-| `quota.team_reputation_warning` | Team reputation usage approaching limit (80%+) |
-
----
+| `quota.team_reputation_exceeded` | Team-reputation usage exceeded the org's limit |
+| `quota.team_reputation_warning` | Team-reputation usage approaching the org's limit |
 
 ## See also
 
-- [Team Trust Rating](/concepts/team-reputation) -- How team reputation scoring works
-- [Team Management Guide](/guides/team-management) -- Practical guide with examples
-- [Risk Assessment](/concepts/risk-assessment) -- Team risk model that feeds reputation
-- [Webhook Notifications](/guides/webhooks) -- Event delivery and signature verification
-- [Pricing](/pricing/overview) -- Plans and feature comparison
+- [Team Trust Rating](/concepts/team-reputation) — how team reputation scoring works
+- [Team Management Guide](/guides/team-management) — practical guide with examples
+- [Risk Assessment](/concepts/risk-assessment) — the team risk model that feeds reputation
+- [Webhook Notifications](/guides/webhooks) — event delivery and signature verification
+- [Pricing](/pricing/overview) — usage-based access and current rates

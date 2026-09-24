@@ -91,7 +91,7 @@ your_application_span
 
 For the complete attributes and metrics reference, see [OTel Attributes](/specifications/otel-attributes).
 
-### `aip.integrity_check` — 22 attributes + 2 GenAI SIG aliases
+### `aip.integrity_check` — 31 attributes + 4 GenAI SemConv fields
 
 | Attribute | Type | Source |
 |---|---|---|
@@ -112,11 +112,30 @@ For the complete attributes and metrics reference, see [OTel Attributes](/specif
 | `aip.conscience.consultation_depth` | string | conscience_context |
 | `aip.conscience.values_checked_count` | int | conscience_context |
 | `aip.conscience.conflicts_count` | int | conscience_context |
+| `aip.attestation.input_commitment` | string | attestation |
+| `aip.attestation.chain_hash` | string | attestation |
+| `aip.attestation.merkle_root` | string | attestation |
+| `aip.attestation.signature_verified` | boolean | attestation |
+| `aip.attestation.certificate_id` | string | attestation |
+| `aip.attestation.zk_proven` | boolean | attestation |
+| `aip.attestation.zk_proof_time_ms` | float | attestation |
 | `aip.window.size` | int | window_summary |
 | `aip.window.integrity_ratio` | float | window_summary (0.0-1.0) |
 | `aip.window.drift_alert_active` | boolean | window_summary |
+| `aip.integrity.output_hash` | string | output_analysis |
+| `aip.integrity.output_tokens` | int | output_analysis |
+| `aip.integrity.output_truncated` | boolean | output_analysis |
+| `aip.integrity.analysis_scope` | string | output_analysis |
 | `gen_ai.evaluation.verdict` | string | GenAI SIG forward-compat |
 | `gen_ai.evaluation.score` | float | GenAI SIG forward-compat |
+| `gen_ai.system` | string | upstream LLM provider attribution |
+| `gen_ai.request.model` | string | upstream LLM provider attribution |
+
+`mnemom.span.role` (`customer` / `verifier`) is also set on some spans so you can filter
+verifier-internal traffic out of per-provider SLOs.
+
+All fields are duck-typed and optional-chained — a missing field is skipped rather than
+throwing, so partial checkpoints still produce a valid (if sparser) span.
 
 ### `aap.verify_trace` — 8 attributes
 
@@ -164,6 +183,14 @@ For the complete attributes and metrics reference, see [OTel Attributes](/specif
 | `aap.verification.duration_ms` | Histogram | — |
 | `aap.coherence.score` | Histogram | compatible |
 
+### Sideband findings (Trust Posture detectors)
+
+A separate recorder, `recorder.recordSidebandFinding(finding)`, covers fleet-level sideband
+detector firings (coherence, fault-line, fleet, drift — see [Tuning Sideband
+Detection](/guides/sideband-detection)) rather than per-turn AIP/AAP results. It emits a
+`safe_house.sideband.finding` span carrying `safe_house.sideband.source`, `.axis`, `.team_id`,
+`.finding_count`, `.severity`, and `.pattern_type`, with one span event per affected agent.
+
 ## Dashboard templates
 
 Pre-built dashboards are available in the [aip-otel-exporter repository](https://github.com/mnemom/aip-otel-exporter/tree/main/packages/typescript/dashboards):
@@ -187,18 +214,11 @@ Integration examples are available in the [examples directory](https://github.co
 
 ## Performance
 
-Measured via `npm run bench` (Vitest bench, Node 22, Apple M-series):
-
-| Operation | Mean | p99 | Ops/sec |
-|---|---|---|---|
-| `recordIntegrityCheck()` | 0.007 ms | 0.023 ms | 142,540 |
-| `recordVerification()` | 0.003 ms | 0.004 ms | 310,510 |
-| `recordCoherence()` | 0.003 ms | 0.003 ms | 321,385 |
-| `recordDrift()` | 0.003 ms | 0.007 ms | 295,807 |
-| Workers `createOTLPSpan()` | 0.003 ms | 0.004 ms | 341,778 |
-| Workers `serializeExportPayload()` | 0.004 ms | 0.006 ms | 234,860 |
-
-All operations are sub-0.01ms mean. Zero measurable overhead on hot paths.
+Every recorder call (`recordIntegrityCheck`, `recordVerification`, `recordCoherence`,
+`recordDrift`) and the Workers-adapter helpers (`createOTLPSpan`, `serializeExportPayload`) ship
+with their own Vitest benchmark (`npm run bench` in the TypeScript package) — run it against your
+own hardware and Node version for current numbers. All of them are attribute-mapping and JSON
+serialization only (no network I/O), so the overhead they add on your hot path is sub-millisecond.
 
 ## Design principles
 
@@ -231,16 +251,9 @@ This exporter is part of the Mnemom trust plane:
 | [Python README](https://github.com/mnemom/aip-otel-exporter/blob/main/packages/python/README.md) | Python package documentation |
 | [Dashboards README](https://github.com/mnemom/aip-otel-exporter/blob/main/packages/typescript/dashboards/README.md) | Dashboard import instructions |
 
-## Status
+## Versions
 
-**Version 0.1.0** — Initial release.
-
-| Component | Status |
+| Package | Version |
 |---|---|
-| TypeScript Manual API | Stable |
-| TypeScript Auto-instrumentation | Stable |
-| TypeScript Workers Adapter | Stable |
-| Python Manual API | Stable |
-| Python Auto-instrumentation | Stable |
-| Metrics API | Stable |
-| Dashboard Templates | Stable |
+| `@mnemom/aip-otel-exporter` (npm) | 0.13.0 |
+| `aip-otel-exporter` (PyPI) | 0.5.0 |

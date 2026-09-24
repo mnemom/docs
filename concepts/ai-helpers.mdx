@@ -1,20 +1,19 @@
 ---
 title: "AI Helpers"
-description: "Four AI-forward verbs that turn the cards API into a self-serve developer experience: scaffold (NL → manifest), explain (why was this enforced?), simulate (dry-run), and tools/import (bulk import). All read-style; never auto-commit."
+description: "Three AI-forward verbs that turn the cards API into a self-serve developer experience: scaffold (NL → manifest), explain (why was this enforced?), and simulate (dry-run). All read-style; never auto-commit."
 sidebarTitle: "AI Helpers"
 icon: "wand-magic-sparkles"
 ---
 
-The cards API ships four AI-forward verbs that make manifest authoring self-serve. They wrap the platform's existing capabilities — LLM, policy engine, observer — and surface them through care-framed HTTP endpoints.
+The cards API ships three AI-forward verbs that make manifest authoring self-serve. They wrap the platform's existing capabilities — LLM, policy engine, observer — and surface them through care-framed HTTP endpoints.
 
 | Verb | Endpoint | What it does |
 |---|---|---|
 | **scaffold** | `POST /v1/<resource>/scaffold` | Natural-language description → starting-point manifest YAML + reasoning. |
 | **explain** | `POST /v1/<resource>/<scope>/<id>/explain` | "Why did the policy engine flag this?" Returns structured trace + remediations. |
 | **simulate** | `POST /v1/<resource>/<scope>/<id>/simulate` | Dry-run gateway + observer against a hypothetical tool call. |
-| **tools/import** | `POST /v1/tools/import` | Bulk preview from OpenAPI 3.0+ spec or connector YAML manifest. |
 
-All four are **read-style POSTs**. They don't mutate state, so they don't take `Idempotency-Key` or `If-Match`. They're idempotent by construction.
+All three are **read-style POSTs**. They don't mutate state, so they don't take `Idempotency-Key` or `If-Match`. They're idempotent by construction.
 
 ## scaffold — natural language to a manifest
 
@@ -153,62 +152,16 @@ Use this before you commit a manifest change, or to test whether a specific tool
 
 See [the simulate guide](/guides/simulate-before-commit) for the full pre-commit workflow.
 
-## tools/import — bulk preview from OpenAPI or YAML
-
-You point the endpoint at an OpenAPI 3.0+ spec or a connector tool manifest; the platform walks the operations, extracts proposed tool definitions, and LLM-infers the class + domain for each.
-
-```bash
-curl -X POST https://api.mnemom.ai/v1/tools/import \
-  -H "X-Mnemom-Api-Key: $MNEMOM_PLATFORM_ADMIN_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "format": "openapi",
-    "source": "url",
-    "url": "https://api.github.com/openapi.yaml",
-    "infer_class_domain": true
-  }'
-```
-
-Response:
-
-```json
-{
-  "ok": true,
-  "imported": [
-    {
-      "name": "github_create_issue",
-      "class": "internal_write",
-      "domain": "engineering",
-      "description": "Create a new GitHub issue",
-      "schema": {...},
-      "confidence": 0.92,
-      "from_path": "/repos/{owner}/{repo}/issues",
-      "from_method": "POST"
-    }
-  ],
-  "inferred_class_domain": {
-    "github_create_issue": { "class": "internal_write", "domain": "engineering", "confidence": 0.92 }
-  },
-  "conflicts": [],
-  "commit_url": "POST /v1/tools",
-  "preview_token": "tools-import:..."
-}
-```
-
-The preview never auto-commits — you iterate `imported[]` and write each tool individually via `POST /v1/tools`. Platform-admin only.
-
-See [the bulk import guide](/guides/bulk-tool-import) for the full ingest-and-confirm workflow.
-
 ## Rate limits
 
-LLM-backed verbs (scaffold and tools/import-with-inference) share a per-principal budget:
+LLM-backed verbs (scaffold, and explain/simulate when called with `"enrich": true`) share a per-principal budget:
 
 | Window | Default | Override |
 |---|---|---|
 | Per user | 10 calls/hour | `LLM_USER_HOURLY_CAP` env var |
 | Per org | 100 calls/hour | `LLM_ORG_HOURLY_CAP` env var |
 
-On exceed: `429 Too Many Requests` with a `Retry-After` header and a care-framed body. explain and simulate are pure-sync (no LLM by default); they don't consume the LLM budget unless you pass `"enrich": true`.
+On exceed: `429 Too Many Requests` with a `Retry-After` header and a care-framed body. explain and simulate are pure-sync (no LLM) by default; they don't consume the LLM budget unless you pass `"enrich": true`.
 
 ## Care-framed by construction
 
@@ -216,16 +169,11 @@ Every customer-facing string in the response surface — error messages, reasoni
 
 ## Cache + freshness
 
-scaffold and tools/import-with-inference cache LLM responses by hash of the input. Identical inputs return identical outputs without burning the LLM budget. Cache TTLs:
-
-- scaffold: 24 hours (description-hash → manifest + reasoning)
-- tools/import inference: 7 days (tool_name + method + path + tags → class + domain inference)
-
-explain and simulate are not cached — they consume live spec state.
+scaffold caches LLM responses by a hash of the input (model + scope + description + hints). Identical inputs return identical outputs without burning the LLM budget — 24-hour TTL. explain and simulate are not cached — they consume live spec state.
 
 ## Related reading
 
 - [Sub-resource verbs](/concepts/sub-resource-verbs) — the write surface the remediations point at.
-- [Cards as Resources](/concepts/cards-as-resources) — the URL surface that wraps it all.
+- [Agent Cards](/concepts/agent-cards) — the URL surface that wraps it all.
 - [Policy engine](/concepts/policy-engine) — what explain and simulate are surfacing.
 - [Care-framing doctrine](/for-agents) — the operator vocabulary every helper uses.

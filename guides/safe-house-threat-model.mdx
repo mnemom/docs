@@ -90,7 +90,7 @@ Indirect injection embeds malicious instructions inside content the agent proces
 - Pattern matching targets instruction delimiters ("System:", "Assistant:", "Human:", XML/YAML tags used as instruction wrappers)
 
 <Note>
-**Verified against the gateway source.** In `mnemom/mnemom-platform` at commit `c8122e65`, `judgeShadowScreen()` (`gateway/src/index.ts:7683`) is called with `sourceType: "tool_result"` at `gateway/src/index.ts:8088` — the synchronous acting chain whose per-tool decisions the request path applies before dispatch — and at `gateway/src/index.ts:7990` (the `waitUntil` shadow chain, recording only) and `gateway/src/index.ts:14977` (the `observe` recorder, which never modifies the message). All three run within the lifecycle of the request that carried the tool results. Tool-result screening requires `screen_surfaces.tool_responses` to be enabled on the [protection card](/concepts/protection-card).
+Tool-result screening runs synchronously, inside the same request that carries the tool result back to the model, before the model is allowed to read it. It requires `screen_surfaces.tool_responses` to be enabled on the [protection card](/concepts/protection-card).
 </Note>
 
 **Known limit:** Sufficiently novel indirect injection payloads that bear no similarity to known patterns will produce lower L1/L2 confidence scores. The arena flywheel addresses this over time — when a new pattern is observed and confirmed as malicious, it enters the candidate pool and can be promoted to active detection.
@@ -234,7 +234,7 @@ curl -X PUT "https://api.mnemom.ai/v1/protection/agent/${AGENT_ID}" \
   --data-binary @protection.card.yaml
 ```
 
-(The legacy `PUT /v1/agents/{id}/safe-house/config` endpoint was removed in the 2026-04-15 unified-cards consolidation. See the [safe-house config guide](/guides/safe-house-config) for the full protection-card lifecycle.)
+(A legacy `PUT /v1/agents/{id}/safe-house/config` endpoint has since been retired in favor of the unified protection card above. See the [safe-house config guide](/guides/safe-house-config) for the full protection-card lifecycle.)
 
 ### Marking false positives
 
@@ -244,10 +244,7 @@ When releasing a quarantined item, set `is_false_positive: true`:
 curl -X POST https://api.mnemom.ai/v1/safe-house/quarantine/qid_7f3a9b2c/release \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "is_false_positive": true,
-    "note": "Legitimate wire transfer request from verified CFO"
-  }'
+  -d '{"is_false_positive": true}'
 ```
 
 False positive records feed the calibration loop. When the same agent accumulates false positives in a specific threat category, the adaptive threshold suggestion engine recommends configuration changes. The suggestions are available at `GET /v1/safe-house/threshold-suggestions`.
@@ -271,7 +268,7 @@ Don't apply threshold changes immediately across all agents when you see a false
 
 - [OWASP Agentic Top 10 mapping](/guides/owasp-agentic-top-10) — How each shipped threat pattern maps to the OWASP Top 10 for Agentic Applications (ASI01–ASI10), with coverage gaps documented
 - [Safe House overview](/concepts/safe-house) — Architecture and how Safe House fits into the Mnemom gateway stack
-- [Safe House Webhooks](/guides/safe-house-webhooks) — React to threats in real-time via webhook events
+- [Webhook Notifications](/guides/webhooks) — React to threats in real-time via `sh.*` webhook events
 - [Safe House Monitoring](/guides/safe-house-monitoring) — Security Observatory, metrics, and alert management
 - [Safe House API Reference](/api-reference/safe-house-overview) — Full endpoint reference for configuration and quarantine management
 - [Security & Trust Model](/guides/security-trust-model) — The broader Mnemom threat model covering AIP and AAP

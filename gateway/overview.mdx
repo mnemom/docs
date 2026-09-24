@@ -5,30 +5,23 @@ sidebarTitle: "Overview"
 icon: "satellite-dish"
 ---
 
-# Mnemom Gateway overview
-
 Mnemom is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
 
 Mnemom is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs per-turn [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
 
-> **us-2 cutover (2026-08-04):** On 2026-08-04 Mnemom's **managed** production cut over onto the
-> Azure **us-2 cell**: `ca-*-us2` container apps in resource group `rg-mnemom-cell-us2-eastus2`,
-> fronted by Cloudflare, with identity on Zitadel `id-us2.mnemom.ai`. Managed compute moved off
-> Cloudflare Workers onto Azure container apps. Mnemom retired the legacy Supabase project as the
-> managed datastore. Cloudflare remains as the fronting CDN/edge. References to "Cloudflare Workers"
-> compute and "Supabase" storage below describe the **pre-cutover managed** topology. The
-> **self-hosted** stack still ships on Cloudflare Workers + Supabase — see the [self-hosted quickstart](/quickstart/self-hosted).
+<Note>
+The hosted gateway at `gateway.mnemom.ai` is what you integrate against regardless of which backend serves a given request — that endpoint, its request/response contract, and the headers documented in [Enforcement Modes](/gateway/enforcement) are the stable surface. If you'd rather run your own instance, see the [self-hosted quickstart](/quickstart/self-hosted) for that deployment's infrastructure requirements -- they describe the self-hosted stack only, not how Mnemom operates the managed service.
+</Note>
 
 ## Architecture
 
 ```
 gateway/
 ├── cli/          # CLI tool (npm package)
-├── gateway/      # Cloudflare Worker — API proxy + tracing
-├── observer/     # Cloudflare Worker — trace builder + AAP verification
-├── api/          # Cloudflare Worker — REST API
-├── dashboard/    # React frontend (legacy, see mnemom-website)
-└── database/     # Supabase schema (Postgres)
+├── gateway/      # API proxy + tracing
+├── observer/     # Trace builder + AAP verification
+├── api/          # REST API
+└── database/     # Postgres schema (self-hosted: Supabase)
 ```
 
 ### Request flow
@@ -38,7 +31,7 @@ gateway/
 Your App → mnemom   ├─── /openai/*    ──→ OpenAI (GPT-5)
            gateway  └─── /gemini/*    ──→ Google (Gemini)
                 ↓               ↑
-           CF AI Gateway ← SSE stream
+           request logging ← SSE stream
                 ↓           |
          Response split     |
            /       \        |
@@ -49,11 +42,11 @@ Your App → mnemom   ├─── /openai/*    ──→ OpenAI (GPT-5)
                     |
               AIP analysis (Haiku, ~3s)
                     |
-           checkpoint + attestation → Supabase
+           checkpoint + attestation stored
                     |
-           Policy evaluation (if policy active)
+           Policy evaluation (autonomy_mode-gated)
                     |
-           Observer (cron) → AP-Trace → Supabase
+           Observer (cron) → AP-Trace stored
                     |
            Dashboard (mnemom.ai)
 ```
@@ -62,11 +55,11 @@ Named agents use the `x-mnemom-agent` header to specify an agent name (e.g., `x-
 
 The system consists of five components:
 
-1. **Gateway** — A Cloudflare Worker that intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background — extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and — in nudge mode — recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered — on streaming this adds latency.
+1. **Gateway** — Intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background — extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and — in nudge mode — recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered — on streaming this adds latency.
 
     That describes the *response* path. On the **request** path the gateway also runs [Safe House](/concepts/safe-house) front-door screening, and that is not a single gate per turn: it screens the inbound message and, when `screen_surfaces.tool_responses` is enabled, each tool result the request is handing back to the model — synchronously, before the body is forwarded upstream. A flagged tool result is withheld (replaced with a quarantine notice) or decorated as untrusted in that same request. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
-2. **Observer** — A scheduled Cloudflare Worker (1-minute cron) that processes AI Gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against alignment cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints via `linkCheckpointToTrace()`. AIP integrity analysis is handled entirely by the gateway.
+2. **Observer** — A scheduled background process that processes gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against alignment cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints. AIP integrity analysis is handled entirely by the gateway.
 
 3. **API** — Serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
 
@@ -76,11 +69,9 @@ The system consists of five components:
 
 ## Supported providers
 
-| Provider | Models | Thinking/AIP | Auth |
-|----------|--------|-------------|------|
-| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks) | `x-api-key` |
-| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries | `Authorization: Bearer` |
-| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts) | `x-goog-api-key` |
+The gateway routes and traces Anthropic, OpenAI, and Gemini — see
+[Provider Support](/concepts/provider-support) for the current supported-model
+list and per-provider feature coverage.
 
 ## What gets traced
 
@@ -98,15 +89,12 @@ Mnemom Gateway builds AP-Traces that record:
 
 Your prompts, responses, and API keys are never stored. Only SHA-256 hashes of API keys are used for agent identification.
 
-## AIP compatibility matrix
+## AIP compatibility
 
-| Provider/Model | AIP Support | Method |
-|----------------|-------------|--------|
-| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
-| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
-| Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
-| Non-reasoning models | Tracing only | Synthetic clear verdict |
-| Legacy OpenAI (o3/o4-mini) | Unsupported | Reasoning encrypted |
+Coverage varies by provider — see [Provider Support](/concepts/provider-support#aip-coverage-by-provider--the-headline-commitment)
+for the full matrix and honest disclosure. In short: Anthropic and Gemini get
+full thinking-trace analysis; OpenAI gets none through the gateway today (its
+Chat Completions door never returns reasoning content, on any model).
 
 ## Claiming your agent
 
@@ -122,17 +110,16 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 
 - **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
 - **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `x-mnemom-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
-- **AIP requires reasoning models** — AIP integrity checking requires models with exposed thinking (Anthropic, Gemini, GPT-5 Thinking). Models without thinking get synthetic clear verdicts.
+- **AIP requires exposed reasoning** — AIP integrity checking needs a provider that exposes thinking content. Anthropic and Gemini do; OpenAI's Chat Completions door does not expose any reasoning content today, on any model, so OpenAI gets synthetic `clear` verdicts rather than analysis — see [Provider Support](/concepts/provider-support).
 - **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
 
 ## Dependencies
 
-- [Agent Alignment Protocol (AAP)](/protocols/aap/specification) — `@mnemom/agent-alignment-protocol@0.1.8` on npm
-- [Agent Integrity Protocol (AIP)](/protocols/aip/specification) — `@mnemom/agent-integrity-protocol@0.1.4` on npm
-- [Cloudflare Workers](https://workers.cloudflare.com/) — Gateway, observer, and API hosting
-- [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) — Request logging and analytics
-- [Supabase](https://supabase.com/) — Postgres database with row-level security
+- [Agent Alignment Protocol (AAP)](/protocols/aap/specification) — [`@mnemom/agent-alignment-protocol`](https://www.npmjs.com/package/@mnemom/agent-alignment-protocol) on npm
+- [Agent Integrity Protocol (AIP)](/protocols/aip/specification) — [`@mnemom/agent-integrity-protocol`](https://www.npmjs.com/package/@mnemom/agent-integrity-protocol) on npm
 - API keys: Anthropic (required for AIP analysis), OpenAI and Gemini (optional, for multi-provider tracing)
+
+If you're running the [self-hosted](/quickstart/self-hosted) stack instead of the hosted gateway, it deploys on Cloudflare Workers with a Supabase Postgres database.
 
 ## Next steps
 

@@ -4,7 +4,7 @@ description: "Conecta los servidores Model Context Protocol de Mnemom a Claude C
 sidebarTitle: "Clientes MCP"
 icon: "plug"
 keywords: ["MCP", "Model Context Protocol", "Claude", "Cursor", "VS Code"]
-source_fingerprint: sha256:4ea7b27c106ed8ef5e5b1c38a7f644e0ff66c6bdc87892c21c17b0147e3e0f40
+source_fingerprint: sha256:620c1ec33a51a1889d77f8b0fd12577a728e82c0829f7e4cd6100cec0d73a1d0
 ---
 
 # Conectarse mediante MCP
@@ -15,17 +15,17 @@ Mnemom opera dos servidores públicos de [Model Context Protocol](https://modelc
   <Card title="Plano de control" icon="shield-check">
     `https://api.mnemom.ai/mcp`
 
-    62 herramientas que reflejan la CLI `mnemom` — Trust Ratings, tarjetas de alineamiento y protección, señales de gobernanza, posturas, equipos, webhooks y claves API. `tools/list` es público; la ejecución de herramientas se autentica exactamente como la [API REST](/api-reference/overview).
+    75 herramientas que reflejan la CLI `mnemom` — Trust Ratings, tarjetas de alineamiento y protección, señales de gobernanza, posturas, equipos, webhooks y claves API. `tools/list` es público; la ejecución de herramientas se autentica exactamente como la [API REST](/api-reference/overview).
   </Card>
   <Card title="Búsqueda en la documentación" icon="book-open">
     `https://docs.mnemom.ai/mcp`
 
-    Solo lectura. Dos herramientas — `search_mnemom_docs` y `query_docs_filesystem` — sobre esta documentación y la especificación OpenAPI. Sin autenticación.
+    Tres herramientas — `search_mnemom_docs` y `query_docs_filesystem_mnemom_docs` (ambas de solo lectura, sobre esta documentación y la especificación OpenAPI), más `submit_feedback` (presenta un informe sobre una página de la documentación). Sin autenticación.
   </Card>
 </Columns>
 
 <Note>
-  El plano de control se autentica con las mismas credenciales que la API REST: un **Bearer JWT** o una **`X-Mnemom-Api-Key`**. Consulta [Autenticación](/api-reference/headers). El servidor de búsqueda en la documentación no necesita autenticación.
+  El plano de control se autentica con las mismas credenciales que la API REST: un **Bearer token** (un token de acceso OAuth, obtenido de la misma forma en que `mnemom login` obtiene uno — consulta [Flujo OAuth device](/guides/oauth-device-flow)) o una **`X-Mnemom-Api-Key`**. Consulta [Autenticación](/api-reference/overview#authentication). El servidor de búsqueda en la documentación no necesita autenticación.
 </Note>
 
 ## Autenticación
@@ -33,10 +33,14 @@ Mnemom opera dos servidores públicos de [Model Context Protocol](https://modelc
 Define tu token una vez en el entorno, luego refiérelo desde cada configuración de cliente:
 
 ```bash
-export MNEMOM_TOKEN="<your Bearer JWT or mnm_… API key>"
+export MNEMOM_TOKEN="<your Bearer access token or mnm_… API key>"
 ```
 
 El servidor del plano de control transmite el valor tal cual como `Authorization: Bearer <token>`. Para usar una clave API en su lugar, envíala como el encabezado `X-Mnemom-Api-Key`.
+
+<Tip>
+Un cliente MCP que implemente el descubrimiento OAuth 2.1 no necesita ningún token pegado manualmente: una llamada sin autenticar recibe un `401` con un encabezado `WWW-Authenticate` que apunta a `https://api.mnemom.ai/.well-known/oauth-protected-resource/mcp`, y el cliente puede seguirlo hasta un inicio de sesión normal en el navegador. El encabezado manual `Authorization`/`X-Mnemom-Api-Key` de abajo es la alternativa explícita y programada para los clientes que no hacen descubrimiento OAuth.
+</Tip>
 
 ## Configuración del cliente
 
@@ -130,7 +134,7 @@ curl -sS -X POST https://api.mnemom.ai/mcp \
   | jq '.result.tools | length'
 ```
 
-Deberías ver el número de herramientas (62 para el plano de control, 2 para la búsqueda en la documentación). La **ejecución** de herramientas en el plano de control aplica la misma autorización que la llamada REST equivalente — un cliente no autenticado puede enumerar las herramientas pero no invocar las privilegiadas.
+Deberías ver el número de herramientas (75 para el plano de control, 3 para la búsqueda en la documentación). La **ejecución** de herramientas en el plano de control aplica la misma autorización que la llamada REST equivalente — un cliente no autenticado puede enumerar las herramientas pero no invocar las privilegiadas.
 
 ## Descubrimiento
 
