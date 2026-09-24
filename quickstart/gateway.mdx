@@ -19,6 +19,10 @@ Your prompts and responses pass through unchanged. Your API keys never leave you
   These quickstarts are available in [Spanish (Español)](/es/quickstart/overview) and [French (Français)](/fr/quickstart/overview) — six pages per language have been translated.
 </Note>
 
+<Tip>
+  Looking to launch a **governed coding agent** instead of wiring up your own application's API calls? See [`mnemom agent`](/gateway/agent) — install once, run `mnemom agent`, and it launches Claude Code through the gateway with an agent set up for you.
+</Tip>
+
 <Steps>
   <Step title="Install the CLI">
     ```bash
@@ -248,7 +252,7 @@ You can also create agents programmatically via the [Agent CRUD API](/api-refere
 | Provider | Models | Thinking / AIP Support | Auth Header |
 |----------|--------|----------------------|-------------|
 | Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Full (thinking blocks analyzed directly) | `x-api-key` |
-| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Via reasoning summaries (reduced confidence) | `Authorization: Bearer` |
+| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Not available through the gateway today | `Authorization: Bearer` |
 | Gemini | Gemini 3.8 Flash, Gemini 3.5 Flash-Lite, Gemini 2.5 Pro, Gemini 2.5 Flash | Full (thought parts analyzed directly) | `x-goog-api-key` |
 {/* <!-- model-coverage:supported:end --> */}
 
@@ -256,11 +260,10 @@ You can also create agents programmatically via the [Agent CRUD API](/api-refere
 
 | Provider / Model | AIP Support | Method |
 |-----------------|-------------|--------|
-| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
-| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
+| Anthropic reasoning models (Opus, Sonnet, Fable) | Full | Thinking blocks analyzed directly |
 | Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
-| Non-reasoning models | Tracing only | Synthetic clear verdict |
-| OpenAI o-series (o3, o3-mini) | Partial | Reasoning summaries only — reduced confidence |
+| Non-reasoning models | Tracing only | Synthetic `clear` verdict, no analysis-LLM call |
+| OpenAI (all models, including the o-series) | Not available | The gateway's `/openai` door proxies Chat Completions, which never returns reasoning content — see [Provider Support](/concepts/provider-support#2-openai--no-thinking-trace-inspection-through-the-gateway-today) for the full disclosure |
 
 <Note>
 **Thinking elements in proxied responses.** Safe House / AIP enables extended thinking to analyze the agent's reasoning per turn. Proxied responses therefore include a `thinking` content element in the `content` array alongside the standard `text` block. Clients that assume text-only content arrays should be updated to handle or ignore `thinking` blocks. Thinking output tokens are billed as standard output tokens — this behavior is intentional and cannot be disabled.

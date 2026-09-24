@@ -69,11 +69,9 @@ The system consists of five components:
 
 ## Supported providers
 
-| Provider | Models | Thinking/AIP | Auth |
-|----------|--------|-------------|------|
-| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks) | `x-api-key` |
-| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries | `Authorization: Bearer` |
-| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts) | `x-goog-api-key` |
+The gateway routes and traces Anthropic, OpenAI, and Gemini — see
+[Provider Support](/concepts/provider-support) for the current supported-model
+list and per-provider feature coverage.
 
 ## What gets traced
 
@@ -91,15 +89,12 @@ Mnemom Gateway builds AP-Traces that record:
 
 Your prompts, responses, and API keys are never stored. Only SHA-256 hashes of API keys are used for agent identification.
 
-## AIP compatibility matrix
+## AIP compatibility
 
-| Provider/Model | AIP Support | Method |
-|----------------|-------------|--------|
-| Anthropic reasoning models (Opus, Sonnet) | Full | Thinking blocks analyzed directly |
-| OpenAI GPT-5 Thinking series | Partial | Reasoning summaries (reduced confidence) |
-| Gemini 2.5/3 with thinking | Full | Thought parts analyzed directly |
-| Non-reasoning models | Tracing only | Synthetic clear verdict |
-| Legacy OpenAI (o3/o4-mini) | Unsupported | Reasoning encrypted |
+Coverage varies by provider — see [Provider Support](/concepts/provider-support#aip-coverage-by-provider--the-headline-commitment)
+for the full matrix and honest disclosure. In short: Anthropic and Gemini get
+full thinking-trace analysis; OpenAI gets none through the gateway today (its
+Chat Completions door never returns reasoning content, on any model).
 
 ## Claiming your agent
 
@@ -115,7 +110,7 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 
 - **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
 - **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `x-mnemom-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
-- **AIP requires reasoning models** — AIP integrity checking requires models with exposed thinking (Anthropic, Gemini, GPT-5 Thinking). Models without thinking get synthetic clear verdicts.
+- **AIP requires exposed reasoning** — AIP integrity checking needs a provider that exposes thinking content. Anthropic and Gemini do; OpenAI's Chat Completions door does not expose any reasoning content today, on any model, so OpenAI gets synthetic `clear` verdicts rather than analysis — see [Provider Support](/concepts/provider-support).
 - **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
 
 ## Dependencies

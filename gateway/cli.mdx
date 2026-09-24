@@ -36,7 +36,7 @@ The resulting scoped access + refresh tokens are stored in `~/.mnemom/auth.json`
 
 <Note>
 Logging in does **not** select an organization — the session carries no org
-context. Org-scoped commands (like `agents claim`) target your **active** org,
+context. Org-scoped commands (like `agent claim`) target your **active** org,
 set with `mnemom org use`, defaulting to your personal org when none is set.
 </Note>
 
@@ -79,7 +79,7 @@ Auth Status
 ## Organizations
 
 <Note>
-`mnemom login` binds no org — the session carries no org context. Org-scoped commands (like `agents claim`) target your **active** org, set with `mnemom org use`, defaulting to your personal org when none is set.
+`mnemom login` binds no org — the session carries no org context. Org-scoped commands (like `agent claim`) target your **active** org, set with `mnemom org use`, defaulting to your personal org when none is set.
 </Note>
 
 <Steps>
@@ -96,7 +96,7 @@ mnemom org list
 
 ### `mnemom org use [slug-or-id]`
 
-Set the active org — the default for org-scoped commands like `agents claim`. No argument prints the current setting.
+Set the active org — the default for org-scoped commands like `agent claim`. No argument prints the current setting.
 
 ```bash
 mnemom org use acme
@@ -287,7 +287,7 @@ Evaluating card.yaml against 2 tools...
 
 ## Policy commands (removed)
 
-The standalone `mnemom policy` command group has been removed — policy (capability mappings, forbidden rules, enforcement defaults) is now authored directly in the alignment card and evaluated with `mnemom card evaluate`, per the table above.
+The standalone `mnemom policy` command group has been removed — policy (capability mappings, forbidden rules, enforcement defaults) is now authored directly in the alignment card and evaluated with `mnemom card evaluate`, per the table below.
 
 | Old command | Replacement |
 |-------------|-------------|
@@ -456,14 +456,15 @@ mnemom protection drift protection.yaml --agent my-coder
 ## Agent commands
 
 `mnemom agent` is one namespace for everything about your governed agents: the
-launcher, and the fleet verbs `list`, `claim`, and `move`.
+launcher, and the fleet verbs `list`, `claim`, `move`, `sessions`, and `show`.
 
 ### `mnemom agent`
 
 Launch a governed coding-agent session (Claude Code today) through the gateway.
 A bare `mnemom agent` asks for a session name and an optional goal, then
 launches. The launcher, its sub-verbs (`setup`, `doctor`, `config`, `invite`),
-saved settings, contracts, and guardrails are documented on their own page:
+saved settings, contracts, guardrails, and the context-folding and implicit
+goal-mode toggles are documented on their own page:
 [`mnemom agent`](/gateway/agent).
 
 ```bash
@@ -537,6 +538,32 @@ mnemom agent move mnm-... --to acme
 mnemom agent move my-coder --to acme --json
 ```
 
+### `mnemom agent sessions`
+
+List your Mnemom Agent launches from the local ledger (`~/.mnemom/sessions.jsonl`),
+newest first — the last 20 unless `--all`.
+
+```bash
+mnemom agent sessions
+mnemom agent sessions --all --json
+```
+
+**Options:** `--all`, `--json`
+
+### `mnemom agent show [ref]`
+
+Show one session: the local launch record merged with the gateway's live goal
+state (sealed contract, latest verdict, guardrail gauges). `ref` is a session
+name (newest match wins) or a unique conversation-id prefix; omitted shows the
+newest session.
+
+```bash
+mnemom agent show
+mnemom agent show fix-auth --json
+```
+
+**Options:** `--json`
+
 ## Diagnostics
 
 <Steps>
@@ -564,8 +591,8 @@ Agent:    my-coder (mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b)
 Gateway:  https://gateway.mnemom.ai
 Status:   Connected
 Providers:
-  Anthropic  ✓ (Claude Opus 4.6)
-  OpenAI     ✓ (GPT-5.2)
+  Anthropic  ✓ (Claude Sonnet 5)
+  OpenAI     ✓ (GPT-5)
   Gemini     ✗ (not configured)
 Last seen: 2 minutes ago
 ```
@@ -622,11 +649,11 @@ mnemom logs --agent my-coder -l 50
 **Example output:**
 
 ```
-2026-02-17 14:32:01  CLEAR      api_call    Claude Opus 4.6    "Search for documents"
-2026-02-17 14:31:45  CLEAR      api_call    Claude Opus 4.6    "Summarize results"
-2026-02-17 14:31:12  REVIEW     api_call    GPT-5.2            "Execute trade"
+2026-02-17 14:32:01  CLEAR      api_call    Claude Sonnet 5    "Search for documents"
+2026-02-17 14:31:45  CLEAR      api_call    Claude Sonnet 5    "Summarize results"
+2026-02-17 14:31:12  REVIEW     api_call    GPT-5              "Execute trade"
   └─ concern: autonomy_violation (HIGH) — action exceeds bounded_actions
-2026-02-17 14:30:58  CLEAR      api_call    Claude Opus 4.6    "Draft email"
+2026-02-17 14:30:58  CLEAR      api_call    Claude Sonnet 5    "Draft email"
 ```
 
 </Steps>
@@ -848,13 +875,10 @@ mnemom card evaluate my-card.yaml --tools mcp__browser__navigate,mcp__slack__pos
 
 ## Supported providers
 
-The gateway supports tracing for these providers:
-
-| Provider | Models | Thinking/AIP | Auth Method |
-|----------|--------|-------------|-------------|
-| Anthropic | Claude Opus 4.6, Opus 4.5, Sonnet 4.5 | Full (thinking blocks) | `x-api-key` |
-| OpenAI | GPT-5.2, GPT-5.2 Pro, GPT-5 | Via reasoning summaries | `Authorization: Bearer` |
-| Gemini | Gemini 2.5 Pro, Gemini 3 Pro | Full (thought parts) | `x-goog-api-key` |
+The gateway routes and traces Anthropic, OpenAI, and Gemini. See
+[Provider Support](/concepts/provider-support) for the current supported-model
+list and the per-provider feature-coverage matrix (thinking-trace inspection,
+prompt caching, and more vary by provider).
 
 ## See also
 
