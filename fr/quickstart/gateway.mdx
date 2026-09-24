@@ -3,7 +3,7 @@ title: "Démarrage rapide Mnemom Gateway"
 description: "Gouvernance complète des agents — vérification, analyse d'intégrité et application des politiques — en 5 minutes sans modification de code"
 sidebarTitle: "Gateway"
 icon: "bolt"
-source_fingerprint: sha256:96fc728b72aa368597e68446b93218ae17071f636532f75f4462cc01380636a7
+source_fingerprint: sha256:c75277cceb4f4af3450e620c3599391e969350c7bf23cf001f102ba1e521700c
 ---
 
 # Mnemom Gateway
@@ -22,6 +22,10 @@ Vos prompts et réponses passent inchangés. Vos clés API ne quittent jamais vo
   Ces démarrages rapides sont disponibles en [espagnol (Español)](/es/quickstart/overview) et en [français (Français)](/fr/quickstart/overview) — six pages par langue ont été traduites.
 </Note>
 
+<Tip>
+  Vous cherchez à lancer un **agent de codage gouverné** plutôt que de câbler les appels API de votre propre application ? Voir [`mnemom agent`](/gateway/agent) — installez-le une fois, exécutez `mnemom agent`, et il lance Claude Code à travers la gateway avec un agent déjà configuré pour vous.
+</Tip>
+
 <Steps>
   <Step title="Installer la CLI">
     ```bash
@@ -36,7 +40,7 @@ Vos prompts et réponses passent inchangés. Vos clés API ne quittent jamais vo
     mnemom login
     ```
 
-    Cela ouvre un flux de connexion via navigateur et stocke votre token d'authentification dans `~/.mnemom/auth.json`.
+    Cela ouvre un flux de connexion via navigateur et stocke votre token d'authentification dans `~/.mnemom/auth.json`. Sur une machine sans navigateur local (SSH, un conteneur), utilisez plutôt `mnemom login --no-browser` — voir la [référence CLI](/gateway/cli#authentication).
 
     <Note>
     Vos clés API fournisseur ne sont **pas** envoyées à Mnemom. Seuls les hachages SHA-256 sont utilisés pour identifier votre agent. Le hachage ne peut pas être inversé pour récupérer votre clé.
@@ -245,18 +249,17 @@ Vous pouvez également créer des agents de manière programmatique via l'[API C
 | Fournisseur | Modèles | Support Thinking / AIP | En-tête d'authentification |
 |----------|--------|----------------------|-------------|
 | Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Complet (blocs de réflexion analysés directement) | `x-api-key` |
-| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Via résumés de raisonnement (confiance réduite) | `Authorization: Bearer` |
+| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Non disponible via la gateway pour l'instant | `Authorization: Bearer` |
 | Gemini | Gemini 3.8 Flash, Gemini 3.5 Flash-Lite, Gemini 2.5 Pro, Gemini 2.5 Flash | Complet (parties de réflexion analysées directement) | `x-goog-api-key` |
 
 ### Compatibilité AIP
 
 | Fournisseur / Modèle | Support AIP | Méthode |
 |-----------------|-------------|--------|
-| Modèles de raisonnement Anthropic (Opus, Sonnet) | Complet | Blocs de réflexion analysés directement |
-| Série OpenAI GPT-5 Thinking | Partiel | Résumés de raisonnement (confiance réduite) |
+| Modèles de raisonnement Anthropic (Opus, Sonnet, Fable) | Complet | Blocs de réflexion analysés directement |
 | Gemini 2.5/3 avec thinking | Complet | Parties de réflexion analysées directement |
-| Modèles sans raisonnement | Traçage uniquement | Verdict clear synthétique |
-| Série OpenAI o (o3, o3-mini) | Partiel | Résumés de raisonnement uniquement — confiance réduite |
+| Modèles sans raisonnement | Traçage uniquement | Verdict `clear` synthétique, aucun appel au LLM d'analyse |
+| OpenAI (tous les modèles, y compris la série o) | Non disponible | La porte `/openai` de la gateway proxifie Chat Completions, qui ne renvoie jamais de contenu de raisonnement — voir [Provider Support](/concepts/provider-support#2-openai--no-thinking-trace-inspection-through-the-gateway-today) pour la divulgation complète |
 
 <Note>
 **Éléments thinking dans les réponses proxiées.** Safe House / AIP active le thinking étendu pour analyser le raisonnement de l'agent à chaque tour. Les réponses proxiées incluent donc un élément de contenu `thinking` dans le tableau `content` aux côtés du bloc `text` standard. Les clients qui supposent des tableaux de contenu texte uniquement doivent être mis à jour pour gérer ou ignorer les blocs thinking. Les tokens de sortie thinking sont facturés comme des tokens de sortie standard — ce comportement est intentionnel et ne peut pas être désactivé.
