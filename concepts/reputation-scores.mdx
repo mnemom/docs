@@ -418,10 +418,12 @@ curl https://api.mnemom.ai/v1/reputation/agent-xyz/verify
 curl https://api.mnemom.ai/v1/checkpoints/{latest_checkpoint_id}/certificate
 
 # 3. Verify the Merkle root against the agent's checkpoint tree
-curl https://api.mnemom.ai/v1/agents/agent-xyz/merkle-root
+#    (members of the agent's org only -- anonymous requests get 401)
+curl https://api.mnemom.ai/v1/agents/agent-xyz/merkle-root \
+  -H "Authorization: Bearer $MNEMOM_TOKEN"
 ```
 
-The verification endpoint is public and requires no authentication. Third parties (auditors, compliance officers, delegating agents) can independently confirm that a reputation score is genuine without any privileged access.
+The reputation verification endpoint (`GET /v1/reputation/{agent_id}/verify`) and the certificate endpoint are public and require no authentication. The per-agent Merkle root endpoint in step 3 is member-only: it requires an authenticated member of the agent's org. Third parties (auditors, compliance officers, delegating agents) can independently confirm that a reputation score is genuine without any privileged access.
 
 <Note>
 Verification confirms that the score was computed from authentic, tamper-evident data. It does not guarantee the scoring algorithm itself is correct -- for that, see the published [scoring methodology](/concepts/reputation-scores).

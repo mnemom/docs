@@ -265,13 +265,14 @@ The attestation system requires two trust assumptions:
 
 ### Public verifiability
 
-All verification endpoints are public and unauthenticated. Anyone can:
+The certificate verification endpoints are public and unauthenticated. Anyone can:
 
 - Fetch signing public keys via `GET /v1/keys`
 - Retrieve a certificate via `GET /v1/checkpoints/{id}/certificate`
 - Verify a certificate via `POST /v1/verify`
-- Check a Merkle root via `GET /v1/agents/{id}/merkle-root`
 - Generate an inclusion proof via `GET /v1/checkpoints/{id}/inclusion-proof`
+
+An agent's current Merkle root (`GET /v1/agents/{id}/merkle-root`) and its ZK proof count (`GET /v1/agents/{id}/zk-proof-count`) are per-agent reads, so they require an authenticated member of the agent's org; an anonymous request gets `401`. A certificate already carries the Merkle root it was proven against (`proofs.merkle.root`), so a third party can still walk the inclusion proof offline without calling either endpoint.
 
 This means any third party -- auditors, regulators, downstream consumers of an agent's output -- can independently verify the integrity of an agent's analysis history without trusting Mnemom. The certificates are self-describing documents that contain all the information needed for offline verification (once the public key is obtained).
 
