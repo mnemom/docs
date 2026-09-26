@@ -407,12 +407,25 @@ jobs:
           fi
           ISSUE=$(expr "$HEAD_BRANCH" : '.*-issue-\([0-9]\{1,\}\)-adw-' || true)
           [ -n "$ISSUE" ] || skip
-          STATE=$(gh api "repos/$REPO/issues/$ISSUE" --jq '.state' 2>/dev/null || true)
+          # MNE-6010: a suppressed gh failure here reads as "not open"/"no label"/"no PR"
+          # — indistinguishable from those states genuinely being false — and silently
+          # skips a legitimate resume. Check the exit code explicitly so a transient gh
+          # failure is a loud warning, not a confident wrong answer.
+          if ! STATE=$(gh api "repos/$REPO/issues/$ISSUE" --jq '.state'); then
+            echo "::warning::gh api issues/$ISSUE (state) failed; treating as unresolved (skip)" >&2
+            skip
+          fi
           [ "$STATE" = "open" ] || skip
-          LABELS=$(gh api "repos/$REPO/issues/$ISSUE" --jq '[.labels[].name] | join(",")' 2>/dev/null || true)
+          if ! LABELS=$(gh api "repos/$REPO/issues/$ISSUE" --jq '[.labels[].name] | join(",")'); then
+            echo "::warning::gh api issues/$ISSUE (labels) failed; treating as unresolved (skip)" >&2
+            skip
+          fi
           printf '%s' "$LABELS" | grep -q 'adw:awaiting-checks' || skip
           if printf '%s' "$LABELS" | grep -q 'adw:freeze'; then skip; fi
-          PR_OPEN=$(gh api "repos/$REPO/pulls?head=${REPO%%/*}:$HEAD_BRANCH&state=open" --jq 'length' 2>/dev/null || echo 0)
+          if ! PR_OPEN=$(gh api "repos/$REPO/pulls?head=${REPO%%/*}:$HEAD_BRANCH&state=open" --jq 'length'); then
+            echo "::warning::gh api pulls (head=$HEAD_BRANCH) failed; treating as unresolved (skip)" >&2
+            skip
+          fi
           [ "${PR_OPEN:-0}" -ge 1 ] || skip
           { echo "should_run=true"; echo "resume_issue=$ISSUE"; echo "pr_number="; echo "pr_sync=false"; } >> "$GITHUB_OUTPUT"
 
@@ -560,6 +573,18 @@ jobs:
       issues: read
       pull-requests: read
     steps:
+      # A freshly onboarded repo has this workflow file (added on ZTE onboarding) BEFORE
+      # the three ADW creds (ADW_APP_ID var + ADW_APP_PRIVATE_KEY / ANTHROPIC_API_KEY
+      # secrets) land — those are a separate, admin-gated step. The `schedule` trigger
+      # above fires every 15 minutes regardless, so a fresh onboard with no creds yet
+      # must NOT hard-fail here: an unconditional app-token mint threw "the 'client-id'
+      # ... must be set to a non-empty string" every tick, generating a scheduled-run
+      # failure-email storm (found on reference.mnemom, MNE-onboard-sweep-storm). Gate
+      # the mint (and every step below that consumes its token) on the App ID actually
+      # being configured; the no-op branch just logs and exits clean.
+      - name: No ADW credentials configured yet
+        if: vars.ADW_APP_ID == ''
+        run: echo "ADW_APP_ID is not set on this repo yet (creds land in a separate admin-gated step) — skipping this sweep pass"
       # An App token (same creds as the worker job) so the repository_dispatch lands
       # on this repo. github.token cannot self-dispatch a repository_dispatch event.
       # `client-id` is the current name for the input that used to be `app-id`: the action
@@ -567,6 +592,7 @@ jobs:
       # ID as the JWT `iss`, so this variable's value stays valid under the new key.
       - name: Mint GitHub App token
         id: app
+        if: vars.ADW_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.ADW_APP_ID }}
@@ -575,6 +601,7 @@ jobs:
           repositories: |
             ${{ github.event.repository.name }}
       - name: Re-dispatch parked (awaiting-checks) issues
+        if: vars.ADW_APP_ID != ''
         env:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -583,15 +610,22 @@ jobs:
           # excluded (the freeze label is the kill-switch). For each, only re-dispatch
           # when an open PR still exists on its canonical ADW branch (a stale label on
           # a closed/merged PR is left for the worker's own terminal label hygiene).
-          ISSUES=$(gh api "repos/$REPO/issues?state=open&labels=adw:awaiting-checks&per_page=100" \
-            --jq '.[] | select([.labels[].name] | index("adw:freeze") | not) | .number' \
-            2>/dev/null || true)
+          # MNE-6010: a suppressed gh failure here is byte-identical to a genuinely empty
+          # result and reads as the reassuring "no parked issues to sweep" — check the
+          # exit code explicitly so a failed read is a loud warning instead.
+          if ! ISSUES=$(gh api "repos/$REPO/issues?state=open&labels=adw:awaiting-checks&per_page=100" \
+            --jq '.[] | select([.labels[].name] | index("adw:freeze") | not) | .number'); then
+            echo "::warning::gh api issues (awaiting-checks) read failed; skipping this sweep pass"
+            exit 0
+          fi
           [ -n "$ISSUES" ] || { echo "no parked issues to sweep"; exit 0; }
           for ISSUE in $ISSUES; do
             # Confirm an open ADW PR still exists for this issue before re-dispatching.
-            PR_OPEN=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
-              --jq "[.[] | select(.head.ref | test(\"-issue-${ISSUE}-adw-\"))] | length" \
-              2>/dev/null || echo 0)
+            if ! PR_OPEN=$(gh api "repos/$REPO/pulls?state=open&per_page=100" \
+              --jq "[.[] | select(.head.ref | test(\"-issue-${ISSUE}-adw-\"))] | length"); then
+              echo "::warning::gh api pulls read failed for issue #$ISSUE; skipping (not a stale-label claim)"
+              continue
+            fi
             if [ "${PR_OPEN:-0}" -ge 1 ]; then
               echo "re-dispatching parked issue #$ISSUE"
               gh api "repos/$REPO/dispatches" -X POST \
@@ -604,6 +638,7 @@ jobs:
             fi
           done
       - name: Nudge stale design-gate pauses (MNE-1618)
+        if: vars.ADW_APP_ID != ''
         env:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -622,12 +657,19 @@ jobs:
           # exact pause was already nudged, so a re-plan's NEW pause re-arms the nudge
           # rather than spamming a comment every 15-minute tick forever.
           NOW_EPOCH=$(date -u +%s)
-          ISSUES=$(gh api "repos/$REPO/issues?state=open&labels=adw:design-gate-pending&per_page=100" \
-            --jq '.[] | select([.labels[].name] | index("adw:freeze") | not) | .number' \
-            2>/dev/null || true)
+          # MNE-6010: same suppressed-stderr / false-negative shape as the re-dispatch
+          # sweep above — a failed read must not be read as "nothing to sweep".
+          if ! ISSUES=$(gh api "repos/$REPO/issues?state=open&labels=adw:design-gate-pending&per_page=100" \
+            --jq '.[] | select([.labels[].name] | index("adw:freeze") | not) | .number'); then
+            echo "::warning::gh api issues (design-gate-pending) read failed; skipping this sweep pass"
+            exit 0
+          fi
           [ -n "$ISSUES" ] || { echo "no pending design-gate pauses to sweep"; exit 0; }
           for ISSUE in $ISSUES; do
-            COMMENTS=$(gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate 2>/dev/null || echo '[]')
+            if ! COMMENTS=$(gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate); then
+              echo "::warning::gh api comments read failed for issue #$ISSUE; skipping (not \"no pause found\")"
+              continue
+            fi
             PAUSE_AT=$(printf '%s' "$COMMENTS" | jq -r '[.[] | select(.body | contains("[ADW-DESIGN-GATE-PAUSE]"))] | sort_by(.created_at) | last | .created_at // ""' 2>/dev/null || echo "")
             if [ -z "$PAUSE_AT" ]; then
               echo "issue #$ISSUE carries the pending label but no pause comment was found; skipping"
