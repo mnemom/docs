@@ -11,7 +11,7 @@ This document describes what AIP does and does not do. Read it before depending 
 
 ## Five fundamental limitations
 
-### 1. detects injection, does not prevent it
+### 1. Detects injection, does not prevent it
 
 AIP analyzes thinking blocks *after* the agent has already processed the injected content. The injection has occurred. AIP detects its effects on reasoning. By the time AIP raises a `boundary_violation`, the agent has already thought the problematic thoughts. In `enforce`, AIP prevents the resulting *action*, not the *reasoning* — the response is gated before delivery. In `observe` and `nudge`, AIP does not prevent the action at all; it records the verdict (and, for nudge, carries it into the agent's next turn).
 
@@ -19,7 +19,7 @@ AIP analyzes thinking blocks *after* the agent has already processed the injecte
 
 **Do not read this limitation as "injected content is screened later."** Preventing injected content from reaching the model is the [Safe House](/concepts/safe-house) front door's job, and it happens on the request path, not on a later turn. That includes tool results: each one is screened in the same request that carries it back to the model, and a flagged tool result is withheld or decorated before the body is forwarded upstream. AIP sits behind that screen and catches what it scored below threshold. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
-### 2. analysis quality bounded by analysis model
+### 2. Analysis quality bounded by analysis model
 
 AIP uses an LLM to evaluate another LLM's thinking. This means:
 
@@ -29,7 +29,7 @@ AIP uses an LLM to evaluate another LLM's thinking. This means:
 
 **Implication:** AIP is a practical defense that raises the bar for adversaries. It is not a theoretical guarantee. The analysis model is a best-effort evaluator, not an oracle.
 
-### 3. thinking blocks may not be complete
+### 3. Thinking blocks may not be complete
 
 LLM providers may truncate, filter, or summarize thinking blocks before exposing them. AIP can only analyze what is provided.
 
@@ -41,7 +41,7 @@ LLM providers may truncate, filter, or summarize thinking blocks before exposing
 
 **Implication:** AIP's coverage depends entirely on the provider's willingness to expose thinking. A model with opaque reasoning is invisible to AIP.
 
-### 4. timing is not free
+### 4. Timing is not free
 
 AIP adds latency between agent turns. In the hosted gateway path the analysis LLM call typically completes in ~3-5 seconds, running in the background while the client already has its response (except in `enforce`, where the response itself is held until analysis returns). During this time, the agent is waiting only in `enforce` or when the SDK's `check()` is awaited directly.
 
@@ -50,7 +50,7 @@ AIP adds latency between agent turns. In the hosted gateway path the analysis LL
 
 **Implication:** AIP requires explicit architectural coordination to be preventive. In a gateway deployment under `enforce`, the gateway evaluates the response before delivering it, which adds latency; in `observe` and `nudge` the response is returned immediately and the verdict is recorded post-hoc. In an SDK deployment, the caller must await the signal before proceeding.
 
-### 5. conscience values are advisory
+### 5. Conscience values are advisory
 
 Conscience values increase detection sensitivity but AIP cannot enforce them. An agent system without AIP integration proceeds regardless of what AIP would have detected. AIP has no enforcement mechanism of its own -- it relies on the host system to act on signals.
 

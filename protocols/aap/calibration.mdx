@@ -38,9 +38,9 @@ This document describes how AAP's drift detection thresholds were derived. It pr
 
 ---
 
-## 1. calibration overview
+## 1. Calibration overview
 
-### 1.1 what was calibrated
+### 1.1 What was calibrated
 
 AAP's drift detection uses two primary thresholds:
 
@@ -54,7 +54,7 @@ These thresholds balance two competing concerns:
 1. **Sensitivity**: Detecting genuine drift when it occurs
 2. **Specificity**: Avoiding false alarms on natural conversation variation
 
-### 1.2 why empirical calibration
+### 1.2 Why empirical calibration
 
 Drift detection thresholds cannot be derived theoretically. What constitutes "drift" depends on:
 
@@ -65,7 +65,7 @@ Drift detection thresholds cannot be derived theoretically. What constitutes "dr
 
 Instead, we calibrated empirically: observing real multi-turn agent conversations, identifying cases of genuine divergence, and tuning thresholds to detect those cases while minimizing false alarms.
 
-### 1.3 the core insight
+### 1.3 The core insight
 
 Through observation, we found that:
 
@@ -81,9 +81,9 @@ Through observation, we found that:
 
 ---
 
-## 2. the calibration corpus
+## 2. The calibration corpus
 
-### 2.1 corpus description
+### 2.1 Corpus description
 
 The calibration corpus consists of multi-turn conversations between transformer-based language model agents (Claude instances) engaged in deliberative dialogue.
 
@@ -97,7 +97,7 @@ The calibration corpus consists of multi-turn conversations between transformer-
 | Participant types | 3-4 agents per conversation |
 | Conversation types | Deliberative, design review, decision-making |
 
-### 2.2 corpus characteristics
+### 2.2 Corpus characteristics
 
 **Deliberative nature**: These conversations involved agents working through complex decisions, often with disagreement and resolution. This is important because:
 
@@ -109,7 +109,7 @@ The calibration corpus consists of multi-turn conversations between transformer-
 
 **Longitudinal coverage**: Conversations ranged from brief (10 messages) to extended (100+ messages), providing data on both short-term variation and long-term drift.
 
-### 2.3 what the corpus does NOT include
+### 2.3 What the corpus does NOT include
 
 - **Adversarial agents**: All agents in the corpus were non-adversarial
 - **Non-transformer agents**: Only Claude instances were included
@@ -120,13 +120,13 @@ These limitations bound the applicability of the calibration (see Section 8).
 
 ---
 
-## 3. feature extraction methodology
+## 3. Feature extraction methodology
 
-### 3.1 the SSM approach
+### 3.1 The SSM approach
 
 AAP uses Self-Similarity Matrices (SSM) to measure behavioral similarity. Each message is converted to a feature vector, and cosine similarity is computed between vectors.
 
-### 3.2 feature components
+### 3.2 Feature components
 
 The feature vector combines three components:
 
@@ -155,7 +155,7 @@ The feature vector combines three components:
 - `role:<value>`: Derived from message type (opening, response, etc.)
 - `sender:<value>`: Participant identity
 
-### 3.3 similarity computation
+### 3.3 Similarity computation
 
 Similarity between two messages:
 
@@ -173,7 +173,7 @@ def compute_similarity(text_a: str, text_b: str, meta_a: dict, meta_b: dict) -> 
     return 0.6 * word_sim + 0.3 * char_sim + 0.1 * meta_sim
 ```
 
-### 3.4 why these weights
+### 3.4 Why these weights
 
 The 60/30/10 weighting was determined empirically:
 
@@ -211,9 +211,9 @@ Alternative weightings were tested. This combination provided the best discrimin
 
 ---
 
-## 4. threshold derivation
+## 4. Threshold derivation
 
-### 4.1 methodology
+### 4.1 Methodology
 
 We used the following process to derive thresholds:
 
@@ -261,7 +261,7 @@ We analyzed how long low-similarity streaks persisted:
 
 At 3 turns, 87% of cases represented genuine divergence. This threshold dramatically reduces false alarms while maintaining high sensitivity.
 
-### 4.2 why not single threshold
+### 4.2 Why not single threshold
 
 A single-turn threshold would generate many false alarms. Natural conversation includes:
 
@@ -271,7 +271,7 @@ A single-turn threshold would generate many false alarms. Natural conversation i
 
 These create single-turn similarity drops that resolve immediately. Requiring sustained divergence filters these out.
 
-### 4.3 why not longer sustained requirement
+### 4.3 Why not longer sustained requirement
 
 Requiring 4+ turns would miss:
 - Quick divergences that cause problems before self-correcting
@@ -280,7 +280,7 @@ Requiring 4+ turns would miss:
 
 3 turns balances early detection with confidence.
 
-### 4.4 visual evidence: SSM patterns from calibration corpus
+### 4.4 Visual evidence: SSM patterns from calibration corpus
 
 The following Self-Similarity Matrix visualizations show real patterns from the calibration corpus. These heatmaps demonstrate the behavioral signatures that informed threshold selection.
 
@@ -325,9 +325,9 @@ These patterns informed the 0.30/3-turn thresholds: transient single-turn drops 
 
 ---
 
-## 5. the calibrated thresholds
+## 5. The calibrated thresholds
 
-### 5.1 primary thresholds
+### 5.1 Primary thresholds
 
 ```python
 # From aap/verification/constants.py
@@ -339,7 +339,7 @@ DEFAULT_SIMILARITY_THRESHOLD: float = 0.30
 DEFAULT_SUSTAINED_TURNS_THRESHOLD: int = 3
 ```
 
-### 5.2 secondary thresholds
+### 5.2 Secondary thresholds
 
 ```python
 # Warn when actions are near (but not over) boundaries
@@ -352,7 +352,7 @@ MIN_COHERENCE_FOR_PROCEED: float = 0.70
 CONFLICT_PENALTY_MULTIPLIER: float = 0.50
 ```
 
-### 5.3 feature extraction parameters
+### 5.3 Feature extraction parameters
 
 ```python
 # Minimum word length for content features
@@ -362,7 +362,7 @@ MIN_WORD_LENGTH: int = 3
 MAX_TFIDF_FEATURES: int = 500
 ```
 
-### 5.4 threshold interpretation
+### 5.4 Threshold interpretation
 
 | Similarity Score | Interpretation |
 |------------------|----------------|
@@ -375,17 +375,17 @@ Note: These interpretations are approximate. Context matters--technical discussi
 
 ---
 
-## 6. validation approach
+## 6. Validation approach
 
-### 6.1 cross-validation
+### 6.1 Cross-validation
 
 Thresholds were validated with k-fold cross-validation on the calibration corpus: calibrate on a subset of conversations, test drift detection against the held-out remainder, and check that precision/recall stayed stable across folds rather than fitting one fold's idiosyncrasies. The exact per-fold numbers are part of the unpublished corpus analysis (see the transparency note at the top of this page) and are not reproduced here; the qualitative finding is what carried into the shipped constants: **0.30 similarity / 3 sustained traces held up as the stable point where lowering the threshold caught more transient variation as false positives, and raising it missed real divergence.**
 
-### 6.2 threshold sensitivity
+### 6.2 Threshold sensitivity
 
 Varying either constant away from its shipped default moved precision and recall in the expected directions: a lower similarity threshold or a shorter sustained-traces requirement catches drift faster but flags more transient variation; a higher threshold or longer requirement is quieter but slower to catch genuine divergence. 0.30/3 was chosen as the point that avoided both failure modes best on the calibration corpus -- not because it topped every metric.
 
-### 6.3 failure analysis
+### 6.3 Failure analysis
 
 We analyzed cases where the thresholds failed:
 
@@ -401,9 +401,9 @@ We analyzed cases where the thresholds failed:
 
 ---
 
-## 7. recalibration guidance
+## 7. Recalibration guidance
 
-### 7.1 when to recalibrate
+### 7.1 When to recalibrate
 
 Recalibration is recommended when:
 
@@ -412,7 +412,7 @@ Recalibration is recommended when:
 3. **Different languages**: Calibration was English-only
 4. **Different conversation structures**: 1:1 vs. multi-party, synchronous vs. async
 
-### 7.2 recalibration process
+### 7.2 Recalibration process
 
 **Step 1: Collect representative corpus**
 
@@ -437,7 +437,7 @@ Use the labeled data to find the threshold that maximizes your preferred metric 
 
 Use cross-validation to ensure thresholds generalize.
 
-### 7.3 adjustment heuristics
+### 7.3 Adjustment heuristics
 
 If you cannot fully recalibrate, these heuristics may help:
 
@@ -450,7 +450,7 @@ If you cannot fully recalibrate, these heuristics may help:
 | Technical domain with jargon | Increase threshold (jargon reduces apparent similarity) |
 | Casual conversation | Decrease threshold (casual talk has more variation) |
 
-### 7.4 threshold bounds
+### 7.4 Threshold bounds
 
 Based on our analysis, we recommend keeping thresholds within these bounds:
 
@@ -461,9 +461,9 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 ---
 
-## 8. limitations
+## 8. Limitations
 
-### 8.1 corpus limitations
+### 8.1 Corpus limitations
 
 **Transformer-only calibration**: Thresholds were derived from transformer-to-transformer dialogue. Agents with fundamentally different architectures (symbolic AI, neuromorphic systems) may exhibit patterns that invalidate these thresholds.
 
@@ -473,7 +473,7 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 **Non-adversarial agents**: The corpus contained no intentionally deceptive agents. The thresholds may not detect adversarial gaming.
 
-### 8.2 methodological limitations
+### 8.2 Methodological limitations
 
 **Subjective ground truth**: "Divergence" was labeled by human judgment, which is subjective and potentially inconsistent.
 
@@ -481,7 +481,7 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 **Single feature set**: Only one feature extraction approach was tested. Alternative features might perform better for specific use cases.
 
-### 8.3 fundamental limitations
+### 8.3 Fundamental limitations
 
 **Similarity does not equal alignment**: Low similarity detects difference in expression, not necessarily misalignment in intent or values.
 
@@ -491,15 +491,15 @@ Based on our analysis, we recommend keeping thresholds within these bounds:
 
 ---
 
-## 9. algorithm versioning
+## 9. Algorithm versioning
 
-### 9.1 current version
+### 9.1 Current version
 
 ```python
 ALGORITHM_VERSION: str = "1.2.0"
 ```
 
-### 9.2 version history
+### 9.2 Version history
 
 | Version | Changes |
 |---------|---------|
@@ -509,7 +509,7 @@ ALGORITHM_VERSION: str = "1.2.0"
 
 The 0.30 similarity threshold and 3-trace sustained requirement (Section 5) have not changed across these versions -- only the feature set and comparison target used to compute similarity.
 
-### 9.3 version compatibility
+### 9.3 Version compatibility
 
 Verification results include the algorithm version used (`verification_metadata.algorithm_version`). When comparing results:
 
