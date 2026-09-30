@@ -121,6 +121,15 @@ Self-contained links for independent verification.
 | `verification.certificate_url` | `string` | URL to retrieve this certificate. |
 | `verification.verify_url` | `string` | URL to submit this certificate for server-side verification: `https://api.mnemom.ai/v1/verify` |
 
+### Public and member views
+
+`GET /v1/checkpoints/{checkpoint_id}/certificate` needs no authentication, but what it returns depends on who asks:
+
+- **Members of the agent's org** get the full certificate described above.
+- **Everyone else** (anonymous callers, or signed-in users outside the org) gets a verify-only view. It keeps the envelope fields, `subject.checkpoint_id`, `subject.agent_id`, `claims.verdict`, the `input_commitments` hashes, `proofs`, and `verification`. The session ID, card ID, concerns, confidence, reasoning summary, analysis model and duration, and `input_commitments.model_version` are blanked or omitted, and an extra top-level `redacted` array names each withheld field (for example `"subject.session_id"` or `"claims.concerns"`).
+
+None of the withheld fields is covered by a signature, chain, or Merkle proof, so a verify-only certificate passes every verification step below exactly as the full certificate does.
+
 ---
 
 ## Signed payload format

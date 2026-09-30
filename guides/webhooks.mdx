@@ -54,8 +54,11 @@ it: `mnemom webhooks rotate-secret <org_id> <endpoint_id>` or `POST /v1/orgs/{or
 
 Requirements:
 - Up to **5 endpoints per organization**.
-- `url` must be `https://`. Loopback, RFC-1918/link-local/CGNAT ranges, and cloud metadata
-  addresses are rejected at both creation time and again immediately before every delivery.
+- `url` must be `https://`, with no username or password in it. Loopback, RFC-1918/link-local/CGNAT
+  ranges, cloud metadata addresses, and internal-only names (`localhost`, single-label hosts,
+  `.local`, `.internal`) are rejected, and so is a hostname that resolves to any of those addresses.
+  The check runs at creation time and again immediately before every delivery. A delivery follows
+  at most 3 redirects, and each redirect target goes through the same check.
 - `event_types` defaults to none — you opt in explicitly per event type. Leave it as an empty
   list only if you intend to add types later via `PATCH`.
 
@@ -66,6 +69,11 @@ curl -X POST https://api.mnemom.ai/v1/orgs/{org_id}/webhooks/{endpoint_id}/test 
   -H "Authorization: Bearer $TOKEN"
 # {"success": true, "status": 200, "latency_ms": 145, "error": null}
 ```
+
+If the test can't reach your endpoint (DNS failure, connection refused, timeout, or a blocked
+address or redirect), `success` is `false` and `error` is the generic `"destination unreachable"`.
+The response doesn't say which of these happened, so check your endpoint's DNS, TLS, and firewall.
+If your endpoint answers with an HTTP error, `status` carries its status code.
 
 ## Payload envelope
 

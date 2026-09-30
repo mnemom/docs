@@ -112,6 +112,8 @@ Each cell describes the v1 commitment level. Symbols:
 
 Anthropic models expose full **extended thinking blocks** through the response API. AIP reads completed thinking blocks post-response (before delivery in `enforce`, which adds latency; post-delivery in `observe`/`nudge`), and the verifier (Claude Haiku 4.5) has full chain-of-thought visibility. This is the most complete AIP coverage Mnemom offers — and the baseline against which other providers are compared.
 
+If the client's thinking settings return thinking blocks without readable text, AIP grades the turn's visible reply and tool calls instead of skipping the check. See [Integrity Checkpoints](/concepts/integrity-checkpoints#provider-support).
+
 ### [2] OpenAI — no thinking-trace inspection through the gateway today
 
 OpenAI's reasoning summaries are a **Responses API** feature (`reasoning.summary`), not something the Chat Completions API returns. The gateway's default `/openai` door proxies Chat Completions — the shape OpenAI clients send by default — and that shape never carries reasoning content back, for any OpenAI model, reasoning or not. AIP's thinking-extraction step returns empty by construction for every `/openai/*` request today, including through the `/openai/v1/responses` passthrough path. There is no per-model split here: it is uniform across `o3`, `o3-mini`, `gpt-5`, `gpt-5-codex`, `gpt-5.6-*`, `gpt-6-astra`, and `gpt-6.1-sol`.

@@ -60,7 +60,7 @@ Safe House uses a layered approach that balances speed with accuracy:
 | Layer | Method | Latency | Purpose |
 |-------|--------|---------|---------|
 | **L1** | Regex and word-list heuristics | &lt;5ms | Fast rejection of obvious attacks; 8 languages |
-| **L2** | Claude Haiku semantic analysis | ~80–100ms | Deep intent understanding, handles obfuscation and novel attacks; enforces the org's `protected_surface` (assets, forbidden operations, escalation requirements) from the canonical protection card |
+| **L2** | Semantic analysis by a judge model the gateway hosts | ~80–100ms | Deep intent understanding, handles obfuscation and novel attacks; enforces the org's `protected_surface` (assets, forbidden operations, escalation requirements) from the canonical protection card |
 | **L3** | Session escalation | Stateful | Flags sessions where earlier messages establish suspicious context |
 
 L1 runs first and can short-circuit the pipeline entirely for high-confidence detections. If L1 passes or returns a `warn` score, L2 runs. L3 operates continuously across the session, not per-message.
@@ -93,7 +93,7 @@ Safe House classifies detected threats into nine categories:
 
 ## Multilingual coverage
 
-L1 heuristics carry native word lists for **English, French, German, Italian, Spanish, Portuguese, Japanese, Chinese, Arabic, and Korean** — 10 languages. Outside that set, L1 falls back to the English word lists with reduced confidence. L2 (Haiku analysis) handles all languages — attacks in languages outside the L1 native set are still caught, but only at the L2 stage with its additional ~80–100ms latency.
+L1 heuristics carry native word lists for **English, French, German, Italian, Spanish, Portuguese, Japanese, Chinese, Arabic, and Korean** — 10 languages. Outside that set, L1 falls back to the English word lists with reduced confidence. L2 semantic analysis handles all languages — attacks in languages outside the L1 native set are still caught, but only at the L2 stage with its additional ~80–100ms latency.
 
 ## Response headers
 
@@ -127,6 +127,10 @@ Configure canaries in the Safe House config:
 ```
 
 Any inbound message containing a canary pattern triggers an automatic `block` verdict regardless of other scoring, and emits a `safe_house.canary_triggered` webhook event.
+
+<Note>
+**Safe House writes need a write role.** Creating canaries or custom threat patterns, releasing, reporting or deleting a quarantined item, resolving a human review and resolving a campaign all require the `owner`, `admin` or `member` role in the org. A `viewer` can read Safe House state (patterns, canaries, quarantine, reviews, campaigns) but gets `403` on these writes.
+</Note>
 
 ## Source trust
 

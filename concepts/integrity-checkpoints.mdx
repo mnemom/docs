@@ -211,6 +211,10 @@ The adapter is selected automatically based on the API endpoint URL or can be co
 **OpenAI's `reasoning_content` field is not populated through Mnemom's gateway today.** OpenAI's Chat Completions API — the shape the gateway proxies, streaming or not — never returns reasoning content, for any OpenAI model. The adapter above extracts it when present (for a self-hosted integration that reads it directly from a provider that does surface it), but on Mnemom's managed and self-hosted gateway, every OpenAI request extracts an empty thinking block and falls through to the minimum-evidence skip below — no analysis-LLM call, no verdict beyond the synthetic `clear`. See [Provider Support](/concepts/provider-support) for the full accounting.
 </Warning>
 
+<Note>
+**Thinking blocks with no readable content.** A provider can return thinking blocks whose text is withheld — for example when the client's thinking settings don't expose the reasoning. In that case the gateway doesn't skip the check: it grades the turn's visible output instead — the reply text plus the tool calls made that turn, with each tool input truncated to 2,000 characters — and tells the analysis LLM that the missing reasoning is a client setting, not something to flag. A turn with neither readable thinking nor visible output is skipped. A response with no thinking blocks at all is handled as before (no analysis).
+</Note>
+
 <CodeGroup>
 ```python Python (Anthropic)
 # Anthropic response with thinking blocks

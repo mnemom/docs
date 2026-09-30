@@ -37607,7 +37607,7 @@
       "post": {
         "operationId": "signIn",
         "summary": "Sign in with email + password",
-        "description": "Server-enforces SSO for org-enforced domains (returns 403 with `code: sso_required`). For users with a verified TOTP factor, returns 200 `{ mfa_required: true, factor_id }` and sets a short-lived `mnemom_mfa_pending` cookie; otherwise issues `mnemom_session` and returns `{ user }`.",
+        "description": "Server-enforces SSO for org-enforced domains (returns 403 with `code: sso_required`). For users with a verified TOTP factor, returns 200 `{ mfa_required: true, factor_id }` and sets a short-lived `mnemom_mfa_pending` cookie; otherwise issues `mnemom_session` and returns `{ user }`. When the deployment enforces Cloudflare Turnstile on sign-in, a missing or invalid `turnstile_token` returns 403 before the password is checked.",
         "tags": [
           "Auth"
         ],
@@ -37630,6 +37630,10 @@
                   "password": {
                     "type": "string",
                     "format": "password"
+                  },
+                  "turnstile_token": {
+                    "type": "string",
+                    "description": "Cloudflare Turnstile token from the sign-in form. Optional; verified only when the deployment enforces Turnstile on sign-in."
                   }
                 }
               }
@@ -51802,7 +51806,7 @@
       "post": {
         "operationId": "oauthRegisterClient",
         "summary": "OAuth 2.0 Dynamic Client Registration (RFC 7591)",
-        "description": "Registers a public OAuth client for the MCP flow. No client secret is issued (PKCE-protected public clients only). redirect_uris must be HTTPS, or an RFC 8252 loopback (http://127.0.0.1[:port]/..., http://[::1][:port]/..., or http://localhost[:port]/...), and are exact-matched at /authorize. Because registration is unauthenticated, an HTTPS redirect_uri is accepted only when its hostname is on the approved-client allowlist (exact match, default port — e.g. claude.ai, chatgpt.com, vscode.dev); any other host is refused with `invalid_redirect_uri`. The same policy is re-checked at /authorize, so a client registered earlier with an unapproved host cannot complete an authorization. Loopback redirects (native clients) are always accepted. Registration is abuse-guarded with per-IP and global daily caps.",
+        "description": "Registers a public OAuth client for the MCP flow. No client secret is issued (PKCE-protected public clients only). redirect_uris must be HTTPS, or an RFC 8252 loopback (http://127.0.0.1[:port]/..., http://[::1][:port]/..., or http://localhost[:port]/...), and are exact-matched at /authorize. Registration needs no manual step (RFC 7591), but an HTTPS redirect_uri is admitted only when its hostname exactly matches Mnemom's reviewed MCP-host allowlist (for example chatgpt.com, claude.ai and vscode.dev), on the default port, with no wildcard or prefix matching; any other host is rejected with invalid_redirect_uri here, and /authorize refuses it again (an error page, never a redirect). Loopback redirect_uris are accepted on any port. A device-only client (no redirect_uris) completes the flow but is issued a token with no capability unless its client_id is explicitly vetted by an operator, and its consent screen says so. Contact Mnemom to have an additional client host reviewed and added. Registration is abuse-guarded with per-IP and global daily caps.",
         "tags": [
           "OAuth"
         ],
@@ -52234,6 +52238,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -52388,6 +52395,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -52583,6 +52593,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"

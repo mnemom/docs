@@ -109,17 +109,17 @@ Every verdict type is proven stochastically -- there is no verdict that is prove
 
 ### Deferred proofs
 
-When the [policy engine](/concepts/policy-engine) detects `card_gaps` alongside a `boundary_violation`, the gateway creates a proof record with `status: deferred` instead of immediately dispatching to the prover. This creates a tamper-evident audit trail without incurring GPU cost.
+When the [policy engine](/concepts/policy-engine) detects `card_gaps` alongside a `boundary_violation`, the gateway creates a proof record with `status: deferred` instead of immediately dispatching it to the prover. This keeps a tamper-evident audit trail without generating a proof yet.
 
 The observer's DDR ([Disagreement-Driven Review](/protocols/aip/specification#15-disagreement-driven-review)) reconciliation later classifies the violation:
 
-| DDR Outcome | Proof Resolution | GPU Cost |
-|-------------|-----------------|----------|
-| `card_gap` | `skipped_card_gap` -- proof permanently skipped | None |
-| `noise` | `skipped_noise` -- proof permanently skipped | None |
-| `aip_miss` | Upgraded to `pending` and dispatched to prover | Normal |
+| DDR Outcome | Proof Resolution |
+|-------------|-----------------|
+| `card_gap` | `skipped_card_gap` -- proof permanently skipped |
+| `noise` | `skipped_noise` -- proof permanently skipped |
+| `aip_miss` | Upgraded to `pending` and dispatched to the prover |
 
-This means only **confirmed real violations** receive the expensive GPU treatment. During rapid development when alignment cards frequently drift, this can reduce proving costs by 80-95%.
+This means only **confirmed real violations** are proven, which matters most during rapid development, when alignment cards drift often.
 
 ### On-demand proving
 
@@ -130,48 +130,26 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 - The stochastic sample missed a checkpoint of interest
 - A deferred proof needs to be forced without waiting for DDR
 
+The request needs an API key belonging to a member of the org that governs the checkpoint's agent; any other caller gets the same `404` as a missing checkpoint. If a proof already exists, the endpoint returns its current status. Each newly queued proof is charged in μ to that org's billing account (rate card class `analyze.zk-proof`, see [Pricing](/pricing/overview)); returning an existing proof is not charged. If the billing account cannot be resolved, no proof is queued and the request fails with `503` (or `409` when the org has no billing account).
+
 ---
 
 ## Cost and latency
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| **Proving cost** | ~$0.001/proof | Modal H100 GPU, per-second billing. Scales to zero when idle. |
-| **Proving latency** | ~700ms | Wall-clock time from proof request to receipt on H100 GPU. Previously 3-15 minutes on CPU. |
+| **Price** | 100 μ per proof | Rate card class `analyze.zk-proof`, charged once per checkpoint. See [Pricing](/pricing/overview). |
+| **Proving latency** | ~700ms | Typical time from proof request to receipt. Each completed proof reports its own `proving_duration_ms`. |
 | **Verification latency** | &lt;100 milliseconds | STARK verification is fast. Local verification avoids network round-trips. |
 | **Proof size** | ~2.7 MB | SP1 compressed STARK receipt. |
 
-Proving is asynchronous. The checkpoint verdict is returned immediately; the proof is generated in the background (~700ms on GPU) and attached to the certificate when complete. With GPU acceleration, proof generation completes before the next integrity checkpoint in most conversations.
+Proving is asynchronous. The checkpoint verdict is returned immediately; the proof is generated in the background and attached to the certificate when complete. In most conversations it completes before the next integrity checkpoint.
 
-### Proof input persistence
+### Proof status and failures
 
-When the gateway creates a proof request, it stores the full proving inputs alongside the `verdict_proofs` row:
+Poll [`GET /v1/checkpoints/{checkpoint_id}/proof`](/api-reference/endpoint/get-checkpoints-id-proof) to follow a proof. Its `status` is one of `pending`, `proving`, `completed`, or `failed`.
 
-| Column | Description |
-|--------|-------------|
-| `analysis_json` | The full analysis response text from the AIP observer |
-| `thinking_hash` | SHA-256 hash of the thinking block |
-| `card_hash` | SHA-256 hash of the Alignment Card at the time of analysis |
-| `values_hash` | SHA-256 hash of the conscience values at the time of analysis |
-| `model` | The analysis model identifier |
-
-This ensures that proof inputs survive prover restarts, network failures, and machine stops. If the initial proving attempt fails, the retry loop can reconstruct the full proof request from the database without needing the original HTTP payload.
-
-### Self-healing retry loop
-
-The prover service runs a background retry loop every 30 seconds that:
-
-1. Queries `get_pending_proofs()` for proofs with status `pending` or `failed` (up to 5 retries)
-2. Filters out proofs without stored input data (legacy orphans)
-3. Sets status to `proving` and spawns `prove_verdict_derivation()` with the stored inputs
-4. On success, calls `complete_proof()` to persist the receipt, journal, and verification result
-5. On failure, calls `fail_proof()` to increment the retry counter
-
-This makes the proving pipeline self-healing: transient failures (prover unavailable, machine restarts, OOM) are automatically recovered without operator intervention.
-
-<Note>
-If a proof fails to generate after 5 retries, it remains in `failed` status. The checkpoint is still valid -- it just lacks the additional computational integrity guarantee. Proofs without stored inputs (created before input persistence was added) are skipped by the retry loop and marked as permanently failed.
-</Note>
+The proving inputs are stored with the proof request, so a transient failure (for example, the prover restarting) does not lose the request: it is retried automatically, with no action needed from you. A proof that still cannot be generated ends in `failed`. The checkpoint itself remains valid; it just lacks the additional computational integrity guarantee.
 
 ---
 

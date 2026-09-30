@@ -27,7 +27,7 @@ For organizations with heterogeneous agent populations, the org-level template i
 | Org with multiple teams, agent in 2+ teams | `Platform → Organization → {Team₁, Team₂} → Agent` (multi-team strictest-wins folds across all teams) |
 | Org with multiple teams, agent in zero teams | `Platform → Organization → Agent` — the team layer is **omitted** (no default team) |
 
-There is **no auto-created default team**. Teams are an explicit org-admin construct. If a customer-shaped need for "agents auto-land in a specific team" arises, that lands as an opt-in `default_team_id` setting on the org — additive, not breaking.
+There is **no auto-created default team**. Teams are an explicit org-admin construct.
 
 ## The four-layer cascade (when applicable)
 
@@ -51,6 +51,8 @@ For each field on the canonical card, the composition rule applies across **ever
 The fold is variadic: the same rules apply with 0, 1, or N teams. Solo agents reduce naturally to the 3-layer cascade with no team contribution.
 
 ## Multi-team agents
+
+A team can only contain agents governed by the team's own org: `POST /v1/teams` and `POST /v1/teams/:id/members` refuse the whole request with `400` ("Agent not found") if any listed agent belongs to another org, has no org, or doesn't exist — the same answer in all three cases.
 
 An agent can be a member of multiple teams within its org. The composer aggregates contributions from **all** teams the agent belongs to via strictest-wins per field. If an agent is in `team:platform` and `team:sre`, and `platform` sets `autonomy_mode: nudge` while `sre` sets `autonomy_mode: enforce`, the strictest (`enforce`) wins.
 

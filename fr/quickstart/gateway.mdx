@@ -110,11 +110,17 @@ Vos prompts et réponses passent inchangés. Vos clés API ne quittent jamais vo
     | En-tête | Quand il est émis | Que faire |
     |---|---|---|
     | `X-Mnemom-Request-Id` | Toujours | UUIDv4 par requête. **Journalisez-le toujours.** Collez-le dans un ticket de support et nous pouvons récupérer chaque ligne de log pour la requête. |
-    | `X-Mnemom-Verdict` | Toujours (gateway) | Structuré `front=…; autonomy=…; integrity=…; back=…` avec chaque valeur dans `{pass \| observed \| nudged \| enforced \| unverified}`. Analysez-le ; l'état à quatre points de contrôle indique ce que Safe House a observé (front+back), ce que CLPI a fait sur les appels d'outils (autonomy), et ce que AIP a fait sur le raisonnement (integrity). `front` est un cumul sur chaque surface entrante que la requête a portée — le message *et* chaque résultat d'outil filtré dans cette même requête — donc `front=enforced` sur un `200` signifie qu'un résultat d'outil a été retenu ou décoré avant que le modèle ne le voie. Voir [Quand la porte d'entrée s'active](/concepts/safe-house#when-the-front-door-runs). `unverified` est propre à integrity : l'analyseur a échoué, donc aucun verdict fiable n'existe — `enforce` retient la réponse (fail-closed, toujours 2xx), `observe`/`nudge` la transmettent et enregistrent l'état unverified. Jamais rapporté comme `pass`. |
+    | `X-Mnemom-Verdict` | Toujours (gateway), sauf sur une longue réponse non-streaming validée de manière anticipée (voir la note ci-dessous) | Structuré `front=…; autonomy=…; integrity=…; back=…` avec chaque valeur dans `{pass \| observed \| nudged \| enforced \| unverified}`. Analysez-le ; l'état à quatre points de contrôle indique ce que Safe House a observé (front+back), ce que CLPI a fait sur les appels d'outils (autonomy), et ce que AIP a fait sur le raisonnement (integrity). `front` est un cumul sur chaque surface entrante que la requête a portée — le message *et* chaque résultat d'outil filtré dans cette même requête — donc `front=enforced` sur un `200` signifie qu'un résultat d'outil a été retenu ou décoré avant que le modèle ne le voie. Voir [Quand la porte d'entrée s'active](/concepts/safe-house#when-the-front-door-runs). `unverified` est propre à integrity : l'analyseur a échoué, donc aucun verdict fiable n'existe — `enforce` retient la réponse (fail-closed, toujours 2xx), `observe`/`nudge` la transmettent et enregistrent l'état unverified. Jamais rapporté comme `pass`. |
     | `X-Mnemom-Advisory` | Quand la gateway a des avis | JSON compact `[{source, text, severity?, id?}, …]`. Exposez les entrées dans votre UI opérateur / logs. Omis entièrement quand vide. |
     | `X-Mnemom-Agent` | Quand la requête est liée à un agent nommé | L'identifiant d'agent que la gateway a résolu pour votre requête (par ex. `mnm-a1b2c3d4…`). Utile pour le recoupement des lignes du tableau de bord. |
     | `X-Mnemom-Session` | Sur les sessions multi-tours | Token de corrélation de session stable. Renvoyez-le au tour suivant pour maintenir la continuité de session. |
     | `Retry-After` | Sur `429` et certains `503` | Secondes à attendre avant de réessayer. **Respectez-le.** |
+    | `X-Mnemom-Effective-Mode` | Uniquement quand un tour s'est exécuté dans un autre mode que celui configuré | Aujourd'hui une seule valeur : `passthrough; reason=balance_depleted; configured=enforce` — le solde µ d'un agent en `enforce` était épuisé, donc le tour a été transmis sans les contrôles Trust OS. Le `X-AIP-Verdict: clear` / `integrity=pass` d'une telle réponse ne signifie **pas** que le tour a été contrôlé. Rechargez votre solde pour rétablir l'application. |
+    | `X-Mnemom-Deferred` | Sur une longue réponse non-streaming que la gateway a validée de manière anticipée | Voir la note ci-dessous. |
+
+    <Note>
+    Une requête non-streaming vers `/anthropic/v1/messages`, `/openai/v1/chat/completions` ou `/openai/v1/responses` encore en cours après environ 75 secondes est validée de manière anticipée : la gateway envoie un `200` dont le corps commence par des octets de maintien (retours à la ligne), puis le JSON final (les espaces en tête sont du JSON valide, les clients JSON l'analysent donc sans changement). Sur une telle réponse, `X-AIP-Verdict` vaut `pending`, `X-Mnemom-Verdict` et `X-Policy-Verdict` sont **absents** (n'interprétez jamais leur absence comme un succès), et `X-Mnemom-Deferred` indique ce que les en-têtes anticipés n'ont pas pu porter. Une erreur après la validation ferme la connexion en cours de corps — une erreur de transport que votre SDK peut réessayer — plutôt qu'un corps d'erreur dans le `200`.
+    </Note>
 
     Analyse rapide :
 
@@ -248,8 +254,8 @@ Vous pouvez également créer des agents de manière programmatique via l'[API C
 
 | Fournisseur | Modèles | Support Thinking / AIP | En-tête d'authentification |
 |----------|--------|----------------------|-------------|
-| Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Complet (blocs de réflexion analysés directement) | `x-api-key` |
-| OpenAI | GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Non disponible via la gateway pour l'instant | `Authorization: Bearer` |
+| Anthropic | Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, Claude Sonnet 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5 | Complet (blocs de réflexion analysés directement) | `x-api-key` |
+| OpenAI | GPT-6.1 Sol, GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Terra, GPT-5.6 Luna, GPT-5, GPT-5 Codex, o3, o3-mini | Non disponible via la gateway pour l'instant | `Authorization: Bearer` |
 | Gemini | Gemini 3.8 Flash, Gemini 3.5 Flash-Lite, Gemini 2.5 Pro, Gemini 2.5 Flash | Complet (parties de réflexion analysées directement) | `x-goog-api-key` |
 
 ### Compatibilité AIP

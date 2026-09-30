@@ -35,6 +35,8 @@ The `status` value progresses through the cascade phases documented in [Cascade 
 
 The agent is immediately inaccessible — all read endpoints return `404` after the request is accepted. Data deletion proceeds asynchronously across all stores.
 
+An owner or admin of the org that governs the agent can delete it, and so can the agent's creator while they are still a member of that org. Another member of the org gets `403`; a caller outside the org gets `404`, the same answer as an agent that doesn't exist. The same rule applies to tombstoning and restoring an agent.
+
 ### Org-level deletion
 
 ```bash
@@ -62,7 +64,7 @@ curl -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   https://api.mnemom.ai/v1/agents/{agent_id}/deletion-status
 ```
 
-Returns the current phase and completion status of the deletion cascade.
+Returns the current phase and completion status of the deletion cascade. Any member of the agent's org can read it. After the cascade has removed the agent itself, only the person who requested the deletion or a member of the org recorded on the request can read it. Everyone else gets `404`, the same answer as when no deletion was requested.
 
 ### Idempotency
 

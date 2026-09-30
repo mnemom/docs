@@ -78,6 +78,10 @@ Server-side, sessions are revalidated against the session registry on every prot
 
 Signing in from a new device sends a notification email; that email carries a one-click, single-use revoke link so you can kill the new session without first signing back in yourself â€” useful if the new sign-in wasn't you.
 
+### Sign-in throttling
+
+Password and MFA-code attempts are throttled per account, on top of the per-IP limit. After 10 attempts for the same email (or the same pending MFA sign-in) from one network without a successful sign-in, or a much higher number across all networks, further attempts are held for 30 seconds, and the hold doubles with each attempt up to 15 minutes. A held attempt returns `429` with code `rate_limited` and a `Retry-After` header, whether or not the account exists. A successful sign-in clears the counter.
+
 ---
 
 ## API keys
@@ -151,7 +155,7 @@ If you are rotating an **agent's provider key** (Anthropic / OpenAI / Gemini) â€
 If you lose all your passkeys and cannot complete MFA, use the password recovery path:
 
 1. On the sign-in page, click **Forgot password?**.
-2. Check email for the reset link (single-use, 15-minute TTL).
+2. Check email for the reset link (single-use, 15-minute TTL). Open it in the same browser you requested it from; opened anywhere else, it shows a confirmation page naming the account before it signs you in.
 3. Set a new password.
 4. Complete MFA enrollment or re-auth.
 5. Sign in.
