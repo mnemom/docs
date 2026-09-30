@@ -18,7 +18,76 @@ Three layers power this:
 **What no external system can guarantee:** Enforcement at the sub-thinking level — inside the model's weights. If a model produces compromised reasoning that does not surface in its thinking blocks, no external observer can detect it. Mnemom verifies everything the model externalizes; it cannot inspect what the model does not reveal. See the [limitations docs](/protocols/aap/limitations) for details.
 </Note>
 
-## Get started
+## Start here
+
+Five steps from zero to a governed agent. Every command below is taken from the [gateway quickstart](/quickstart/gateway), the [CLI reference](/gateway/cli) and [MCP clients](/mcp-clients) — follow those pages for options and troubleshooting.
+
+<Steps>
+  <Step title="Install the CLI and log in">
+    ```bash
+    npm install -g @mnemom/mnemom
+    mnemom login
+    ```
+
+    `mnemom login` opens a browser. On a machine with no browser (SSH, a container), run `mnemom login --no-browser` instead.
+  </Step>
+
+  <Step title="Connect the MCP server (optional)">
+    Let your coding agent read and manage your Mnemom agents directly. The control-plane server needs a Bearer access token or `mnm_…` API key; the docs server needs no auth.
+
+    ```bash
+    export MNEMOM_TOKEN="<your Bearer access token or mnm_… API key>"
+    claude mcp add --transport http mnemom https://api.mnemom.ai/mcp \
+      --header "Authorization: Bearer $MNEMOM_TOKEN"
+    claude mcp add --transport http mnemom-docs https://docs.mnemom.ai/mcp
+    ```
+
+    Other clients (Cursor, VS Code and more) are covered in [MCP clients](/mcp-clients).
+  </Step>
+
+  <Step title="Send traffic through the gateway, then claim your agent">
+    Point your LLM call at the gateway and name your agent with the `x-mnemom-agent` header. Use `-i` to print response headers and note the `X-Mnemom-Agent` id.
+
+    ```bash
+    curl -i https://gateway.mnemom.ai/anthropic/v1/messages \
+      -H "x-api-key: $ANTHROPIC_API_KEY" \
+      -H "x-mnemom-agent: my-agent" \
+      -H "anthropic-version: 2023-06-01" \
+      -H "content-type: application/json" \
+      -d '{"model": "claude-sonnet-4-6", "max_tokens": 1024, "messages": [{"role": "user", "content": "Hello"}]}'
+    ```
+
+    Claim the agent so it belongs to your account:
+
+    ```bash
+    mnemom agent claim <id-from-X-Mnemom-Agent-header> --name my-agent --key $ANTHROPIC_API_KEY
+    ```
+
+    See [Gateway quickstart](/quickstart/gateway) for other providers and the full claim flow.
+  </Step>
+
+  <Step title="See your traffic">
+    From the terminal:
+
+    ```bash
+    mnemom status --agent my-agent
+    mnemom logs --agent my-agent
+    mnemom activity --agent my-agent
+    ```
+
+    Or open the [dashboard](https://mnemom.ai/dashboard) and select your agent: the conscience timeline lists every trace, integrity checkpoint and enforcement action, alongside integrity scores, drift alerts and the enforcement log. Through MCP, ask your coding agent to run `query_traces` for the agent.
+  </Step>
+
+  <Step title="Configure your cards">
+    The [Alignment Card](/concepts/alignment-cards) declares your agent's values and boundaries; the [Protection Card](/concepts/protection-card) sets its [Safe House](/concepts/safe-house) screening. Change either one from whichever surface you prefer:
+
+    - **Dashboard** — open your agent in the [dashboard](https://mnemom.ai/dashboard) and edit its Alignment Card.
+    - **CLI** — `mnemom card show|edit --agent my-agent` and `mnemom protection show|edit --agent my-agent`. See [CLI reference](/gateway/cli).
+    - **MCP** — `get_alignment_by_agent`, `put_alignment_by_agent`, `get_protection_by_agent` and `put_protection_by_agent`.
+  </Step>
+</Steps>
+
+## Other ways to integrate
 
 <Note>
   These quickstarts are available in [Spanish (Español)](/es/quickstart/overview) and [French (Français)](/fr/quickstart/overview) — six pages per language have been translated.
