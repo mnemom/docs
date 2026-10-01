@@ -71,10 +71,21 @@ The writer follows these rules:
 - **The statement changes only when you change it**, by saying what the goal
   is ("your goal is …"), or by stopping or dropping the current work ("stop
   that and do Y").
+- **A rename is an edit, not new work.** When you rename something the goal
+  names ("rename fooparse to barparse"), every item that names it is rewritten
+  with the new name, the statement included. The rename is not added as a
+  requirement of its own. Renaming something the goal does not name is new
+  work.
 - **Finished work is kept and marked.** When a requirement is done it stays
   in the goal, prefixed `[done]`.
-- **Only your words add content.** The agent's plan or its offer never becomes
-  a requirement unless you agree to it (see [Approvals](#approvals)).
+- **Only your words add content.** Each item the writer adds or changes must
+  trace to what you said, and must not say more than you did. It does not fill
+  in a reason, a target or a step you never mentioned. The agent's plan or its
+  offer never becomes a requirement unless you agree to it (see
+  [Approvals](#approvals)).
+- **Text the coding tool inserted changes nothing.** If the message that
+  reached the writer is only text your client added (a loaded skill, a recap
+  prompt), the goal stays as it was. With no goal yet, nothing is recorded.
 - **Forbidden paths come only from you.** A forbidden path is kept only when
   the earlier goal had it or your message names it. The writer cannot invent
   one.
@@ -91,6 +102,12 @@ On the request that carries your new message, the agent still sees the goal as
 it was. That goal is marked provisional, and the agent is told to follow your
 latest message, not to argue it against the old goal. The response carries
 `x-mnemom-goal-steer: queued` on such a request.
+
+The agent may take further steps in the same turn before the new revision is
+stored. Those steps also see the goal marked provisional, and they get no judge
+note. Each one is judged later, against the new revision once it is stored. If
+no new revision is stored (the goal did not change, or it took too long), those
+steps get no verdict.
 
 ### The agent sees the goal as a labelled note
 
@@ -111,7 +128,15 @@ TypeSafe Jev. It reads:
 - your latest message and your answers to the agent's questions;
 - the agent's text and its tool calls, with facts a parser reads from the
   calls (which tests a command runs, git commands that change history or a
-  remote, credentials written as literal values).
+  remote, credentials written as literal values);
+- what the step writes, not only where: an edit's old and new text, a new
+  file's content, the text of a message the agent sends. Long values are
+  clipped.
+
+Credentials and secrets are redacted from all of this before anything reaches
+the judge. The judge also asks a separate question for each open requirement
+(up to a fixed number of them), so a step that breaks one specific requirement
+can be flagged on its own.
 
 The verdict is `aligned`, `drifting` (the step works on something else) or
 `violation` (it breaks a requirement or a fence you set). On `drifting` or
@@ -121,7 +146,8 @@ decides what to do with the note.
 
 When your message changes the goal, the previous step is judged against the
 goal it acted under and recorded, but no note is sent. Your new message is what
-steers that turn.
+steers that turn. Steps the agent takes after your message are judged against
+the new goal, as described [above](#it-is-updated-after-the-response-not-before).
 
 ## What counts as your words
 
@@ -145,9 +171,9 @@ tag or wrapper the client used. It does not use word lists to decide.
 | --- | --- |
 | Tool output | A file the agent read, a page it fetched or a command's output may contain text that looks like a message from you, including a line such as `User approved: …`. It is never your words. |
 | The agent's own text | The agent's plan, summary or offer is context for your reply, not an ask. |
-| Teammates and other sessions | A message from an agent-team teammate, a subagent or another Claude session is not from you. Teammates and subagents get [their own goal threads](#threads). |
-| Scheduled prompts | Cron, loop and wake-up ticks that Claude Code marks as scheduled. |
-| Claude Code's background requests | Session titles, recaps and suggestions. These are recognised from Claude Code's request-class header, so they need the [hint headers](#claude-code-outside-the-launcher). |
+| Teammates and other sessions | A message from an agent-team teammate, a subagent or another Claude session is not from you. Teammates and subagents get [their own goal threads](#threads), and their requests never feed your goal. A teammate's brief builds the teammate's own goal. |
+| Scheduled prompts | Cron, loop and wake-up ticks. They are recorded but never change or judge the goal. Recognised when Claude Code marks the request as scheduled, or when its transcript records the turn as scheduled (see [turn origins](#turn-origins-from-the-launcher)). |
+| Claude Code's background requests | Session titles, recaps, suggestions and compaction. These are recognised from Claude Code's request-class header, which needs the [hint headers](#claude-code-outside-the-launcher). When that header is present, only a request of class `main` can change your goal. |
 | Pasted text | When Claude Code marks a paste (`<pasted_content>`), the paste is read as context for what you typed, not as a list of new asks. |
 | Client scaffolding | System reminders, skill bodies, hook feedback, task notifications, compaction prompts and summaries, interrupt markers, and the gateway's own notes. |
 
@@ -155,7 +181,29 @@ A mid-turn message that Claude Code puts inside a tool result is a special
 case. The gateway records it but does not act on it (see [limits](#known-limits)).
 
 For clients other than Claude Code, all user-role text counts as your words.
-Use [`x-mnemom-thread`](#threads) to keep separate streams apart.
+Use [`x-mnemom-thread`](#threads) to keep separate streams apart, and
+[`x-mnemom-turn`](#the-x-mnemom-turn-header) to mark text you did not type.
+
+### Turn origins from the launcher
+
+Some text reaches the wire looking exactly like a message you typed: a
+scheduled tick, a skill body, hook output, a relayed channel message, a message
+from another session. Claude Code records the difference in its own transcript.
+
+`mnemom agent` reads that transcript and tells the gateway where each recent
+turn came from, in the `x-mnemom-turn` request header. It does this in both
+Remote Control and terminal mode. In terminal mode the launcher runs a small
+local proxy in front of the gateway to add the header. The proxy passes your
+credentials through unchanged.
+
+The header can only take text away from your words. Text the transcript records
+as not typed by you is never used for the goal. Text it records as yours is
+still classified from the wire as before, so the header never adds anything.
+If the transcript cannot be read in time, the request goes without the header
+and the gateway falls back to the wire alone.
+
+To turn the header off, set `MNEMOM_AGENT_TURN_HEADER=0` before launching. The
+terminal launch then goes straight to the gateway, with no local proxy.
 
 ## Approvals
 
@@ -284,7 +332,7 @@ verdicts and pin:
 | Thread id | What it is |
 | --- | --- |
 | `main` | Your session: the goal built from your words. |
-| `a.<agent id>` | A Claude Code subagent or agent-team teammate. Its goal is built from the brief it was given, and later from messages its lead sends it. Nothing it reads or says changes your goal. |
+| `a.<agent id>` | A Claude Code subagent, or an agent-team teammate running in the same process (shown as `a.<name>:<team>`). Its goal is built from the brief it was given, and later from messages its lead sends it. Nothing it reads or says changes your goal. |
 | `m.<id>` | Another Claude Code process that shares the conversation id, such as a teammate running in its own terminal pane, a fork, a second session, or the same session after `/clear`. It gets its own main-style thread and cannot rewrite or reset the original `main` goal. |
 | `t.<value>` | A thread you name with the `x-mnemom-thread` header. |
 
@@ -299,8 +347,9 @@ that run without a goal.
 
 ## Claude Code outside the launcher
 
-`mnemom agent` sets this up for you. If you point Claude Code at the gateway
-yourself, send the goal headers with `ANTHROPIC_CUSTOM_HEADERS`. Also set
+`mnemom agent` sets this up for you, in both terminal and Remote Control mode.
+It also adds the [turn origins](#turn-origins-from-the-launcher) header. If you
+point Claude Code at the gateway yourself, send the goal headers with `ANTHROPIC_CUSTOM_HEADERS`. Also set
 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`:
 
 ```bash
@@ -316,6 +365,39 @@ a background call, and which agent sent it. Implicit mode uses these headers to
 skip background requests and to give teammates their own threads. The variable
 is optional. Without it implicit mode still works, but a recap or title prompt
 can be read as your words.
+
+### The `x-mnemom-turn` header
+
+Any client can tell the gateway that some recent user text did not come from
+the user. Send one entry per recent user turn, oldest first, separated by
+commas. Each entry is a list of `key=value` pairs separated by `;`:
+
+```http
+x-mnemom-turn: origin=scheduled; h=<sha256 hex>, origin=human; source=typed; h=<sha256 hex>
+```
+
+| Key | Required | Value |
+| --- | --- | --- |
+| `origin` | Yes | `human`, `scheduled`, `peer`, `task`, `channel` or `meta` |
+| `h` | Yes | The SHA-256 of the turn's text, exactly as sent in the request, as 64 lowercase hex characters |
+| `source` | No | `typed`, `queued`, `system` or `sdk` |
+| `pastes` | No | The number of pastes in the turn, 0 to 9999 |
+
+Unknown keys are ignored. The rules:
+
+- **It can only remove text from your words.** A text block whose hash matches
+  an entry with any origin other than `human` is never used for the goal. An
+  `origin=human` entry adds nothing. Text that matches no entry is classified
+  as if the header were absent.
+- **A malformed header is ignored whole.** One bad entry, more than 32 entries,
+  or a header longer than 8,192 characters means the gateway acts as if it was
+  not sent.
+- **It is read only in implicit mode**, and the gateway removes it before the
+  request goes upstream.
+
+The header comes from the client process, never from model or tool output. A
+client that sends a wrong value can only remove its own user's text from the
+goal.
 
 ## Sealed and implicit compared
 
@@ -361,16 +443,18 @@ can be read as your words.
   not always wrap pasted text in `<pasted_content>`. An unmarked paste is read
   as text you typed.
 - **Detection depends on the client.** Teammate threads, scheduled prompts and
-  background requests are recognised from what Claude Code puts on the wire. A
-  Claude Code change can affect this, and other clients send none of these
-  signals, so all their user text counts as your words.
+  background requests are recognised from what Claude Code puts on the wire
+  and, with `mnemom agent`, from what it records in its transcript. A Claude
+  Code change can affect this. Other clients send none of these signals, so all
+  their user text counts as your words unless they send `x-mnemom-turn`.
 - **Relaunches and `/clear`.** `mnemom agent` can continue an earlier
   implicit session's conversation id. The `main` goal belongs to the Claude
-  Code session that started it, though. A relaunch that starts a new Claude Code
-  session, or a `/clear`, gets its own `m.<id>` thread with a fresh goal. To
-  keep using the original goal, resume the original Claude Code session
-  (`mnemom agent <name> -- --resume <session id>`). `--all-threads` shows
-  every thread.
+  Code session that started it, though. Anything that runs under a different
+  Claude Code session id, such as a `/clear` or a relaunch that starts a new
+  Claude Code session, gets its own `m.<id>` thread with a fresh goal. To be
+  sure a relaunch keeps the original goal, resume the original Claude Code
+  session (`mnemom agent <name> -- --resume <session id>`). `--all-threads`
+  shows every thread.
 - **Rate brakes.** If you change direction many times within a few minutes,
   the gateway pauses revisions. Messages it did not process are picked up with
   your next message.
