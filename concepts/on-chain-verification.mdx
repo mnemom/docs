@@ -21,7 +21,7 @@ On-chain anchoring does not replace the off-chain scoring system. It periodicall
 Mnemom runs two related on-chain operations, both on **Base** (Coinbase's Ethereum L2), on the same **6-hour cron** that recomputes reputation scores:
 
 1. **Merkle root anchoring.** Each agent's integrity checkpoints form a per-agent Merkle tree; the per-agent roots are aggregated into one global root, which is anchored on-chain.
-2. **Score batch publishing.** Eligible agents' current `(agent_id, score, grade)` are published in batches (currently up to 100 entries per transaction, chunked as needed). The commitment for each entry binds the agent id, score, grade, and a hash of the alignment card version the score was computed against -- so a card swapped in underneath an unchanged-looking score changes the on-chain commitment.
+2. **Score batch publishing.** Each cycle publishes the `(agent_id, score, grade)` of every eligible agent whose score or grade changed since its last confirmed publication, plus agents never published before, in batches (currently up to 100 entries per transaction, chunked as needed). An agent whose score and grade are unchanged keeps its previously published value on-chain. The commitment for each entry binds the agent id, score and grade. The commitment format also has a slot for a hash of the alignment card version the score was computed against, but that slot is not populated today, so a card change on its own does not change the on-chain commitment.
 
 Both operations write to Base using `viem`, targeting either `base` (mainnet) or `base-sepolia` (testnet) depending on the environment -- the same two values the API reports in the `chain` field of on-chain responses.
 
@@ -48,6 +48,10 @@ The customer-facing verification endpoint, `GET /v1/on-chain/verify-proof/{agent
 <Warning>
 **Scope limit, stated rather than hidden:** the anchored root that step 3 checks against is read from **Mnemom's own anchor record**, not from a live Base RPC call. A `verified: true` result means "this tree is internally consistent and matches the root Mnemom recorded as anchored" -- it does not, on its own, prove that Mnemom's record of what was anchored agrees with the chain. The response's `verification.anchored_root_source` field reports this (`mnemom_database`) so the limitation is visible in the payload, not just in prose.
 </Warning>
+
+### Private agents
+
+The three on-chain read endpoints follow the same privacy rule as the reputation API. For an agent whose reputation visibility is `private`, `GET /v1/on-chain/status/{agent_id}`, `GET /v1/on-chain/verify-proof/{agent_id}` and `GET /v1/on-chain/history?agent_id=…` return `403` with code `reputation_private` unless the caller is authenticated as a member of the agent's organization. Public, unlisted and unscored agents stay readable without authentication. If the visibility check itself fails, the request fails closed with `500` instead of serving the data.
 
 A customer wanting a fully trust-minimized check today can take the `tx_hash`, `block_number`, and `chain` the API returns for a confirmed anchor and inspect that transaction directly on a Base block explorer -- the transaction itself is public. Reading the registry contract's state directly is not yet part of the documented customer surface.
 

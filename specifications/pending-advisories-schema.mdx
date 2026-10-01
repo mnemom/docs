@@ -1,13 +1,13 @@
 ---
 title: "Pending Advisories Schema"
-description: "Wire format for pending_advisories rows + the closed source taxonomy and expansion contract."
+description: "Wire format for pending_advisories rows + the closed source taxonomy and its compatibility rules."
 sidebarTitle: "Pending Advisories"
 icon: "envelope"
 ---
 
-`pending_advisories` is the unified cross-turn carryover surface. One table, one read point at the start of each runtime turn (`gateway/src/index.ts::injectPendingNudges`), multiple sources via a closed `source` enum spanning runtime + sideband + manual contexts.
+`pending_advisories` is the unified cross-turn carryover surface. One table, read by the gateway at the start of each runtime turn, multiple sources via a closed `source` enum spanning runtime + sideband + manual contexts.
 
-This page documents the row shape every consumer can rely on (gateway, observer, dashboard, CLI, webhook subscribers) and the expansion contract for adding new sources.
+This page documents the row shape every consumer can rely on (gateway, observer, dashboard, CLI, webhook subscribers) and the compatibility rules for new and retired sources.
 
 ## Row shape
 
@@ -32,12 +32,12 @@ interface PendingAdvisory {
 
 ## Source taxonomy
 
-Closed, hierarchical, append-only enum. Adding a new value requires the [expansion recipe](#expansion-contract) (schema amendment + migration + producer + consumer-tolerance).
+Closed, hierarchical, append-only enum. New values are added additively; see [Compatibility](#compatibility).
 
 | Context | Producer | Examples |
 |---|---|---|
-| `runtime.*` | `gateway/src/index.ts` (same-turn intervention bookkeeping) | `runtime.front_door.nudge`, `runtime.back_door.modification` |
-| `manual.*` | mnemom-api admin handlers (human-attached) | `manual.admin` |
+| `runtime.*` | Gateway (same-turn intervention bookkeeping) | `runtime.front_door.nudge`, `runtime.back_door.modification` |
+| `manual.*` | Mnemom API admin handlers (human-attached) | `manual.admin` |
 
 <Warning>
 **Surface-separation invariant.** `sideband.*` sources are no longer accepted into `pending_advisories` — a CHECK constraint on `pending_advisories.source` rejects new `sideband.*` writes (pre-cutover historical rows remain queryable for compliance attestation but were marked `status='expired'`). The fleet-sweep detectors (`sideband.coherence` / `sideband.fault_line` / `sideband.fleet`) write to the operator-actionable [`governance_signals`](/specifications/governance-signals-schema) table instead.
@@ -52,7 +52,7 @@ Closed, hierarchical, append-only enum. Adding a new value requires the [expansi
 | `runtime.inside.autonomy.nudge` | gateway (CLPI handler) | No | (none) |
 | `runtime.inside.integrity.nudge` | gateway (AIP handler) | No | (none) |
 | `runtime.back_door.modification` | gateway (back-door handler) | No | (none) |
-| `manual.admin` | mnemom-api admin attach handler | No | future `manual.advisory_attached` |
+| `manual.admin` | Mnemom API admin attach handler | No | future `manual.advisory_attached` |
 
 `sideband.coherence` / `sideband.fault_line` / `sideband.fleet` previously appeared here; the fleet-sweep detectors behind them now write to [`governance_signals`](/specifications/governance-signals-schema) instead. Runtime drift detection is a separate, agent-scoped detector (not fleet-sweep-driven, not written to `pending_advisories` or `governance_signals`) that fires the `sideband.drift.fired` webhook event directly — see [Webhook events](#webhook-events) below. The legacy `drift.detected` event name has been removed with no replacement alias; subscribers must use `sideband.drift.fired`.
 
@@ -126,22 +126,10 @@ Service-key paths used by the observer cron (not customer-facing — gated behin
 | Sideband sweep heartbeat | `X-Service-Key` | Observer heartbeat: UPSERT per-sweep log row |
 | `GET /v1/teams/:id/effective-posture` | `X-Service-Key` (or user) | Observer posture read (customer-facing endpoint) |
 
-## Expansion contract
+## Compatibility
 
-### Adding a new source
-
-To add a new value to `source`, a single PR train MUST land all of:
-
-1. **Schema amendment** to the source taxonomy adding the value with its producer, consumer responsibilities, and `source_ref` shape.
-2. **Migration** (`ALTER TABLE pending_advisories DROP CONSTRAINT … ADD CONSTRAINT … CHECK (source IN (…))`) appending the new value. Migration MUST use the post-DDL `pg_proc.prosrc` ASSERT pattern from `mnemom-api/database/migrations/158_*.sql`.
-3. **Producer code** that writes rows with the new source — fire-and-forget, never throws on insert failure.
-4. **Consumer-tolerance discipline** — `gateway/src/index.ts::injectPendingNudges` MUST already render any unknown source as a generic advisory (the current code does this; it doesn't filter on source). Future consumers (dashboard filter chips, CLI `--source`, webhook event types) MUST tolerate the value via either pre-registration or graceful unknown-source fallback.
-5. **`source_ref` JSONB shape** documented per source on this page.
-6. **For `sideband.*` only** — extend `PostureBody.sideband` with the corresponding axis configuration (`enabled`, `cadence_seconds`, `severity_floor` or `fire_on.*`, `severity_on_fire`). The Posture is the policy surface; new sideband sources without posture-body fields are forbidden.
-
-### Removing a source
-
-**Forbidden.** Removing a source breaks compliance attestation (historical advisories with that source value become un-renderable) and breaks deserialization for any consumer holding archived rows. Deprecation is the only valid path: stop producing the source, document the deprecation, but leave the CHECK constraint accepting the value forever.
+- **New `source` values are additive.** Mnemom may add values to the source taxonomy. Treat an unrecognized `source` as a generic advisory instead of rejecting the row.
+- **Existing rows are never rewritten to a new source.** When a source stops being produced (as `sideband.*` did), new writes with it are refused, but historical rows keep their original `source` value and remain readable for audit and compliance queries.
 
 ## Webhook events
 

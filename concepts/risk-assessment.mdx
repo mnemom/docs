@@ -155,6 +155,16 @@ GET endpoints that retrieve a stored resource by ID — `GET /v1/risk/assessment
 
 List endpoints (`GET /v1/risk/history/:agent_id`, `GET /v1/risk/team-history/:team_id`) filter implicitly to the calling account and return an empty list rather than `404` when the requested ID belongs to a different account.
 
+### Which agents you can assess
+
+Assessing another organization's public or unlisted agent is allowed — that counterparty check is what the engine is for. An assessment never carries reputation data that the reputation API itself withholds, so both `POST /v1/risk/assess` and `POST /v1/risk/assess/team` check every agent first:
+
+- **Private reputation** — an agent whose reputation visibility is `private` can be assessed only by a member (`owner`, `admin`, `member` or `viewer`) of the organization that governs it. Anyone else gets `403` with code `reputation_private`.
+- **Deleted agents** — a deleted (tombstoned) agent returns `404` with code `agent_not_found`.
+- **Teams by `team_id`** — a team assessment by `team_id` requires membership in the team's organization. A team in an organization you don't belong to returns the same `404` as a team that doesn't exist.
+
+If the membership check itself cannot complete, the request fails closed with `503` and code `membership_unresolved`; retry it.
+
 ## See also
 
 - [Reputation Scores](/concepts/reputation-scores) — the input data that feeds risk assessments

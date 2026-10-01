@@ -8,7 +8,7 @@ icon: "link"
 For the conceptual background -- why Mnemom anchors data on-chain, what gets published, and the honest scope limits of what "verified" means -- see [On-Chain Verification](/concepts/on-chain-verification).
 
 <Note>
-All three endpoints below are public and require no authentication. Anchoring and score publishing themselves are **not customer-callable** -- Mnemom runs them on an internal 6-hour cron.
+All three endpoints below need no authentication for agents whose reputation is public (or not yet scored). For an agent whose reputation is **private**, they return `403 reputation_private` unless you are an authenticated member of the org that governs the agent -- the same rule as [`GET /v1/reputation/{agent_id}`](/api-reference/endpoint/get-reputation-agent-id). History filtered by `agent_id` follows the same rule. Anchoring and score publishing themselves are **not customer-callable** -- Mnemom runs them on an internal 6-hour cron, and each run publishes only the scores that changed since their last confirmed publication.
 </Note>
 
 ---
@@ -97,7 +97,7 @@ else:
 GET /v1/on-chain/status/{agent_id}
 ```
 
-A lighter-weight summary: the agent's most recent score publication, its latest confirmed anchor, and its current Merkle tree metadata. Each of the three is `null` when no matching row exists yet.
+A lighter-weight summary: the agent's most recent score publication, its latest confirmed anchor, and its current Merkle tree metadata. Each of the three is `null` when no matching row exists yet. Because unchanged scores aren't republished, `latest_score_publication` can be older than `latest_anchor` for an agent whose score has been stable.
 
 <CodeGroup>
 ```bash cURL

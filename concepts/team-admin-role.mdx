@@ -53,6 +53,8 @@ The audit trail records the highest applicable role at the time of the mutation.
 | Revoke (self) | the team_admin themselves | same `DELETE` endpoint, with their own `user_id` |
 | List | any org member | `GET /v1/teams/:team_id/admins` |
 
+A caller who isn't a member of the team's org gets `404` ("Team not found") on all three endpoints — the same answer as for a team that doesn't exist. Granting to a user who isn't a member of the team's org returns `403`.
+
 Grants are tuples: each `(team_id, user_id)` pair is independent. A grant on Team A confers nothing for Team B. Re-granting an already-active grant is idempotent — the API returns 200 with `idempotent_noop: true` and no audit row.
 
 A team can have zero, one, or many active team admins. There is **no last-admin protection**: the team can drop to zero grants, because org admins still implicitly cover the team. The dashboard shows a non-blocking warning when revoking the last grant.

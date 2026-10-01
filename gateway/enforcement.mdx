@@ -297,11 +297,13 @@ The gateway reports every enforcement decision on the response, whether or not a
 
 | Header | Meaning |
 |---|---|
-| `X-Mnemom-Verdict` | Structured, always present: `front=<v>; autonomy=<v>; integrity=<v>; back=<v>`, one entry per phase — Safe House front door, action-policing (policy + bounded actions), AIP integrity, Safe House back door. Each `<v>` is one of `pass`, `observed`, `nudged`, `enforced`, `unverified`. Absent phases default to `pass`. |
+| `X-Mnemom-Verdict` | Structured, present on every response except a long non-streaming one the gateway committed early (see [Quickstart: response headers](/quickstart/gateway)): `front=<v>; autonomy=<v>; integrity=<v>; back=<v>`, one entry per phase — Safe House front door, action-policing (policy + bounded actions), AIP integrity, Safe House back door. Each `<v>` is one of `pass`, `observed`, `nudged`, `enforced`, `unverified`. Absent phases default to `pass`. |
 | `X-Mnemom-Advisory` | A JSON array of `{source, text, severity?, id?}` entries surfacing what a `nudged`/`enforced` phase actually did, capped at 5 entries. Omitted entirely when there's nothing to advise. |
 | `X-Mnemom-Request-Id` | A per-request UUID for support correlation. |
 | `X-AIP-Verdict` + `X-AIP-Checkpoint-Id` | The two AIP-specific headers that still exist standalone alongside the structured `X-Mnemom-Verdict.integrity` field. |
 | `X-Policy-Verdict` | `pass` / `warn` / `fail` from the policy engine specifically — see [Policy violations](#policy-violations) above. |
+| `X-Mnemom-Effective-Mode` | Present only when a turn ran in a different mode than configured. Today that is `passthrough; reason=balance_depleted; configured=enforce`: the agent's µ balance was depleted, so the turn was forwarded without enforcement or analysis, and its `X-AIP-Verdict: clear` / `integrity=pass` do not mean the turn was checked. |
+| `X-Mnemom-Deferred` | On a long non-streaming response committed early: names what the early headers could not carry. `X-AIP-Verdict` is `pending` and `X-Mnemom-Verdict` / `X-Policy-Verdict` are absent on such a response. |
 
 <Note>
 A number of legacy per-phase headers — `X-Mnemom-Autonomy-Verdict`, the `X-Safe-House-*` family (`Verdict`, `Quarantine-Id`, `Session-Risk`, `Mode`, `Simulated-Verdict`, `Canary-Triggered`, `DLP`, `Advisory`, `Event`), and most of the old `X-AIP-*` family (`Action`, `Proceed`, `Synthetic`, `Source`, `Analysis-Scope`, `Certificate-Id`, `Chain-Hash`, `Reason`, `Nudge-Count`, `Enforcement`) — were retired in a clean break in favor of the structured `X-Mnemom-Verdict`/`X-Mnemom-Advisory` pair above. The gateway actively strips any of these names from every outbound response as defense-in-depth. If you integrated against one of them before this cutover, migrate to the fields above — the old names will never reappear.

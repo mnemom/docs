@@ -24,6 +24,7 @@ A Mnemom organization has five roles. Every endpoint under `/v1/orgs/{org_id}/*`
 Two notes worth pinning:
 
 - **Only owners change roles.** The owner can promote a member to admin or set anyone's role; admins cannot. Ownership transfer is not an API operation — contact support if you need it.
+- **Only owners remove owners.** An admin can remove members, viewers, auditors, and other admins, but removing an owner returns `403`. The last owner can't be removed by anyone.
 - **`auditor` is the read-only-with-billing-and-compliance role.** Auditors can read invoices, costs, the audit log, and webhook health, but cannot mutate anything. They're the SOC 2 / SOX / DORA review role.
 
 The `viewer` and `auditor` roles require the **RBAC** capability on your account. If it isn't enabled, assigning either role fails with a message pointing at [Pricing](/pricing/overview).
@@ -64,6 +65,12 @@ Configure SAML SSO with your IdP (Okta, Azure AD, Google Workspace, etc.).
 - [`PUT /v1/orgs/{org_id}/sso`](/api-reference/endpoint/put-orgs-org-id-sso) — configure (owner-only — misconfiguration can lock everyone out of the org)
 - [`POST /v1/orgs/{org_id}/sso/test`](/api-reference/endpoint/post-orgs-org-id-sso-test) — test before saving (owner or admin)
 - [`DELETE /v1/orgs/{org_id}/sso`](/api-reference/endpoint/delete-orgs-org-id-sso) — remove (owner-only)
+
+Every domain in `allowed_domains` must be one your organization has proven it controls. Add it with [`POST /v1/domains`](/api-reference/endpoint/post-domains) and verify it by DNS TXT record with [`POST /v1/domains/{domain}/verify`](/api-reference/endpoint/post-domains-domain-verify) before saving the SSO config. `PUT /v1/orgs/{org_id}/sso` refuses:
+
+- an unverified domain — `403 sso_domain_unverified`
+- a domain already bound to another organization's SSO — `409 sso_domain_conflict` (a domain belongs to at most one org)
+- a public email provider domain such as `gmail.com` — `400 sso_domain_public`
 
 ### Usage + costs
 

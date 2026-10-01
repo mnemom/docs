@@ -7,7 +7,7 @@ icon: "list-tree"
 
 ## The canonical set
 
-Every Mnemom response carries a tightly-scoped header surface. The Mnemom-namespaced set is **six headers**, plus an optional API-version header and an AAP allow-list pair. Anything else under `X-Mnemom-*` or `X-AIP-*` was retired clean-break on 2026-05-08 — see [What was retired](#what-was-retired) below.
+Every Mnemom response carries a tightly-scoped header surface. The Mnemom-namespaced set is the headers in the table below, plus an optional API-version header and an AAP allow-list pair. Anything else under `X-Mnemom-*` or `X-AIP-*` was retired clean-break on 2026-05-08 — see [What was retired](#what-was-retired) below.
 
 <Note>
 **Migrating from legacy headers?** Deprecated headers (`X-Safe-House-*`, most `X-AIP-*`, `X-Mnemom-Autonomy-Verdict`) were retired clean-break on 2026-05-08. See [What was retired](#what-was-retired) below for the legacy → canonical mapping.
@@ -18,12 +18,14 @@ There is **no dual-emit window** and **no `Sunset` header** on the legacy names 
 | Header | Always emitted? | Emitted by | Purpose |
 |---|---|---|---|
 | `X-Mnemom-Request-Id` | Always | Gateway | UUIDv4 per request — paste into a support ticket and we can pull every log line for that request. Stable across the whole pipeline. |
-| `X-Mnemom-Verdict` | Always (gateway) | Gateway | Structured per-checkpoint verdict: `front=…; autonomy=…; integrity=…; back=…`, each in `{pass \| observed \| nudged \| enforced \| unverified}`. Parse once; grep four checkpoints. |
+| `X-Mnemom-Verdict` | Always (gateway), except on a response committed before its verdict is decided (see `X-Mnemom-Deferred`) | Gateway | Structured per-checkpoint verdict: `front=…; autonomy=…; integrity=…; back=…`, each in `{pass \| observed \| nudged \| enforced \| unverified}`. Parse once; grep four checkpoints. |
 | `X-Mnemom-Advisory` | When non-empty | Gateway | Compact JSON array of advisory entries `[{source, text, severity?, id?}, …]`. Capped at 5 entries. Omitted entirely when no advisories fired. |
 | `X-Mnemom-Schema` | Always (mnemom-api) | mnemom-api | Response-shape identifier — the unified card schema (`unified/2026-04-15`) by default, or a more specific value on a per-endpoint response (e.g. `alignment-card/sources`, `safe-house-harness-state/v1`). Mirrors the shape your client should validate against. |
 | `X-Mnemom-Version` | Always (mnemom-api) | mnemom-api | Echoes the date-based API version the response was rendered against (`YYYY-MM-DD`). Stripe-Version analog. |
 | `X-Mnemom-Agent` | When the request is bound to a named agent | Gateway | The agent identifier the gateway resolved your request to. |
 | `X-Mnemom-Session` | When the request is part of a multi-turn session | Gateway | Stable session correlation token across a multi-turn conversation. |
+| `X-Mnemom-Effective-Mode` | Only when a turn ran in a different mode than configured | Gateway | Today: `passthrough; reason=balance_depleted; configured=enforce` — the agent's µ balance was depleted, so the turn was forwarded without enforcement or analysis. On such a turn `X-AIP-Verdict: clear` / `integrity=pass` do **not** mean the turn was checked. See [enforcement headers](/gateway/enforcement). |
+| `X-Mnemom-Deferred` | When the gateway commits the `200` before the verdict is decided (for example a [long non-streaming request](/quickstart/gateway)) | Gateway | Names what the early headers could not carry (for example `verdict`). On such a response `X-AIP-Verdict` is `pending` and the decided verdict headers are absent — never read their absence as a pass. Fetch the decided verdict through `X-AIP-Checkpoint-Id` when present. |
 
 **AAP allow-list (two headers):**
 

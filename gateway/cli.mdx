@@ -461,26 +461,31 @@ launcher, and the fleet verbs `list`, `claim`, `move`, `sessions`, and `show`.
 ### `mnemom agent`
 
 Launch a governed coding-agent session (Claude Code today) through the gateway.
-A bare `mnemom agent` asks for a session name and an optional goal, then
-launches. The launcher, its sub-verbs (`setup`, `doctor`, `config`, `invite`),
-saved settings, contracts, guardrails, and the context-folding and implicit
-goal-mode toggles are documented on their own page:
+A bare `mnemom agent` asks for a session name, then launches; pass `--goal` to
+seal a goal. The launcher, its sub-verbs (`setup`, `doctor`, `config`, `invite`),
+saved settings, contracts, guardrails, context folding and profiles, and the
+experimental implicit goal mode are documented on their own page:
 [`mnemom agent`](/gateway/agent).
 
 ```bash
-mnemom agent                    # prompts for a session name + optional goal
+mnemom agent                    # prompts for a session name
 mnemom agent fix-auth --goal "make login work on Safari"
 mnemom agent doctor             # read-only preflight
 ```
 
 ### `mnemom agent list`
 
-List agents across the orgs you belong to.
+List the agents in your active org (set with `mnemom org use`). With no active
+org set, it lists every org you belong to.
 
 ```bash
-mnemom agent list               # every org you belong to
-mnemom agent list --org <id>    # one org
+mnemom agent list                      # your active org
+mnemom agent list --org <slug-or-id>   # one org, by slug or id
+mnemom agent list --all                # every org you belong to
 ```
+
+An `--org` value that is not one of your orgs fails before any API call and
+lists the orgs you can use.
 
 **Example output:**
 
@@ -541,7 +546,9 @@ mnemom agent move my-coder --to acme --json
 ### `mnemom agent sessions`
 
 List your Mnemom Agent launches from the local ledger (`~/.mnemom/sessions.jsonl`),
-newest first — the last 20 unless `--all`.
+newest first — the last 20 unless `--all`. Launches older than
+`sessions.retention_days` (default 30) are removed at the next launch; see
+[CLI preferences](#cli-preferences-mnemom-config).
 
 ```bash
 mnemom agent sessions
@@ -563,6 +570,63 @@ mnemom agent show fix-auth --json
 ```
 
 **Options:** `--json`
+
+## Updates: `mnemom update`
+
+The CLI updates itself in the background: at most once a day it checks for a
+newer release and installs it after the running command exits, never under a
+live session. Only a plain `npm install -g` install self-updates; other package
+managers get the right manual command instead. Background updates are off in CI
+and when output is not a terminal.
+
+```bash
+mnemom update            # check and install now
+mnemom update --check    # only report whether an update is available
+mnemom update --json
+```
+
+**Options:** `--check`, `--channel <latest|next>` (this run only), `--force`
+(allow installing an older version, e.g. moving from `next` back to `latest`),
+`--json`
+
+Updates never downgrade on their own. Set `MNEMOM_DISABLE_AUTOUPDATE=1` to turn
+background updates off entirely, or use the `update.mode` preference below.
+
+## CLI preferences: `mnemom config`
+
+CLI-wide preferences live in `~/.mnemom/config.json`. (Settings for
+`mnemom agent` live separately in `mnemom agent config`.)
+
+```bash
+mnemom config list                         # every setting, its value, and where it came from
+mnemom config get update.channel
+mnemom config set update.mode notify
+mnemom config unset update.mode            # back to the default
+```
+
+| Key | Values | Default | Environment override |
+| --- | --- | --- | --- |
+| `update.channel` | `latest` \| `next` | `latest` (`next` when you run a `next` build; `next` requires an invitation) | `MNEMOM_UPDATE_CHANNEL` |
+| `update.mode` | `auto` \| `notify` \| `off` | `auto` | `MNEMOM_UPDATE_MODE` |
+| `sessions.retention_days` | positive whole number | `30` | `MNEMOM_SESSIONS_RETENTION_DAYS` |
+
+## Experimental features: `mnemom experimental`
+
+Some features ship as **experimental**: off until you turn them on, hidden from
+`--help` while off, and liable to change or be removed in any release with no
+deprecation period. Using an experimental flag or command while its feature is
+off fails with a pointer to the command that turns it on.
+
+```bash
+mnemom experimental list             # every experimental feature and whether it is on
+mnemom experimental enable <id>
+mnemom experimental disable <id>
+```
+
+The setting is stored in `~/.mnemom/config.json`. `MNEMOM_EXPERIMENTAL=<id>,<id>`
+(or `all` / `none`) overrides it for one shell. Implicit goal mode for
+`mnemom agent` is the `implicit` feature — see
+[Implicit goal mode](/gateway/agent#implicit-goal-mode-experimental).
 
 ## Diagnostics
 

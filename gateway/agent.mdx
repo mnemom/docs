@@ -16,14 +16,16 @@ It is designed to be one command: install once, then `mnemom agent`.
 ## Install once
 
 ```bash
-npm install -g @mnemom/mnemom@next
+npm install -g @mnemom/mnemom
 mnemom login
 ```
 
 <Note>
-`mnemom agent` is in pre-release under the `@next` tag while the rollout is
-invitation-only. `mnemom login` opens a browser sign-in (device-code fallback on
-headless machines); set `MNEMOM_API_KEY` instead for CI.
+`mnemom agent` ships in the regular `@mnemom/mnemom` release; access is still
+by invitation (see below). `mnemom login` opens a browser sign-in (device-code
+fallback on headless machines); set `MNEMOM_API_KEY` instead for CI. The CLI
+keeps itself up to date in the background — see
+[Updates](/gateway/cli#updates-mnemom-update).
 </Note>
 
 <Note>
@@ -55,17 +57,16 @@ cd your-project
 mnemom agent
 ```
 
-With no arguments in a terminal, `mnemom agent` asks two things and then
-launches:
+With no arguments in a terminal, `mnemom agent` asks for one thing and then
+launches: a **session name**, which labels the session in your traces and the
+claude.ai session list. Enter takes the current folder name.
 
-1. **Session name** — labels the session in your traces and the claude.ai
-   session list. Enter takes the current folder name.
-2. **Set a goal?** — a one-line goal turns on **goal alignment**: the gateway
-   seals it as a contract and nudges the agent back when it drifts, for a little
-   µ per turn. Say no and the session runs governed with goal alignment off.
-   Either way the launch prints `goal alignment: on` or `off`.
+Goal alignment is not prompted for. Pass `--goal` to turn it on: the gateway
+seals your one-line goal as a contract and nudges the agent back when it drifts,
+for a little µ per turn. Without `--goal` the session runs governed with goal
+alignment off. Either way the launch prints `goal alignment: on` or `off`.
 
-Skip the prompts when you already know what you want:
+Skip the prompt when you already know what you want:
 
 ```bash
 mnemom agent fix-auth                                    # named, no goal
@@ -74,24 +75,48 @@ mnemom agent fix-auth --goal "make login work on Safari" # named, goal on
 
 Non-interactive runs (pipes, CI) never prompt; they need a session name.
 
-## Implicit goal mode (opt-in)
+## Implicit goal mode (experimental)
 
-A sealed goal (the prompt above, or `--goal`) is one way to turn on goal
-alignment. The other is **implicit mode**: no statement to write up front — the
-gateway infers the goal from your messages and revises it as you steer.
-Guardrail ceilings (`--max-turns`, `--budget`, `--stall`) still apply.
+A sealed goal (`--goal`) is one way to turn on goal alignment. The other is
+**implicit mode**: no statement to write up front — the gateway infers the goal
+from your messages and revises it as you steer. Guardrail ceilings
+(`--max-turns`, `--budget`, `--stall`) still apply.
+
+Implicit mode is an **experimental feature** and is off until you turn it on.
+Experimental features may change or be removed in any release, with no
+deprecation period.
 
 ```bash
-mnemom agent fix-auth --implicit      # goal alignment on, nothing sealed
-mnemom agent fix-auth --no-implicit   # goal alignment off for this launch,
-                                       # even if launcher.toml sets goal_mode = implicit
+mnemom experimental enable implicit   # turn the feature on (stored in ~/.mnemom/config.json)
+mnemom experimental list              # see every experimental feature and whether it is on
 ```
+
+While the feature is on, a launch with no `--goal` runs in implicit mode by
+default:
+
+```bash
+mnemom agent fix-auth                 # goal alignment on, implicit, nothing sealed
+mnemom agent fix-auth --no-implicit   # goal alignment off for this launch
+```
+
+Set `goal_mode = "off"` in `~/.mnemom/launcher.toml` (or
+`mnemom agent config set goal_mode off`) to keep implicit mode off unless you
+pass `--implicit`. While the feature is off, `--implicit` is refused with a
+pointer to `mnemom experimental enable implicit`, and a saved
+`goal_mode = "implicit"` is ignored with the same pointer.
 
 `--implicit` cannot be combined with `--goal`/`--requirement`/`--allow`/`--forbid`/`--goal-id`
 — a sealed contract always wins on the gateway, so the launch refuses the
-combination rather than silently ignore `--implicit`. Set `goal_mode = "implicit"`
-in `~/.mnemom/launcher.toml` (or `mnemom agent config set goal_mode implicit`) to
-make it the standing default when no `--goal` is given.
+combination rather than silently ignore `--implicit`.
+
+With the feature on, `mnemom agent goal` reads and steers the inferred goal of a
+session:
+
+```bash
+mnemom agent goal show [ref]          # the live inferred goal (add --history for revisions)
+mnemom agent goal pin [ref]           # stop new messages revising it (--off unpins)
+mnemom agent goal reset [ref]         # clear it, or replace it with --statement "…"
+```
 
 `mnemom agent sessions` and `mnemom agent show` report a session's goal mode as
 `ON` (sealed), `IMPLICIT`, or `OFF` — see [Sessions](#sessions-mnemom-agent-sessions--show)
@@ -105,8 +130,10 @@ mnemom agent doctor
 
 A read-only check with an actionable hint for anything not ready: your settings
 file, the coding-agent CLI, your Anthropic key source, **gateway health** (a
-`200` plus the `x-mnemom-verdict` header that proves governance is live), and
-your **Mnemom Agent access** for the active org. It writes nothing, never reads
+`200` plus the `x-mnemom-verdict` header that proves governance is live), a
+gateway that belongs to a different Mnemom deployment than the rest of the CLI,
+your **Mnemom Agent access** for the active org, and the CLI's auto-update
+status. It writes nothing, never reads
 your key's value, and exits non-zero when the machine is not launch-ready, so a
 script can gate on it.
 
@@ -122,14 +149,17 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 
 | Default | Value | Override |
 | --- | --- | --- |
-| Gateway | `https://gateway.mnemom.ai` | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
+| Gateway | `https://gateway.mnemom.ai` (the gateway the rest of the CLI uses) | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
 | Launch shape | **Terminal** — a governed session in this terminal. | `config set launch` |
 | Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
 | Agent | a governed `agent-<you>` agent, created and claimed in your org on first run | `--agent <slug>`, `config set agent` |
 | Key source | env → saved store → prompt | `config set key_source` |
 
-The prod gateway is the default door, but it is **never** selected silently for
-any other value; a custom cell is reached only when you name it.
+A launch always uses one Mnemom deployment end to end: the gateway must belong to
+the same deployment the CLI signs in to and reads your agents and sessions from.
+A `--gateway` (or saved `gateway`) on a different deployment is refused at launch
+and by `mnemom agent setup`, with the fix; a local gateway on `localhost` is
+exempt.
 
 ## Saved settings: `mnemom agent config`
 
@@ -160,8 +190,9 @@ mnemom agent config path                 # print the file path
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
 | `launch` | Launch shape — `terminal` (`remote-control`\|`server` are internal-only) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
-| `goal_mode` | Standing goal-alignment default when a launch gives no `--goal`/`--implicit` — `implicit` or `off` (default `off`) |
+| `goal_mode` | Standing goal-alignment default when a launch gives no `--goal`/`--implicit` — `implicit` or `off`. Takes effect only with the experimental `implicit` feature on, where an unset value means `implicit` |
 | `context` | Context folding default — `true`/`false` (default `true`; also settable per-launch with `--context`/`--no-context`) |
+| `context_profile` | How the gateway folds context — `balanced` (default), `aggressive`, or `off` (also `--context-profile`, `MNEMOM_AGENT_CONTEXT_PROFILE`) |
 | `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
 | `guardrails.budget_usd` | Contract guardrail: spend ceiling in USD (positive number) |
 | `guardrails.stall_turns` | Contract guardrail: consecutive no-write turns (positive integer) |
@@ -227,7 +258,7 @@ your own agent any time with `--agent <slug>`.
 The agent-fleet verbs live under the same namespace:
 
 ```bash
-mnemom agent list [--org <id>]                        # agents across the orgs you belong to
+mnemom agent list [--org <slug|id>] [--all]           # agents in your active org (--all: every org)
 mnemom agent claim <id-or-name> --key <key> [--org <slug>]
 mnemom agent move <id-or-name> --to <slug|id>
 ```
@@ -235,6 +266,9 @@ mnemom agent move <id-or-name> --to <slug|id>
 ## Sessions: `mnemom agent sessions` / `show`
 
 Every real launch is appended to a local ledger, `~/.mnemom/sessions.jsonl`.
+Entries older than 30 days are removed at the next launch; change that with
+`mnemom config set sessions.retention_days <days>` (or
+`MNEMOM_SESSIONS_RETENTION_DAYS`).
 
 ```bash
 mnemom agent sessions          # the last 20 launches, newest first
@@ -254,7 +288,8 @@ that conversation — the sealed contract (if any), the latest verdict, and
 guardrail gauges (`turns 3/10`, etc., flagged when a ceiling was crossed) — so
 you can check on a session after the fact without re-reading your terminal
 scrollback. Each row's `Goal` column, and `show`'s goal-mode field, read `ON`
-(sealed contract), `IMPLICIT`, or `OFF`.
+(sealed contract), `IMPLICIT`, or `OFF`. For an implicit-mode session, `show`
+also prints the statement the gateway inferred.
 
 ## Launch shapes
 
@@ -272,7 +307,7 @@ mnemom agent my-session
 
 ## Contracts and guardrails
 
-A goal (from the prompt or `--goal`) seals a contract on the first turn; add
+A goal (`--goal`) seals a contract on the first turn; add
 requirements, path rules and guardrail ceilings on the command line. Passing any
 contract flag makes `--goal` required.
 
@@ -328,6 +363,27 @@ mnemom agent config set context false    # make "off" the standing default
 Precedence: `--context`/`--no-context` wins, else `MNEMOM_AGENT_CONTEXT`
 (`0`/`false`/`off`/`no` turn it off), else `config set context`, else on.
 
+### Context profiles
+
+`--context-profile` picks how the gateway folds the session:
+
+| Profile | Behaviour |
+| --- | --- |
+| `balanced` (default) | Keeps more of the earlier work verbatim and folds later — for long sessions that revisit earlier files and decisions. |
+| `aggressive` | Folds earlier and keeps a tighter working set — for cost-sensitive sessions and short, focused tasks. |
+| `off` | No gateway folding; compaction is left to the coding agent. Same as `--no-context`. |
+
+```bash
+mnemom agent long-session --context-profile aggressive
+mnemom agent config set context_profile aggressive   # standing default
+```
+
+Precedence: `--no-context` (always `off`; combining it with
+`--context-profile balanced` or `aggressive` is refused), else
+`--context-profile`, else `MNEMOM_AGENT_CONTEXT_PROFILE` / `config set
+context_profile`, else `off` when folding is turned off by `context = false` or
+`MNEMOM_AGENT_CONTEXT`, else `balanced`.
+
 ## Your Anthropic key
 
 `mnemom agent` resolves your Anthropic key in
@@ -349,7 +405,7 @@ falling back.
 | --- | --- |
 | `--invite <token>` | Redeem a Mnemom Agent invitation, then launch if a session name is given |
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
-| `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (not combinable with the contract fields above) |
+| `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
 | `--agent <slug>` | Governed identity (else a default `agent-<you>` is provisioned) |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
@@ -358,6 +414,7 @@ falling back.
 | `--trim-mcp` | Launch with no MCP servers |
 | `--no-yolo` | Do not pass `--dangerously-skip-permissions` |
 | `--context` / `--no-context` | Force context folding on/off for this launch (on by default) |
+| `--context-profile <profile>` | `balanced` (default), `aggressive`, or `off` — see [Context profiles](#context-profiles) |
 | `--setup` / `--no-setup` | Force / skip governed-agent provisioning |
 | `--dry-run` | Print the resolved launch plan and exit |
 
