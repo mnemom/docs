@@ -263,9 +263,19 @@ mnemom agent my-session --no-setup  # skip the provisioning check for this launc
 <Note>
 Provisioning writes to your org, so it always asks first. In a non-interactive
 run (no TTY) nothing is provisioned unless you pass `--setup`; the launch still
-proceeds with a warning that the agent is unclaimed and how to claim it. Bring
-your own agent any time with `--agent <slug>`.
+proceeds with a warning that the agent is unclaimed and how to claim it. Until
+the agent is claimed into an org, the gateway refuses its governed turns with
+`402` (`details.reason: "agent_unclaimed"`), because there is no account to pay
+them from in µ. Run `mnemom agent --setup` or `mnemom agent claim` to fix it.
+Bring your own agent any time with `--agent <slug>`.
 </Note>
+
+Governed turns carry your Mnemom API key in `x-mnemom-api-key`, and
+`mnemom agent` sends it for you. A CLI too old to send it gets `401`
+(`mnemom_api_key_required`); update with `npm i -g @mnemom/mnemom`. A key from a
+different org than the agent's gets `403` (`agent_org_mismatch`); switch org
+with `mnemom org use <slug>`. To send these headers from your own client, see
+[Governed headers need a Mnemom API key](/gateway/implicit-goal-mode#governed-headers-need-a-mnemom-api-key).
 
 ### Managing agents
 
