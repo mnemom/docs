@@ -82,28 +82,31 @@ A sealed goal (`--goal`) is one way to turn on goal alignment. The other is
 from your messages and revises it as you steer. Guardrail ceilings
 (`--max-turns`, `--budget`, `--stall`) still apply.
 
-Implicit mode is an **experimental feature** and is off until you turn it on.
-Experimental features may change or be removed in any release, with no
-deprecation period.
+Implicit mode is an **experimental, opt-in feature**. It is never on by
+default, on any cell, including cells where the gateway supports it. It runs
+only after you opt in. Experimental features may change or be removed in any
+release, with no deprecation period.
+
+To opt in, turn on the experimental feature:
 
 ```bash
-mnemom experimental enable implicit   # turn the feature on (stored in ~/.mnemom/config.json)
+mnemom experimental enable implicit   # opt in (stored in ~/.mnemom/config.json)
 mnemom experimental list              # see every experimental feature and whether it is on
 ```
 
-While the feature is on, a launch with no `--goal` runs in implicit mode by
-default:
+Once you have opted in, a launch with no `--goal` runs in implicit mode:
 
 ```bash
 mnemom agent fix-auth                 # goal alignment on, implicit, nothing sealed
 mnemom agent fix-auth --no-implicit   # goal alignment off for this launch
 ```
 
-Set `goal_mode = "off"` in `~/.mnemom/launcher.toml` (or
-`mnemom agent config set goal_mode off`) to keep implicit mode off unless you
-pass `--implicit`. While the feature is off, `--implicit` is refused with a
-pointer to `mnemom experimental enable implicit`, and a saved
-`goal_mode = "implicit"` is ignored with the same pointer.
+To use implicit mode only on the launches where you ask for it, also run
+`mnemom agent config set goal_mode off` (or set `goal_mode = "off"` in
+`~/.mnemom/launcher.toml`), then pass `--implicit` on those launches. To opt
+out, run `mnemom experimental disable implicit`. Until you opt in,
+`--implicit` is refused with a pointer to `mnemom experimental enable implicit`,
+and a saved `goal_mode = "implicit"` is ignored with the same pointer.
 
 `--implicit` cannot be combined with `--goal`/`--requirement`/`--allow`/`--forbid`/`--goal-id`
 — a sealed contract always wins on the gateway, so the launch refuses the
@@ -200,7 +203,7 @@ mnemom agent config path                 # print the file path
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
 | `launch` | Launch shape — `terminal` (`remote-control`\|`server` are internal-only) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
-| `goal_mode` | Standing goal-alignment default when a launch gives no `--goal`/`--implicit` — `implicit` or `off`. Takes effect only with the experimental `implicit` feature on, where an unset value means `implicit` |
+| `goal_mode` | What a launch with no `--goal`/`--implicit`/`--no-implicit` does — `implicit` or `off`. Ignored until you opt in to the experimental `implicit` feature, so implicit mode is never on by default. After you opt in, an unset value means `implicit`; set `off` to use implicit mode only with `--implicit` |
 | `context` | Context folding default — `true`/`false` (default `true`; also settable per-launch with `--context`/`--no-context`) |
 | `context_profile` | How the gateway folds context — `balanced` (default), `aggressive`, or `off` (also `--context-profile`, `MNEMOM_AGENT_CONTEXT_PROFILE`) |
 | `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
@@ -415,7 +418,7 @@ falling back.
 | --- | --- |
 | `--invite <token>` | Redeem a Mnemom Agent invitation, then launch if a session name is given |
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
-| `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the experimental `implicit` feature; not combinable with the contract fields above) |
+| `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the opt-in experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
 | `--agent <slug>` | Governed identity (else a default `agent-<you>` is provisioned) |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |

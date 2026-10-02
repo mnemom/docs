@@ -11,29 +11,33 @@ direction, it updates the goal. It then checks each step the agent takes against
 the current goal and tells the agent when a step looks off.
 
 <Warning>
-Implicit goal mode is **experimental**. It may change or be removed in any
-release, with no deprecation period. For a goal that must not move during a
-session, use a [sealed goal contract](/gateway/agent#contracts-and-guardrails).
+Implicit goal mode is **experimental and opt-in**. It is never on by default,
+on any cell, including cells where the gateway supports it. It may change or be
+removed in any release, with no deprecation period. For a goal that must not
+move during a session, use a [sealed goal contract](/gateway/agent#contracts-and-guardrails).
 </Warning>
 
 ## Turn it on
 
-With `mnemom agent`, turn on the experimental feature once. While it is on, a
-launch with no `--goal` runs in implicit mode:
+Nothing runs in implicit mode until you opt in. With `mnemom agent`, opt in
+once by turning on the experimental feature. After that, a launch with no
+`--goal` runs in implicit mode:
 
 ```bash
 mnemom experimental enable implicit
 mnemom agent fix-auth
 ```
 
-`--no-implicit` turns it off for one launch. To keep it off unless you pass
-`--implicit`, run `mnemom agent config set goal_mode off`. `--implicit` cannot
-be combined with `--goal`, `--requirement`, `--allow`, `--forbid` or
-`--goal-id`, because a sealed contract always wins. See
+`--no-implicit` turns it off for one launch. To use it only when you ask for
+it, run `mnemom agent config set goal_mode off` and pass `--implicit` on the
+launches that should use it. `mnemom experimental disable implicit` opts you
+out again. `--implicit` cannot be combined with `--goal`, `--requirement`,
+`--allow`, `--forbid` or `--goal-id`, because a sealed contract always wins. See
 [`mnemom agent`](/gateway/agent#implicit-goal-mode-experimental) for the
 launcher side.
 
-Any other client turns it on with two request headers:
+Any other client opts in per session with two request headers. A request
+without them is never in implicit mode:
 
 ```http
 x-mnemom-goal-mode: implicit
@@ -408,7 +412,7 @@ goal.
 | Path fences | The `--allow` / `--forbid` you set | Only forbidden paths you name in your messages |
 | Judge | The sealed-contract judge | TypeSafe Jev |
 | Guardrails (`max_turns`, `budget`, `stall`) | Yes | Yes |
-| Status | Standard in `mnemom agent` | Experimental |
+| Status | Standard in `mnemom agent` | Experimental, opt-in |
 | If both are sent | The sealed contract governs | Ignored |
 
 ## Response headers
