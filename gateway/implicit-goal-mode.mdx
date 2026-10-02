@@ -162,8 +162,8 @@ tag or wrapper the client used. It does not use word lists to decide.
 | --- | --- |
 | Messages you type | The normal case. |
 | A message you send while the agent is working | When Claude Code delivers it as its own "the user sent a new message" reminder. See the [limits](#known-limits) for the case where it arrives inside tool output. |
-| A slash command with arguments | `/name args` counts as an ask. Built-in commands that control the CLI (`/clear`, `/compact`, `/model` and similar) do not. A skill's body text does not either. |
-| Your answers to the agent's AskUserQuestion questions | Only an answered question paired with the agent's AskUserQuestion call. A declined question does not count. |
+| A slash command with arguments | The `/name args` line you typed counts as an ask. Built-in commands that control the CLI (`/clear`, `/compact`, `/model` and similar) do not. The text Claude Code expands the command into does not count either. |
+| Your answers to the agent's AskUserQuestion questions | An option you pick, or an answer you type in your own words. Only an answer paired with the agent's AskUserQuestion call counts. A declined question does not count. |
 
 **Does not count** (never changes the goal):
 
@@ -175,7 +175,7 @@ tag or wrapper the client used. It does not use word lists to decide.
 | Scheduled prompts | Cron, loop and wake-up ticks. They are recorded but never change or judge the goal. Recognised when Claude Code marks the request as scheduled, or when its transcript records the turn as scheduled (see [turn origins](#turn-origins-from-the-launcher)). |
 | Claude Code's background requests | Session titles, recaps, suggestions and compaction. These are recognised from Claude Code's request-class header, which needs the [hint headers](#claude-code-outside-the-launcher). When that header is present, only a request of class `main` can change your goal. |
 | Pasted text | When Claude Code marks a paste (`<pasted_content>`), the paste is read as context for what you typed, not as a list of new asks. |
-| Client scaffolding | System reminders, skill bodies, hook feedback, task notifications, compaction prompts and summaries, interrupt markers, and the gateway's own notes. |
+| Client scaffolding | System reminders, skill bodies (including the skill text Claude Code adds when the agent loads a skill), slash-command expansions, the "Tool loaded." notice after the agent loads a tool, hook feedback, task notifications, compaction prompts and summaries, interrupt markers, and the gateway's own notes. |
 
 A mid-turn message that Claude Code puts inside a tool result is a special
 case. The gateway records it but does not act on it (see [limits](#known-limits)).
@@ -447,14 +447,16 @@ goal.
   and, with `mnemom agent`, from what it records in its transcript. A Claude
   Code change can affect this. Other clients send none of these signals, so all
   their user text counts as your words unless they send `x-mnemom-turn`.
-- **Relaunches and `/clear`.** `mnemom agent` can continue an earlier
-  implicit session's conversation id. The `main` goal belongs to the Claude
-  Code session that started it, though. Anything that runs under a different
-  Claude Code session id, such as a `/clear` or a relaunch that starts a new
-  Claude Code session, gets its own `m.<id>` thread with a fresh goal. To be
-  sure a relaunch keeps the original goal, resume the original Claude Code
-  session (`mnemom agent <name> -- --resume <session id>`). `--all-threads`
-  shows every thread.
+- **Relaunches and `/clear`.** The `main` goal belongs to the Claude Code
+  session that started it. When you relaunch an implicit session by name and
+  answer yes to "Resume previous session?", `mnemom agent` continues the same
+  conversation and resumes the same Claude Code session, so the relaunch keeps
+  building on the `main` goal. A relaunch with no terminal to ask in does the
+  same. If Claude Code no longer has that session, or you pass your own
+  session flag (`--session-id`, `--continue`, `--fork-session`, or `--resume`
+  with another session), the launch runs as a different Claude Code session.
+  That session, like a `/clear`, gets its own `m.<id>` thread with a fresh
+  goal. `--all-threads` shows every thread.
 - **Rate brakes.** If you change direction many times within a few minutes,
   the gateway pauses revisions. Messages it did not process are picked up with
   your next message.
