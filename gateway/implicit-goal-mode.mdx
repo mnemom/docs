@@ -36,10 +36,12 @@ out again. `--implicit` cannot be combined with `--goal`, `--requirement`,
 [`mnemom agent`](/gateway/agent#implicit-goal-mode-experimental) for the
 launcher side.
 
-Any other client opts in per session with two request headers. A request
-without them is never in implicit mode:
+Any other client opts in per session with two request headers, and sends its
+Mnemom API key with them (see [below](#governed-headers-need-a-mnemom-api-key)).
+A request without the two headers is never in implicit mode:
 
 ```http
+x-mnemom-api-key: <your Mnemom API key>
 x-mnemom-goal-mode: implicit
 x-mnemom-conversation-id: <your conversation id>
 ```
@@ -50,6 +52,36 @@ parameters: `implicit; max_turns=200; budget_usd=25; stall_turns=10`. A
 ceiling that is not a positive number is ignored. If the request also carries a
 sealed contract (`x-mnemom-contract`), or one was sealed earlier in the
 conversation, the sealed contract governs and implicit mode stays off.
+
+### Governed headers need a Mnemom API key
+
+`x-mnemom-goal-mode`, `x-mnemom-contract`, `x-mnemom-session-config` and
+`x-mnemom-turn` are governance headers. A request that carries any one of them
+is a governed agent turn, and governed turns are paid in µ by the org that owns
+the agent. Such a request must also carry `x-mnemom-api-key`: a valid Mnemom API
+key (`mnm_*`) for the agent's org. See [API keys](/guides/api-keys) to create
+one. `mnemom agent` sends it for you.
+
+The Mnemom key does not replace your provider credential. Keep sending your
+provider key (`x-api-key` or `Authorization`) as before. The gateway checks the
+Mnemom key before it looks up or creates the agent, and removes it before the
+request goes to the model provider.
+
+If the check fails, the request is refused before it reaches the model. The
+body uses the standard [error envelope](/api-reference/errors#response-shape):
+
+| Status | `error.code` | When | What to do |
+| --- | --- | --- | --- |
+| `401` | `mnemom_api_key_required` | The request has a governance header but no `x-mnemom-api-key`. | Add the header. With `mnemom agent`, update the CLI: `npm i -g @mnemom/mnemom`. |
+| `401` | `unauthorized` (message `Invalid Mnemom API key`) | The key is unknown, expired or revoked. | Send a current key. |
+| `402` | `billing_error`, `details.reason: "agent_unclaimed"` | The agent is not claimed into an org, so its governed turns have no account to pay from. | Run `mnemom agent --setup`, or [claim the agent](/guides/agent-claim-flow) into your org. The gateway never claims it for you. |
+| `402` | `billing_error`, `details.reason: "no_billing_account"` | The agent's org has no billing account. | Set up billing for the org, then retry. |
+| `403` | `agent_org_mismatch` | The agent is claimed in a different org from the key's org. A key with no org also gets this for a claimed agent. | Use a key from the agent's org, or switch org with `mnemom org use <slug>`. |
+| `503` | `mnemom_api_key_unavailable` | The key could not be verified right now. | Retry. |
+
+`x-mnemom-agent` and `x-mnemom-conversation-id` are not governance headers.
+Plain proxy use is unchanged: a request with none of the four headers above is
+handled exactly as before, whether or not it sends `x-mnemom-api-key`.
 
 ## What it does
 
@@ -353,15 +385,20 @@ that run without a goal.
 
 `mnemom agent` sets this up for you, in both terminal and Remote Control mode.
 It also adds the [turn origins](#turn-origins-from-the-launcher) header. If you
-point Claude Code at the gateway yourself, send the goal headers with `ANTHROPIC_CUSTOM_HEADERS`. Also set
+point Claude Code at the gateway yourself, send the goal headers and your
+Mnemom API key with `ANTHROPIC_CUSTOM_HEADERS`. Also set
 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`:
 
 ```bash
 export ANTHROPIC_BASE_URL=https://gateway.mnemom.ai/anthropic
-export ANTHROPIC_CUSTOM_HEADERS=$'x-mnemom-agent: my-agent\nx-mnemom-conversation-id: my-session-1\nx-mnemom-goal-mode: implicit'
+export ANTHROPIC_CUSTOM_HEADERS="$(printf 'x-mnemom-api-key: %s\nx-mnemom-agent: my-agent\nx-mnemom-conversation-id: my-session-1\nx-mnemom-goal-mode: implicit' "$MNEMOM_API_KEY")"
 export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1
 claude
 ```
+
+`x-mnemom-goal-mode` makes every request a governed turn, so without
+`x-mnemom-api-key` each one is refused with `401`. See
+[Governed headers need a Mnemom API key](#governed-headers-need-a-mnemom-api-key).
 
 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` makes Claude Code state facts about each
 request in headers: whether it is a main request, a subagent's, a compaction or
@@ -398,6 +435,10 @@ Unknown keys are ignored. The rules:
   not sent.
 - **It is read only in implicit mode**, and the gateway removes it before the
   request goes upstream.
+- **It needs a Mnemom API key.** `x-mnemom-turn` is a governance header, so a
+  request that carries it must also send `x-mnemom-api-key`, even when implicit
+  mode is off. See
+  [Governed headers need a Mnemom API key](#governed-headers-need-a-mnemom-api-key).
 
 The header comes from the client process, never from model or tool output. A
 client that sends a wrong value can only remove its own user's text from the
@@ -476,3 +517,5 @@ goal.
 
 - [`mnemom agent`](/gateway/agent): the launcher, sealed contracts and guardrails
 - [CLI reference](/gateway/cli): the full `mnemom` command surface
+- [API keys](/guides/api-keys): create the Mnemom key that governed requests send
+- [Agent claim flow](/guides/agent-claim-flow): claim an agent into your org

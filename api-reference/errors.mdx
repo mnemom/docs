@@ -63,6 +63,8 @@ If you see an unfamiliar 400, capture the `X-Request-Id` and open a support tick
 | `forbidden` | 403 | Default — authenticated but not authorized for this resource or action. |
 | `aal2_required` | 403 | The action (e.g. removing a passkey, rotating an API key) requires a fresh **AAL2 step-up**; re-verify and retry. See [Authentication — AAL2 step-up](/guides/authentication#aal2-step-up). |
 | `invalid_hash_proof` | 403 | The `hash_proof` supplied to prove agent-key possession (claim, link, rekey) doesn't match. |
+| `mnemom_api_key_required` | 401 | A gateway-routed request carries a governance header (`x-mnemom-contract`, `x-mnemom-goal-mode`, `x-mnemom-session-config` or `x-mnemom-turn`) but no `x-mnemom-api-key`. See [Governed headers need a Mnemom API key](/gateway/implicit-goal-mode#governed-headers-need-a-mnemom-api-key). |
+| `agent_org_mismatch` | 403 | A governed gateway request's Mnemom API key belongs to a different org from the agent's. Use a key from the agent's org. |
 | `not_found` | 404 | Default — the resource doesn't exist, or doesn't belong to the caller's org (Mnemom does not distinguish the two, to avoid leaking existence across orgs). |
 
 **Agent containment (403).** A `paused` or `killed` agent gets every gateway-routed request rejected with a distinct code:
@@ -81,12 +83,14 @@ If you see an unfamiliar 400, capture the `X-Request-Id` and open a support tick
 
 ## 402 Payment Required — billing and depletion
 
-Gateway-routed requests (`gateway.mnemom.ai`) can be rejected for two distinct billing reasons, both under the `billing_error` code, distinguished by `details.reason`:
+Gateway-routed requests (`gateway.mnemom.ai`) can be rejected for these billing reasons, all under the `billing_error` code, distinguished by `details.reason`:
 
 | `details.reason` | When |
 |---|---|
 | `billing_unconfigured` | The org's billing account could not be resolved (e.g. no payment method configured). Checked first — always wins over a depleted balance for the same org. |
 | `balance_depleted` | The org's µ balance is determined to be at or below zero. The gateway fails closed: the request is rejected rather than proxied to the model. |
+| `agent_unclaimed` | Governed agent turns only (a request with a governance header). The agent is not claimed into an org, so there is no account to pay from in µ. Run `mnemom agent --setup` or [claim the agent](/guides/agent-claim-flow). |
+| `no_billing_account` | Governed agent turns only. The agent's org has no billing account. |
 
 ```json
 {
@@ -134,6 +138,7 @@ See [Rate limits](/api-reference/overview#rate-limits) for the actual ceilings a
 | **`500`** | Unexpected server condition. | Limited retry — at most once, immediately. If 500 persists, do not retry-loop; capture `X-Request-Id` and file a ticket. |
 | **`503`** (`maintenance`) | A declared, scheduled write-freeze window. Reads keep working; writes are paused. Body `details` carries `reads`/`writes` status and, when known, `window_ends_at` and `status_page`. The response also carries `X-Mnemom-Maintenance: 1` so you can distinguish a declared window from an incidental outage without parsing the body. | Honor `Retry-After` (minimum 30s). |
 | **`503`** (gateway-routed calls) | A downstream LLM provider returned 5xx or timed out. | Exponential backoff, starting at 1s. Honor `Retry-After` when present. |
+| **`503`** (`mnemom_api_key_unavailable`) | A governed gateway request's Mnemom API key could not be verified right now. | Retry with backoff. |
 | **`529`** (gateway-routed calls) | Gateway-saturation overload — an Anthropic-shaped `overloaded_error` passed through. `Retry-After` is set. | Honor `Retry-After`. Treat 529 as "back off and re-route through the same endpoint when the window expires," not "permanent failure." |
 
 The 503/529 distinction on gateway-routed calls matters for your fallback strategy: 503 means the gateway is fine but the LLM provider isn't; 529 means the gateway itself is shedding load. A client that has a backup provider should switch on 503 but not on 529.
