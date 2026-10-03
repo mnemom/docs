@@ -211,7 +211,7 @@ mnemom agent config path                 # print the file path
 | `agent` | Governed agent identity slug (`x-mnemom-agent`) |
 | `effort` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`) |
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
-| `launch` | Launch shape — `terminal` (`remote-control`\|`server` are internal-only) |
+| `launch` | Launch shape — `terminal` |
 | `auth` | How Claude Code signs in to Anthropic: `api-key` (default), `subscription` or `console`. See [Sign-in options](/gateway/agent-sign-in) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
 | `goal_mode` | What a launch with no `--goal`/`--implicit`/`--no-implicit` does — `implicit` or `off`. Ignored until you opt in to the experimental `implicit` feature, so implicit mode is never on by default. After you opt in, an unset value means `implicit`; set `off` to use implicit mode only with `--implicit` |
@@ -238,7 +238,7 @@ An example `~/.mnemom/launcher.toml`:
 ```toml
 gateway = "https://gateway.mnemom.ai"
 model = "claude-sonnet-5"
-agent = "agent-alex"
+agent = "agent-sam"
 launch = "terminal"
 
 [guardrails]
@@ -265,18 +265,25 @@ from your Mnemom login. Before Claude Code starts, on every launch, it:
    org (set with `mnemom org use`), else your personal org. Your active org
    setting is not changed. A newly claimed agent also gets its default cards.
 
-You see one line, either `mnemom agent: 'agent-alex' is mnm-…, claimed.` or
-`mnemom agent: claimed 'agent-alex' (mnm-…) in your personal org.`
+The launcher prints one line naming the agent and saying whether it was already
+claimed or has just been claimed, and into which org. Each agent it confirms as
+claimed is recorded on this machine.
 
-The launch stops, and Claude Code is not started, when:
+The launch stops, and Claude Code is not started, when the answer is definite:
 
 - the agent for this credential and name belongs to another Mnemom account. Pick
   a name of your own with `--agent <name>`;
-- the gateway can't be reached to say which agent it serves (a subscription
-  launch can fall back to the agent the gateway served last time);
+- the agent is not claimed and can't be claimed, for example because this launch
+  has no org to claim it into. The message says what went wrong;
 - the gateway does not support the subscription identity check yet. Launch with
-  `--auth api-key` instead;
-- the claim fails for any other reason. The message says what went wrong.
+  `--auth api-key` instead.
+
+If Mnemom or the gateway can't be reached, or returns a temporary error, the
+launcher retries. If it still can't get an answer, it launches on the agent this
+machine last confirmed as claimed for the same credential, agent name and
+gateway, and prints a warning saying so. If there is no such record, the launch
+stops and asks you to try again. It never falls back to an agent it knows is
+unclaimed.
 
 This works the same way in a terminal, a script or CI. There is no prompt to
 confirm the claim.
@@ -305,7 +312,7 @@ agent any time with `--agent <slug>`.
 
 ### Managing agents
 
-The agent-fleet verbs live under the same namespace:
+The agent-management verbs live under the same namespace:
 
 ```bash
 mnemom agent list [--org <slug|id>] [--all]           # agents in your active org (--all: every org)
