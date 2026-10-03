@@ -23,8 +23,9 @@ mnemom login
 <Note>
 Access to `mnemom agent` is still by invitation (see below). `mnemom login`
 opens a browser sign-in (device-code fallback on headless machines); set `MNEMOM_API_KEY` instead for CI. The CLI
-keeps itself up to date in the background — see
-[Updates](/gateway/cli#updates-mnemom-update).
+keeps itself up to date in the background. If the Mnemom API needs a newer CLI
+than the one you run, the CLI stops, updates itself when it can, and asks you to
+run the command again — see [Updates](/gateway/cli#updates-mnemom-update).
 </Note>
 
 <Note>
@@ -74,8 +75,11 @@ mnemom agent fix-auth --goal "make login work on Safari" # named, goal on
 
 Non-interactive runs (pipes, CI) never prompt; they need a session name.
 
-Before Claude Code starts, your first launch in a terminal can ask two one-time
-questions: how Claude Code should sign in to Anthropic, when there is a choice (see
+Before Claude Code starts, `mnemom agent` makes sure the agent the session runs
+as is claimed in your org (see [Your governed agent](#your-governed-agent)). It
+never starts a session on an unclaimed agent.
+
+Your first launch in a terminal can also ask two one-time questions: how Claude Code should sign in to Anthropic, when there is a choice (see
 [Sign-in options](/gateway/agent-sign-in)), and whether to look at what Mnemom
 would have saved on your recent sessions (see
 [Savings estimates](/gateway/agent-savings)).
@@ -170,7 +174,7 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 | Gateway | `https://gateway.mnemom.ai` (the gateway the rest of the CLI uses) | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
 | Launch shape | **Terminal** — a governed session in this terminal. | `config set launch` |
 | Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
-| Agent | a governed `agent-<you>` agent, created and claimed in your org on first run | `--agent <slug>`, `config set agent` |
+| Agent | a governed `agent-<you>` agent, claimed into your org before the first session | `--agent <slug>`, `config set agent` |
 | Sign-in | Anthropic API key, unless you pick another option on first launch | `--auth`, `config set auth` |
 | Key source | env → saved store → prompt | `config set key_source` |
 
@@ -212,7 +216,8 @@ mnemom agent config path                 # print the file path
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
 | `goal_mode` | What a launch with no `--goal`/`--implicit`/`--no-implicit` does — `implicit` or `off`. Ignored until you opt in to the experimental `implicit` feature, so implicit mode is never on by default. After you opt in, an unset value means `implicit`; set `off` to use implicit mode only with `--implicit` |
 | `context` | Context folding default — `true`/`false` (default `true`; also settable per-launch with `--context`/`--no-context`) |
-| `context_profile` | How the gateway folds context — `balanced` (default), `aggressive`, or `off` (also `--context-profile`, `MNEMOM_AGENT_CONTEXT_PROFILE`) |
+| `context_profile` | How the gateway folds context — `balanced`, `aggressive`, `adaptive` or `off`; unset means the gateway's own default (also `--context-profile`, `MNEMOM_AGENT_CONTEXT_PROFILE`) |
+| `compact_at` | Gateway compaction target — a token count from 50k to just under 1M (`200k` works), or `1m`/`off` for none (default: none). A target needs the experimental `compaction-intercept` feature (also `--compact-at`, `MNEMOM_COMPACT_AT`) |
 | `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
 | `guardrails.budget_usd` | Contract guardrail: spend ceiling in USD (positive number) |
 | `guardrails.stall_turns` | Contract guardrail: consecutive no-write turns (positive integer) |
@@ -243,39 +248,60 @@ budget_usd = 25
 
 ## Your governed agent
 
-If you do not name an agent, `mnemom agent` provisions a safe default one for
-you. On first run it:
+Every `mnemom agent` session runs as a **claimed** agent. An unclaimed agent
+belongs to no org and is billed to no one, so the launcher never starts a session
+on one.
 
-1. derives a slug, `agent-<your handle>`, from your Mnemom login;
-2. checks whether that agent already exists and is claimed in your org;
-3. if not, shows you the plan (slug, org, and the cards it will publish), asks
-   for confirmation, then **births** the agent through the gateway, **claims** it
-   into your org, and publishes a default governed posture.
+If you do not name an agent, the launcher uses `agent-<your handle>`, derived
+from your Mnemom login. Before Claude Code starts, on every launch, it:
 
-The default posture keeps the **cards in observe mode** (they watch and record
-without intervening) and lets the **goal contract do the nudging**. The alignment
-card runs integrity and injection screening for visibility
-(`autonomy_mode`/`integrity_mode: observe`, `principal.relationship:
-delegated_authority`); the protection card screens all four surfaces (incoming,
-outgoing, tool calls, tool responses) in observe mode at thresholds
-`0.60 / 0.80 / 0.95`.
+1. asks the gateway which agent it serves for this launch's credential and agent
+   name. With an Anthropic API key, the answer is cached after the first launch.
+   With a [Claude subscription sign-in](/gateway/agent-sign-in#claude-subscription-team-or-enterprise),
+   the gateway is asked every time;
+2. checks whether that agent is claimed. An agent that is already claimed is
+   left where it is and never claimed again;
+3. if it is not claimed, claims it into the org this launch bills: your active
+   org (set with `mnemom org use`), else your personal org. Your active org
+   setting is not changed. A newly claimed agent also gets its default cards.
 
-With a [Claude subscription sign-in](/gateway/agent-sign-in#claude-subscription-team-or-enterprise),
-there is nothing to set up first: the gateway creates the agent in your org on
-the session's first turn.
+You see one line, either `mnemom agent: 'agent-alex' is mnm-…, claimed.` or
+`mnemom agent: claimed 'agent-alex' (mnm-…) in your personal org.`
+
+The launch stops, and Claude Code is not started, when:
+
+- the agent for this credential and name belongs to another Mnemom account. Pick
+  a name of your own with `--agent <name>`;
+- the gateway can't be reached to say which agent it serves (a subscription
+  launch can fall back to the agent the gateway served last time);
+- the gateway does not support the subscription identity check yet. Launch with
+  `--auth api-key` instead;
+- the claim fails for any other reason. The message says what went wrong.
+
+This works the same way in a terminal, a script or CI. There is no prompt to
+confirm the claim.
+
+### Default cards
+
+A newly claimed agent gets a default coding posture. Both cards are published
+**off**, because alignment and protection analysis are billed: the alignment card
+has `autonomy_mode` and `integrity_mode` set to `off` and
+`principal.relationship: delegated_authority`; the protection card has
+`mode: off`, with thresholds `0.60 / 0.80 / 0.95` and all four screen surfaces
+declared so it is ready when you turn it on. Turn them on with
+[`mnemom card`](/gateway/cli#card-commands) and
+[`mnemom protection`](/gateway/cli#protection-commands). The goal contract does
+the nudging.
 
 ```bash
-mnemom agent setup                  # provision / repair the governed agent explicitly
-mnemom agent my-session --setup     # provision non-interactively, then launch
-mnemom agent my-session --no-setup  # skip the provisioning check for this launch
+mnemom agent setup                  # check (and if needed claim) the agent and refresh its cards; no launch
+mnemom agent my-session --setup     # the same, then launch
+mnemom agent my-session --no-setup  # skip the default-card writes for this launch
 ```
 
-<Note>
-Provisioning writes to your org, so it always asks first. In a non-interactive
-run (no TTY) nothing is provisioned unless you pass `--setup`; the launch still
-proceeds with a warning that the agent is unclaimed and how to claim it. Bring
-your own agent any time with `--agent <slug>`.
-</Note>
+`--no-setup` only skips the card writes. The agent is still checked and, if
+needed, claimed. `mnemom agent setup` uses an Anthropic API key. Bring your own
+agent any time with `--agent <slug>`.
 
 ### Managing agents
 
@@ -376,7 +402,8 @@ off.
 ## Context folding
 
 Context folding summarizes older turns so a long session keeps fitting the
-model's context window. It is **on by default**.
+model's context window. It is **on by default**. Unless you choose a profile, the
+gateway's own default profile applies.
 
 ```bash
 mnemom agent long-session --no-context   # turn folding off for this launch
@@ -389,12 +416,14 @@ Precedence: `--context`/`--no-context` wins, else `MNEMOM_AGENT_CONTEXT`
 
 ### Context profiles
 
-`--context-profile` picks how the gateway folds the session:
+`--context-profile` picks how the gateway folds the session. With no profile set
+anywhere, nothing is sent and the gateway's default applies.
 
 | Profile | Behaviour |
 | --- | --- |
-| `balanced` (default) | Keeps more of the earlier work verbatim and folds later — for long sessions that revisit earlier files and decisions. |
+| `balanced` | Keeps more of the earlier work verbatim and folds later — for long sessions that revisit earlier files and decisions. |
 | `aggressive` | Folds earlier and keeps a tighter working set — for cost-sensitive sessions and short, focused tasks. |
+| `adaptive` | Sizes the fold to the conversation: no fold below 200k tokens, `aggressive` from 200k to 1M, `balanced` above. |
 | `off` | No gateway folding; compaction is left to the coding agent. Same as `--no-context`. |
 
 ```bash
@@ -402,11 +431,11 @@ mnemom agent long-session --context-profile aggressive
 mnemom agent config set context_profile aggressive   # standing default
 ```
 
-Precedence: `--no-context` (always `off`; combining it with
-`--context-profile balanced` or `aggressive` is refused), else
-`--context-profile`, else `MNEMOM_AGENT_CONTEXT_PROFILE` / `config set
+Precedence: `--no-context` (always `off`; combining it with any other
+`--context-profile` is refused), else `--context-profile`, else the profile of
+the session being resumed, else `MNEMOM_AGENT_CONTEXT_PROFILE` / `config set
 context_profile`, else `off` when folding is turned off by `context = false` or
-`MNEMOM_AGENT_CONTEXT`, else `balanced`.
+`MNEMOM_AGENT_CONTEXT`, else the gateway's default.
 
 ## How Claude Code signs in
 
@@ -426,19 +455,27 @@ looked up, and what you see when something is missing.
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
 | `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the opt-in experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
-| `--agent <slug>` | Governed identity (else a default `agent-<you>` is provisioned) |
+| `--agent <slug>` | Governed identity (default `agent-<you>`). Claimed before launch either way |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
 | `--gateway <url>` | Gateway host override |
 | `--model <alias\|id>`, `--effort <level>` | Model + reasoning effort |
 | `--trim-mcp` | Launch with no MCP servers |
 | `--no-yolo` | Do not pass `--dangerously-skip-permissions` |
 | `--context` / `--no-context` | Force context folding on/off for this launch (on by default) |
-| `--context-profile <profile>` | `balanced` (default), `aggressive`, or `off` — see [Context profiles](#context-profiles) |
-| `--setup` / `--no-setup` | Force / skip governed-agent provisioning |
+| `--context-profile <profile>` | `balanced`, `aggressive`, `adaptive` or `off` — see [Context profiles](#context-profiles) |
+| `--compact-at <n\|200k\|1m\|off>` | Gateway compaction target for this session, from 50k to just under 1M; `1m` or `off` means none. A target needs the experimental `compaction-intercept` feature |
+| `--conversation-id <id>` | Conversation id to send (default: generated) |
+| `--no-context-hint` | Do not seed Claude Code's context-hint feature flag |
+| `--no-context-handoff`, `--no-compaction-intercept` | Keep that experimental feature off for this launch, even when your settings turn it on |
+| `--setup` / `--no-setup` | Re-check the agent and refresh its default cards / skip the card writes. The agent is claimed either way — see [Your governed agent](#your-governed-agent) |
 | `--dry-run` | Print the resolved launch plan and exit |
 | `--first-run` | Show the [first-run savings screen](/gateway/agent-savings) again, then exit |
 
 Anything after `--` is passed straight through to the coding-agent CLI.
+
+Flags of experimental features (`--implicit`, `--slack`, `--context-handoff`,
+`--compaction-intercept`) are hidden from `--help` until you turn the feature on
+with [`mnemom experimental enable`](/gateway/cli#experimental-features-mnemom-experimental).
 
 ## Related
 
