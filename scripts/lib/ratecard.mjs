@@ -14,8 +14,10 @@
 //                                        prices differ from the committed extract.
 //
 // The extract deliberately keeps only customer-facing fields (peg, usage margin,
-// the card-level overdraft switch, and each class's rate model / unit / list rate). Provider cost tables, notes and
-// internal commentary in the YAML are dropped: this docs repo is public.
+// the card-level overdraft switch, the inference share and its scope, and each
+// class's rate model / unit / list rate / bucket / cost multiplier). Provider cost
+// tables, notes and internal commentary in the YAML are dropped: this docs repo is
+// public.
 
 import { parse as parseYaml } from "yaml";
 
@@ -43,6 +45,11 @@ export const REQUIRED_PAGE_CLASSES = [
   "kernel.egress.webhook",
   "kernel.egress.email",
 ];
+
+// The per-request inference-share class. It is `model: usage` on the card, but it
+// is priced by the share rule (a percentage of the customer's forwarded inference
+// spend), never as a multiple of measured model cost.
+export const INFERENCE_SHARE_CLASS = "gateway.turn.inference-share";
 
 // Wording from the retired pricing model that must not come back: Safe House
 // "bundled" into the turn, flat per-request dollar prices, and plan subscriptions.
@@ -100,6 +107,15 @@ export function extractRatecard(yamlText, source) {
     fail(`rate card ${doc.version}: usage_margin_pct must be a number in [0, 1), got ${margin}`);
   }
 
+  const bps = doc.inference_share_bps ?? null;
+  if (bps !== null && !(Number.isInteger(bps) && bps >= 1 && bps <= 10000)) {
+    fail(`rate card ${doc.version}: inference_share_bps must be an integer in [1, 10000], got ${bps}`);
+  }
+  const scope = doc.inference_share_scope ?? null;
+  if (scope !== null && scope !== "agent" && scope !== "all") {
+    fail(`rate card ${doc.version}: inference_share_scope must be agent or all, got ${JSON.stringify(scope)}`);
+  }
+
   const seen = new Set();
   const classes = doc.classes.map((c) => {
     if (!c || typeof c.class !== "string") fail(`rate card ${doc.version}: class entry without \`class\``);
@@ -112,7 +128,22 @@ export function extractRatecard(yamlText, source) {
     } else if (typeof rate !== "number") {
       fail(`rate card ${doc.version}: ${c.model} class ${c.class} has no numeric rate_mu`);
     }
-    return { class: c.class, model: c.model, unit: c.unit ?? null, rate_mu: rate };
+    const out = { class: c.class, model: c.model, unit: c.unit ?? null, rate_mu: rate };
+    // Bucket and cost multiplier only appear on cards that set them, so an older
+    // card's extract keeps its exact shape.
+    if (c.bucket !== undefined) {
+      if (c.bucket !== "agent" && c.bucket !== "governance") {
+        fail(`rate card ${doc.version}: ${c.class} has bucket ${JSON.stringify(c.bucket)}`);
+      }
+      out.bucket = c.bucket;
+    }
+    if (c.cogs_multiplier !== undefined) {
+      if (!(typeof c.cogs_multiplier === "number" && c.cogs_multiplier >= 1)) {
+        fail(`rate card ${doc.version}: ${c.class} cogs_multiplier must be a number >= 1`);
+      }
+      out.cogs_multiplier = c.cogs_multiplier;
+    }
+    return out;
   });
   classes.sort((a, b) => a.class.localeCompare(b.class));
 
@@ -128,6 +159,7 @@ export function extractRatecard(yamlText, source) {
     peg: { usd_per_mu: peg.mu_usd, mmu_per_mu: peg.mmu_per_mu ?? null },
     usage_margin_pct: margin,
     overdraft,
+    ...(bps !== null ? { inference_share_bps: bps, inference_share_scope: scope } : {}),
     classes,
   };
 }
@@ -157,6 +189,34 @@ export function usageMultiplier(margin) {
   return r;
 }
 
+/**
+ * The multiplier on measured model cost one usage class is charged at: its own
+ * `cogs_multiplier` when the card sets one, otherwise the card margin's.
+ */
+export function classMultiplier(cls, extract) {
+  if (cls.cogs_multiplier !== undefined) return cls.cogs_multiplier;
+  return usageMultiplier(extract.usage_margin_pct);
+}
+
+/** Every multiplier a cost-priced usage class on this card is charged at. */
+function multipliersInUse(extract) {
+  const out = new Set();
+  for (const c of extract.classes) {
+    if (c.model !== "usage" || c.class === INFERENCE_SHARE_CLASS) continue;
+    try {
+      out.add(classMultiplier(c, extract));
+    } catch {
+      /* reported by the per-row check */
+    }
+  }
+  return out;
+}
+
+/** True when some cost-priced usage class falls back to the card margin. */
+function marginInUse(extract) {
+  return extract.classes.some((c) => c.model === "usage" && c.class !== INFERENCE_SHARE_CLASS && c.cogs_multiplier === undefined);
+}
+
 // Trailing text a usage-priced cell may carry after "N× measured model cost".
 // Anything else after the price is rejected, so a cell cannot state a charge
 // (e.g. "…, including level 1") that the parser would otherwise ignore.
@@ -166,6 +226,9 @@ const USAGE_SUFFIXES = ["", " of the level 2 call"];
  * Parse the price cell of a pricing-page table row. The WHOLE cell must be one of:
  *   Free
  *   N× measured model cost[ of the level 2 call]
+ *   Measured model cost[ of the level 2 call]          (at cost: 1×)
+ *   P% of the forwarded inference spend, less the request's agent charges   (scope agent)
+ *   P% of the forwarded inference spend, less the request's measured charges (scope all)
  *   N μ[ ($X)][ per [completed ]<unit>]
  * Anything else is "unparseable", which the gate reports as a failure.
  */
@@ -178,6 +241,10 @@ export function parsePrice(cell) {
   if (/^free$/i.test(text)) return { kind: "free" };
   const usage = text.match(/^(\d+)\s*[×x]\s+(?:the\s+)?measured model cost(.*)$/i);
   if (usage && USAGE_SUFFIXES.includes(usage[2].toLowerCase())) return { kind: "usage", multiplier: Number(usage[1]) };
+  const atCost = text.match(/^(?:at\s+)?measured model cost(.*)$/i);
+  if (atCost && USAGE_SUFFIXES.includes(atCost[1].toLowerCase())) return { kind: "usage", multiplier: 1 };
+  const share = text.match(new RegExp(String.raw`^(${NUM})%\s+of the forwarded inference spend, less the request's (agent|measured) charges$`, "i"));
+  if (share) return { kind: "share", pct: num(share[1]), against: share[2].toLowerCase() };
   const fixed = text.match(new RegExp(String.raw`^(${NUM})\s*[μµ](?:\s*\(\$(${NUM})\))?(?:\s+per\s+(?:completed\s+)?([a-z][a-z-]*))?$`));
   if (fixed) {
     const out = { kind: "fixed", mu: num(fixed[1]) };
@@ -247,12 +314,17 @@ export function checkPageAgainstExtract(mdx, extract) {
     problems.push(`the checked region must name the rate card version \`${extract.version}\``);
   }
 
+  // The card margin's multiplier, when some usage class is priced from it.
   let multiplier = null;
-  try {
-    multiplier = usageMultiplier(extract.usage_margin_pct);
-  } catch (e) {
-    if (extract.classes.some((c) => c.model === "usage")) problems.push(e.message);
+  if (marginInUse(extract)) {
+    try {
+      multiplier = usageMultiplier(extract.usage_margin_pct);
+    } catch (e) {
+      problems.push(e.message);
+    }
   }
+  const allowedMultipliers = multipliersInUse(extract);
+  const sharePct = extract.inference_share_bps != null ? extract.inference_share_bps / 100 : null;
 
   const onPage = new Set();
   for (const row of rows) {
@@ -271,11 +343,28 @@ export function checkPageAgainstExtract(mdx, extract) {
       problems.push(`line ${row.line}: cannot read the price "${price.text}" for ${row.class}`);
       continue;
     }
-    if (cls.model === "usage") {
+    if (cls.class === INFERENCE_SHARE_CLASS) {
+      if (sharePct === null) {
+        problems.push(`line ${row.line}: ${row.class} is listed but rate card ${extract.version} carries no inference_share_bps`);
+      } else if (price.kind !== "share" || price.against !== SHARE_AGAINST[shareScope(extract)]) {
+        problems.push(
+          `line ${row.line}: ${row.class} must read "${sharePct}% of the forwarded inference spend, less the request's ${SHARE_AGAINST[shareScope(extract)]} charges" (inference_share_scope ${shareScope(extract)})`,
+        );
+      } else if (!sameMoney(price.pct, sharePct)) {
+        problems.push(`line ${row.line}: ${row.class} says ${price.pct}% but the rate card's inference share is ${sharePct}%`);
+      }
+    } else if (cls.model === "usage") {
+      let want = null;
+      try {
+        want = classMultiplier(cls, extract);
+      } catch {
+        /* margin problem already reported */
+      }
       if (price.kind !== "usage") {
-        problems.push(`line ${row.line}: ${row.class} is usage-priced on the rate card; the page must say "${multiplier}× measured model cost"`);
-      } else if (multiplier !== null && price.multiplier !== multiplier) {
-        problems.push(`line ${row.line}: ${row.class} says ${price.multiplier}× but the rate card's margin implies ${multiplier}×`);
+        problems.push(`line ${row.line}: ${row.class} is usage-priced on the rate card; the page must say "${want}× measured model cost"`);
+      } else if (want !== null && price.multiplier !== want) {
+        const why = cls.cogs_multiplier !== undefined ? "its cogs_multiplier is" : "the rate card's margin implies";
+        problems.push(`line ${row.line}: ${row.class} says ${price.multiplier}× but ${why} ${want}×`);
       }
     } else if (cls.rate_mu === 0) {
       if (price.kind !== "free") problems.push(`line ${row.line}: ${row.class} is free on the rate card; the page must say "Free"`);
@@ -297,6 +386,13 @@ export function checkPageAgainstExtract(mdx, extract) {
   for (const req of REQUIRED_PAGE_CLASSES) {
     if (!onPage.has(req)) problems.push(`required class ${req} is missing from the checked region`);
   }
+  // Every class a customer can be charged for by usage must be on the page, so a
+  // new usage class (or the inference share) cannot ship unlisted.
+  for (const c of extract.classes) {
+    if (c.model === "usage" && !onPage.has(c.class) && !REQUIRED_PAGE_CLASSES.includes(c.class)) {
+      problems.push(`usage class ${c.class} on rate card ${extract.version} is missing from the checked region`);
+    }
+  }
 
   // Page-wide facts stated in prose.
   const pegs = [...mdx.matchAll(/1\s*[μµ]\s*=\s*\$\s?([0-9.]+)/g)].map((m) => Number(m[1]));
@@ -304,21 +400,30 @@ export function checkPageAgainstExtract(mdx, extract) {
   for (const p of pegs) {
     if (p !== extract.peg.usd_per_mu) problems.push(`the page states 1 μ = $${p}; the rate card peg is $${extract.peg.usd_per_mu}`);
   }
-  if (extract.usage_margin_pct !== null) {
-    const want = Math.round(extract.usage_margin_pct * 100);
-    for (const m of mdx.matchAll(/(\d+)%\s+(?:gross\s+)?margin/gi)) {
-      if (Number(m[1]) !== want) problems.push(`the page states a ${m[1]}% margin; the rate card margin is ${want}%`);
+  // A margin may only be quoted when some class is actually priced from it.
+  for (const m of mdx.matchAll(/(\d+)%\s+(?:gross\s+)?margin/gi)) {
+    if (!marginInUse(extract) || extract.usage_margin_pct === null) {
+      problems.push(`the page states a ${m[1]}% margin, but no class on rate card ${extract.version} is priced from the card margin`);
+    } else if (Number(m[1]) !== Math.round(extract.usage_margin_pct * 100)) {
+      problems.push(`the page states a ${m[1]}% margin; the rate card margin is ${Math.round(extract.usage_margin_pct * 100)}%`);
     }
-    if (multiplier !== null) {
-      for (const m of mdx.matchAll(/(\d+)\s*[×x]\s+(?:the\s+|its\s+)?measured\b/gi)) {
-        if (Number(m[1]) !== multiplier) problems.push(`the page states ${m[1]}× measured cost; the rate card implies ${multiplier}×`);
-      }
+  }
+  if (allowedMultipliers.size > 0) {
+    const shown = [...allowedMultipliers].sort((a, b) => a - b).join("× or ") + "×";
+    for (const m of mdx.matchAll(/(\d+)\s*[×x]\s+(?:the\s+|its\s+)?measured\b/gi)) {
+      if (!allowedMultipliers.has(Number(m[1]))) problems.push(`the page states ${m[1]}× measured cost; the rate card charges ${shown}`);
     }
+  }
+  // Every "P% of … inference" in prose must be the card's inference share.
+  for (const m of mdx.matchAll(new RegExp(String.raw`(${NUM})%\s+(?:of\s+)?(?:the\s+|your\s+|its\s+)?(?:customer's\s+)?(?:forwarded\s+)?inference\b`, "gi"))) {
+    if (sharePct === null) problems.push(`line ${lineOf(mdx, m.index)}: the page quotes a ${m[1]}% inference share; rate card ${extract.version} has none`);
+    else if (!sameMoney(num(m[1]), sharePct)) problems.push(`line ${lineOf(mdx, m.index)}: the page quotes a ${m[1]}% inference share; the rate card's is ${sharePct}%`);
   }
 
   problems.push(...checkMoneyPairs(mdx, extract));
-  problems.push(...checkWorkedExample(mdx, multiplier));
+  problems.push(...checkWorkedExample(mdx, allowedMultipliers, sharePct));
   problems.push(...checkOverdraftWording(mdx, extract));
+  problems.push(...checkShareScopeWording(mdx, extract));
   problems.push(...checkExpiryWording(mdx));
 
   const lines = mdx.split("\n");
@@ -357,13 +462,19 @@ export function checkMoneyPairs(mdx, extract) {
 const WORKED_EXAMPLE_HEADING = "### A worked example";
 
 /**
- * The worked example's arithmetic. In the section under WORKED_EXAMPLE_HEADING,
- * each "At N× that is C μ" must use the rate card's multiplier and equal N × the
- * most recent measured cost written as "(B μ)"; "T μ in total" must be the sum of
- * those charges. The section is required and must contain at least one step, so
- * rewording it out of the checked shape fails rather than going unchecked.
+ * The worked example's arithmetic. In the section under WORKED_EXAMPLE_HEADING:
+ *   - each "At N× that is C μ" must use a multiplier the rate card charges and
+ *     equal N × the most recent measured cost written as "(B μ)";
+ *   - "P% of that is S μ" (the inference share) must use the card's share and
+ *     equal P% of the most recent "(B μ)";
+ *   - "the larger of the two, X μ" must be max(that share, the charges stated
+ *     since it), and replaces them in the running total;
+ *   - "a Y μ inference-share line" must be X minus those charges;
+ *   - "T μ in total" must be the running total.
+ * The section is required and must contain at least one step, so rewording it
+ * out of the checked shape fails rather than going unchecked.
  */
-export function checkWorkedExample(mdx, multiplier) {
+export function checkWorkedExample(mdx, allowedMultipliers, sharePct = null) {
   const start = mdx.indexOf(WORKED_EXAMPLE_HEADING);
   if (start === -1) return [`the page must keep a "${WORKED_EXAMPLE_HEADING}" section (its arithmetic is checked)`];
   const rest = mdx.slice(start + WORKED_EXAMPLE_HEADING.length);
@@ -371,6 +482,7 @@ export function checkWorkedExample(mdx, multiplier) {
   const section = next === -1 ? rest : rest.slice(0, next);
   const base = start + WORKED_EXAMPLE_HEADING.length;
   const where = (i) => `line ${lineOf(mdx, base + i)}`;
+  const allowed = allowedMultipliers instanceof Set ? allowedMultipliers : new Set(allowedMultipliers == null ? [] : [allowedMultipliers]);
 
   const events = [
     ...[...section.matchAll(new RegExp(String.raw`\((${NUM})\s*[μµ]\)`, "g"))].map((m) => ({ at: m.index, cost: num(m[1]) })),
@@ -379,28 +491,65 @@ export function checkWorkedExample(mdx, multiplier) {
       n: Number(m[1]),
       charge: num(m[2]),
     })),
+    ...[...section.matchAll(new RegExp(String.raw`(${NUM})%\s+of\s+that\s+is\s+(${NUM})\s*[μµ]`, "g"))].map((m) => ({
+      at: m.index,
+      pct: num(m[1]),
+      share: num(m[2]),
+    })),
+    ...[...section.matchAll(new RegExp(String.raw`the\s+larger\s+of\s+the\s+two,\s+(${NUM})\s*[μµ]`, "g"))].map((m) => ({ at: m.index, larger: num(m[1]) })),
+    ...[...section.matchAll(new RegExp(String.raw`a\s+(${NUM})\s*[μµ]\s+inference-share\s+line`, "g"))].map((m) => ({ at: m.index, topUp: num(m[1]) })),
     ...[...section.matchAll(new RegExp(String.raw`(${NUM})\s*[μµ]\s+in\s+total`, "g"))].map((m) => ({ at: m.index, total: num(m[1]) })),
   ].sort((a, b) => a.at - b.at);
 
   const problems = [];
   let cost = null;
-  const charges = [];
+  let charges = [];
+  let share = null; // { target, from } while a share is open
+  let lastAgent = null; // { larger, agentSum } after "the larger of the two"
+  let steps = 0;
   let totals = 0;
+  const sum = (xs) => xs.reduce((a, b) => a + b, 0);
   for (const e of events) {
     if (e.cost !== undefined) cost = e.cost;
     else if (e.charge !== undefined) {
-      if (multiplier !== null && e.n !== multiplier) problems.push(`${where(e.at)}: the worked example uses ${e.n}×; the rate card implies ${multiplier}×`);
+      steps++;
+      if (allowed.size > 0 && !allowed.has(e.n)) problems.push(`${where(e.at)}: the worked example uses ${e.n}×; the rate card charges ${[...allowed].join("× or ")}×`);
       if (cost === null) problems.push(`${where(e.at)}: the worked example charges ${e.charge} μ with no "(N μ)" measured cost before it`);
       else if (!sameMoney(e.n * cost, e.charge)) problems.push(`${where(e.at)}: the worked example says ${e.n}× ${cost} μ is ${e.charge} μ; it is ${+(e.n * cost).toFixed(10)} μ`);
       charges.push(e.charge);
       cost = null;
+    } else if (e.share !== undefined) {
+      steps++;
+      if (sharePct === null) problems.push(`${where(e.at)}: the worked example applies a ${e.pct}% inference share; the rate card has none`);
+      else if (!sameMoney(e.pct, sharePct)) problems.push(`${where(e.at)}: the worked example uses a ${e.pct}% share; the rate card's is ${sharePct}%`);
+      if (cost === null) problems.push(`${where(e.at)}: the worked example's share has no "(N μ)" inference cost before it`);
+      else if (!sameMoney((e.pct / 100) * cost, e.share)) problems.push(`${where(e.at)}: the worked example says ${e.pct}% of ${cost} μ is ${e.share} μ; it is ${+((e.pct / 100) * cost).toFixed(10)} μ`);
+      share = { target: e.share, from: charges.length };
+      cost = null;
+    } else if (e.larger !== undefined) {
+      if (share === null) {
+        problems.push(`${where(e.at)}: "the larger of the two" with no inference share before it`);
+        continue;
+      }
+      const agentSum = sum(charges.slice(share.from));
+      const want = Math.max(share.target, agentSum);
+      if (!sameMoney(e.larger, want)) problems.push(`${where(e.at)}: the larger of ${share.target} μ and ${+agentSum.toFixed(10)} μ is ${+want.toFixed(10)} μ, not ${e.larger} μ`);
+      charges = [...charges.slice(0, share.from), e.larger];
+      lastAgent = { larger: e.larger, agentSum };
+      share = null;
+    } else if (e.topUp !== undefined) {
+      if (lastAgent === null) problems.push(`${where(e.at)}: an inference-share line with no "the larger of the two" before it`);
+      else if (!sameMoney(e.topUp, Math.max(0, lastAgent.larger - lastAgent.agentSum))) {
+        problems.push(`${where(e.at)}: the inference-share line is ${e.topUp} μ; it is ${+Math.max(0, lastAgent.larger - lastAgent.agentSum).toFixed(10)} μ`);
+      }
     } else {
       totals++;
-      const sum = charges.reduce((a, b) => a + b, 0);
-      if (!sameMoney(sum, e.total)) problems.push(`${where(e.at)}: the worked example total is ${e.total} μ but its charges add up to ${+sum.toFixed(10)} μ`);
+      if (share !== null) problems.push(`${where(e.at)}: the worked example states a total before saying which of the share and the agent charges is larger`);
+      const s = sum(charges);
+      if (!sameMoney(s, e.total)) problems.push(`${where(e.at)}: the worked example total is ${e.total} μ but its charges add up to ${+s.toFixed(10)} μ`);
     }
   }
-  if (charges.length === 0) problems.push(`the worked example has no "At N× that is C μ" step to check`);
+  if (steps === 0) problems.push(`the worked example has no "At N× that is C μ" step to check`);
   if (totals === 0) problems.push(`the worked example has no "T μ in total" line to check`);
   return problems;
 }
@@ -411,6 +560,36 @@ function sentences(mdx) {
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
     .replace(/\s+/g, " ")
     .split(/(?<=[.!?])\s+/);
+}
+
+// What the share is netted against, by the card's inference_share_scope. An absent
+// scope is the billing default, agent.
+const SHARE_AGAINST = { agent: "agent", all: "measured" };
+const shareScope = (extract) => extract.inference_share_scope ?? "agent";
+
+const OUTSIDE_THE_MAX = /\b(?:on top|outside the comparison)\b/i;
+const GOVERNANCE_TOPIC = /\b(?:governance|integrity analysis|Safe House)\b/i;
+
+/**
+ * The prose must say which charges the 4% is compared against. Scope `all` nets
+ * governance too, so no sentence may put governance (the integrity analysis, Safe
+ * House) on top of the comparison; observer trace analysis is the one thing that
+ * stays on top, because it runs later with no request to attach to, so a sentence
+ * about it is allowed. Scope `agent` must say governance is charged on top.
+ */
+export function checkShareScopeWording(mdx, extract) {
+  if (extract.inference_share_bps == null) return [];
+  const problems = [];
+  const all = sentences(mdx);
+  const outside = all.filter((s) => OUTSIDE_THE_MAX.test(s) && GOVERNANCE_TOPIC.test(s) && !/\bobserver\b/i.test(s));
+  if (shareScope(extract) === "all") {
+    for (const s of outside) {
+      problems.push(`rate card ${extract.version} nets governance inside the inference-share comparison (scope all), but the page says: "${s.trim()}"`);
+    }
+  } else if (outside.length === 0) {
+    problems.push(`rate card ${extract.version} bills governance on top of the inference-share comparison (scope agent); the page must say so`);
+  }
+  return problems;
 }
 
 const OVERDRAFT_TOPIC = /\b(?:below (?:zero|0)|negative|overdraft|overdrawn|overdraw|credit line)\b/i;
@@ -468,12 +647,22 @@ export function pageRelevantDiff(a, b, classes) {
   if (a.peg.usd_per_mu !== b.peg.usd_per_mu) diffs.push(`peg ${a.peg.usd_per_mu} → ${b.peg.usd_per_mu}`);
   if (a.usage_margin_pct !== b.usage_margin_pct) diffs.push(`usage_margin_pct ${a.usage_margin_pct} → ${b.usage_margin_pct}`);
   if ((a.overdraft ?? null) !== (b.overdraft ?? null)) diffs.push(`overdraft ${a.overdraft ?? null} → ${b.overdraft ?? null}`);
+  if ((a.inference_share_bps ?? null) !== (b.inference_share_bps ?? null)) {
+    diffs.push(`inference_share_bps ${a.inference_share_bps ?? null} → ${b.inference_share_bps ?? null}`);
+  }
+  if ((a.inference_share_scope ?? null) !== (b.inference_share_scope ?? null)) {
+    diffs.push(`inference_share_scope ${a.inference_share_scope ?? null} → ${b.inference_share_scope ?? null}`);
+  }
   const am = new Map(a.classes.map((c) => [c.class, c]));
   const bm = new Map(b.classes.map((c) => [c.class, c]));
   for (const id of classes) {
     const x = am.get(id);
     const y = bm.get(id);
-    const fmt = (c) => (c ? `${c.model}${c.rate_mu === null ? "" : ` ${c.rate_mu} μ`}` : "absent");
+    const fmt = (c) =>
+      c
+        ? `${c.model}${c.rate_mu === null ? "" : ` ${c.rate_mu} μ`}` +
+          `${c.bucket === undefined ? "" : ` ${c.bucket}`}${c.cogs_multiplier === undefined ? "" : ` ${c.cogs_multiplier}×`}`
+        : "absent";
     if (fmt(x) !== fmt(y)) diffs.push(`${id}: ${fmt(x)} → ${fmt(y)}`);
   }
   return diffs;

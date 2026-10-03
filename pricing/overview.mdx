@@ -1,6 +1,6 @@
 ---
 title: "Pricing"
-description: "Usage-based pricing in μ (1 μ = $0.01): gateway model calls at 5× measured cost, fixed-price API products, and free non-model work"
+description: "Usage-based pricing in μ (1 μ = $0.01): gateway model calls at measured cost, a 4% inference share in Mnemom agent sessions, fixed-price API products, and free non-model work"
 sidebarTitle: "Pricing"
 icon: "credit-card"
 ---
@@ -39,23 +39,53 @@ a fraction of a μ.
 
 ## What you pay for
 
-The rule is simple: when the gateway calls a model to do work for you, that call is
-charged at **5× its measured model cost**, which is an 80% margin. The cost is measured
-per call from the tokens it used, at the model provider's list prices. A step that makes
-no model call costs nothing.
+When the gateway calls a model to do work for you, that call is charged at **its measured
+model cost**: the tokens it used, at the model provider's published prices, with no markup.
+A step that makes no model call costs nothing.
+
+In a **Mnemom agent session** (a conversation the gateway runs with Mnemom's agent features
+on, such as context management or goal alignment), each successful request also has an
+**inference share**. The share is 4% of that request's forwarded inference spend, priced
+at the provider's published rates. For each request you pay the larger of two amounts,
+never both:
+
+- the measured cost of the gateway's own model calls for that request: **agent work**
+  (context folds, the goal-alignment judge, and implicit-goal calls) and, when governance
+  is on, **governance** (the integrity analysis and Safe House level 2 screens);
+- the 4% share.
+
+When the share is larger, your statement shows the measured lines plus an "Inference
+share (4%)" line that tops them up to it. Observer trace analysis runs later from your
+logs, not on a request, so it is charged at measured cost on its own line, on top of the
+comparison.
+
+There is no minimum charge per request. A request that fails upstream is charged nothing.
 
 {/* <!-- pricing-ratecard:start --> */}
 
-Prices on this page match Mnemom rate card `v2026-09-gateway`.
+Prices on this page match Mnemom rate card `v2026-10-share`.
 
-### Model calls the gateway makes
+### Agent work in a Mnemom agent session
 
 | What | Rate card class | Price |
 |---|---|---|
-| A governed turn: the integrity analysis and goal-contract check the gateway runs on a model turn | `gateway.turn.governed` | 5× measured model cost |
-| A Safe House screen. Level 1 (rules, no model call) is free. You are charged only when a screened surface escalates to the level 2 model | `gateway.sh.check` | 5× measured model cost of the level 2 call |
-| A context fold: condensing a long run's context so it fits the model's window | `gateway.context.fold` | 5× measured model cost |
-| Observer trace analysis, per analyzed trace | `kernel.observer.trace-analysis` | 5× measured model cost |
+| A context fold: condensing a long run's context so it fits the model's window | `gateway.context.fold` | Measured model cost |
+| The goal-alignment judge, per call | `gateway.goal.judge` | Measured model cost |
+| An implicit-goal call: deciding whether a message changes the goal, and writing the goal | `gateway.goal.intent` | Measured model cost |
+
+### Governance
+
+| What | Rate card class | Price |
+|---|---|---|
+| A governed turn's integrity analysis | `gateway.turn.governed` | Measured model cost |
+| A Safe House screen. Level 1 (rules, no model call) is free. You are charged only when a screened surface escalates to the level 2 model | `gateway.sh.check` | Measured model cost of the level 2 call |
+| Observer trace analysis, per analyzed trace. It runs later from your logs, so it is always charged on its own, never compared with the share | `kernel.observer.trace-analysis` | Measured model cost |
+
+### The inference share
+
+| What | Rate card class | Price |
+|---|---|---|
+| The inference share, once per successful request in a Mnemom agent session, when 4% is larger than the request's agent work and governance above | `gateway.turn.inference-share` | 4% of the forwarded inference spend, less the request's measured charges |
 
 ### API products with a fixed price
 
@@ -79,20 +109,26 @@ Prices on this page match Mnemom rate card `v2026-09-gateway`.
 ### What is not charged
 
 - **Your own model inference.** When you send requests through the gateway with your own
-  provider key (BYOK), the model call you asked for is passed through. Your provider bills
-  you for it; Mnemom does not. You pay Mnemom only for the gateway's own model calls in the
-  first table above.
+  provider key (BYOK), the model call you asked for is passed through and your provider
+  bills you for it. Mnemom does not resell it. Outside a Mnemom agent session there is no
+  inference share. Inside one, the share replaces the measured cost of the gateway's own
+  model calls only when the share is larger.
 - **Work that needs no model call**, as listed in the last table.
 - **Everything else on this site** (agent registration, alignment and protection cards,
   the dashboard, reputation lookups) has no per-call charge today.
 
 ### A worked example
 
-A governed turn's integrity analysis uses $0.002 (0.2 μ) of model tokens. At 5× that is
-1 μ. One of the turn's surfaces also escalates to the Safe House level 2 model, and that
-call uses $0.0004 (0.04 μ) of model tokens. At 5× that is 0.2 μ. The turn costs 1.2 μ in
-total. If Safe House had cleared every surface at level 1, the screen would have cost
-nothing.
+A request in a Mnemom agent session forwards a model call that your provider prices at
+$2.50 (250 μ). 4% of that is 10 μ. The same request triggers a context fold whose model
+tokens cost $0.03 (3 μ). At 1× that is 3 μ. Governance is on for this session. The
+integrity analysis uses $0.002 (0.2 μ) of model tokens. At 1× that is 0.2 μ. One surface
+escalates to the Safe House level 2 model, and that call uses $0.0004 (0.04 μ).
+At 1× that is 0.04 μ. The request's charge is the larger of the two, 10 μ: the 3.24 μ of
+measured lines plus a 6.76 μ inference-share line. The request costs 10 μ in total.
+
+Had the measured lines come to more than the share, the request would have been charged
+their own cost and there would be no inference-share line.
 
 ## When your balance runs out
 
@@ -165,14 +201,14 @@ accounting and peg) and dedicated cells (an isolated deployment in the region yo
     μ is the unit you pay in. One μ is one US cent, and the peg is fixed.
   </Accordion>
   <Accordion title="What exactly am I charged for?">
-    The model calls the gateway makes for you (governed turns, Safe House level 2
-    escalations, context folds, and observer trace analysis), each at 5× its measured model
-    cost, plus the fixed-price API products listed above. Work that needs no model call is
-    free, and your own model inference sent with your own provider key is not charged.
+    The model calls the gateway makes for you, each at its measured model cost. In a Mnemom
+    agent session you also pay the inference share (4% of the request's forwarded inference
+    spend) when it is larger than the agent work's cost. Fixed-price API products are listed
+    above. Work that needs no model call is free.
   </Accordion>
   <Accordion title="Is Safe House screening free?">
     Level 1 screening, which runs rules and makes no model call, is free. When a surface
-    escalates to level 2, that model call is charged at 5× its measured cost.
+    escalates to level 2, that model call is charged at its measured cost.
   </Accordion>
   <Accordion title="How do I get my first μ?">
     Create an account, add a payment method, and buy μ. Nothing is charged until you buy.
@@ -186,6 +222,15 @@ accounting and peg) and dedicated cells (an isolated deployment in the region yo
     Yes. Each lot of μ expires after 12 months without a charge drawn from it. The clock
     starts at purchase, and every charge except a settled ResearchGrade reservation restarts
     it. See "When μ expires" above.
+  </Accordion>
+  <Accordion title="What is the inference share?">
+    In a Mnemom agent session, each successful request is charged the larger of two
+    amounts: the measured cost of the gateway's own model calls for it (context folds, the
+    goal judge, implicit-goal calls and, when governance is on, the integrity analysis and
+    Safe House level 2 screens), or 4% of the request's forwarded inference spend at the
+    provider's published rates. When the 4% is larger, your statement shows an "Inference
+    share (4%)" line for the difference. Observer trace analysis runs later from your logs,
+    so it is charged at measured cost on top.
   </Accordion>
   <Accordion title="Do features differ depending on how much μ I buy?">
     No. Every feature is available to every account regardless of spend. Buying more μ buys
