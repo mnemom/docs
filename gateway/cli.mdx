@@ -187,11 +187,11 @@ Open your agent's alignment card in your `$EDITOR` for interactive editing. Vali
 mnemom card edit --agent my-coder
 ```
 
-The card is fetched from the server, opened in your editor, and published back on save. If validation fails, the CLI reports errors and gives you the option to re-edit.
+The card is fetched from the server and opened in your editor (`$EDITOR`, else `$VISUAL`, else `vi`). When you close the editor, the CLI validates the card, asks for confirmation in a terminal, and publishes it. If you made no changes, nothing is published. If validation fails, the CLI lists the errors and nothing is published.
 
 ### `mnemom card publish <file>`
 
-Read a YAML or JSON alignment card file, validate it against the unified schema, confirm before publishing, and upload to your agent's alignment card via the API. Optionally triggers re-verification of existing traces against the new card.
+Read a YAML or JSON alignment card file, validate it against the unified schema, and upload it to your agent. In a terminal the CLI asks for confirmation first; in a script it publishes without asking.
 
 ```bash
 mnemom card publish card.yaml --agent my-coder
@@ -201,52 +201,19 @@ mnemom card publish card.yaml --agent my-coder
 
 | Option | Description |
 |--------|-------------|
-| `--agent <name>` | Target agent |
-| `--no-verify` | Skip re-verification prompt after publish |
-| `--yes` | Skip confirmation prompt |
+| `--agent <name>` | Target agent (or set `MNEMOM_AGENT`) |
+| `--idempotency-key <uuid>` | Reuse a specific `Idempotency-Key` when retrying (default: generated) |
 
-**Example:**
-
-```
-$ mnemom card publish card.yaml --agent my-coder
-
-  Validating card.yaml...
-  ✓ Valid YAML
-  ✓ Required blocks present (principal, values, autonomy, audit)
-  ✓ 6 declared values (3 standard, 3 custom with definitions)
-  ✓ 7 bounded actions
-  ✓ 2 escalation triggers (evaluable conditions)
-  ✓ Card not expired
-
-  Publish this card for agent my-coder? (y/N) y
-
-  ✓ Card published: ac-a4c12709-v2
-  Re-verify existing traces against new card? (y/N) y
-  ✓ 247 traces re-verified
-```
+If validation fails, the CLI lists the failed checks, publishes nothing and exits `1`.
 
 ### `mnemom card validate <file>`
 
-Local-only validation with no API call. Checks compliance against the unified schema. CI-friendly: exit code 0 on pass, 1 on fail.
+Validate an alignment card. With an agent (`--agent` or `MNEMOM_AGENT`), the server validates the card against the agent's org and platform rules. If you are not signed in or the server can't be reached, it falls back to local validation with a warning. Without an agent, or with `--offline`, it validates locally against the unified schema. CI-friendly: exit code 0 on pass, 1 on fail.
 
 ```bash
-mnemom card validate card.yaml
-```
-
-**Example:**
-
-```
-$ mnemom card validate card.yaml
-
-  ✓ Valid YAML
-  ✓ Required blocks: principal, values, autonomy, audit
-  ✓ values.declared: 6 values (non-empty)
-  ✓ Custom values defined: editorial_independence, source_attribution, investigative_rigor
-  ✓ bounded_actions: 7 actions (non-empty)
-  ✓ escalation_triggers: 2 triggers (evaluable conditions)
-  ✓ expires_at: 2026-08-21 (valid)
-
-  Card is valid.
+mnemom card validate card.yaml                    # local
+mnemom card validate card.yaml --agent my-coder   # server-side, against the agent's org rules
+mnemom card validate card.yaml --offline          # always local
 ```
 
 ### `mnemom card evaluate <file> --tools <tools>`
@@ -270,18 +237,7 @@ mnemom card evaluate card.yaml --tools mcp__browser__navigate,mcp__filesystem__d
 - `0` -- No hard policy violations (without `--strict`, warnings don't affect this)
 - `1` -- One or more evaluations fail (or, with `--strict`, any warning)
 
-**Example output:**
-
-```
-Evaluating card.yaml against 2 tools...
-
-  mcp__browser__navigate .... PASS (mapped to web_fetch)
-  mcp__filesystem__delete ... FAIL (forbidden)
-    Reason: File deletion not permitted
-
-  Verdict: FAIL
-  1 pass, 1 fail
-```
+The output names the card and the tools, then a verdict (`PASS`, `WARN` or `FAIL`), any violations and warnings with the tool and reason, and how many of the card's actions the tools cover. Evaluation runs locally against the card file.
 
 </Steps>
 
@@ -425,8 +381,10 @@ mnemom protection publish protection.yaml --agent my-coder
 
 | Option | Description |
 |--------|-------------|
-| `--agent <name>` | Target agent |
-| `--yes` | Skip confirmation prompt |
+| `--agent <name>` | Target agent (or set `MNEMOM_AGENT`) |
+| `--idempotency-key <uuid>` | Reuse a specific `Idempotency-Key` when retrying (default: generated) |
+
+In a terminal the CLI asks for confirmation first; in a script it publishes without asking.
 
 ### `mnemom protection validate <file>`
 
@@ -456,21 +414,25 @@ mnemom protection drift protection.yaml --agent my-coder
 ## Agent commands
 
 `mnemom agent` is one namespace for everything about your governed agents: the
-launcher, and the fleet verbs `list`, `claim`, `move`, `sessions`, and `show`.
+launcher and its sub-verbs (`setup`, `doctor`, `config`, `invite`, `help`), and
+the verbs `list`, `claim`, `move`, `sessions`, `show` and the experimental `goal`.
 
 ### `mnemom agent`
 
 Launch a governed coding-agent session (Claude Code today) through the gateway.
 A bare `mnemom agent` asks for a session name, then launches; pass `--goal` to
-seal a goal. The launcher, its sub-verbs (`setup`, `doctor`, `config`, `invite`),
-saved settings, contracts, guardrails, context folding and profiles, and the
-experimental implicit goal mode are documented on their own page:
-[`mnemom agent`](/gateway/agent).
+seal a goal. Every launch first makes sure the agent it runs as is claimed in your
+org, and claims it if it is not; it never starts a session on an unclaimed agent.
+The launcher, its sub-verbs, sign-in options, saved settings, contracts,
+guardrails, context folding and profiles, and the experimental implicit goal mode
+are documented on their own page: [`mnemom agent`](/gateway/agent).
 
 ```bash
 mnemom agent                    # prompts for a session name
 mnemom agent fix-auth --goal "make login work on Safari"
 mnemom agent doctor             # read-only preflight
+mnemom agent --dry-run          # print the launch plan; no sign-in, no key read, no launch
+mnemom agent help config        # help for one sub-verb; never launches
 ```
 
 ### `mnemom agent list`
@@ -610,6 +572,20 @@ mnemom update --json
 Updates never downgrade on their own. Set `MNEMOM_DISABLE_AUTOUPDATE=1` to turn
 background updates off entirely, or use the `update.mode` preference below.
 
+### Minimum version
+
+The Mnemom API tells the CLI the oldest version it still supports, on every
+response. A CLI older than that stops instead of running the command, because an
+old CLI can leave out request fields a newer server expects. When auto-update is
+on (`update.mode` is `auto`) and the CLI was installed with `npm install -g`, it
+installs the newest stable release that meets the minimum, prints
+`Updated the Mnemom CLI … Re-run your command.` and exits; run your command
+again. Otherwise it prints the command to upgrade by hand:
+
+```bash
+npm i -g @mnemom/mnemom@latest
+```
+
 ## CLI preferences: `mnemom config`
 
 CLI-wide preferences live in `~/.mnemom/config.json`. (Settings for
@@ -642,9 +618,17 @@ mnemom experimental disable <id>
 ```
 
 The setting is stored in `~/.mnemom/config.json`. `MNEMOM_EXPERIMENTAL=<id>,<id>`
-(or `all` / `none`) overrides it for one shell. Implicit goal mode for
-`mnemom agent` is the `implicit` feature. It is off unless you enable it — see
-[Implicit goal mode](/gateway/agent#implicit-goal-mode-experimental).
+(or `all` / `none`) overrides it for one shell. The current features, all for
+`mnemom agent`:
+
+| Feature | What it turns on |
+| --- | --- |
+| `implicit` | Implicit goal alignment: `--implicit`, `goal_mode = implicit` and `mnemom agent goal`. See [Implicit goal mode](/gateway/agent#implicit-goal-mode-experimental) |
+| `compaction-intercept` | `--compaction-intercept`, the `compaction_intercept` setting, and a `--compact-at` target below 1M |
+| `context-handoff` | `--context-handoff` and the `context_handoff` setting |
+| `slack` | `--slack`, the `slack_*` settings and `mnemom agent slack` |
+
+`mnemom experimental list` shows the same list with what each one gates.
 
 ## Diagnostics
 
@@ -652,7 +636,7 @@ The setting is stored in `~/.mnemom/config.json`. `MNEMOM_EXPERIMENTAL=<id>,<id>
 
 ### `mnemom status`
 
-Show agent status, connected providers, and connection info.
+Check that an agent is set up and reachable.
 
 ```bash
 mnemom status --agent my-coder
@@ -660,24 +644,10 @@ mnemom status --agent my-coder
 
 **Output includes:**
 
-- Agent ID
-- Connected providers (Anthropic, OpenAI, Gemini)
-- Gateway URL
-- Connection status
-- Last activity timestamp
-
-**Example output:**
-
-```
-Agent:    my-coder (mnm-0b3f2a1c-d4e5-4f60-b7a8-9c0d1e2f3a4b)
-Gateway:  https://gateway.mnemom.ai
-Status:   Connected
-Providers:
-  Anthropic  ✓ (Claude Sonnet 5)
-  OpenAI     ✓ (GPT-5)
-  Gemini     ✗ (not configured)
-Last seen: 2 minutes ago
-```
+- System checks for authentication, the gateway and the API, each marked OK, warning or error
+- The agent ID, the gateway URL and a link to the agent's dashboard
+- A trace summary: integrity score, total and verified traces, violations, and last activity
+- An overall result: `ALL SYSTEMS GO`, `OK (with warnings)` or `ISSUES DETECTED`
 
 ### `mnemom activity`
 
@@ -687,22 +657,7 @@ Show AAP behavioral activity and the activity score for your agent (the agent-si
 mnemom activity --agent my-coder
 ```
 
-**Output includes:**
-
-- Overall integrity ratio (percentage of `clear` verdicts)
-- Verification statistics (total traces, violations, warnings)
-- Drift alert status
-- Recent concern categories
-
-**Example output:**
-
-```
-Integrity Score: 0.94 (94%)
-Traces verified: 1,247
-Violations:      12 (3 CRITICAL, 9 HIGH)
-Drift alerts:    0 active
-Window:          10 checkpoints, 2h retention
-```
+**Output includes:** the score, total traces, verified traces and violations. `mnemom integrity` is a deprecated alias.
 
 ### `mnemom logs`
 
@@ -716,7 +671,7 @@ mnemom logs --agent my-coder [-l N]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-l N` | Number of log entries to display | 10 |
+| `-l, --limit <number>` | Number of traces to show | 10 |
 
 **Example:**
 
@@ -728,15 +683,7 @@ mnemom logs --agent my-coder
 mnemom logs --agent my-coder -l 50
 ```
 
-**Example output:**
-
-```
-2026-02-17 14:32:01  CLEAR      api_call    Claude Sonnet 5    "Search for documents"
-2026-02-17 14:31:45  CLEAR      api_call    Claude Sonnet 5    "Summarize results"
-2026-02-17 14:31:12  REVIEW     api_call    GPT-5              "Execute trade"
-  └─ concern: autonomy_violation (HIGH) — action exceeds bounded_actions
-2026-02-17 14:30:58  CLEAR      api_call    Claude Sonnet 5    "Draft email"
-```
+Each trace prints as its own block with its timestamp. A trace that failed verification is marked `[VIOLATION]`. The output ends with a link to the agent's dashboard.
 
 </Steps>
 
@@ -842,7 +789,7 @@ Manage teams and their scope-cascade templates (`mnemom team ...`).
 | `verify-card <agent_id>` | Verify a published canonical card's AAP attestation + Merkle inclusion proof offline | `--at`, `--card-kind`, `--api`, `--strict`, `--jwks-cache`, `--no-cache` |
 | `usage` | Show per-person token/request consumption for an org | `--org`, `--days <7\|30\|90>`, `--person`, `--provider`, `--model`, `--limit`, `--cursor`, `--json` |
 | `validate safe-house` | Render Safe House harness state per lane — a promotion-readiness signal, mainly used in CI | `--against`, `--max-age`, `--lane`, `--strict`, `--json` |
-| `try-me <token>` | Run the guided Dojo onboarding for a `/try-me` token (born → claim → declare → spar) | `--dry-run`, `--json`, `--yes`, `--name`, `--resume`, `--no-open`, `--poll-timeout` |
+| `try-me <token>` | Run the guided Dojo onboarding for a `/try-me` token (born → claim → declare → spar) | `--dry-run`, `--json`, `--yes`, `--name`, `--resume`, `--api`, `--no-open`, `--poll-timeout` |
 | `wrap` | Instrument an existing agent through the gateway (born → cards → integration snippet) | `--provider`, `--framework`, `--name`, `--provider-key`, `--yes`, `--json` |
 | `onboard` | Self-onboard the calling agent (scan → claim → declare → rating → badge) | `--json`, `--yes`, `--key`, `--hash-proof`, `--no-open` |
 | `skills list` / `skills describe <name>` | List or describe the Mnemom CLI's own skills | `--json` |
@@ -852,7 +799,7 @@ Manage teams and their scope-cascade templates (`mnemom team ...`).
 | Option | Description |
 |--------|-------------|
 | `--agent <name>` | Select which agent to use for the command |
-| `--version` | Show CLI version |
+| `-V, --version` | Show CLI version |
 | `--help` | Show help text |
 
 ## Agent selection
@@ -862,7 +809,7 @@ Commands that operate on an agent use this priority to determine which agent:
 1. `--agent <name>` flag (highest priority)
 2. `MNEMOM_AGENT` environment variable
 
-There is no default agent concept. If neither `--agent` nor `MNEMOM_AGENT` is set, the CLI will prompt you to specify one (or error in non-interactive mode).
+There is no default agent concept. If neither `--agent` nor `MNEMOM_AGENT` is set, the command stops with `Agent required. Use --agent <name> or set MNEMOM_AGENT.` (`mnemom agent` is different: it uses its own default agent, see [Your governed agent](/gateway/agent#your-governed-agent).)
 
 **Example:**
 
