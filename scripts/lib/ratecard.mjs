@@ -227,7 +227,8 @@ const USAGE_SUFFIXES = ["", " of the level 2 call"];
  *   Free
  *   N× measured model cost[ of the level 2 call]
  *   Measured model cost[ of the level 2 call]          (at cost: 1×)
- *   P% of the forwarded inference spend, less the request's agent charges
+ *   P% of the forwarded inference spend, less the request's agent charges   (scope agent)
+ *   P% of the forwarded inference spend, less the request's measured charges (scope all)
  *   N μ[ ($X)][ per [completed ]<unit>]
  * Anything else is "unparseable", which the gate reports as a failure.
  */
@@ -242,8 +243,8 @@ export function parsePrice(cell) {
   if (usage && USAGE_SUFFIXES.includes(usage[2].toLowerCase())) return { kind: "usage", multiplier: Number(usage[1]) };
   const atCost = text.match(/^(?:at\s+)?measured model cost(.*)$/i);
   if (atCost && USAGE_SUFFIXES.includes(atCost[1].toLowerCase())) return { kind: "usage", multiplier: 1 };
-  const share = text.match(new RegExp(String.raw`^(${NUM})%\s+of the forwarded inference spend, less the request's agent charges$`, "i"));
-  if (share) return { kind: "share", pct: num(share[1]) };
+  const share = text.match(new RegExp(String.raw`^(${NUM})%\s+of the forwarded inference spend, less the request's (agent|measured) charges$`, "i"));
+  if (share) return { kind: "share", pct: num(share[1]), against: share[2].toLowerCase() };
   const fixed = text.match(new RegExp(String.raw`^(${NUM})\s*[μµ](?:\s*\(\$(${NUM})\))?(?:\s+per\s+(?:completed\s+)?([a-z][a-z-]*))?$`));
   if (fixed) {
     const out = { kind: "fixed", mu: num(fixed[1]) };
@@ -345,8 +346,10 @@ export function checkPageAgainstExtract(mdx, extract) {
     if (cls.class === INFERENCE_SHARE_CLASS) {
       if (sharePct === null) {
         problems.push(`line ${row.line}: ${row.class} is listed but rate card ${extract.version} carries no inference_share_bps`);
-      } else if (price.kind !== "share") {
-        problems.push(`line ${row.line}: ${row.class} must read "${sharePct}% of the forwarded inference spend, less the request's agent charges"`);
+      } else if (price.kind !== "share" || price.against !== SHARE_AGAINST[shareScope(extract)]) {
+        problems.push(
+          `line ${row.line}: ${row.class} must read "${sharePct}% of the forwarded inference spend, less the request's ${SHARE_AGAINST[shareScope(extract)]} charges" (inference_share_scope ${shareScope(extract)})`,
+        );
       } else if (!sameMoney(price.pct, sharePct)) {
         problems.push(`line ${row.line}: ${row.class} says ${price.pct}% but the rate card's inference share is ${sharePct}%`);
       }
@@ -420,6 +423,7 @@ export function checkPageAgainstExtract(mdx, extract) {
   problems.push(...checkMoneyPairs(mdx, extract));
   problems.push(...checkWorkedExample(mdx, allowedMultipliers, sharePct));
   problems.push(...checkOverdraftWording(mdx, extract));
+  problems.push(...checkShareScopeWording(mdx, extract));
   problems.push(...checkExpiryWording(mdx));
 
   const lines = mdx.split("\n");
@@ -556,6 +560,36 @@ function sentences(mdx) {
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
     .replace(/\s+/g, " ")
     .split(/(?<=[.!?])\s+/);
+}
+
+// What the share is netted against, by the card's inference_share_scope. An absent
+// scope is the billing default, agent.
+const SHARE_AGAINST = { agent: "agent", all: "measured" };
+const shareScope = (extract) => extract.inference_share_scope ?? "agent";
+
+const OUTSIDE_THE_MAX = /\b(?:on top|outside the comparison)\b/i;
+const GOVERNANCE_TOPIC = /\b(?:governance|integrity analysis|Safe House)\b/i;
+
+/**
+ * The prose must say which charges the 4% is compared against. Scope `all` nets
+ * governance too, so no sentence may put governance (the integrity analysis, Safe
+ * House) on top of the comparison; observer trace analysis is the one thing that
+ * stays on top, because it runs later with no request to attach to, so a sentence
+ * about it is allowed. Scope `agent` must say governance is charged on top.
+ */
+export function checkShareScopeWording(mdx, extract) {
+  if (extract.inference_share_bps == null) return [];
+  const problems = [];
+  const all = sentences(mdx);
+  const outside = all.filter((s) => OUTSIDE_THE_MAX.test(s) && GOVERNANCE_TOPIC.test(s) && !/\bobserver\b/i.test(s));
+  if (shareScope(extract) === "all") {
+    for (const s of outside) {
+      problems.push(`rate card ${extract.version} nets governance inside the inference-share comparison (scope all), but the page says: "${s.trim()}"`);
+    }
+  } else if (outside.length === 0) {
+    problems.push(`rate card ${extract.version} bills governance on top of the inference-share comparison (scope agent); the page must say so`);
+  }
+  return problems;
 }
 
 const OVERDRAFT_TOPIC = /\b(?:below (?:zero|0)|negative|overdraft|overdrawn|overdraw|credit line)\b/i;
