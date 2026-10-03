@@ -126,7 +126,7 @@ test("retired pricing wording fails", () => {
 test("review mutation (a): a stale dollar figure beside a μ price fails", () => {
   mustFail(PAGE.replace("24,900 μ ($249)", "24,900 μ ($299)"), /rg\.run\.person-card shows 24900 μ as \$299; at the peg that is \$249/);
   mustFail(PAGE.replace("24,900 μ ($249)", "24,900 μ ($299)"), /24900 μ is \$249 at the peg, not \$299/);
-  mustFail(PAGE.replace("10,000 μ (worth $100", "10,000 μ (worth $150"), /10000 μ is \$100 at the peg, not \$150/);
+  mustFail(PAGE.replace("49,900 μ ($499)", "49,900 μ ($599)"), /49900 μ is \$499 at the peg, not \$599/);
   mustFail(PAGE.replace("$0.0004 (0.04 μ)", "$0.004 (0.04 μ)"), /0\.04 μ is \$0\.0004 at the peg, not \$0\.004/);
   // and a μ-only re-price on the rate card leaves the page's dollar figure stale:
   const snap = clone(SNAP);
