@@ -1,0 +1,121 @@
+---
+title: "Savings estimates"
+description: "What the mnemom agent first-run savings screen and the in-session savings counter show, how the estimate is worked out, and how to turn each one off."
+sidebarTitle: "Savings estimates"
+icon: "piggy-bank"
+---
+
+`mnemom agent` shows what Mnemom saves you in two places:
+
+- a **first-run savings screen**, a one-time look back at your recent Claude Code
+  sessions;
+- a **savings counter** in Claude Code's status bar while a session runs.
+
+Both are estimates, worked out on your machine. Mnemom saves the most on long
+sessions: 15–25% on sessions over 200k tokens versus stock Claude Code defaults.
+
+<Note>
+The savings counter is only in the `next` release. Install with
+`npm install -g @mnemom/mnemom@next`; see [Install once](/gateway/agent#install-once).
+</Note>
+
+## First-run savings screen
+
+The first time you launch `mnemom agent` in a terminal, it asks before Claude
+Code starts:
+
+```text
+Mnemom can look at your recent Claude Code sessions and show you what it would have saved.
+It runs on this machine. Nothing is uploaded.
+Take a look? [Y/n/never]
+```
+
+| Answer | What happens |
+| --- | --- |
+| Enter or `y` | Shows the screen, then launches. You are not asked again. |
+| `n` | Launches. You are asked again next time. |
+| `never` | Launches. You are never asked again. |
+
+To see the screen again at any time, run `mnemom agent --first-run`. It shows
+the screen and exits without launching.
+
+### What it shows
+
+The screen covers your last 30 days of Claude Code on this machine:
+
+- what that usage cost at Anthropic API list prices, and about what it would have
+  cost with Mnemom. Everything is priced at API prices, whatever you actually pay,
+  including on a subscription;
+- your biggest session, with and without Mnemom;
+- on a Claude Team or Enterprise plan, the saving as a share of your usage, if it
+  is 5% or more;
+- for sessions that already ran through `mnemom agent`, what Mnemom saved, and
+  separately what it would have saved on the rest.
+
+If the saving is under $5 or under 5%, the screen says your sessions were too
+small for Mnemom to change much. If there is too little history to look at, it
+shows the general figure for long sessions instead. Every number is rounded down.
+
+### What it reads and writes
+
+- It reads Claude Code's session files on this machine, and only their usage
+  data: token counts, model names and timestamps. It never reads the content of
+  your messages.
+- It makes no network calls. Nothing is uploaded.
+- It writes two files in `~/.mnemom`, readable only by you:
+  `first-run.json` remembers your answer, and `first-run-audit.json` records each
+  number on the screen and how it was worked out.
+
+You are never asked in a script, a pipe or CI, or with `--dry-run`. To never be
+asked on a machine, set `MNEMOM_AGENT_NO_FIRST_RUN=1`.
+
+## Savings counter
+
+When `mnemom agent` launches Claude Code, it adds a segment to Claude Code's
+status bar that updates as the session runs:
+
+```text
+mnemom saved ~$1.84 this session
+```
+
+If you already have a status line in your Claude Code settings, it keeps running
+and the counter is added after it, separated by ` · `.
+
+The counter uses the same estimate as the first-run screen, applied to the
+current session, including its subagents, and rounded down to the cent. It reads
+the session's files on this machine and makes no network calls. It keeps a small
+state file per session in `~/.mnemom/statusline/`.
+
+### Turn the counter off
+
+Set `MNEMOM_AGENT_NO_STATUSLINE=1` before launching:
+
+```bash
+MNEMOM_AGENT_NO_STATUSLINE=1 mnemom agent my-session   # this launch
+export MNEMOM_AGENT_NO_STATUSLINE=1                    # every launch from this shell
+```
+
+There is no `mnemom agent config` setting for it. The counter is also left out
+when you pass your own `--settings` to Claude Code after `--`, and it is only
+added when the coding-agent CLI is Claude Code.
+
+## How the estimate works
+
+- Each request in a Claude Code session file is priced at Anthropic API list
+  prices for its model, from the token counts Claude Code records.
+- Mnemom saves by folding long context. Requests too small for Mnemom to fold
+  count as no saving.
+- Larger requests get one flat saving rate, an estimate based on our benchmark of
+  long Claude Code sessions run with and without Mnemom. The number of requests
+  and the output are assumed to be the same as without Mnemom.
+- A single rate overstates the saving on mid-size requests and understates it on
+  very large ones. Across many sessions it evens out.
+
+The estimate is not your bill. Prices, plan limits and your own sessions vary,
+and some background calls Claude Code makes are not in its session files.
+
+## Related
+
+- [mnemom agent](/gateway/agent): install, invitations and launching
+- [Context folding](/gateway/agent#context-folding): how Mnemom keeps long sessions lean
+- [Sign-in options](/gateway/agent-sign-in): subscription, API key or Anthropic Console
