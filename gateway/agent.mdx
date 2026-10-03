@@ -16,15 +16,13 @@ It is designed to be one command: install once, then `mnemom agent`.
 ## Install once
 
 ```bash
-npm install -g @mnemom/mnemom@next
+npm install -g @mnemom/mnemom
 mnemom login
 ```
 
 <Note>
-Install the `next` channel (`@mnemom/mnemom@next`): the default `latest` release
-does not include the savings counter. Access to `mnemom agent` is still by
-invitation (see below). `mnemom login` opens a browser sign-in (device-code
-fallback on headless machines); set `MNEMOM_API_KEY` instead for CI. The CLI
+Access to `mnemom agent` is still by invitation (see below). `mnemom login`
+opens a browser sign-in (device-code fallback on headless machines); set `MNEMOM_API_KEY` instead for CI. The CLI
 keeps itself up to date in the background — see
 [Updates](/gateway/cli#updates-mnemom-update).
 </Note>
@@ -75,6 +73,12 @@ mnemom agent fix-auth --goal "make login work on Safari" # named, goal on
 ```
 
 Non-interactive runs (pipes, CI) never prompt; they need a session name.
+
+Before Claude Code starts, your first launch in a terminal can ask two one-time
+questions: how Claude Code should sign in to Anthropic, when there is a choice (see
+[Sign-in options](/gateway/agent-sign-in)), and whether to look at what Mnemom
+would have saved on your recent sessions (see
+[Savings estimates](/gateway/agent-savings)).
 
 ## Implicit goal mode (experimental)
 
@@ -167,6 +171,7 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 | Launch shape | **Terminal** — a governed session in this terminal. | `config set launch` |
 | Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
 | Agent | a governed `agent-<you>` agent, created and claimed in your org on first run | `--agent <slug>`, `config set agent` |
+| Sign-in | Anthropic API key, unless you pick another option on first launch | `--auth`, `config set auth` |
 | Key source | env → saved store → prompt | `config set key_source` |
 
 A launch always uses one Mnemom deployment end to end: the gateway must belong to
@@ -203,6 +208,7 @@ mnemom agent config path                 # print the file path
 | `effort` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`) |
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
 | `launch` | Launch shape — `terminal` (`remote-control`\|`server` are internal-only) |
+| `auth` | How Claude Code signs in to Anthropic: `api-key` (default), `subscription` or `console`. See [Sign-in options](/gateway/agent-sign-in) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
 | `goal_mode` | What a launch with no `--goal`/`--implicit`/`--no-implicit` does — `implicit` or `off`. Ignored until you opt in to the experimental `implicit` feature, so implicit mode is never on by default. After you opt in, an unset value means `implicit`; set `off` to use implicit mode only with `--implicit` |
 | `context` | Context folding default — `true`/`false` (default `true`; also settable per-launch with `--context`/`--no-context`) |
@@ -253,6 +259,10 @@ card runs integrity and injection screening for visibility
 delegated_authority`); the protection card screens all four surfaces (incoming,
 outgoing, tool calls, tool responses) in observe mode at thresholds
 `0.60 / 0.80 / 0.95`.
+
+With a [Claude subscription sign-in](/gateway/agent-sign-in#claude-subscription-team-or-enterprise),
+there is nothing to set up first: the gateway creates the agent in your org on
+the session's first turn.
 
 ```bash
 mnemom agent setup                  # provision / repair the governed agent explicitly
@@ -398,26 +408,21 @@ Precedence: `--no-context` (always `off`; combining it with
 context_profile`, else `off` when folding is turned off by `context = false` or
 `MNEMOM_AGENT_CONTEXT`, else `balanced`.
 
-## Your Anthropic key
+## How Claude Code signs in
 
-`mnemom agent` resolves your Anthropic key in
-order:
-
-1. environment: `MNEMOM_AGENT_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY`;
-2. the CLI's own store, `~/.mnemom/launcher.json` (`0600`);
-3. an interactive prompt (masked), offering to save it for next time.
-
-`config set key_source env|store|prompt` restricts the search (`env` = env only,
-`store` = env then store, `prompt` = always prompt). The key is placed only in
-the launched process and is never logged, printed, or passed as an argument. If
-no key resolves, `mnemom agent` refuses to launch un-routed rather than silently
-falling back.
+Claude Code can sign in to Anthropic three ways under `mnemom agent`: an
+Anthropic API key (the default), your Claude Team or Enterprise subscription, or
+the API key your Anthropic Console login created. Your first launch in a
+terminal asks which one when there is a choice, and saves the answer.
+[Sign-in options](/gateway/agent-sign-in) covers each one, where the API key is
+looked up, and what you see when something is missing.
 
 ## Flags
 
 | Flag | Meaning |
 | --- | --- |
 | `--invite <token>` | Redeem a Mnemom Agent invitation, then launch if a session name is given |
+| `--auth <mode>` | How Claude Code signs in: `api-key`, `subscription` or `console` — see [Sign-in options](/gateway/agent-sign-in) |
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
 | `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the opt-in experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
@@ -431,11 +436,14 @@ falling back.
 | `--context-profile <profile>` | `balanced` (default), `aggressive`, or `off` — see [Context profiles](#context-profiles) |
 | `--setup` / `--no-setup` | Force / skip governed-agent provisioning |
 | `--dry-run` | Print the resolved launch plan and exit |
+| `--first-run` | Show the [first-run savings screen](/gateway/agent-savings) again, then exit |
 
 Anything after `--` is passed straight through to the coding-agent CLI.
 
 ## Related
 
+- [Sign-in options](/gateway/agent-sign-in) — subscription, API key or Anthropic Console
+- [Savings estimates](/gateway/agent-savings) — the first-run savings screen and the in-session counter
 - [CLI reference](/gateway/cli) — the full `mnemom` command surface
 - [Agent claim flow](/guides/agent-claim-flow)
 - [Conscience values](/gateway/conscience-values) and [org card templates](/gateway/org-card-templates)

@@ -1,0 +1,132 @@
+---
+title: "Sign-in options"
+description: "How Claude Code signs in to Anthropic when you launch it with mnemom agent: a Claude Team or Enterprise subscription, an Anthropic API key, or an Anthropic Console login."
+sidebarTitle: "Sign-in options"
+icon: "key"
+---
+
+`mnemom agent` sends Claude Code's model traffic through the Mnemom gateway, but
+Claude Code still has to sign in to Anthropic. There are three ways to do that:
+
+| Option | `auth` setting | Anthropic bills | You need |
+| --- | --- | --- | --- |
+| [Claude subscription](#claude-subscription-team-or-enterprise) | `subscription` | your Claude Team or Enterprise plan | Claude Code signed in with your Team or Enterprise claude.ai account |
+| [Anthropic API key](#anthropic-api-key) | `api-key` (default) | the Anthropic account that owns the key | an API key (`sk-ant-…`) |
+| [Anthropic Console](#anthropic-console) | `console` | API usage on your Console organization | Claude Code signed in with `/login` → "Anthropic Console account" |
+
+Your Mnemom µ balance is checked and charged the same way whichever option you
+pick. See [Account and µ balance](/gateway/agent).
+
+## How the option is picked
+
+The first time you run `mnemom agent` in a terminal, it looks at how Claude Code
+is signed in on this machine (`~/.claude.json`, or `.claude.json` in
+`$CLAUDE_CONFIG_DIR`). If there is a real choice, it asks once. For example:
+
+```text
+mnemom agent: Claude Code is signed in with your Claude team plan. How should it sign in through Mnemom?
+  1) Claude subscription — Team or Enterprise (your claude.ai login)
+  2) Anthropic API key
+Select:
+```
+
+Type the number and press Enter. Your answer is saved as `auth` in
+`~/.mnemom/launcher.toml`. If you press Enter without a number, this launch uses
+an API key and you are asked again next time.
+
+| Claude Code is signed in with | What `mnemom agent` does |
+| --- | --- |
+| A Claude Team or Enterprise plan | Asks: subscription or API key |
+| An Anthropic Console account, and the API key `/login` created is on this machine | Asks: Console or API key |
+| A Claude Pro or Max plan | Uses an API key, says why, and saves `auth = api-key` |
+| An Anthropic Console account without that key (for example, a `claude auth login --console` profile) | Uses an API key, says why, and saves `auth = api-key` |
+| Amazon Bedrock, Google Vertex AI or Microsoft Foundry | Uses an API key, says why, and saves `auth = api-key` |
+| Nothing | Uses an API key and saves nothing |
+
+You are never asked in a script, a pipe or CI. A non-interactive launch with
+nothing set uses an API key.
+
+To change the option later, or set it for one launch:
+
+```bash
+mnemom agent config set auth subscription   # or api-key, console
+mnemom agent my-session --auth console      # this launch only
+```
+
+Precedence: `--auth`, then `MNEMOM_AGENT_AUTH`, then `auth` in
+`~/.mnemom/launcher.toml`, then `api-key`. To see what a launch would use without
+launching, run `mnemom agent --dry-run`. `mnemom agent doctor` also reports it.
+
+## Claude subscription (Team or Enterprise)
+
+Use your company's Claude plan. You don't need an Anthropic API key.
+
+1. Sign Claude Code in to your Team or Enterprise claude.ai account: run
+   `claude`, then `/login`.
+2. Run `mnemom agent` and pick **Claude subscription**, or run
+   `mnemom agent config set auth subscription`.
+
+What happens on a subscription launch:
+
+- Claude Code sends its own claude.ai login to the gateway. `mnemom agent`
+  doesn't read or store it.
+- The gateway checks your plan with Anthropic. Only Team and Enterprise plans are
+  accepted. Pro and Max plans are refused and need an API key instead.
+- Usage counts against your Claude plan, as it does when you use Claude Code
+  without Mnemom.
+- The session runs in your terminal.
+- Your governed agent is created in your Mnemom org on the session's first turn,
+  so you don't need to run `mnemom agent setup` first.
+- The gateway identifies you by a Mnemom API key. The first time one is needed,
+  `mnemom agent` creates a gateway-only key and saves it to
+  `~/.mnemom/launcher.json` (readable only by you). To use your own key instead,
+  set `MNEMOM_AGENT_MNEMOM_KEY` to an org API key with the `gateway` scope.
+
+## Anthropic API key
+
+This is the default. `mnemom agent` looks for your key in this order:
+
+1. the environment: `MNEMOM_AGENT_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY`;
+2. its own store, `~/.mnemom/launcher.json` (readable only by you);
+3. a masked prompt, which offers to save the key for next time.
+
+`mnemom agent config set key_source env|store|prompt` narrows the search:
+`env` uses the environment only, `store` uses the environment then the store, and
+`prompt` always asks.
+
+The key goes only to the Claude Code process `mnemom agent` launches. It is never
+logged, printed or passed as a command-line argument. If no key is found,
+`mnemom agent` stops instead of launching Claude Code without the gateway.
+
+## Anthropic Console
+
+Use this if your team pays for Claude through the Anthropic Console (API
+billing) and you sign Claude Code in with a Console account.
+
+1. Run `claude`, then `/login` → **Anthropic Console account**. Claude Code
+   creates an API key for you and keeps it on this machine: in your login
+   keychain on macOS, otherwise in Claude Code's `.claude.json`.
+2. Run `mnemom agent` and pick **Anthropic Console**, or run
+   `mnemom agent config set auth console`.
+
+On every launch, `mnemom agent` reads the key Claude Code created and uses it
+exactly like an API key you supplied. It never copies the key into its own
+files.
+
+If Claude Code has no Console key on this machine, a launch with
+`auth = console` stops with this message:
+
+```text
+mnemom agent: auth = console, but Claude Code has no Anthropic Console login on this machine.
+  Sign in: run `claude`, then /login → "Anthropic Console account".
+  Or use a key instead: `mnemom agent config set auth api-key`.
+```
+
+This happens, for example, after `claude auth login --console`, which signs you
+in without creating a key. Sign in again with `/login` as above, or switch to an
+API key.
+
+## Related
+
+- [mnemom agent](/gateway/agent): install, invitations and launching
+- [Savings estimates](/gateway/agent-savings): the first-run savings screen and the in-session counter
