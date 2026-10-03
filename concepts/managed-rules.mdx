@@ -1,52 +1,38 @@
 ---
 title: "Managed Rules"
-description: "Signed detection rules AEGIS publishes to every gateway in the network. Low-severity rules auto-promote with a 24h observe soak; rules that would block production traffic require dual-control human review under an append-only audit chain."
+description: "Detection rules AEGIS delivers to every gateway as an Ed25519-signed rule set. Each gateway verifies the signature before it uses the rules and picks up changes within minutes. New rules are reviewed before they reach production."
 sidebarTitle: "Managed Rules"
 icon: "shield-keyhole"
 ---
 
-A **Managed Rule** is the control-plane state that wraps a signed detection recipe propagated to every gateway in the network. Recipes are detection content; rules are the control-plane state; both compose through the same machinery as [agent cards](/concepts/agent-cards). When [AEGIS](/concepts/aegis) promotes a detection pattern — from Mnemom's own adversarial testing, from a customer FN/FP report, or from the cross-tenant aggregator — the result is a Managed Rule that lands at every affected customer's gateway, targeting the P95 ≤ 30s propagation SLO.
+A **Managed Rule** is the control-plane state that wraps a detection recipe. Recipes are detection content; rules are the control-plane state; both compose through the same machinery as [agent cards](/concepts/agent-cards) (Platform → Org → Team → Agent). [AEGIS](/concepts/aegis) delivers the active rules to every gateway as one signed rule set.
 
-This page documents the rule pipeline: how a candidate becomes a promoted rule, how the protective invariant is enforced, and how the 24-hour observe soak governs mode escalation.
+## Where candidates come from
 
-## The signal-loop pipeline
+A candidate rule enters a review queue before it can become a Managed Rule. Every candidate row is stamped server-side with a `writer_identity` recording where it came from and under which auth context — a customer's own false-negative or false-positive report, an internal observation, a security-researcher submission, or a platform-admin entry. The customer never sets the writer identity; it is the server-side stamp review uses to decide what a candidate is eligible for.
 
-AEGIS Managed Rules are sourced from three signal loops plus the substrate-fingerprint cross-cutting dimension; see [AEGIS — three signal loops](/concepts/aegis#the-three-signal-loops). Every candidate row is stamped server-side with a `writer_identity` recording which signal loop and auth context produced it — a customer's own FN/FP report, an internal observation, a security-researcher submission, or a platform-admin manual entry. The customer never sets the writer identity; it is the server-side stamp downstream review uses to scope auto-promotion eligibility.
+Screening is also tested continuously by an automated, adaptive attacker that runs against sandbox agents in an isolated environment, never against customer agents.
 
-## Reviewer modes
+## Review
 
-The graduated-trust pattern used by Cloudflare WAF Managed Rules, AWS Shield Advanced, and CrowdStrike Falcon: confidence determines auto-eligibility, and convenience is the customer's posture choice. Mode is set platform-wide.
+New rules are reviewed before they reach production. The reviewer mode is set platform-wide:
 
-| Mode | Low blast radius (`observe` / `nudge` defaults) | Would block production traffic |
+| Mode | Low blast radius (`observe` / `nudge`) | Would block production traffic |
 |---|---|---|
-| **`manual`** (default) | Platform admin reviews + approves | Platform admin reviews + a second admin signs off (dual-control) |
-| **`auto-approve-trusted-sources`** | Auto-promote when the source is a trusted internal signal and pattern complexity is below threshold | Still requires dual-control human review — no exception |
-| **`auto-approve-high-confidence`** | Auto-promote when a confidence score (a function of how many distinct agents a pattern bypassed, its consistency, and its complexity) clears threshold | Still requires at least one human approver under dual-control |
+| **`manual`** (default) | A platform admin reviews and promotes | Approval from a second reviewer who did not create the rule is required before promotion |
+| **`auto-approve-trusted-sources`** | May auto-promote when the source is a trusted internal signal and pattern complexity is below threshold | Same as `manual` |
+| **`auto-approve-high-confidence`** | May auto-promote when a confidence score clears threshold | Same as `manual` |
 
-The choice between modes only affects the low-blast-radius tier; rules that would block production traffic are governed by the protective invariant below regardless of mode.
+The reviewer mode only affects rules whose blast radius is bounded. Rules that would block production traffic always go through human review. Each review step is recorded in a table that rejects edits and deletes.
 
-## The protective invariant
+## Signed delivery
 
-A rule that would actually block real production traffic can never promote without a human in the loop, regardless of how the reviewer mode is set. Auto-modes only accelerate rules whose blast radius is bounded (observe / nudge / log).
+Promotion writes the active rule set to two independent storage tiers, each signed with its own Ed25519 key. The gateway verifies the signature on every read:
 
-The invariant is enforced **structurally** by the schema: a database constraint requires the dual-control quorum to be recorded before a rule can be marked active. The database refuses to write an active row that has not collected the required approvals — this is not a workflow a misconfigured handler can skip.
+- A rule set whose signature does not verify against the primary tier's key falls through to the secondary tier.
+- A secondary-tier rule set that does not verify falls through to the gateway's last-known-good in-process copy.
 
-## Signed promotion
-
-Every promotion produces a signed row plus two independent signed envelopes — a primary read tier and a secondary failover tier for the gateway. The signing keys are independent: they rotate independently and would have to be compromised independently to fully poison the rule plane. Even if both envelopes were forged, the gateway verifies each row against its own per-row promotion signature before evaluation, and a forged row will not match.
-
-See [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) for the wire format and [`/trust/slos`](https://trust.mnemom.ai/slos) for the published SLOs on failover behavior.
-
-## Propagation, soak, and auto-rollback
-
-A promoted rule transits four stages before it reaches its target enforcement mode:
-
-1. **Sign + dual-write.** Promotion writes the per-row signed entry, then dual-writes both envelopes from the same canonical recipe set — only the signing key differs between them.
-2. **Gateway propagation.** The gateway's tiered read pipeline picks up the new envelope within the P95 ≤ 30s propagation target.
-3. **24-hour observe soak.** The rule enters `observe` mode regardless of its target mode. During the soak, the false-positive rate over that window governs whether the rule survives.
-4. **Escalation or auto-rollback.** If the soak passes, the rule escalates to its target mode (`nudge` or `enforce`). If it fails on false-positive rate, the rule is auto-rolled-back under [CLPI trust recovery](/concepts/card-lifecycle) and Mnemom's internal `recipe.retired` signal fires with `reason = 'observe_soak_fp'` (see note below — this is an internal operations signal, not one your org subscribes to).
-
-The soak is not bypassable: a platform admin cannot manually escalate before the 24-hour window completes. A rule can be published directly as `enforce`, but only after the soak, never instead of it. Independently of the soak, a rule that goes 90 days with zero hits, or whose cumulative false-positive rate crosses threshold once it has enough evaluations to be statistically meaningful, is retired by a nightly sweep.
+Gateways pick up a changed rule set within minutes. See [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) for the wire format.
 
 ## Webhook events
 
@@ -56,7 +42,7 @@ Only one event in the rule lifecycle is delivered to your org's own webhook subs
 |---|---|---|
 | [`recipe.candidate.created`](/api-reference/webhook-events#recipecandidatecreated) | Your org submits a false-positive/false-negative report on a recipe (see below) | `candidate_id`, `writer_identity`, `report_type`, `related_recipe_id` |
 
-The rest of the lifecycle — `recipe.promoted`, `recipe.retired`, and the campaign-state transitions on the network layer — are internal Mnemom operations signals, not customer-subscribable webhooks; see the note on [Webhook Event Catalog](/api-reference/webhook-events#detection-reports). Track their effect instead through the [advisory](/concepts/advisories) and [IoC](/concepts/iocs) feeds, or the published [`/trust/slos`](https://www.mnemom.ai/trust/slos) commitments. See [Webhooks](/guides/webhooks) for subscription setup and [Webhook contract](/concepts/webhook-contract) for the canonical payload shape.
+The rest of the lifecycle (`recipe.promoted`, `recipe.retired`) is internal Mnemom operations signals, not customer-subscribable webhooks; see the note on [Webhook Event Catalog](/api-reference/webhook-events#detection-reports). See [Webhooks](/guides/webhooks) for subscription setup and [Webhook contract](/concepts/webhook-contract) for the canonical payload shape.
 
 ## Reporting a false positive or false negative
 
@@ -77,9 +63,7 @@ The report lands in the same review queue as every other candidate, with the cus
 
 ## See also
 
-- [AEGIS](/concepts/aegis) — the overall protection-layer framing
-- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — the wire format on the signed envelopes
-- [CLPI](/concepts/clpi) — the governance layer that handles auto-rollback
-- [Protection Card](/concepts/protection-card) — the per-agent configuration Managed Rules tune at the gateway
+- [AEGIS](/concepts/aegis) — runtime screening at four checkpoints
+- [Managed rule envelope schema](/specifications/managed-rule-envelope-schema) — the wire format of the signed rule set
+- [Protection Card](/concepts/protection-card) — the per-agent configuration Managed Rules apply under
 - [Card Composition](/concepts/card-composition) — the scope cascade Managed Rules compose into
-- [`/trust/slos`](https://trust.mnemom.ai/slos) — published SLOs for propagation, freshness, failover
