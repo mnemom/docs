@@ -1,31 +1,25 @@
 ---
 title: "Supply Chain Trust"
-description: How Mnemom publishes its npm packages with SLSA provenance, and how to verify the packages you install.
+description: How Mnemom publishes its npm packages, which carry SLSA provenance, and how to verify the packages you install.
 ---
 
-Every `@mnemom/*` npm package is published with **SLSA build provenance** — a cryptographically signed attestation that binds each published tarball to the exact GitHub Actions workflow run that built it. This guarantees the package you install was built from the source code we published, on infrastructure we control, without a developer's laptop or long-lived credential in the chain.
+Our npm packages under the `@mnemom/*` scope are published from GitHub Actions through npm's [Trusted Publisher](https://docs.npmjs.com/trusted-publishers) system, so no long-lived npm token is involved. Packages built from our public repositories also carry **SLSA build provenance**: a signed attestation that ties the published tarball to the workflow run, repository and commit that built it.
 
 ## What provenance means
 
-When you install a recent version of any `@mnemom/*` package, the tarball on the npm registry is accompanied by a [SLSA provenance attestation](https://slsa.dev/spec/v1.0/provenance) (predicate type `https://slsa.dev/provenance/v1`). The attestation is:
+For packages with provenance, the tarball on the npm registry is accompanied by a [SLSA provenance attestation](https://slsa.dev/spec/v1.0/provenance) (predicate type `https://slsa.dev/provenance/v1`). The attestation is:
 
 - **Signed** via [sigstore](https://www.sigstore.dev/), using short-lived keys issued only to the specific GitHub Actions workflow run.
 - **Bound to the source** — records the exact commit SHA, repository, and workflow path used to build the package.
 - **Transparent** — published to the public sigstore transparency log; anyone can audit the full signing history.
 
-No long-lived npm tokens are used. All publishes authenticate via GitHub OIDC to npm's [Trusted Publisher](https://docs.npmjs.com/trusted-publishers) system.
+## Packages without provenance
 
-## Runtime supply-chain detection with AEGIS
+npm only issues provenance for packages built from a public source repository. Packages built from our private platform repository are published through Trusted Publisher without a provenance attestation: the CLI (`@mnemom/mnemom`), `@mnemom/sdk`, `@mnemom/policy-engine` and `@mnemom/team-coherence`. Earlier releases of some of these, published while that repository was public, do carry provenance. For these packages, `npm audit signatures` reports a verified registry signature and may report no attestation; that is expected.
 
-SLSA provenance verifies the package at *build time*. The May 2026 *Mini Shai-Hulud* worm demonstrated that valid SLSA Build Level 3 attestations can be produced for malicious packages when the attacker controls the build pipeline. The cryptographic claim — *"this package was built by that build pipeline"* — is true; what the claim does not protect against is a compromised pipeline producing a signed worm. Runtime detection is the complementary layer.
+## Recording what your agents ran on
 
-[AEGIS](/concepts/aegis)'s [substrate fingerprint](/concepts/substrate-fingerprint) is the cross-tenant runtime signal. Every evaluation, integrity checkpoint, and arena attempt across every Mnemom customer is stamped with a `substrate_id` identifying the AI substrate the agent ran on. The base form is `<provider>:<model>`; when the customer sets the `X-Mnemom-Sdk-Version` and `X-Mnemom-Lockfile-Hash` headers, the trigger composes the four-component identifier `<provider>:<model>:<sdk@ver>:<lockfile-hash>` for deployed-dependency-graph attribution. The [L1 cross-tenant aggregator](/concepts/protection-network#l1-cross-tenant-aggregator) rolls behavioral signal per substrate axis-bucket. Behavioral deviation that appears at every customer running on the same substrate simultaneously is the signature SLSA cannot produce — because the attacker controls the build pipeline, not every customer's traffic.
-
-Customer action items, in order of effort:
-
-1. **Keep verifying SLSA provenance.** This guide's existing content remains the canonical package-layer step. SLSA + Sigstore + the Mnemom Trusted Publisher path is the build-layer foundation.
-2. **Read AEGIS L4 + L5 surfaces.** The [threat thermometer](/concepts/protection-network#l4-threat-thermometer) and the [IoCs](/concepts/iocs) + [advisories](/concepts/advisories) surfaces publish what AEGIS is detecting in the network — including any substrate-attributed behavioral deviations. Both surfaces are honest about state per the [calm-at-GA contract](/concepts/aegis#the-calm-at-ga-contract): if the network is calm, the page shows calm.
-3. **Opt in to elevated supply-chain attribution.** Set the `X-Mnemom-Lockfile-Hash` header (SHA-256 digest of your resolved manifest) on outbound gateway requests for deployed-dependency-graph attribution at AEGIS's L0 axis. The companion `X-Mnemom-Sdk-Version` header tightens SDK attribution when the User-Agent dispatch fallback isn't enough. See the [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) for the runnable how-to.
+Provenance covers the packages you install. To record which SDK, and optionally which dependency lockfile, each agent call ran on, use the [substrate fingerprint](/concepts/substrate-fingerprint): the gateway stores it on every integrity checkpoint. If you later learn that a dependency was compromised, you can find the checkpoints, and so the agent decisions, that ran on it. See the [lockfile-hash opt-in guide](/guides/lockfile-hash-opt-in) to set it up. Mnemom does not analyze fingerprints for compromise; it records them for your audit.
 
 ## Verifying a package
 
@@ -46,7 +40,7 @@ audited 1 package in 0s
 1 package has a verified attestation
 ```
 
-If any `@mnemom/*` package in your tree reports `missing attestations` or `unverified`, treat it as a supply-chain incident and contact security@mnemom.ai before using the installed code.
+If any `@mnemom/*` package not listed under [packages without provenance](#packages-without-provenance) reports `missing attestations`, or any package reports an invalid signature, treat it as a supply-chain incident and contact security@mnemom.ai before using the installed code.
 
 ### Inspecting provenance directly
 
@@ -65,27 +59,22 @@ You should see an entry like:
 
 ### SBOMs
 
-Every release ships a CycloneDX software bill of materials (SBOM). You can find it in two places:
-
-- **GitHub Release assets** — for packages published via GitHub Releases (e.g., `@mnemom/types`), the SBOM is attached to the release itself. Example: [mnemom/mnemom-types releases](https://github.com/mnemom/mnemom-types/releases).
-- **Workflow run artifacts** — every publish workflow run uploads `sbom.cdx.json` as an artifact, retained for 90 days.
-
-SBOMs are CycloneDX JSON format and can be consumed by any standard SBOM scanner (Grype, Trivy, Dependency-Track, etc.).
+Each publish generates a CycloneDX software bill of materials (SBOM). For packages released from our public repositories, the SBOM is attached to the GitHub release, for example on [mnemom/mnemom-types releases](https://github.com/mnemom/mnemom-types/releases). SBOMs are CycloneDX JSON and work with standard scanners such as Grype, Trivy and Dependency-Track.
 
 ## Packages covered
 
 All packages under the `@mnemom/*` scope on npm. A non-exhaustive list:
 
-| Package | Repo |
-|---|---|
-| `@mnemom/agent-alignment-protocol` | [mnemom/aap](https://github.com/mnemom/aap) |
-| `@mnemom/agent-integrity-protocol` | [mnemom/aip](https://github.com/mnemom/aip) |
-| `@mnemom/aip-otel-exporter` | [mnemom/aip-otel-exporter](https://github.com/mnemom/aip-otel-exporter) |
-| `@mnemom/policy-engine` | [mnemom/mnemom-platform](https://github.com/mnemom/mnemom-platform) |
-| `@mnemom/mnemom` (CLI) | [mnemom/mnemom-platform](https://github.com/mnemom/mnemom-platform) |
-| `@mnemom/types` | [mnemom/mnemom-types](https://github.com/mnemom/mnemom-types) |
-
-All publishes use the same canonical, shared publish workflow, which gives us a single source of truth for the publish recipe and makes drift between repos architecturally impossible.
+| Package | Repo | Provenance |
+|---|---|---|
+| `@mnemom/agent-alignment-protocol` | [mnemom/aap](https://github.com/mnemom/aap) | Yes |
+| `@mnemom/agent-integrity-protocol` | [mnemom/aip](https://github.com/mnemom/aip) | Yes |
+| `@mnemom/aip-otel-exporter` | [mnemom/aip-otel-exporter](https://github.com/mnemom/aip-otel-exporter) | Yes |
+| `@mnemom/types` | [mnemom/mnemom-types](https://github.com/mnemom/mnemom-types) | Yes |
+| `@mnemom/mnemom` (CLI) | Private | No |
+| `@mnemom/sdk` | Private | No (some earlier releases: yes) |
+| `@mnemom/policy-engine` | Private | No (some earlier releases: yes) |
+| `@mnemom/team-coherence` | Private | No (some earlier releases: yes) |
 
 ## Reporting concerns
 
