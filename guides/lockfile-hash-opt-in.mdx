@@ -1,13 +1,13 @@
 ---
 title: "Opt in to lockfile-hash substrate attribution"
-description: "Set the X-Mnemom-Lockfile-Hash header on outbound requests so AEGIS attributes behavior to a specific deployed dependency-graph at L0. SHA-256 digest of your resolved manifest; the hash is sent, the manifest is not."
+description: "Set the X-Mnemom-Lockfile-Hash header on outbound requests so each integrity checkpoint records which deployed dependency graph produced it. SHA-256 digest of your resolved manifest; the hash is sent, the manifest is not."
 sidebarTitle: "Lockfile-hash opt-in"
 icon: "fingerprint"
 ---
 
-The default [substrate fingerprint](/concepts/substrate-fingerprint) AEGIS stamps on every row covers `<provider>:<model>`. Setting the `X-Mnemom-Lockfile-Hash` header (and, optionally, the companion `X-Mnemom-Sdk-Version` header) extends the fingerprint to a four-component identifier that includes a hash of *your* deployed dependency graph — making AEGIS able to attribute behavioral deviation to a specific deployed version of your stack, not just the model and SDK level.
+The default [substrate fingerprint](/concepts/substrate-fingerprint) recorded on each integrity checkpoint covers `<provider>:<model>`. Setting the `X-Mnemom-Lockfile-Hash` header (and, optionally, the companion `X-Mnemom-Sdk-Version` header) extends it to a four-component identifier that includes a hash of *your* deployed dependency graph. Each checkpoint then records exactly which build of your stack produced it, which you can use as evidence in your own audits and incident reviews.
 
-This guide is the runnable how-to. The conceptual surface is [substrate fingerprint](/concepts/substrate-fingerprint); the spec for the L1 read is [`/specifications/threat-state-response-schema`](/specifications/threat-state-response-schema).
+This guide is the runnable how-to. The conceptual surface is [substrate fingerprint](/concepts/substrate-fingerprint).
 
 ## What you'll change
 
@@ -130,7 +130,7 @@ Setting `X-Mnemom-Sdk-Version` explicitly is the way to get reliable SDK attribu
 | Hash | Stored verbatim in `integrity_checkpoints.substrate_id` as the fourth component. |
 | Manifest contents | **Never sent, never stored.** Only the hash crosses the wire. |
 | Validation | Malformed (not 64 hex chars after normalization) → 400 + `X-Mnemom-Error: invalid-lockfile-hash`; request rejected before reaching the agent. |
-| Lookup direction | `substrate_id` is the cross-tenant axis identity AEGIS aggregates on. The cross-tenant aggregator buckets per `(substrate, vertical, pattern, source)`; your hash contributes to the substrate axis bucket for your specific deployed graph. |
+| Visibility | Returned on your own checkpoints only. Mnemom does not compare it across customers. |
 
 ### Privacy posture
 
@@ -144,7 +144,7 @@ The canonical record is on `integrity_checkpoints.substrate_id`, readable via th
 curl -sS \
   -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
   "https://api.mnemom.ai/v1/agents/$AGENT_ID/checkpoints?limit=1" \
-  | jq '.[0].substrate_id'
+  | jq '.checkpoints[0].substrate_id'
 ```
 
 After issuing one request with both headers set, the latest checkpoint's `substrate_id` should be the four-component form, for example:
@@ -159,17 +159,15 @@ There is no dedicated self-test endpoint — the checkpoint read is the verifica
 
 | Scenario | Recommendation |
 |---|---|
-| You want substrate attribution at the deployed-dependency-graph level — AEGIS can flag *your* deployed stack independently of other customers running on the same `<provider>:<model>:<sdk@ver>`. | Opt in. |
+| You want each checkpoint to record which deployed dependency graph produced it, for your own audit trail. | Opt in. |
 | You only want SDK-level attribution and the User-Agent dispatch handles your client. | Skip. The default `<provider>:<model>` plus User-Agent-derived `<sdk@ver>` is sufficient. |
-| Your deployment is a single canonical image (lockfile is identical across the fleet). | Opt in. The hash is stable across the fleet and contributes coherent signal. |
-| Your lockfile changes on every deploy (lockfile churn). | Opt in only if you can tolerate the L1 bucket fragmenting per deploy. The substrate axis is most useful when the bucket is stable. |
+| Your lockfile changes on every deploy. | Opt in if you want per-deploy attribution; the value changes with each deploy. |
 | Your lockfile is trivial enough that the hash is reversible. | Skip if the reversal matters for your threat model. |
 
-The lockfile-hash dimension is the runtime-side companion to package-layer provenance — see [Supply-chain trust](/guides/supply-chain-trust) for how AEGIS substrate attribution and SLSA / Sigstore compose.
+The lockfile hash is a record of what you deployed. It does not detect a compromised dependency; use package-layer provenance for that. See [Supply-chain trust](/guides/supply-chain-trust).
 
 ## See also
 
 - [Substrate fingerprint](/concepts/substrate-fingerprint) — the conceptual page
-- [Supply-chain trust](/guides/supply-chain-trust) — the package-layer + runtime-layer story
-- [AEGIS](/concepts/aegis) — the protection-layer framing
-- [Threat state response schema](/specifications/threat-state-response-schema) — the customer-readable read of the L1 aggregator
+- [Supply-chain trust](/guides/supply-chain-trust) — package-layer provenance
+- [AEGIS](/concepts/aegis) — runtime screening

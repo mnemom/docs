@@ -1,99 +1,67 @@
 ---
 title: "AEGIS"
-description: "Adaptive Enforcement, Governance & Intelligence Substrate — the protection layer of Safe House. Screens every agent transaction at four checkpoints, each independently set to one of four enforcement modes."
+description: "Adaptive Enforcement, Governance & Intelligence Substrate — the runtime screening layer of Safe House. Checks every gateway call at four checkpoints, under three per-agent settings, each set to one of four enforcement modes."
 sidebarTitle: "AEGIS"
 icon: "shield-check"
 ---
 
-**Mnemom AEGIS** — Adaptive Enforcement, Governance & Intelligence Substrate — is the protection layer of [Safe House](/concepts/safe-house). It screens every agent transaction at four checkpoints (front door, back door, inside.autonomy, inside.integrity), each independently set to one of four enforcement modes (`off`, `observe`, `nudge`, `enforce`). AEGIS is the cross-tenant defensive network above the per-customer perimeter: per-customer Safe Houses detect on what they can see; AEGIS sees across all of them and feeds signed Managed Rules back to every gateway in the network.
+**Mnemom AEGIS** — Adaptive Enforcement, Governance & Intelligence Substrate — is the runtime screening layer of [Safe House](/concepts/safe-house). Every model call routed through the Mnemom gateway is checked at four checkpoints (front door, inside.autonomy, inside.integrity, back door). For each agent you choose, per setting, whether a check is `off`, only records (`observe`), warns (`nudge`), or steps in (`enforce`).
 
-AEGIS learns from three signal sources: Mnemom-run adversarial testing that continuously probes Safe House for bypasses, customer-reported false negatives and false positives, and aggregated cross-tenant patterns the network can see but no individual customer can. When a new detection pattern crosses the promotion bar, AEGIS converts it into an Ed25519-signed [Managed Rule](/concepts/managed-rules) and propagates it to every affected customer's gateway, targeting under thirty seconds at P95. Higher-severity rules require dual-control human review under an append-only audit chain, and the whole pipeline is backed by a public STIX 2.1 [Indicator-of-Compromise feed](/concepts/iocs).
+Detection content reaches the gateways as [Managed Rules](/concepts/managed-rules): an Ed25519-signed rule set that each gateway verifies before it uses it, and picks up within minutes of a change.
 
-This page is the conceptual entry point. The rule pipeline is documented in [Managed Rules](/concepts/managed-rules); the supply-chain detection dimension in [Substrate fingerprint](/concepts/substrate-fingerprint).
+## The four checkpoints
 
-## The four checkpoints × the four enforcement modes
+A checkpoint is a *position* in the request lifecycle, not a per-turn budget. The front door fires once per inbound surface: a request that hands three tool results back to the model passes the front door for the message and again for each of those results. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
-Every agent transaction passes four positions in the request lifecycle. Each position is independently configurable to one of four modes. This is the load-bearing bidirectional matrix Safe House operators tune; AEGIS does not introduce new modes or new checkpoints — it ships detection content that composes against the same matrix.
-
-A checkpoint is a *position*, not a per-turn budget. The front door in particular fires once per inbound surface: a request that hands three tool results back to the model passes the front door for the message and again for each of those results, all before the model sees any of them. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
-
-### Four checkpoints
-
-| Checkpoint | Position | What it screens |
+| Checkpoint | Position | What it checks |
 |---|---|---|
-| **Front door** | Inbound — runs on *every* inbound surface a request carries: the message, and each tool result coming back to the model in that same request (enforce: before the model reads it; observe/nudge: post-hoc) | Prompt injection, indirect injection, social engineering, BEC fraud, agent spoofing |
-| **Inside.autonomy** | Mid-transaction | Tool-use policy, action verification, CLPI proofs |
-| **Inside.integrity** | Mid-transaction | AIP reasoning checks, drift detection, conscience |
-| **Back door** | Outbound (enforce: before delivery; observe/nudge: post-hoc) | PII leakage, exfiltration patterns, alignment-card violations, regulated advice |
+| **Front door** | Inbound: the newest user message, and each tool result in the request (enforce and nudge: before the model reads it; observe: in the background, after the request is forwarded) | Prompt injection, hidden instructions in tool results, social engineering, payment-change fraud, false claims of system or admin authority |
+| **Inside.autonomy** | Mid-transaction | The tools offered to the model, against the agent's [Alignment Card](/concepts/alignment-cards); the tool calls the model makes, against the assets and operations your organization marks as protected |
+| **Inside.integrity** | Mid-transaction | The agent's reasoning, reviewed by [AIP](/protocols/aip/specification) for prompt injection, value misalignment, autonomy violations, corrupted or deceptive reasoning, and undeclared intent |
+| **Back door** | Outbound | Sensitive data in the response: card numbers, SSNs, API keys, private keys, access tokens, connection strings, emails, phone numbers and IP addresses. Redacted on non-streaming responses; recorded on streamed ones |
 
-### Four enforcement modes
+## Three settings per agent
 
-| Mode | Semantics |
+| Setting | Covers |
 |---|---|
-| **`off`** | Inactive. No analysis, no logging. |
-| **`observe`** | Full evaluation; verdict in header + Observatory; zero operational impact on the transaction. |
-| **`nudge`** | Soft intervention — warnings, prompts, advisories. Transaction proceeds. |
-| **`enforce`** | Synchronous block at quarantine / block thresholds. |
+| **Safe House** ([Protection Card](/concepts/protection-card) `mode`) | Front door, tool calls and back door. Each surface (incoming messages, tool responses, tool calls, outgoing responses) can be switched on or off. |
+| **Autonomy** (`autonomy_mode`) | Tool use against the Alignment Card. |
+| **Integrity** (`integrity_mode`) | The agent's reasoning. |
 
-The canonical enum is `off / observe / nudge / enforce`. See [Protection Card](/concepts/protection-card) for the per-agent configuration surface and [Card Composition](/concepts/card-composition) for the strictest-wins scope cascade.
+Settings apply at the platform, organization, team and agent level, and the strictest one wins. A lower level can add protection but cannot remove or weaken one set above it. See [Card Composition](/concepts/card-composition).
 
-## The three signal loops
+## Four enforcement modes
 
-AEGIS is one detection substrate fed by three signal loops plus the substrate-fingerprint cross-cutting dimension. Recipes are detection content; Managed Rules are the control-plane state each recipe wraps once promoted; both compose through the same machinery as [agent cards](/concepts/agent-cards) (Platform → Org → Team → Agent).
+| Mode | What happens |
+|---|---|
+| **`off`** | The check does not run. |
+| **`observe`** | The check runs and the result is recorded. The request and response are unchanged. |
+| **`nudge`** | The request goes through with a warning the model and your application can see. Sensitive data in outgoing responses is redacted. |
+| **`enforce`** | Flagged content does not go through. An unsafe message is replaced with a quarantine notice, a forbidden tool turn or a failed integrity check is replaced with a refusal, and sensitive data is redacted. The HTTP response itself is a normal response. |
 
-```
-ADVERSARIAL TESTING    CUSTOMER SIGNAL     CROSS-TENANT           SUPPLY-CHAIN
-(Mnemom-run probes      (FN/FP reports +    AGGREGATOR             (substrate
- against every Safe      sideband +          (rolling stats per     fingerprint +
- House deployment)       telemetry)          axis-bucket)           deviation patterns)
-       │                       │                    │                     │
-       └───────────────────────┴────────────────────┴─────────────────────┘
-                                       │
-                                       ▼
-                       CANDIDATE TABLE + REVIEW QUEUE       (writer identity per source)
-                                       │
-                                       ▼
-                       SIGNED PROMOTION                     (Ed25519; dual-control on higher-severity tiers)
-                                       │
-                                       ▼
-                       PROMOTED RECIPES → MANAGED RULES      (compose like cards:
-                                                             Platform / Org / Team / Agent)
-                                       │
-                                       ▼ (dual-signed across two independent storage tiers;
-                                       │  target P95 ≤ 30s propagation)
-                       GATEWAY EVALUATES AT 4 CHECKPOINTS × 4 MODES
-```
+Every gateway response carries the outcome of each checkpoint in the `X-Mnemom-Verdict` header, for example `front=pass; autonomy=pass; integrity=pass; back=pass`. See [Headers](/api-reference/headers).
 
-Supply-chain detection is a sub-dimension of the same substrate, not a parallel system. Every evaluation gets a [substrate fingerprint](/concepts/substrate-fingerprint) attribute. Substrate-attributed deviation patterns become recipes that compose like every other recipe — that is how supply-chain detection lands inside the four-checkpoint model rather than alongside it.
+## How detection rules are kept current
 
-Every candidate carries a `writer_identity` recording which signal loop and auth context produced it (a customer's own FN/FP report, an internal observation, a security-researcher submission, or a platform-admin manual entry). That taxonomy is stamped server-side by the auth context used at write time — a customer can report a false positive or false negative, but never sets the writer identity itself. The full pipeline from candidate to promoted Managed Rule is documented in [Managed Rules](/concepts/managed-rules).
+- **Signed delivery.** Managed Rules reach every gateway as an Ed25519-signed rule set. Each gateway checks the signature before it uses the rules and picks up changes within minutes.
+- **Review before production.** New rules are reviewed before they reach production. See [Managed Rules](/concepts/managed-rules).
+- **Continuous testing.** Screening is tested continuously by an automated, adaptive attacker that runs against sandbox agents in an isolated environment, never against customer agents.
+- **Customer reports.** You can report a missed attack or a false block against a rule. Reports go into the review queue.
 
-## The calm-at-GA contract
+Every candidate rule carries a `writer_identity` recording where it came from (a customer's own false-negative or false-positive report, an internal observation, a security-researcher submission, or a platform-admin entry). It is stamped server-side from the auth context used at write time; a customer can file a report but never sets the writer identity itself.
 
-> If the network is genuinely calm, the thermometer says calm, the advisory list shows no unresolved incidents, the IoC feed is empty. That's not a stub — that's the system telling the truth.
+## Limits
 
-This is the load-bearing honesty principle behind every AEGIS surface. The threat thermometer, the [IoC feed](/concepts/iocs), and the [advisory list](/concepts/advisories) reflect actual operational state, never fabricated activity to look busier than the network is. When AEGIS publishes a real advisory or IoC, it carries `synthetic: false` — and customers can rely on that field to distinguish a genuine detection from any illustrative or test-seed entry the platform has published for pipeline validation.
-
-## Honest claims and limitations
-
-AEGIS is precise about what it does and does not do, and where capability is partial rather than complete.
-
-### What AEGIS does not claim
-
-1. **Cryptographic identity at every layer.** AAP is a transparency protocol, not a trust protocol. The honest construction is: AAP declares an agent's identity and alignment. AIP verifies it in flight. CLPI governs its lifecycle and anchors evidence. Safe House screens it at the perimeter. AEGIS signs the cross-tenant defenses that act on it. None of these layers substitutes for the others.
-2. **Uniform detection confidence across every threat class.** AEGIS surfaces the confidence and tier of each Managed Rule; a low-confidence tier-3 rule in `observe` mode is not the same claim as a dual-control-reviewed rule in `enforce`.
-
-### Where AEGIS is one layer, not the whole answer
-
-- **Supply-chain compromise.** AEGIS detects *behavioral signatures consistent with* supply-chain compromise across every customer running on the same substrate. It does not replace package-level provenance verification — see [Substrate fingerprint](/concepts/substrate-fingerprint) and [Supply-chain trust](/guides/supply-chain-trust).
-- **Same-turn enforcement.** Inline enforcement at the four checkpoints is Safe House's job; AEGIS supplies the detection content. See [Safe House](/concepts/safe-house).
-- **Per-team oversight.** Sideband detectors observe team-level patterns; AEGIS consumes the signal for cross-tenant aggregation but does not auto-inject sideband observations into agent prompts. See [Sideband detection](/concepts/sideband-detection).
+1. **Not a trust protocol.** AAP declares an agent's identity and alignment, AIP verifies reasoning in flight, CLPI governs the card lifecycle, and AEGIS screens traffic at the gateway. None of these layers substitutes for the others.
+2. **Detection confidence varies by threat class.** A low-confidence rule in `observe` is not the same claim as a reviewed rule in `enforce`.
+3. **Only traffic through the gateway is screened.** Direct provider calls that bypass the gateway are not seen.
+4. **No supply-chain detection.** The [substrate fingerprint](/concepts/substrate-fingerprint) records which provider, model, SDK and (optionally) lockfile produced each checkpoint, as evidence for your own audits. AEGIS does not detect compromised dependencies; use package-level provenance for that. See [Supply-chain trust](/guides/supply-chain-trust).
 
 ## See also
 
-- [Managed Rules](/concepts/managed-rules) — the signed detection-rule pipeline AEGIS publishes to every gateway
-- [Substrate fingerprint](/concepts/substrate-fingerprint) — the cross-tenant supply-chain signal axis
-- [Safe House](/concepts/safe-house) — the per-customer perimeter AEGIS protects
+- [Managed Rules](/concepts/managed-rules) — the signed rule set AEGIS publishes to every gateway
+- [Safe House](/concepts/safe-house) — the per-customer screening configuration
+- [Protection Card](/concepts/protection-card) — per-agent Safe House settings
+- [Substrate fingerprint](/concepts/substrate-fingerprint) — what each checkpoint records about the stack that produced it
 - [CLPI](/concepts/clpi) — the governance layer that composes with AEGIS
-- [AAP specification](/protocols/aap/specification) — the transparency protocol AEGIS does not replace
-- [AIP specification](/protocols/aip/specification) — the per-turn integrity protocol AEGIS does not replace
+- [AIP specification](/protocols/aip/specification) — the per-turn integrity protocol
