@@ -24,8 +24,11 @@ mnemom login
 Access to `mnemom agent` is still by invitation (see below). `mnemom login`
 opens a browser sign-in (device-code fallback on headless machines); set `MNEMOM_API_KEY` instead for CI. The CLI
 keeps itself up to date in the background. If the Mnemom API needs a newer CLI
-than the one you run, the CLI stops, updates itself when it can, and asks you to
-run the command again — see [Updates](/gateway/cli#updates-mnemom-update).
+than the one you run, the CLI stops. In an interactive terminal, with a plain
+`npm install -g` install and auto-update on (the default), it updates itself and asks you to run the command
+again. Otherwise (CI, scripts, piped output, or other installs) it prints the
+upgrade command, `npm i -g @mnemom/mnemom@latest`, for you to run — see
+[Updates](/gateway/cli#updates-mnemom-update).
 </Note>
 
 <Note>
@@ -88,6 +91,24 @@ Your first launch in a terminal can also ask two one-time questions: how Claude 
 [Sign-in options](/gateway/agent-sign-in)), and whether to look at what Mnemom
 would have saved on your recent sessions (see
 [Savings estimates](/gateway/agent-savings)).
+
+## Permission prompts
+
+By default, `mnemom agent` starts Claude Code with
+`--dangerously-skip-permissions`, so Claude Code does not ask before it edits
+files or runs commands. Claude Code calls this Bypass Permissions mode. The first
+time, it shows a warning and asks you to accept it before the session starts.
+Claude Code recommends this mode only in a sandboxed container or VM.
+
+To keep Claude Code's permission prompts, pass `--no-yolo`:
+
+```bash
+mnemom agent fix-auth --no-yolo
+```
+
+`--no-yolo` applies to that launch only; there is no saved setting for it, so
+pass it on every launch where you want the prompts. `mnemom agent --dry-run`
+shows which mode a launch would use (`yolo: on` or `off`).
 
 ## Resume a session
 
@@ -220,7 +241,7 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 | --- | --- | --- |
 | Gateway | `https://gateway.mnemom.ai` (the gateway the rest of the CLI uses) | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
 | Launch shape | **Terminal** — a governed session in this terminal. | `config set launch` |
-| Permissions | yolo — `--dangerously-skip-permissions` on | `--no-yolo` |
+| Permissions | Claude Code's permission prompts are **off** (`--dangerously-skip-permissions`). See [Permission prompts](#permission-prompts) | `--no-yolo` (per launch) |
 | Agent | a governed `agent-<you>` agent, claimed into your org before the first session | `--agent <slug>`, `config set agent` |
 | Sign-in | Anthropic API key, unless you pick another option on first launch | `--auth`, `config set auth` |
 | Key source | env → saved store → prompt | `config set key_source` |
@@ -515,7 +536,7 @@ looked up, and what you see when something is missing.
 | `--gateway <url>` | Gateway host override |
 | `--model <alias\|id>`, `--effort <level>` | Model + reasoning effort |
 | `--trim-mcp` | Launch with no MCP servers |
-| `--no-yolo` | Do not pass `--dangerously-skip-permissions` |
+| `--no-yolo` | Keep Claude Code's permission prompts: do not pass `--dangerously-skip-permissions` |
 | `--context` / `--no-context` | Force context folding on/off for this launch (on by default) |
 | `--context-profile <profile>` | `balanced`, `aggressive`, `adaptive` or `off` — see [Context profiles](#context-profiles) |
 | `--compact-at <n\|200k\|1m\|off>` | Gateway compaction target for this session, from 50k to just under 1M; `1m` or `off` means none. A target needs the experimental `compaction-intercept` feature |
