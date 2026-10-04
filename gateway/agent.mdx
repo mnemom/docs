@@ -63,8 +63,8 @@ mnemom agent
 ```
 
 With no arguments in a terminal, `mnemom agent` asks for one thing and then
-launches: a **session name**, which labels the session in your traces and the
-claude.ai session list. Enter takes the current folder name.
+launches: a **session name**, which labels the session in your traces and in
+`mnemom agent sessions`. Enter takes the current folder name.
 
 Goal alignment is not prompted for. Pass `--goal` to turn it on: the gateway
 seals your one-line goal as a contract and nudges the agent back when it drifts,
@@ -100,19 +100,29 @@ mnemom agent fix-auth -- --continue             # the most recent session in thi
 mnemom agent fix-auth -- --resume <session-id>  # a specific session
 ```
 
+When Claude Code exits normally, the last line `mnemom agent` prints is the command to resume
+it, for example:
+
+```text
+Resume with: mnemom agent fix-auth -- --resume <session-id>  (keeps it governed; `claude --resume` runs outside Mnemom)
+```
+
+If you named an agent with `--agent`, the command includes it.
+`mnemom agent show <name>` prints the same command.
+
 <Warning>
-When Claude Code exits it prints its own hint, `claude --resume <session-id>`.
-Do not run that command on its own: it reopens the conversation outside Mnemom,
-with no governance, no µ billing and nothing in your traces. Use the session id
-from that hint with `mnemom agent <name> -- --resume <session-id>` instead.
+Claude Code prints its own hint just above that line: `claude --resume <session-id>`.
+Do not run that command: it reopens the conversation outside Mnemom, with no
+governance, no µ billing and nothing in your traces. Use the `mnemom agent`
+command instead.
 </Warning>
 
 The resumed session runs governed, like any other launch, and the conversation
-carries on where it stopped. With `--resume <session-id>`, it keeps the context
-profile that session ran under unless you pass `--context-profile`. With
-`--continue`, your default profile applies; pass `--context-profile` to choose
-another (see [Context profiles](#context-profiles)). A sealed goal does not carry
-over: pass `--goal` again to seal one for the resumed session.
+carries on where it stopped. It keeps the context profile that session ran
+under, whether you resume with `--continue` or `--resume <session-id>`, unless
+you pass `--context-profile` (see [Context profiles](#context-profiles)). A
+sealed goal does not carry over: pass `--goal` again to seal one for the resumed
+session.
 
 If you have turned on [implicit goal mode](#implicit-goal-mode-experimental),
 relaunching an implicit session by the same name asks "Resume previous
@@ -379,7 +389,8 @@ mnemom agent show --json
 that conversation — the sealed contract (if any), the latest verdict, and
 guardrail gauges (`turns 3/10`, etc., flagged when a ceiling was crossed) — so
 you can check on a session after the fact without re-reading your terminal
-scrollback. Each row's `Goal` column, and `show`'s goal-mode field, read `ON`
+scrollback. It also prints the command that resumes the session through
+`mnemom agent` (see [Resume a session](#resume-a-session)). Each row's `Goal` column, and `show`'s goal-mode field, read `ON`
 (sealed contract), `IMPLICIT`, or `OFF`. For an implicit-mode session, `show`
 also prints the statement the gateway inferred.
 
@@ -475,7 +486,7 @@ mnemom agent config set context_profile aggressive   # standing default
 
 Precedence: `--no-context` (always `off`; combining it with any other
 `--context-profile` is refused), else `--context-profile`, else the profile of
-the session being resumed with `--resume <session-id>`, else `MNEMOM_AGENT_CONTEXT_PROFILE` / `config set
+the session being resumed (with `--continue` or `--resume <session-id>`), else `MNEMOM_AGENT_CONTEXT_PROFILE` / `config set
 context_profile`, else `off` when folding is turned off by `context = false` or
 `MNEMOM_AGENT_CONTEXT`, else the gateway's default.
 
