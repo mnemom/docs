@@ -462,20 +462,148 @@ what was sealed. The gateway echoes the full hash back on every response as
 | `--budget` | any positive USD amount (decimals allowed) | the CLI refuses the flag before launching |
 | Requirements, `--allow`, `--forbid` | no count limit; only the 8,192-byte total applies | — |
 
-The contract is sealed on the **first turn** of a session and cannot change
-afterwards: a later request that sends a different or invalid contract header is
-ignored and the sealed contract keeps governing, so a client hiccup mid-session
-never kills a governed session. To change the contract, start a new session.
+The contract is sealed on the **first turn** of a session. A later request that
+sends a different or invalid contract header is ignored outright and the sealed
+contract keeps governing, so a client hiccup mid-session never kills a governed
+session — the only way a live seal's terms change is the owner update path
+below.
 
-### What guardrails do
+### Seal lifetime
 
-Guardrails (`--max-turns`, `--budget`, `--stall`) **observe and nudge, never
-block**. Each ceiling is checked once per turn; when one is crossed the gateway
-appends a short `[mnemom guardrail]` line to your next message telling the agent
-which ceiling it hit, and marks the crossing on the response headers and in your
+A seal lives for 24 hours since it was last touched by an active request on
+that conversation — each request slides the window forward, so a session you
+keep using never lapses on its own. If the session goes quiet for a full 24
+hours, the seal lapses: `mnemom agent show` reports it as `EXPIRED`, and the
+next request that carries a goal seals a brand-new contract (version 1 again,
+fresh guardrail and judge counters) rather than reviving the old one.
+
+### Updating a sealed contract
+
+The agent itself can never change its own sealed contract — not by asking for
+it, and not by writing something the fence would otherwise allow. The one way a
+live seal's requirements, path rules, mode or ceilings change after the first
+turn is an explicit update made through the contract's owner-credentialed
+update path, never inferred from anything said in the conversation.
+
+An update writes a new version of the same contract: the version number goes up
+by one, and the record keeps a pointer to the hash it updated from. Guardrail
+counters, the turn count and the judge's running state all carry over —
+updating a contract changes its terms, not progress already made against them.
+
+Two things to know before relying on an update:
+
+- **Ceilings replace, they don't merge.** An update's turn/spend/stall ceilings
+  replace the live contract's ceilings outright. To raise the turn ceiling while
+  keeping the existing spend ceiling, resend both — an omitted ceiling means "no
+  ceiling of this kind" on the new version, not "leave the old one in place".
+- **Mode is the one field that carries over when omitted.** If the update
+  doesn't name a mode, the session's current `nudge`/`enforce` mode is kept
+  unchanged. Name a mode explicitly — including `nudge`, to downgrade an
+  `enforce` session — and that value wins instead.
+
+The update applies starting with the conversation's **next** request; a
+request already in flight when the update lands was judged against the version
+it started with. The session is told about the update once, on that next
+request, as part of the governance text the gateway adds to the conversation.
+
+### Ceilings: nudge vs enforce
+
+Every sealed contract has a mode, `nudge` or `enforce` (default `nudge`, set
+with `--mode`). The mode governs what happens when a guardrail ceiling — turns,
+spend, or, when the contract sets one, wall-clock time — is crossed. `stall`
+(consecutive no-write turns) is informational only in both modes; a crossed
+stall ceiling is never grounds for a refusal.
+
+**`nudge` (the default).** Guardrails **observe and nudge, never block**. Each
+ceiling is checked once per turn; when one is crossed the gateway appends a
+short `[mnemom guardrail]` line to your next message telling the agent which
+ceiling it hit, and marks the crossing on the response headers and in your
 traces. The session keeps running. A ceiling you leave unset falls back to the
 cell's default for that guardrail, if the cell has one; otherwise it is simply
 off.
+
+**`enforce`.** A request that would run with a turn, spend or time ceiling
+already crossed is refused outright, **before** the gateway calls the model, so
+an enforce refusal never costs a model call. The response is an HTTP `429`
+with `error.code: "goal_contract_enforce_refused"`, naming which ceiling(s) are
+over along with their current value and limit. The session cannot raise its own
+ceiling; only the contract's owner can, through the update path above — and
+because the check compares the live counters against the live ceilings fresh on
+every request, rather than remembering that a ceiling once fired, raising the
+ceiling unblocks the very next request with no other action needed.
+
+### Fence coverage
+
+`--allow`/`--forbid` path rules are enforced mechanically, not only by the
+judge's reading of the transcript: the gateway classifies every tool call and
+shell command the agent runs as a read, a write or an exec, and checks a
+write's target path against your fences.
+
+- `Edit`, `Write`, `MultiEdit` and `NotebookEdit` are always writes.
+  `Read`, `Grep`, `Glob`, `LS`, `WebFetch`, `WebSearch` and `TodoRead` are
+  always reads and are never checked against a fence.
+- Inside a `Bash` call, the gateway parses shell redirections and common
+  write-shaped commands (copy, move, make-directory and similar) out of the
+  command text — including across a pipeline — to find the file(s) a command
+  writes, and checks each one that resolves to a concrete path.
+- A write whose target the gateway can't resolve to a concrete path at parse
+  time — one built from a shell variable, a command substitution, or similar —
+  is not treated as a violation by default. The gateway works through a
+  resolution ladder (the value as written, variables set earlier in the
+  session, then evidence in the tool's own result) before giving up on it; a
+  target still open after that ladder sets no automatic verdict. The judge
+  decides from the full turn, and the step's fence-check line in your traces
+  names the target as unresolved rather than silently passing over it.
+- A resolved write that lands outside every allowed path, or under a forbidden
+  one, is always at least a `violation` verdict. The mechanical check can only
+  raise the judge's verdict on a fenced write, never lower it, and on its own it
+  never blocks the request either way — see [Ceilings](#ceilings-nudge-vs-enforce)
+  above for what does.
+
+### Final-turn judging
+
+Every assistant turn in a sealed session is graded against the contract. Most
+turns are judged from the request that follows them — the gateway grades the
+previous turn when it sees the next one. That leaves a session's very last
+turn with no later request to grade it from, which matters most in a headless
+run, where that last turn is often the exact push or pull-request step the
+seal exists to govern. The gateway closes that gap itself: it judges the final
+streamed turn directly, in the background, after your response has already
+been sent, so a cut-off or aborted stream is still judged from what it did
+produce and you see no added latency.
+
+`mnemom agent show` reports any gap as `judging: unjudged <N>` (with
+`· memoised <M>` alongside it for turns the judge's memo graded without storing
+a fresh verdict). Under normal operation this reads `unjudged 0`; a nonzero
+count means a turn's grading failed or is still in flight, not that judging is
+turned off.
+
+### Lead-directed sessions
+
+`--lead-directed` adds one more fixed requirement to the sealed contract, on
+top of whatever `--requirement` flags you pass: that this session may push its
+own branches and open draft or ready pull requests, from a git worktree, but
+never merge them. Pass it when a session is being run on someone else's
+direction and that direction includes pushing branches or opening PRs on its
+own — it turns "the lead said I could do this" into part of what the judge
+grades the session against, instead of something asserted only in the
+conversation.
+
+```bash
+mnemom agent ship-fix \
+  --goal "Fix the flaky retry test" \
+  --lead-directed \
+  --requirement "Open the PR; do not merge it"
+```
+
+The requirement line itself reads:
+
+> On the lead's direction, this session may push its own branches and open
+> draft or ready pull requests, from a git worktree, never the primary
+> checkout; it may not merge them.
+
+Passing `--lead-directed` more than once on the same launch adds it only once
+— the requirement never duplicates in the sealed statement.
 
 ## Context folding
 
@@ -533,6 +661,8 @@ looked up, and what you see when something is missing.
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
 | `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the opt-in experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
+| `--mode <nudge\|enforce>` | Contract mode (a contract field — requires `--goal`); default `nudge`. See [Ceilings: nudge vs enforce](#ceilings-nudge-vs-enforce) |
+| `--lead-directed` | Add the fixed lead-directed push/PR requirement (a contract field — requires `--goal`). See [Lead-directed sessions](#lead-directed-sessions) |
 | `--agent <slug>` | Governed identity (default `agent-<you>`). Claimed before launch either way |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
 | `--gateway <url>` | Gateway host override |
