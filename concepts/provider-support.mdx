@@ -1,11 +1,11 @@
 ---
 title: "Provider Support"
-description: "Honest per-provider coverage of every Mnemom feature — what works, what's partial, and what's not supported across Anthropic, OpenAI, and Gemini"
+description: "Honest per-provider coverage of every Mnemom feature — what works, what's partial, and what's not supported across Anthropic, OpenAI, and Gemini, including Anthropic and OpenAI models hosted on Microsoft Foundry"
 sidebarTitle: "Provider Support"
 icon: "network-wired"
 ---
 
-Mnemom sits in front of three upstream model providers: **Anthropic**, **OpenAI**, and **Gemini**. Safe House, AIP integrity checkpoints, CLPI policy enforcement, and DLP all route through a single gateway, but the **quality of each feature varies by provider** — because the underlying APIs differ in what they expose.
+Mnemom sits in front of three upstream model providers: **Anthropic**, **OpenAI**, and **Gemini**. Anthropic and OpenAI models can also be served from your own [Microsoft Foundry](#microsoft-foundry) resource. Safe House, AIP integrity checkpoints, CLPI policy enforcement, and DLP all route through a single gateway, but the **quality of each feature varies by provider** — because the underlying APIs differ in what they expose.
 
 This page is the honest accounting: what Mnemom guarantees on each provider, what it partially guarantees, and what it cannot guarantee.
 
@@ -209,11 +209,19 @@ Models the gateway routes are classified into two tiers:
 
 Passthrough-tier models that are removed from the upstream provider also disappear from the gateway's `/models.json` registry; we do not maintain shims.
 
+## Microsoft Foundry
+
+Anthropic and OpenAI models that you host on [Microsoft Foundry](https://azure.microsoft.com/products/ai-foundry) can be routed through the gateway's `/anthropic` and `/openai` doors. You name your Foundry endpoint in one request header and send your own Foundry credential. The gateway forwards the request to your resource and applies the same governance it applies to every other request. See [Microsoft Foundry](/gateway/microsoft-foundry) for the setup.
+
+The feature coverage matrix above applies by door for the three request paths the gateway forwards to Foundry: `/anthropic/v1/messages`, `/openai/v1/chat/completions` and `/openai/v1/responses`. A Claude deployment on Foundry gets the Anthropic column and an OpenAI deployment gets the OpenAI column. The Batch API is not available through Foundry.
+
+Foundry support covers Anthropic and OpenAI models only. Gemini is not offered through Microsoft Foundry. The [Microsoft Foundry](/gateway/microsoft-foundry#supported-models) page lists the models, and the deployment name must be the model id shown under [Canonical model IDs](#supported-models) above.
+
 ## Out of scope
 
 Provider expansion beyond Anthropic + OpenAI + Gemini is **not in scope for v1**. Cohere, Mistral, Together, Groq, and other providers are not supported. Adding a provider is a multi-quarter effort (Safe House dispatch, AIP adapter, CLPI policy schema mapping, test coverage, docs) — tracked separately.
 
-BYOK (bring-your-own-key) for upstream providers is also out of v1. v1 ships with Mnemom-only key custody.
+Bring-your-own-key for the provider doors means sending your own Anthropic, OpenAI or Gemini key on each request, as the [Gateway Quickstart](/quickstart/gateway) shows. Routing to a model host other than the provider itself is supported for [Microsoft Foundry](#microsoft-foundry) only.
 
 ## Related
 
