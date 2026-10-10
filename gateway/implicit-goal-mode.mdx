@@ -121,14 +121,15 @@ says that the gateway wrote it and that the user did not. The gateway never
 puts it in the system prompt, and never places it before your last prompt-cache
 breakpoint, so your cached prefix is not disturbed.
 
-### Each step is judged
+### How steps are judged
 
 The gateway judges a step once it sees the request that follows it, grading
 that step against the goal that was current when the agent took it — so a
 session's very last step, with no later request to carry its judging, is not
-graded. (A sealed contract closes that same gap for its own last turn; see
-[Final-turn judging](/gateway/agent#final-turn-judging). Implicit mode does
-not yet have an equivalent backstop.) The judge in implicit mode is TypeSafe
+graded. (A sealed contract closes that same gap for its main thread's last
+turn; see [Final-turn judging](/gateway/agent#final-turn-judging). A subagent's
+or teammate's last turn is counted there, not judged. Implicit mode does not
+yet have an equivalent backstop.) The judge in implicit mode is TypeSafe
 Jev. It reads:
 
 - the goal, its open requirements and the path fences, with a mechanical check
@@ -412,7 +413,7 @@ goal.
 | | Sealed contract | Implicit mode |
 | --- | --- | --- |
 | Where the goal comes from | You write it before the first turn (`--goal`, `x-mnemom-contract`) | Built from your messages |
-| Can it change mid-session? | No. Start a new session to change it. | Yes, when you change direction. Pin to freeze it. |
+| Can it change mid-session? | Not by the session. Only the agent's owner can, through a contract update, which writes a new version that applies from the next request. See [Updating a sealed contract](/gateway/agent#updating-a-sealed-contract). | Yes, when you change direction. Pin to freeze it. |
 | Path fences | The `--allow` / `--forbid` you set | Only forbidden paths you name in your messages |
 | Judge | The sealed-contract judge | TypeSafe Jev |
 | Guardrails (`max_turns`, `budget`, `stall`) | Yes | Yes |

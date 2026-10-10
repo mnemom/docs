@@ -8,7 +8,7 @@ icon: "robot"
 `mnemom agent` launches your coding-agent CLI (Claude Code today) with its
 model traffic routed through the Mnemom gateway. Every session runs under a
 **governed agent identity**, shows up in your traces, and can carry a sealed
-per-session **goal contract** that the gateway grades each turn against and
+per-session **goal contract** that the gateway grades the session's turns against and
 re-anchors the agent when it drifts.
 
 It is designed to be one command: install once, then `mnemom agent`.
@@ -473,38 +473,159 @@ below.
 A seal lives for 24 hours since it was last touched by an active request on
 that conversation — each request slides the window forward, so a session you
 keep using never lapses on its own. If the session goes quiet for a full 24
-hours, the seal lapses: `mnemom agent show` reports it as `EXPIRED`, and the
-next request that carries a goal seals a brand-new contract (version 1 again,
-fresh guardrail and judge counters) rather than reviving the old one.
+hours, the seal lapses, and the next request that carries a goal seals a
+brand-new contract (version 1 again, fresh guardrail and judge counters) rather
+than reviving the old one.
+
+`mnemom agent show` reports a lapsed seal as `EXPIRED` until 7 days after the
+conversation's last request. After that the gateway keeps no record of the old
+seal: `show` reports no sealed contract for the conversation, and the next goal
+seals as a first seal.
 
 ### Updating a sealed contract
 
 The agent itself can never change its own sealed contract — not by asking for
 it, and not by writing something the fence would otherwise allow. The one way a
 live seal's requirements, path rules, mode or ceilings change after the first
-turn is an explicit update made through the contract's owner-credentialed
-update path, never inferred from anything said in the conversation.
+turn is an explicit update sent by the agent's owner through the Mnemom API,
+never inferred from anything said in the conversation.
+
+#### How to update
+
+Send the full new contract to:
+
+```
+POST https://api.mnemom.ai/v1/agent/sessions/{conversationId}/contract?agent_id=<agent id>
+```
+
+- `conversationId` is the conversation the session runs under and `agent_id`
+  is the governed agent's id. `mnemom agent show` prints both. Add
+  `&org_id=<org id>` when the agent is not in your primary organization.
+- The caller must be an `owner` or `admin` of the agent's organization,
+  authenticated with a Bearer token or an `X-Mnemom-Api-Key` like any other
+  [API call](/api-reference/overview#authentication). An API key scoped to
+  gateway traffic only is always refused, with `403`
+  `session_credential_forbidden`, so a session cannot update its own contract
+  with the key it uses to reach the gateway.
+- The same update is available as the `update_contract` tool on the
+  control-plane [MCP server](/mcp-clients). It takes the same fields and
+  follows the same rules.
+
+Write the whole new contract, not only the fields you are changing, to a file
+such as `contract-update.json`:
+
+```json
+{
+  "contract": {
+    "statement": "Refactor the auth module without changing its public API",
+    "requirements": ["All existing tests keep passing"],
+    "allowed_paths": ["src/auth/**"],
+    "forbidden_paths": ["**/*.env"],
+    "max_turns": 300,
+    "budget_usd": 25
+  },
+  "expected_version": 1
+}
+```
+
+and send it:
+
+```bash
+curl -X POST "https://api.mnemom.ai/v1/agent/sessions/$CONVERSATION_ID/contract?agent_id=$AGENT_ID" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @contract-update.json
+```
+
+| Body field | Meaning |
+| --- | --- |
+| `contract.statement`, `contract.requirements`, `contract.allowed_paths`, `contract.forbidden_paths` | Required. The arrays may be empty. |
+| `contract.max_turns`, `contract.budget_usd`, `contract.stall_turns` | Optional guardrail ceilings. They replace the live ones; see below. |
+| `contract.time_limit_s` | Optional wall-clock ceiling, a whole number of seconds counted from when the contract was first sealed. It has no cell default, so an update that omits it removes the time ceiling. |
+| `contract.mode` | Optional, `nudge` or `enforce`. Kept from the live contract when omitted. |
+| `contract.goal_id` | Optional. |
+| `expected_version` or `expected_hash` | Optional. The version or hash you last read. If the live contract has moved past it, the update is refused with `409` and nothing changes. |
+
+The new contract goes through the same checks as a first seal (see
+[Limits](#limits)). A `200` response carries the new `version`, its `hash`,
+`previous_hash` (the version it replaced), the stored `contract`, and
+`sealed_at`, which stays the time the contract was first sealed: an update
+never moves it. The response's `contract.time_limit_s` is the one place to read
+the live time ceiling: `mnemom agent show` prints the turn, spend and stall
+ceilings but not `time_limit_s`.
+
+| Status | `error.code` | Meaning |
+| --- | --- | --- |
+| `400` | `agent_id_required`, `invalid_contract` | `agent_id` is missing, or the contract lacks a required field or carries an invalid `time_limit_s` or `mode` |
+| `400` | `statement_missing`, `statement_too_long`, `contract_too_large` | The new contract fails a seal check |
+| `400` | `bad_request` | The body is not valid JSON |
+| `401` | `unauthorized` | No valid credential |
+| `403` | `forbidden`, `session_credential_forbidden` | The caller is not an owner or admin, or presented a gateway-only key |
+| `404` | `agent_not_found`, `no_seal` | The agent is not in the organization, or the conversation has no live sealed contract (never sealed, or lapsed) |
+| `404` | `not_found` | The caller has no organization |
+| `409` | `version_conflict` | The live contract moved past `expected_version`/`expected_hash`; `error.details.current` holds the live record |
+| `503` | `update_unavailable` | The gateway could not write the update; nothing changed, so it is safe to retry |
+| `503` | `gateway_unavailable` | The API could not reach the gateway, or could not read its reply. The update **may or may not** have been applied: see below before retrying |
+| `503` | `service_unavailable` | The agent could not be loaded; nothing changed, so it is safe to retry |
+| `500` | `internal_error` | The gateway failed while applying the update |
+
+Any other `4xx` or `5xx` response carries the generic code for its status
+(for example `bad_request` or `internal_error`).
+
+A `gateway_unavailable` error does not prove the update failed: the gateway may
+have written it before the connection dropped, or written it and sent a reply
+the API could not read. Retry with `expected_version` (or `expected_hash`) set to
+the version you last read. If the first attempt did land, the retry is refused
+with `409 version_conflict` and `error.details.current` shows the new version;
+otherwise the retry applies the update once. You can also read the seal state
+first with `mnemom agent show`.
+
+
+#### What an update changes
 
 An update writes a new version of the same contract: the version number goes up
-by one, and the record keeps a pointer to the hash it updated from. Guardrail
-counters, the turn count and the judge's running state all carry over —
-updating a contract changes its terms, not progress already made against them.
+by one, and the record keeps a pointer to the hash it updated from. Progress
+already made carries over: the turn count, spend, the time counted toward a
+time ceiling, and the judge's counts (`unjudged`/`memoised` in
+`mnemom agent show`). Updating a contract changes its terms, not the progress
+made against them.
 
-Two things to know before relying on an update:
+Three things to know before relying on an update:
 
-- **Ceilings replace, they don't merge.** An update's turn/spend/stall ceilings
+- **Ceilings replace, they don't merge.** An update's turn, spend, stall and
+  time ceilings (`max_turns`, `budget_usd`, `stall_turns`, `time_limit_s`)
   replace the live contract's ceilings outright. To raise the turn ceiling while
-  keeping the existing spend ceiling, resend both — an omitted ceiling means "no
-  ceiling of this kind" on the new version, not "leave the old one in place".
+  keeping the existing spend ceiling, resend both. An omitted ceiling means the
+  contract no longer sets one, not "leave the old one in place": that guardrail
+  then falls back to the cell's default, as described in
+  [Ceilings](#ceilings-nudge-vs-enforce), or is off if the cell has none.
 - **Mode is the one field that carries over when omitted.** If the update
   doesn't name a mode, the session's current `nudge`/`enforce` mode is kept
   unchanged. Name a mode explicitly — including `nudge`, to downgrade an
   `enforce` session — and that value wins instead.
+- **Time is counted from the first seal.** `time_limit_s` measures from when
+  the contract was first sealed, not from the update. Setting
+  `"time_limit_s": 3600` on a session that has already run for two hours puts
+  it over the ceiling at once. An update that resends a `time_limit_s` at or
+  below the time already elapsed keeps the ceiling crossed. An update that
+  omits `time_limit_s` removes the time ceiling entirely, because an update
+  replaces the contract and `time_limit_s` has no cell default to fall back
+  to. To keep a time ceiling, resend `time_limit_s` on every update.
 
-The update applies starting with the conversation's **next** request; a
-request already in flight when the update lands was judged against the version
-it started with. The session is told about the update once, on that next
-request, as part of the governance text the gateway adds to the conversation.
+The update applies starting with the conversation's **next** request. A turn
+already in flight when the update lands is graded against the version it ran
+under. There are two exceptions, both graded against whatever version is live
+when they are judged:
+
+- a subagent or teammate turn, which is graded on that thread's next request;
+- a main-thread turn whose end-of-response judging failed or did not finish
+  within two minutes, which is graded on the next request instead (see
+  [Final-turn judging](#final-turn-judging)).
+
+The session is told about the update once, on the next request, as part of the
+governance text the gateway adds to the conversation. Under `enforce`, if that
+next request is refused because a ceiling the update did not lift is still
+crossed, the session may never see the notice.
 
 ### Ceilings: nudge vs enforce
 
@@ -514,69 +635,158 @@ spend, or, when the contract sets one, wall-clock time — is crossed. `stall`
 (consecutive no-write turns) is informational only in both modes; a crossed
 stall ceiling is never grounds for a refusal.
 
+**Where ceilings come from.** `--max-turns`, `--budget` and `--stall` set the
+turn, spend and stall ceilings at launch. A wall-clock ceiling has no
+`mnemom agent` flag: set it as `time_limit_s` (whole seconds, counted from when
+the contract was first sealed) through an
+[owner update](#updating-a-sealed-contract). A ceiling the contract does not
+set falls back to the cell's default for that guardrail, if the cell has one,
+in both modes; otherwise it is off. The stall ceiling defaults to 8 turns when
+neither the contract nor the cell sets one. A cell-default turn or spend
+ceiling is a real ceiling: under `enforce` it refuses requests just like one
+you set yourself.
+
+**Ceilings are per conversation.** The turn, spend and time counters, and the
+ceilings they are checked against, belong to one conversation. Subagents and
+teammates spawned inside a session count against the same ceilings as the
+session that spawned them; they never get fresh ones. Each sealed
+`mnemom agent` launch runs under a new conversation, and so starts with fresh
+counters, unless you pass `--conversation-id` to continue an existing one.
+
 **`nudge` (the default).** Guardrails **observe and nudge, never block**. Each
 ceiling is checked once per turn; when one is crossed the gateway appends a
 short `[mnemom guardrail]` line to your next message telling the agent which
 ceiling it hit, and marks the crossing on the response headers and in your
-traces. The session keeps running. A ceiling you leave unset falls back to the
-cell's default for that guardrail, if the cell has one; otherwise it is simply
-off.
+traces. The session keeps running.
 
 **`enforce`.** A request that would run with a turn, spend or time ceiling
 already crossed is refused outright, **before** the gateway calls the model, so
 an enforce refusal never costs a model call. The response is an HTTP `429`
 with `error.code: "goal_contract_enforce_refused"`, naming which ceiling(s) are
-over along with their current value and limit. The session cannot raise its own
-ceiling; only the contract's owner can, through the update path above — and
-because the check compares the live counters against the live ceilings fresh on
-every request, rather than remembering that a ceiling once fired, raising the
-ceiling unblocks the very next request with no other action needed.
+over along with their current value and limit, and pointing to the
+`update_contract` tool, the update endpoint and
+[Updating a sealed contract](#updating-a-sealed-contract).
+
+- A refused request is **not counted as a turn**, so retrying it never moves
+  the turn counter.
+- The `429` carries `x-should-retry: false` and no `Retry-After` header, so
+  SDK clients that retry a `429` on their own don't loop on it: the request
+  will keep being refused until the ceiling is raised.
+- The turn that crossed the ceiling is still judged; only the request after it
+  is refused.
+- The session cannot raise its own ceiling; only the contract's owner can,
+  through the [update path](#updating-a-sealed-contract). Because the check
+  compares the live counters against the live ceilings fresh on every request,
+  rather than remembering that a ceiling once fired, raising the ceiling
+  unblocks the very next request with no other action needed.
 
 ### Fence coverage
 
 `--allow`/`--forbid` path rules are enforced mechanically, not only by the
-judge's reading of the transcript: the gateway classifies every tool call and
-shell command the agent runs as a read, a write or an exec, and checks a
-write's target path against your fences.
+judge's reading of the transcript: the gateway reads the tool calls and shell
+commands the agent runs, finds the files they write where it can, and checks
+each one against your fences.
 
-- `Edit`, `Write`, `MultiEdit` and `NotebookEdit` are always writes.
-  `Read`, `Grep`, `Glob`, `LS`, `WebFetch`, `WebSearch` and `TodoRead` are
-  always reads and are never checked against a fence.
-- Inside a `Bash` call, the gateway parses shell redirections and common
-  write-shaped commands (copy, move, make-directory and similar) out of the
-  command text — including across a pipeline — to find the file(s) a command
-  writes, and checks each one that resolves to a concrete path.
-- A write whose target the gateway can't resolve to a concrete path at parse
-  time — one built from a shell variable, a command substitution, or similar —
-  is not treated as a violation by default. The gateway works through a
-  resolution ladder (the value as written, variables set earlier in the
-  session, then evidence in the tool's own result) before giving up on it; a
-  target still open after that ladder sets no automatic verdict. The judge
-  decides from the full turn, and the step's fence-check line in your traces
-  names the target as unresolved rather than silently passing over it.
+- `Edit`, `Write`, `MultiEdit` and `NotebookEdit` are always writes, and their
+  file path is always checked. `Read`, `Grep`, `Glob`, `LS`, `WebFetch`,
+  `WebSearch` and `TodoRead` are always reads and are never checked against a
+  fence.
+- Inside a `Bash` call, the gateway reads these write forms out of the command
+  text and checks their targets:
+  - output redirects: `>`, `>>` and `>|`;
+  - `tee` and the files it writes;
+  - the destination of `cp`, `mv` and `install` (the last operand, or the
+    directory given with `-t`/`--target-directory`), and every directory
+    `install -d` creates;
+  - the destination of `rsync`, which is always its last operand (for
+    `rsync`, `-t` means "keep times", not a target). An `rsync` to a remote
+    `host:path` is not a local write and is not checked, and `rsync -n`,
+    `--dry-run` or `--list-only` writes nothing.
+
+  These forms are found across `&&`, `;` and pipes, after a `cd` (relative
+  targets resolve against it), behind command wrappers (`sudo`, `env`,
+  `nice`, `nohup`, `time`, `exec`, `command`, and `xargs` with a replace
+  string such as `-I`, `-i`, `--replace` or `-J`), and after a leading read
+  such as `git status &&`. If a command
+  is too long to read in full, the fence-check line in your traces names the
+  part that was not read.
+- Other write-shaped commands — `mkdir`, `touch`, `sed -i`, `ln`, running a
+  script, and similar — are **not** fence-checked. The fence-check line counts
+  them as writes that were not checked, and the judge decides from the full
+  turn.
+- A target written with a shell variable or command substitution is resolved
+  in two steps: first from the same command (variable assignments and
+  `export`s earlier in it, `$(pwd)` and `$(mktemp)`), then from variables set
+  by earlier `Bash` commands in the session. `~` and `$HOME` resolve only when
+  `HOME` is set in one of those commands, or when the session's earlier
+  commands name exactly one home directory (`/Users/<name>` or
+  `/home/<name>`). A target still
+  unresolved after that — including a file `xargs` appends from its input —
+  sets no automatic verdict. The judge decides from the full turn, and the
+  fence-check line names the target as unresolved rather than silently passing
+  over it.
 - A resolved write that lands outside every allowed path, or under a forbidden
-  one, is always at least a `violation` verdict. The mechanical check can only
-  raise the judge's verdict on a fenced write, never lower it, and on its own it
-  never blocks the request either way — see [Ceilings](#ceilings-nudge-vs-enforce)
-  above for what does.
+  one, is always at least a `violation` verdict. The allowed-path check applies
+  only when the contract has at least one `--allow` rule. The mechanical check
+  can only raise the judge's verdict on a fenced write, never lower it, and on
+  its own it never blocks the request either way — see
+  [Ceilings](#ceilings-nudge-vs-enforce) above for what does.
+
+#### Temporary and scratch files
+
+There is no exemption for `/tmp` or any other scratch directory. A temp or
+scratch file is a write like any other, so if the contract has `--allow` rules
+and the agent writes outside them — a log in `/tmp`, a `$(mktemp)` file — that
+write is a `violation`. The gateway places a `$(mktemp)` file under `$TMPDIR`
+when the session has set that variable in a command, and under `/tmp`
+otherwise.
+
+If the agent needs scratch space, allow it explicitly, as narrowly as you can:
+
+```bash
+mnemom agent refactor-auth \
+  --goal "Refactor the auth module without changing its public API" \
+  --allow "src/auth/**" \
+  --allow "/tmp/**"
+```
 
 ### Final-turn judging
 
-Every assistant turn in a sealed session is graded against the contract. Most
-turns are judged from the request that follows them — the gateway grades the
-previous turn when it sees the next one. That leaves a session's very last
-turn with no later request to grade it from, which matters most in a headless
-run, where that last turn is often the exact push or pull-request step the
-seal exists to govern. The gateway closes that gap itself: it judges the final
-streamed turn directly, in the background, after your response has already
-been sent, so a cut-off or aborted stream is still judged from what it did
-produce and you see no added latency.
+Turns in a sealed session are graded against the contract. A main-thread turn
+is judged when its response ends, streamed or not: the gateway judges it
+directly, in the background, after your response has already been sent, so you
+see no added latency. That covers a session's very last turn too, which matters
+most in a headless run, where that last turn is often the exact push or
+pull-request step the seal exists to govern.
 
-`mnemom agent show` reports any gap as `judging: unjudged <N>` (with
+Two kinds of turn are judged later, from the request that follows them:
+
+- **Subagent and teammate turns.** Their responses are counted when they end,
+  but each turn is judged on that thread's next request.
+- **A main-thread turn whose judging failed or stalled.** If the end-of-response
+  judging fails, or has not finished after two minutes, the next request judges
+  the turn instead.
+
+Some turns are not judged:
+
+- **Incomplete responses.** A stream that is cut off, errors or is aborted is
+  not judged. The turn is counted as unjudged.
+- **The last turn of a subagent or teammate.** A subagent's or teammate's
+  turns are judged on that thread's next request, so each thread's final turn
+  has none and is counted as unjudged.
+- **Withheld responses.** A response the gateway withheld, or held for review,
+  never reached your client, so it is not judged and does not appear in the
+  unjudged count.
+
+`mnemom agent show` reports these gaps as `judging: unjudged <N>` (with
 `· memoised <M>` alongside it for turns the judge's memo graded without storing
-a fresh verdict). Under normal operation this reads `unjudged 0`; a nonzero
-count means a turn's grading failed or is still in flight, not that judging is
-turned off.
+a fresh verdict). A session without subagents or teammates normally reads
+`unjudged 0`; a session that used them usually reads about one unjudged turn
+per subagent or teammate thread. Only the first 64 threads in a session are
+tracked; the counts of any thread beyond that are left out of the figure. Any
+other nonzero count means a turn was
+cut off, its grading failed, or its grading is still in flight — not that
+judging is turned off.
 
 ### Lead-directed sessions
 
