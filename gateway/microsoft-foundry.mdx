@@ -30,7 +30,7 @@ You need:
 - A Mnemom API key with the `gateway` capability. See [API Keys](/guides/api-keys#creating-a-key).
 
 <Warning>
-  Send the endpoint origin only, with no path. The Foundry portal also shows a `cognitiveservices.azure.com` form of the endpoint; the gateway accepts only `services.ai.azure.com` and `openai.azure.com` hosts.
+  The endpoint must be an `https` URL whose host ends in `.services.ai.azure.com` or `.openai.azure.com`. Any other host is rejected with `400`. Only the scheme and host are used: the gateway appends the path you called, so a path in the header has no effect.
 </Warning>
 
 ## Endpoints
@@ -224,7 +224,7 @@ Errors raised by the gateway use the standard gateway envelope:
 | `x-mnemom-foundry-endpoint` invalid | `400` | The message names the reason: not an absolute URL, scheme is not `https`, the URL embeds credentials, or the host is not a Foundry host. |
 | Path other than the three listed above | `400` | Only `/anthropic/v1/messages`, `/openai/v1/chat/completions` and `/openai/v1/responses` are forwarded to Foundry. |
 | Request carries a Claude subscription sign-in | `400` | Code `subscription_login_unsupported_target`. A Foundry request must carry a Foundry credential. |
-| Foundry responded with a redirect | `502` | The gateway does not follow redirects to or from a Foundry endpoint. Check that the endpoint is the resource origin, with no path. |
+| Foundry responded with a redirect | `502` | The gateway never follows a redirect from a Foundry endpoint. The response is returned as an error rather than relayed. |
 | Foundry returned an error | Upstream status preserved | The Foundry error body is returned unchanged. A `401` or `404` from Foundry usually means a wrong credential, a wrong endpoint, or a deployment name that does not exist on that resource. |
 
 ## Billing
