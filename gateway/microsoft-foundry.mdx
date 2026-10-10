@@ -1,13 +1,13 @@
 ---
 title: "Microsoft Foundry"
-description: "Route Claude and OpenAI models that you host on Microsoft Foundry through the Mnemom gateway — your Foundry resource, your deployment, your credential, with Mnemom governance on every request"
+description: "Route Claude and OpenAI models that you host on Microsoft Foundry through the Mnemom gateway, using your Foundry resource, your deployment and your credential, with Mnemom governance on every request"
 sidebarTitle: "Microsoft Foundry"
 icon: "microsoft"
 ---
 
 If you run Claude or OpenAI models on [Microsoft Foundry](https://azure.microsoft.com/products/ai-foundry) (formerly Azure AI Foundry), you can send those requests through the Mnemom gateway instead of calling your Foundry resource directly. The gateway forwards each request to **your** Foundry endpoint with **your** Foundry credential, and applies the same Safe House screening, integrity checkpoints, policy enforcement and tracing it applies to every other request.
 
-Nothing about your Foundry setup changes. You keep your resource, your deployments, your Azure billing and your credential. Mnemom never stores the credential; it is forwarded to your endpoint on each request and nowhere else.
+Nothing about your Foundry setup changes. You keep your resource, your deployments, your Azure billing and your credential. Mnemom never stores the credential. It is forwarded to your endpoint on each request and nowhere else.
 
 <Note>
   Same door, same path, same body as a request to the provider's own API. Four things to get right:
@@ -22,7 +22,7 @@ Nothing about your Foundry setup changes. You keep your resource, your deploymen
 
 ## How it differs from the provider doors
 
-On the [provider doors](/quickstart/gateway) the gateway forwards your request to the provider's own API — Anthropic, OpenAI or Google — using the provider key you send. With Microsoft Foundry the gateway forwards to a Foundry endpoint you own instead. Two things follow from that:
+On the [provider doors](/quickstart/gateway) the gateway forwards your request to the provider's own API, whether Anthropic, OpenAI or Google, using the provider key you send. With Microsoft Foundry the gateway forwards to a Foundry endpoint you own instead. Two things follow from that:
 
 - **A Mnemom API key is required.** On the provider doors `x-mnemom-api-key` is optional, because the gateway can identify your agent from the provider key you send. With Foundry the credential you send belongs to your Azure resource, so the Mnemom API key is required to tell the gateway whose request it is.
 - **Your deployment name is the model.** Foundry serves models as named deployments. Put the deployment name in the request body's `model` field, exactly as you would when calling Foundry directly.
@@ -48,7 +48,7 @@ POST https://gateway.mnemom.ai/openai/v1/chat/completions
 POST https://gateway.mnemom.ai/openai/v1/responses
 ```
 
-Use the `/anthropic` door for Claude deployments and the `/openai` door for OpenAI deployments. These three paths are the only paths the gateway forwards to Foundry; any other path returns `400`.
+Use the `/anthropic` door for Claude deployments and the `/openai` door for OpenAI deployments. These three paths are the only paths the gateway forwards to Foundry. Any other path returns `400`.
 
 ## Headers
 
@@ -72,7 +72,7 @@ Only the headers Foundry needs are forwarded: the content and credential headers
 
 ## Request body
 
-Send the provider's standard request body. The `model` field carries your Foundry **deployment name**. Do not add an `api-version` query parameter; the gateway forwards the path you call unchanged.
+Send the provider's standard request body. The `model` field carries your Foundry **deployment name**. Do not add an `api-version` query parameter. The gateway forwards the path you call unchanged.
 
 ```json
 {
@@ -236,17 +236,17 @@ Errors raised by the gateway use the standard gateway envelope:
 
 | Condition | Status | Detail |
 |---|---|---|
-| Foundry credential header missing | `401` | The `/anthropic` door requires `x-api-key`; the `/openai` door requires `Authorization: Bearer <credential>`. Microsoft's `api-key` header is not read. |
+| Foundry credential header missing | `401` | The `/anthropic` door requires `x-api-key`. The `/openai` door requires `Authorization: Bearer <credential>`. Microsoft's `api-key` header is not read. |
 | `x-mnemom-api-key` missing | `401` | Code `mnemom_api_key_required`. A Mnemom API key is required whenever `x-mnemom-foundry-endpoint` is present. |
 | `x-mnemom-api-key` invalid | `401` | The key is malformed, unknown, expired or revoked. |
 | Billing not set up or balance depleted | `402` | The organization that owns the Mnemom API key has no billing configured or no balance left. See [402 Payment Required](/api-reference/errors#402-payment-required--billing-and-depletion). |
-| Mnemom API key could not be verified | `503` | The gateway could not reach its key store. Retry with backoff; do not remove the key. |
+| Mnemom API key could not be verified | `503` | The gateway could not reach its key store. Retry with backoff and do not remove the key. |
 | Request sent to the `/gemini` door | `400` | Foundry does not serve the Gemini dialect. The response carries `X-Mnemom-Error: foundry_unsupported_dialect`. |
 | `x-mnemom-foundry-endpoint` invalid | `400` | The message names the reason: not an absolute URL, scheme is not `https`, the URL embeds credentials, or the host is not a Foundry host. |
 | Path other than the three listed above | `400` | Only `/anthropic/v1/messages`, `/openai/v1/chat/completions` and `/openai/v1/responses` are forwarded to Foundry. |
 | Request carries a Claude subscription sign-in | `400` | Code `subscription_login_unsupported_target`. A Foundry request must carry a Foundry credential. |
 | Foundry responded with a redirect | `502` | The gateway never follows a redirect from a Foundry endpoint. The response is returned as an error rather than relayed. |
-| Foundry returned an error | Upstream status preserved | The Foundry error body is returned as received. A `401` or `404` from Foundry usually means a wrong credential, a wrong endpoint, or a deployment name that does not exist on that resource. A `400` from Foundry on a Claude deployment usually means a renamed deployment; see [Request body](#request-body). |
+| Foundry returned an error | Upstream status preserved | The Foundry error body is returned as received. A `401` or `404` from Foundry usually means a wrong credential, a wrong endpoint, or a deployment name that does not exist on that resource. A `400` from Foundry on a Claude deployment usually means a renamed deployment. See [Request body](#request-body). |
 
 ## Billing
 
@@ -254,7 +254,7 @@ Microsoft bills your Foundry resource for the model inference. Mnemom charges on
 
 ## Related
 
-- [Gateway Quickstart](/quickstart/gateway) — the provider doors and the response headers to read
-- [Provider Support](/concepts/provider-support) — per-provider feature coverage and the canonical model ids
-- [Headers reference](/api-reference/headers) — the full set of gateway response headers
-- [Errors reference](/api-reference/errors) — error codes across the API and gateway
+- [Gateway Quickstart](/quickstart/gateway): the provider doors and the response headers to read
+- [Provider Support](/concepts/provider-support): per-provider feature coverage and the canonical model ids
+- [Headers reference](/api-reference/headers): the full set of gateway response headers
+- [Errors reference](/api-reference/errors): error codes across the API and gateway
