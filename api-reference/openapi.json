@@ -114,6 +114,10 @@
       "description": "Mnemom Agent — the governed agent launcher (`mnemom agent`). The per-org feature gate the CLI checks at startup; invites and access reuse the product-invite surface with product `code`."
     },
     {
+      "name": "Sponsorship",
+      "description": "Invite sponsorship (MNE-8193): a sponsor shares a personal link; a verified colleague redeems it for one of the sponsor's invite slots. Dark behind the dedicated `invite_sponsorship` flag (default off). No figures, currency or balance wording in any invitee/sponsor-facing field. Internal while dark."
+    },
+    {
       "name": "Invites",
       "description": "Invitee-facing product-invite redemption (MNE-7166, 6/8 of the RG invite-permission-product epic MNE-7089). Accepting a `pinv_…` token grants product access and forwards a server-owned starter grant; the grant amount is admin-only and never surfaced."
     },
@@ -382,6 +386,60 @@
           "format": "uuid"
         },
         "description": "Aletheia Customer Voice feedback submission identifier (UUID)."
+      },
+      "ProductScopeLedger": {
+        "name": "product",
+        "in": "query",
+        "required": false,
+        "description": "Optional product scope (sub-projects, contract C5). Omitted → today's response, unchanged. `research|design|develop|operate|canon|unattributed` narrows the page's `entries` to that product and adds a `product_scope` summary; `all` returns `{ total, by_product: [{ product, entry_count, net_mmu, unparsed_mmu_count }], product_scope }` computed in one pass. An entry belongs to a product only when its `ref.product` is exactly a known slug — every other entry (incl. all historical rows) is `unattributed`; attribution is never inferred. The rollup basis is the returned page (`product_scope.basis = \"page\"`); follow `next_cursor` to cover a range. Applied AFTER org/RBAC checks, so it can only narrow. Any other value → 400 `invalid_product`.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "research",
+            "design",
+            "develop",
+            "operate",
+            "canon",
+            "unattributed",
+            "all"
+          ]
+        }
+      },
+      "ProductScopeAccount": {
+        "name": "product",
+        "in": "query",
+        "required": false,
+        "description": "Optional product scope (sub-projects, contract C5). Omitted → today's response, unchanged. This is an ACCOUNT-level resource (one shared μ wallet; purchases, grants and balances are not product-scoped), so a `product` value does NOT narrow the figures. The response body is returned unchanged and LABELLED with `product_scope: { scope: \"account\", requested_product }` (plus an `X-Mnemom-Product-Scope: account` response header) so a client can never mistake an account figure for a per-product one. `all` labels `requested_product: \"all\"`. Applied AFTER auth/org/RBAC, so it can never widen access. Any value outside the enum → 400 `invalid_product`.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "research",
+            "design",
+            "develop",
+            "operate",
+            "canon",
+            "unattributed",
+            "all"
+          ]
+        }
+      },
+      "ProductScopeUsage": {
+        "name": "product",
+        "in": "query",
+        "required": false,
+        "description": "Optional product scope (sub-projects, contract C5). Omitted → today's response, unchanged. Usage events are not yet attributed to a product, so ANY valid `product` value returns 422 `product_attribution_unavailable` rather than silently returning unscoped data under a product label. An invalid value → 400 `invalid_product`. Applied AFTER auth/org/RBAC.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "research",
+            "design",
+            "develop",
+            "operate",
+            "canon",
+            "unattributed",
+            "all"
+          ]
+        }
       }
     },
     "responses": {
@@ -447,6 +505,16 @@
       },
       "InternalServerError": {
         "description": "Server error — request was well-formed but the server failed to fulfill it. Typically a downstream dependency (DB / RPC / external API) returned an unexpected error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Retired": {
+        "description": "Gone — the endpoint has been permanently retired and will not return. The message names the replacement path.",
         "content": {
           "application/json": {
             "schema": {
@@ -578,6 +646,25 @@
       },
       "ServiceUnavailable": {
         "description": "An upstream dependency is currently unavailable. The request was not processed; retry after the cooldown window.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "FleetStatsUnavailable": {
+        "description": "The fleet read could not be served. `error.code` is `fleet_stats_unavailable` while the org fleet summary is still being built (refresh pending): no fleet list or export is produced, so an empty result is never returned in its place. Retry after `Retry-After` seconds (`error.details.retry_after_seconds`; `error.details.retryable` is `true`). Other 503s on this route mean an upstream dependency is unavailable.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying. Always present on `fleet_stats_unavailable`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -1389,8 +1476,10 @@
               "clear",
               "review_needed",
               "boundary_violation",
-              "unverified"
-            ]
+              "unverified",
+              "unanalyzed"
+            ],
+            "description": "`unverified`: analysis was supposed to run but did not complete. `unanalyzed`: the agent's integrity_mode is off (AIP off), so the turn was recorded but never analysed (migration 518). Neither is a clean integrity pass."
           },
           "concerns": {
             "type": "array",
@@ -3103,7 +3192,8 @@
                   "clear",
                   "review_needed",
                   "boundary_violation",
-                  "unverified"
+                  "unverified",
+                  "unanalyzed"
                 ]
               },
               "concerns": {
@@ -5032,7 +5122,10 @@
                 "mnemom",
                 "researchgrade",
                 "code",
-                "cli_next"
+                "develop",
+                "cli_next",
+                "canon",
+                "grant"
               ]
             }
           },
@@ -9247,7 +9340,7 @@
       "get": {
         "operationId": "getAgentSession",
         "summary": "Live goal state of one Mnemom Agent session",
-        "description": "Backs `mnemom agent show`. Resolves the org like `GET /v1/code/entitlement` (explicit `org_id` else the caller's primary org), requires membership, and confirms `agent_id` belongs to that org — an unknown agent and an agent in another org are the SAME 404 `agent_not_found`, so existence never leaks across tenants. Then relays the gateway's state for `conversationId` verbatim: the sealed goal contract (`sealed`, with the gateway's `hash` — the only sealed hash; a locally computed one differs because the gateway normalises absent arrays), the latest alignment verdict, the turn counter and the guardrail ceilings/state. `null` sections mean the gateway holds nothing for that conversation (absence is data, never a 404). 503 `gateway_unavailable` when the gateway is unset or unreachable.",
+        "description": "Backs `mnemom agent show`. Resolves the org like `GET /v1/code/entitlement` (explicit `org_id` else the caller's primary org), requires membership, and confirms `agent_id` belongs to that org — an unknown agent and an agent in another org are the SAME 404 `agent_not_found`, so existence never leaks across tenants. Then relays the gateway's state for `conversationId` verbatim: the sealed goal contract (`sealed`, with the gateway's `hash` — the only sealed hash; a locally computed one differs because the gateway normalises absent arrays), the latest alignment verdict, the turn counter, the guardrail ceilings/state, the seal lifecycle (`seal`), the last-50 verdict trail (`verdict_trail`) and the judging counts (`unjudged_turns`/`memoised_turns`). `null`/`[]` sections mean the gateway holds nothing for that conversation (absence is data, never a 404); the same is true of a session sealed before these fields existed on an older gateway. 503 `gateway_unavailable` when the gateway is unset or unreachable.",
         "tags": [
           "Code"
         ],
@@ -9305,7 +9398,11 @@
                     "sealed",
                     "verdict",
                     "turn",
-                    "guardrails"
+                    "guardrails",
+                    "seal",
+                    "verdict_trail",
+                    "unjudged_turns",
+                    "memoised_turns"
                   ],
                   "properties": {
                     "conversation_id": {
@@ -9354,6 +9451,26 @@
                         "sealed_at": {
                           "type": "string",
                           "format": "date-time"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "description": "The contract version (1 for the original seal; an owner update bumps it). Absent on a seal stored before this field existed."
+                        },
+                        "seal_reason": {
+                          "type": "string",
+                          "enum": [
+                            "first",
+                            "after_expiry"
+                          ],
+                          "description": "Why this seal was made. Absent on a seal stored before this field existed."
+                        },
+                        "expired_hash": {
+                          "type": "string",
+                          "description": "The lapsed seal's hash, set only on an `after_expiry` seal."
+                        },
+                        "updated_from": {
+                          "type": "string",
+                          "description": "The previous version's hash, set only on an explicit owner update (never on a seal)."
                         }
                       }
                     },
@@ -9407,6 +9524,33 @@
                         "ceilings": {
                           "type": "object",
                           "description": "The guardrail ceilings the contract sealed.",
+                          "properties": {
+                            "max_turns": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "budget_usd": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "stall_turns": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "time_limit_s": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "description": "Wall-clock ceiling in seconds, measured from when the contract was first sealed (an update does not restart the clock). `null` when the sealed contract set no time limit."
+                            }
+                          },
                           "additionalProperties": true
                         },
                         "state": {
@@ -9415,9 +9559,198 @@
                             "null"
                           ],
                           "description": "Current guardrail counters (turns, spend, stall, crossed flags).",
+                          "properties": {
+                            "turns": {
+                              "type": "integer"
+                            },
+                            "spend_usd": {
+                              "type": "number"
+                            },
+                            "stall_run": {
+                              "type": "integer"
+                            },
+                            "fired": {
+                              "type": "object",
+                              "description": "Which ceilings have crossed (each fires at most once).",
+                              "properties": {
+                                "turns": {
+                                  "type": "boolean"
+                                },
+                                "budget": {
+                                  "type": "boolean"
+                                },
+                                "stall": {
+                                  "type": "boolean"
+                                },
+                                "time": {
+                                  "type": "boolean",
+                                  "description": "The wall-clock ceiling crossed."
+                                }
+                              },
+                              "additionalProperties": true
+                            }
+                          },
                           "additionalProperties": true
                         }
                       }
+                    },
+                    "seal": {
+                      "description": "The seal's lifecycle. `live`: a sealed contract currently governs. `expired`: the prior seal lapsed (24h idle) and the next engaged request will seal afresh. `null` normally means no seal has ever been made for this conversation, but the API also returns `null` if the gateway sent a seal payload out of contract (an unknown `state`, or a required subfield missing/mistyped) — a malformed seal is dropped rather than relayed half-trusted, since `mode` (nudge vs enforce) is conformance-relevant. The two cases are distinguished in the API's own logs (`component: \"agent-session\", event: \"seal_dropped\"`), not in this field.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "state",
+                            "version",
+                            "hash",
+                            "sealed_at",
+                            "reason",
+                            "expired_hash",
+                            "updated_from_hash",
+                            "mode"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "live"
+                              ]
+                            },
+                            "version": {
+                              "type": "integer"
+                            },
+                            "hash": {
+                              "type": "string"
+                            },
+                            "sealed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "reason": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "first",
+                                "after_expiry",
+                                null
+                              ]
+                            },
+                            "expired_hash": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "updated_from_hash": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "nudge",
+                                "enforce"
+                              ],
+                              "description": "Whether a crossed ceiling only nudges (`nudge`) or refuses the next request (`enforce`)."
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "state",
+                            "version",
+                            "hash",
+                            "sealed_at"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "expired"
+                              ]
+                            },
+                            "version": {
+                              "type": "integer"
+                            },
+                            "hash": {
+                              "type": "string"
+                            },
+                            "sealed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "verdict_trail": {
+                      "type": "array",
+                      "description": "The last 50 verdicts, oldest first; empty when none judged yet.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "request_id",
+                          "turn",
+                          "verdict",
+                          "reason",
+                          "fence_breach",
+                          "at"
+                        ],
+                        "properties": {
+                          "request_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "turn": {
+                            "type": "integer"
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "aligned",
+                              "drifting",
+                              "violation"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "fence_breach": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ],
+                            "description": "A conclusive mechanical fence check; `null` means the contract has no fences or the verdict predates the check."
+                          },
+                          "at": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "unjudged_turns": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Assistant turns under the current seal with no verdict (a cut-off/aborted response, a judge that failed or never ran, a non-streamed final turn). `null` when no judge ledger counts under the current seal."
+                    },
+                    "memoised_turns": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Turns the judge memo graded without re-running the judge — inherited from a prior turn judged aligned under the same contract version with a matching tool-call shape and text. `null` alongside `unjudged_turns`."
                     }
                   }
                 }
@@ -9458,6 +9791,266 @@
           },
           "503": {
             "description": "The agent lookup failed (retryable), or the Mnemom gateway is unset or unreachable (`gateway_unavailable`, with `details.reason`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/sessions/{conversationId}/contract": {
+      "post": {
+        "operationId": "updateAgentSessionContract",
+        "summary": "Owner/admin update of a live Mnemom Agent session's goal contract",
+        "description": "Writes a NEW contract version under the SAME goal id into the gateway's sealed-contract record for `conversationId` (`POST /internal/goal/contract`), returning the new version and both hashes. Applies from the conversation's next turn — the request already in flight was judged against the version it read at its own start — and the session is notified once on that next turn. Never infers an update from conversation content; the caller supplies the full new contract. Resolves the org and confirms `agent_id` ownership exactly like `GET /v1/agent/sessions/{conversationId}` (same 404 `agent_not_found` collapse for a missing or cross-org agent), but requires the owner/admin role (a write), not any member role. A caller's own SESSION credential (a gateway-only-scoped API key, or one minted with `kind: 'session'`) is refused with 403 `session_credential_forbidden` before the gateway is ever reached — a session must never update its own contract.",
+        "tags": [
+          "Code"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "description": "The conversation id the CLI launched the session with.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": true,
+            "description": "The agent record id (`agents.id`) the session ran as.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "description": "Target organization (defaults to the caller's primary org).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "contract"
+                ],
+                "properties": {
+                  "contract": {
+                    "type": "object",
+                    "required": [
+                      "statement",
+                      "requirements",
+                      "allowed_paths",
+                      "forbidden_paths"
+                    ],
+                    "description": "The full new goal contract (replaces the live one under the same goal id). Every ceiling (`max_turns`, `budget_usd`, `stall_turns`, `time_limit_s`) follows replace semantics: one omitted here is removed, not kept. Only `mode` carries over when omitted.",
+                    "properties": {
+                      "goal_id": {
+                        "type": "string"
+                      },
+                      "statement": {
+                        "type": "string"
+                      },
+                      "requirements": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowed_paths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "forbidden_paths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "max_turns": {
+                        "type": "number"
+                      },
+                      "budget_usd": {
+                        "type": "number"
+                      },
+                      "stall_turns": {
+                        "type": "number"
+                      },
+                      "time_limit_s": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Wall-clock ceiling in seconds, measured from when the contract was first sealed (an update does not restart the clock). Ceilings are REPLACED, not merged: omitting `time_limit_s` removes any time ceiling the live contract had. To keep it, send it again. A value that is not a positive integer is a 400."
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "nudge",
+                          "enforce"
+                        ],
+                        "description": "Governance mode for the new version. Unlike the ceilings, omitting `mode` keeps the live contract's mode (the gateway carries it over); an explicit value, including `nudge`, replaces it. Any other value is a 400."
+                      }
+                    }
+                  },
+                  "expected_hash": {
+                    "type": "string",
+                    "description": "Optimistic-concurrency guard: the hash the caller last read. A live contract that has moved past it is a 409 `version_conflict`."
+                  },
+                  "expected_version": {
+                    "type": "number",
+                    "description": "Optimistic-concurrency guard: the version the caller last read (alternative to expected_hash)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The contract was updated. Returns the new version and both hashes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "conversation_id",
+                    "agent",
+                    "org_id",
+                    "contract",
+                    "version",
+                    "hash",
+                    "previous_hash",
+                    "sealed_at"
+                  ],
+                  "properties": {
+                    "conversation_id": {
+                      "type": "string"
+                    },
+                    "agent": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "contract": {
+                      "description": "The new contract exactly as the gateway normalised and stored it."
+                    },
+                    "version": {
+                      "type": "integer",
+                      "description": "The new contract version."
+                    },
+                    "hash": {
+                      "type": "string",
+                      "description": "The new contract's hash."
+                    },
+                    "previous_hash": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The prior version's hash (`updated_from`)."
+                    },
+                    "sealed_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing `agent_id`, an invalid JSON body, or `contract` missing statement/requirements/allowed_paths/forbidden_paths.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The caller is not owner/admin in the resolved org (`forbidden`), or presented a SESSION's own credential — gateway-only scopes, or `kind: 'session'` — which is always refused here (`session_credential_forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No org for the caller, the agent does not exist / is not in the resolved org (`agent_not_found`), or the gateway has no sealed contract on record for this conversation (`no_seal`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`version_conflict` — the live contract has moved since `expected_hash`/`expected_version`; `error.details.current` is the live record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "description": "The agent lookup failed (retryable), or the Mnemom gateway is unset/unreachable or could not durably write the update (`gateway_unavailable` / `update_unavailable`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10765,7 +11358,8 @@
                 "clear",
                 "review_needed",
                 "boundary_violation",
-                "unverified"
+                "unverified",
+                "unanalyzed"
               ]
             }
           },
@@ -11009,7 +11603,7 @@
       "get": {
         "operationId": "exportComplianceRecord",
         "summary": "Export compliance record",
-        "description": "Export a comprehensive compliance record for the agent including all checkpoints, reclassifications, card amendments, and score history. Returns a structured document suitable for regulatory audits and compliance reviews.",
+        "description": "Export a comprehensive compliance record for the agent including all checkpoints, score history, reclassifications, card amendments, disagreement reviews and policy evaluations with card gaps. Returns a structured document suitable for regulatory audits and compliance reviews. Every record in the period is included, in both formats; a period with more than 10,000 records of one kind answers 413 `export_too_large`, and should be exported in parts with `from`/`to`. Members of the agent's org only.",
         "tags": [
           "Reclassification"
         ],
@@ -11045,7 +11639,7 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "Start of time range"
+            "description": "Start of time range (ISO-8601 date or date-time; anything else is a 400 `invalid_time_range`)"
           },
           {
             "name": "to",
@@ -11054,12 +11648,20 @@
               "type": "string",
               "format": "date-time"
             },
-            "description": "End of time range"
+            "description": "End of time range (ISO-8601 date or date-time; anything else is a 400 `invalid_time_range`)"
           }
         ],
         "responses": {
           "200": {
             "description": "Compliance export data",
+            "headers": {
+              "X-Mnemom-Export-Counts": {
+                "description": "CSV responses only: rows per section, as `checkpoints=N;score_history=N;reclassifications=N;card_amendments=N;disagreement_reviews=N;policy_evaluations_with_gaps=N`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -11094,6 +11696,30 @@
                         }
                       }
                     },
+                    "counts": {
+                      "type": "object",
+                      "description": "Number of entries in each array of this export.",
+                      "properties": {
+                        "checkpoints": {
+                          "type": "integer"
+                        },
+                        "score_history": {
+                          "type": "integer"
+                        },
+                        "reclassifications": {
+                          "type": "integer"
+                        },
+                        "card_amendments": {
+                          "type": "integer"
+                        },
+                        "disagreement_reviews": {
+                          "type": "integer"
+                        },
+                        "policy_evaluations_with_gaps": {
+                          "type": "integer"
+                        }
+                      }
+                    },
                     "checkpoints": {
                       "type": "array",
                       "items": {
@@ -11113,6 +11739,18 @@
                       }
                     },
                     "score_history": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "disagreement_reviews": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "policy_evaluations_with_gaps": {
                       "type": "array",
                       "items": {
                         "type": "object"
@@ -11139,6 +11777,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "`export_too_large`: the period holds more than 10,000 records of one kind. Narrow it with `from`/`to` and export it in parts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -14076,6 +14724,180 @@
         }
       }
     },
+    "/agents/{agent_id}/session-keys": {
+      "post": {
+        "operationId": "mintAgentSessionKey",
+        "summary": "Mint a short-lived, gateway-only API key bound to an agent",
+        "description": "Owner-authenticated only (a user JWT/cookie/OAuth session, or an API key carrying `api:write`), at org role owner/admin on the agent's governing org (`org_id` resolves like `GET /v1/code/entitlement`; an unknown agent and an agent in another org are the SAME 404 `agent_not_found`). Mints a key scoped to EXACTLY `['gateway']`, bound to `agent_id` and, when given, `session_id` (the gateway conversation id), with a fixed 24h expiry matching the goal contract's sliding 24h TTL. `mnemom agent` mints one of these per launched session instead of handing the launched session the owner's own key (MNE-8245), so a session can never call owner-only mnemom-api routes. A session key, or any other gateway-only key, is refused here with 403 `session_credential_forbidden` — a session can never mint itself a broader key. The minted key's `user_id` is the caller, so it revokes through the existing `DELETE /v1/api-keys/{key_id}`.",
+        "tags": [
+          "Code"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "description": "The agent record id (`agents.id`) to bind the key to.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "description": "Target organization (defaults to the caller's primary org).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "The gateway conversation/session id to bind the key to, if known at mint time."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The minted key. `key` is the cleartext secret — returned once, never again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key_id",
+                    "key",
+                    "key_prefix",
+                    "scopes",
+                    "kind",
+                    "agent_id",
+                    "session_id",
+                    "expires_at",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "key_id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The cleartext key — shown once."
+                    },
+                    "key_prefix": {
+                      "type": "string"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "gateway"
+                        ]
+                      },
+                      "description": "Always exactly `['gateway']`."
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "session"
+                      ]
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`agent_id` is missing (`agent_id_required`), or `session_id` is not a non-empty string.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The caller lacks org role owner/admin on the agent's org (`forbidden`), an API key lacks `api:write` (`insufficient_scope`), or the caller presented a session key or other gateway-only key (`session_credential_forbidden`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No org for the caller (`not_found`), or the agent does not exist / is not in the resolved org (`agent_not_found` — deliberately the same answer for both).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "description": "The agent lookup failed (retryable).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agents/{agent_id}/settings": {
       "get": {
         "operationId": "getAgentSettings",
@@ -15238,8 +16060,9 @@
     "/aip/webhooks": {
       "post": {
         "operationId": "registerAipWebhook",
-        "summary": "Register AIP webhook",
-        "description": "Authorization: the caller must be a member of the organization that owns `agent_id` (the org is derived from the agent row, never from the request); registering a webhook on an agent the caller cannot access returns 403 and nothing is stored, so no one can subscribe to another tenant's agent events. `callback_url` — Outbound URL rules: the URL must be https and must point at a publicly reachable host. Credentials in the URL, single-label or internal host names (localhost, *.local, *.internal, *.home.arpa), and hosts that are or resolve to loopback, private (RFC1918), link-local (including cloud metadata), CGNAT, IPv6 unique-local/link-local, or other non-public addresses are rejected with 400. The host is resolved and checked when the webhook is registered.",
+        "summary": "Register AIP webhook (retired)",
+        "deprecated": true,
+        "description": "Retired. AIP webhooks are no longer supported; this endpoint always returns 410 Gone. Requires authentication.",
         "tags": [
           "Webhooks"
         ],
@@ -15248,80 +16071,15 @@
             "BearerAuth": []
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "agent_id",
-                  "callback_url",
-                  "secret",
-                  "events"
-                ],
-                "properties": {
-                  "agent_id": {
-                    "type": "string"
-                  },
-                  "callback_url": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "secret": {
-                    "type": "string"
-                  },
-                  "events": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         "responses": {
-          "201": {
-            "description": "Webhook registered",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "registration_id": {
-                      "type": "string"
-                    },
-                    "agent_id": {
-                      "type": "string"
-                    },
-                    "callback_url": {
-                      "type": "string"
-                    },
-                    "events": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CrossOriginRejected"
+          },
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -15335,10 +16093,16 @@
     "/aip/webhooks/{registration_id}": {
       "delete": {
         "operationId": "deleteAipWebhook",
-        "summary": "Remove AIP webhook",
-        "description": "Authorization: the registration is resolved to its parent agent and the caller must be a member of the organization that owns that agent; a registration under an agent the caller cannot access returns 403/404, so no other tenant's registration can be deleted. Accepts a bearer JWT or an API key (the global default) — the handler authorizes via `resolveAuthPrincipal`.",
+        "summary": "Remove AIP webhook (retired)",
+        "deprecated": true,
+        "description": "Retired alongside POST /v1/aip/webhooks. Always returns 410 Gone. Requires authentication.",
         "tags": [
           "Webhooks"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
         ],
         "parameters": [
           {
@@ -15351,20 +16115,14 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CrossOriginRejected"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -34785,6 +35543,84 @@
         }
       }
     },
+    "/artifacts/vault-token": {
+      "post": {
+        "operationId": "mintArtifactVaultToken",
+        "summary": "Mint a short-lived artifacts.mnemom vault bearer for the caller's active org.",
+        "description": "Authenticates the caller's platform session, reads the active org and role from `get_user_context`, and returns a 300-second Ed25519 JWS (`org_id`, `org_role`, typed `sub: user:<id>`) signed with a DEDICATED vault key (not the AAP attestation key) whose public half is published in `/v1/.well-known/jwks.json`. The org is never taken from the request. 403 when there is no active org or the role is below member; 503 (fail-closed) when the vault signing key is not configured. A scope-clamped MCP OAuth token cannot mint.",
+        "tags": [
+          "Attestation"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vault bearer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "token_type",
+                    "expires_in",
+                    "expires_at",
+                    "org_id",
+                    "org_role"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "Compact EdDSA JWS."
+                    },
+                    "token_type": {
+                      "const": "Bearer"
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "description": "Seconds; always 300."
+                    },
+                    "expires_at": {
+                      "type": "integer",
+                      "description": "Unix seconds."
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "org_role": {
+                      "type": "string",
+                      "enum": [
+                        "owner",
+                        "admin",
+                        "member"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/auth/callback": {
       "get": {
         "operationId": "emailCallback",
@@ -37789,7 +38625,7 @@
       "post": {
         "operationId": "signUp",
         "summary": "Sign up with email + password",
-        "description": "Creates a new user account. When email confirmation is required on the Supabase project, returns `{ user, email_confirmation_required: true }` without issuing a session cookie; the user must click the email link. When auto-confirm is on, issues `mnemom_session` and returns `{ user }` — except for an email domain that enforces SSO, which gets 403 `sso_required` (503 `sso_check_unavailable` if the SSO lookup fails) and no session; that user signs in through SSO. If the email already has an account, the response is identical to a new confirmation-required signup (`200 { user: null, email_confirmation_required: true }`) so the endpoint cannot be used to enumerate registered emails (CWE-203); no duplicate account is created, and the existing owner is emailed sign-in / reset links out-of-band. Supersedes the earlier `409 email_exists` behavior (MNE-1348).",
+        "description": "Creates a new user account. When email confirmation is required on the Supabase project, returns `{ user, email_confirmation_required: true }` without issuing a session cookie; the user must click the email link. When auto-confirm is on, issues `mnemom_session` and returns `{ user }` — except for an email domain that enforces SSO, which gets 403 `sso_required` (503 `sso_check_unavailable` if the SSO lookup fails) and no session; that user signs in through SSO. If the email already has an account, the response is identical to a new confirmation-required signup (`200 { user: null, email_confirmation_required: true }`) so the endpoint cannot be used to enumerate registered emails (CWE-203); no duplicate account is created, and the existing owner is emailed sign-in / reset links out-of-band. Supersedes the earlier `409 email_exists` behavior (MNE-1348). Invite variant (MNE-8331): a valid `invite_token` that vouches for `email` skips email confirmation and returns a live session (see `invite_token`).",
         "tags": [
           "Auth"
         ],
@@ -37818,6 +38654,10 @@
                     "type": "string",
                     "format": "uri",
                     "description": "Allowlisted SPA path to return to after email confirmation."
+                  },
+                  "invite_token": {
+                    "type": "string",
+                    "description": "Optional product-invite token (`pinv_…`) from an invite link. When it resolves to a PENDING, email-bound invite whose own invitee email equals `email` exactly (trimmed, case-insensitive), the account is created with its email already verified and a session is issued (`{ user }`, no `email_confirmation_required`) — the invite email already proved inbox control. Applies on the Zitadel identity provider; on a GoTrue-backed deployment the token is ignored and the normal confirmation-required answer is returned. The invite is NOT accepted by this call (use `POST /invites/accept`). Any other value (unknown, used, expired, revoked, user-bound, or a different email) is silently ignored and the response is identical to a sign-up without the token; no response reveals whether a token exists or whether the email matched (MNE-1348)."
                   }
                 }
               }
@@ -38288,14 +39128,16 @@
                     },
                     "thresholds": {
                       "type": "array",
-                      "description": "Ordered (ascending by `value_cents`) severity-tiered threshold set (D5 alert hardening). The legacy scalar, if set and no multi-threshold set is configured, is lifted into a single-entry `warning` set here for backward compatibility.",
+                      "deprecated": true,
+                      "description": "DEPRECATED, DECLARED-BUT-NOT-HONORED (MNE-8422, BG-8). The ordered multi-threshold set was fired only by the usage-alerts cron against PLAN overage cost, a subscription/plan surface retired with the legacy plan model; nothing fires these levels anymore. The field still round-trips for contract stability, but `multi_threshold_deprecated` is `true` to signal it is inert. Use the single scalar `threshold_cents` (the surviving low-balance alert) instead.",
                       "items": {
                         "$ref": "#/components/schemas/BudgetAlertThreshold"
                       }
                     },
                     "fired_levels": {
                       "type": "array",
-                      "description": "Severity levels already fired (and deduped) for the current threshold configuration.",
+                      "deprecated": true,
+                      "description": "DEPRECATED (MNE-8422, BG-8): per-level dedup state for the retired multi-threshold set. No longer updated now that nothing fires the multi-threshold levels.",
                       "items": {
                         "type": "string",
                         "enum": [
@@ -38304,6 +39146,10 @@
                           "depleted"
                         ]
                       }
+                    },
+                    "multi_threshold_deprecated": {
+                      "type": "boolean",
+                      "description": "Always `true` (MNE-8422, BG-8): the multi-threshold set (`thresholds`) is accepted for contract stability but is no longer honored — its emitter was retired with the legacy plan model. The single scalar `threshold_cents` low-balance alert remains the only active budget alert."
                     }
                   }
                 }
@@ -38347,7 +39193,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "Two accepted shapes: (a) NEW — `thresholds`: an ordered severity-tiered set (empty array clears it); (b) LEGACY — `threshold_cents`: the single scalar. `thresholds` takes precedence when present; either write resets per-threshold and legacy dedup state.",
+                "description": "Two accepted shapes: (a) LEGACY/ACTIVE — `threshold_cents`: the single scalar low-balance alert, the only shape still honored (fired by the mu-notifications cron); (b) DEPRECATED — `thresholds`: the ordered severity-tiered multi-threshold set, accepted for contract stability but no longer honored (its emitter was retired with the legacy plan model; the response carries `multi_threshold_deprecated: true`). `thresholds` still takes precedence when present; either write resets per-threshold and legacy dedup state.",
                 "properties": {
                   "threshold_cents": {
                     "type": [
@@ -38358,7 +39204,8 @@
                   },
                   "thresholds": {
                     "type": "array",
-                    "description": "New multi-threshold set. Each entry accepts `level` (`warning`|`urgent`|`depleted`, must be unique and rise in severity with value), `value` (non-negative number), an optional `unit` (`cents`, default, or `mu` — 1 µ = 1¢, exact conversion), and an optional `message` (<=500 chars). An empty array clears the configured set.",
+                    "deprecated": true,
+                    "description": "DEPRECATED, DECLARED-BUT-NOT-HONORED (MNE-8422, BG-8). Accepted and persisted for contract stability, but nothing fires these levels anymore — the usage-alerts cron that fired them against PLAN overage cost was retired with the legacy plan model. The response carries `multi_threshold_deprecated: true`. Use the scalar `threshold_cents` low-balance alert instead. Each entry accepts `level` (`warning`|`urgent`|`depleted`, must be unique and rise in severity with value), `value` (non-negative number), an optional `unit` (`cents`, default, or `mu` — 1 µ = 1¢, exact conversion), and an optional `message` (<=500 chars). An empty array clears the configured set.",
                     "maxItems": 5,
                     "items": {
                       "type": "object",
@@ -38419,10 +39266,15 @@
                     },
                     "thresholds": {
                       "type": "array",
-                      "description": "Present on the multi-threshold write path: the normalized, stored threshold set.",
+                      "deprecated": true,
+                      "description": "Present on the (deprecated) multi-threshold write path: the normalized, persisted set. DECLARED-BUT-NOT-HONORED (MNE-8422, BG-8) — see `multi_threshold_deprecated`.",
                       "items": {
                         "$ref": "#/components/schemas/BudgetAlertThreshold"
                       }
+                    },
+                    "multi_threshold_deprecated": {
+                      "type": "boolean",
+                      "description": "Present and `true` on the multi-threshold write path (MNE-8422, BG-8): the set was accepted and persisted for contract stability but is no longer honored — nothing fires these levels. The scalar `threshold_cents` low-balance alert remains active."
                     },
                     "updated": {
                       "type": "boolean"
@@ -38512,67 +39364,21 @@
     "/billing/change-plan": {
       "post": {
         "operationId": "changePlan",
-        "summary": "Change subscription plan",
+        "summary": "Change subscription plan (retired)",
+        "description": "Retired (MNE-8422). Mnemom bills in mu; plan subscriptions no longer exist. Always returns 410 Gone, before authentication or body parsing.",
+        "deprecated": true,
+        "security": [
+          {}
+        ],
         "tags": [
           "Billing"
         ],
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "plan_id"
-                ],
-                "properties": {
-                  "plan_id": {
-                    "type": "string"
-                  },
-                  "annual": {
-                    "type": "boolean",
-                    "default": false
-                  }
-                }
-              }
-            }
-          }
-        },
         "responses": {
-          "200": {
-            "description": "Plan changed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "updated": {
-                      "type": "boolean"
-                    },
-                    "plan_id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CrossOriginRejected"
+          },
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -38586,70 +39392,21 @@
     "/billing/checkout": {
       "post": {
         "operationId": "createCheckout",
-        "summary": "Create Stripe checkout session",
+        "summary": "Create Stripe checkout session (retired)",
+        "description": "Retired (MNE-8422). Mnemom bills in mu; plan subscriptions no longer exist. Always returns 410 Gone, before authentication or body parsing.",
+        "deprecated": true,
+        "security": [
+          {}
+        ],
         "tags": [
           "Billing"
         ],
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "plan_id"
-                ],
-                "properties": {
-                  "plan_id": {
-                    "type": "string"
-                  },
-                  "annual": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "promo_code": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
         "responses": {
-          "200": {
-            "description": "Checkout session URL",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "url": {
-                      "type": "string"
-                    },
-                    "session_id": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CrossOriginRejected"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -38810,6 +39567,11 @@
             "BearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Invoice list",
@@ -38860,6 +39622,11 @@
         "security": [
           {
             "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
           }
         ],
         "responses": {
@@ -38917,6 +39684,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
           }
         ],
         "responses": {
@@ -38930,6 +39700,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -39021,11 +39794,14 @@
               "minimum": 1,
               "maximum": 500
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeLedger"
           }
         ],
         "responses": {
           "200": {
-            "description": "A page of ledger entries plus `nextCursor` (mnemom-mu response, passed through verbatim).",
+            "description": "A page of ledger entries plus `nextCursor` (mnemom-mu response, passed through verbatim unless `product` is supplied).",
             "content": {
               "application/json": {
                 "schema": {
@@ -39034,6 +39810,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -39095,6 +39874,9 @@
               "type": "string",
               "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
           }
         ],
         "responses": {
@@ -39434,6 +40216,11 @@
             "BearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Receipt list",
@@ -39707,6 +40494,9 @@
                 90
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeUsage"
           }
         ],
         "responses": {
@@ -39793,6 +40583,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
           },
@@ -39851,6 +40644,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeUsage"
           }
         ],
         "responses": {
@@ -39989,6 +40785,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -48849,7 +49648,7 @@
       "post": {
         "operationId": "acceptProductInvite",
         "summary": "Accept a product invite.",
-        "description": "RG M1 invite flow (MNE-7166). Redeems an opaque `pinv_…` invite token: validates the token, marks the `product_invite` `accepted` exactly-once, grants the invitee access to the invited product(s), and forwards the staged starter-µ grant to billing server-side. Invitee-facing and authenticated — a user invite requires the caller to be that user (403 otherwise); an org invite requires the caller to be an owner/admin of that org. Idempotent: a second accept re-asserts access and returns 200 without re-firing the grant. The grant amount is admin-only and never appears in the request or response — the response only reports whether the starter grant `fired` or was `deferred`.",
+        "description": "RG M1 invite flow (MNE-7166). Redeems an opaque `pinv_…` invite token: validates the token, marks the `product_invite` `accepted` exactly-once, grants the invitee access to the invited product(s), and tops the account's µ balance up to the invite's per-product entitlement (never a sum, never a debit; computed server-side at accept time) via billing. Invitee-facing and authenticated — a user invite requires the caller to be that user (403 `invite_account_mismatch` otherwise); an email-bound invite requires the caller's account email (resolved server-side, never from the request) to match the invited address; the emailed token is the proof of inbox possession, so the email need not be confirmed yet (403 `invite_email_mismatch` otherwise; 502 if the identity lookup fails, 503 if no identity provider is configured); an org invite requires the caller to be an owner/admin of that org. Idempotent: a second accept re-asserts access and returns 200 without re-firing the grant. The grant amount is admin-only and never appears in the request or response — the response only reports whether the starter grant `fired` or was `deferred`.",
         "tags": [
           "Invites"
         ],
@@ -48924,7 +49723,7 @@
                         "fired",
                         "deferred"
                       ],
-                      "description": "Whether the starter grant was forwarded to billing (`fired`) or deferred for a later human-gated backfill (`deferred`). Omitted on an idempotent re-accept."
+                      "description": "Whether the starter grant was settled (`fired`: forwarded to billing, or nothing owed because the products entitle no µ or the account already holds the entitlement) or deferred for a later retry/backfill (`deferred`). Omitted on an idempotent re-accept."
                     }
                   }
                 }
@@ -48962,6 +49761,84 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/invites/preview": {
+      "get": {
+        "operationId": "previewProductInvite",
+        "summary": "Preview a product invite (sign-up vs sign-in routing).",
+        "description": "MNE-8335. Unauthenticated and keyed by the secret `pinv_…` token — the same secret that authorises accept. Lets the website send a logged-out invitee to /signup (no account yet) or /login (already has one) before they authenticate. Returns only the effective `status`, the invited `products`, and `needs_account` — true only for a LIVE email-bound user invite whose address has no account yet (decided server-side from the invite record; any failed lookup yields false, i.e. sign-in). Never returns an email, an id or a grant amount, and there is deliberately no email-keyed variant (MNE-1348 anti-enumeration). A live row past its expiry reports `expired`. Unknown token: 404.",
+        "tags": [
+          "Invites"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The opaque `pinv_…` invite token from the accept link."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "products",
+                    "needs_account"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "live",
+                        "accepted",
+                        "expired",
+                        "revoked"
+                      ]
+                    },
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "needs_account": {
+                      "type": "boolean",
+                      "description": "True only when the invite is live and its invited email has no account yet."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -50165,7 +51042,10 @@
                 "mnemom",
                 "researchgrade",
                 "code",
-                "cli_next"
+                "develop",
+                "cli_next",
+                "canon",
+                "grant"
               ]
             },
             "description": "Which product's entitlement to check."
@@ -50243,6 +51123,9 @@
                 "true"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/ProductScopeAccount"
           }
         ],
         "responses": {
@@ -50256,6 +51139,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -53308,7 +54194,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
+            "$ref": "#/components/responses/FleetStatsUnavailable"
           }
         }
       }
@@ -54062,6 +54948,7 @@
       "post": {
         "operationId": "createOrgApiKey",
         "summary": "Create organization API key",
+        "description": "Mint an org-billed API key. Owners and admins may request any scope set. Members may create an org key ONLY when `scopes` is exactly `[\"gateway\"]` (a gateway-only key that cannot call mnemom-api routes); a member must pass that scope set explicitly, and any other scope set (including the omitted-scopes default) returns 403. Viewers and auditors cannot create org keys. The key is billed to the org (for personal orgs with no billing account, a member-created key bills to the org owner's personal account) and records the caller as its creator.",
         "tags": [
           "Organizations"
         ],
@@ -54096,7 +54983,7 @@
                       "api:read",
                       "api:write"
                     ],
-                    "description": "Capability set for this org key (ADR-049). If omitted, the API substitutes the default. The caller is already verified as owner/admin of this org by the route's RBAC gate, so `admin:org` is implicit-eligible here; `admin:platform` still requires Mnemom-staff role."
+                    "description": "Capability set for this org key (ADR-049). If omitted, the API substitutes the default. For owner/admin callers `admin:org` is implicit-eligible; `admin:platform` still requires Mnemom-staff role. Member callers must send exactly `[\"gateway\"]`."
                   }
                 }
               }
@@ -54137,6 +55024,7 @@
       "get": {
         "operationId": "listOrgApiKeys",
         "summary": "List organization API keys",
+        "description": "Owners, admins, and auditors see every active key in the org. Members see only the active keys they created themselves. Viewers are refused (403).",
         "tags": [
           "Organizations"
         ],
@@ -56658,7 +57546,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
+            "$ref": "#/components/responses/FleetStatsUnavailable"
           }
         }
       }
@@ -57757,6 +58645,576 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/grants/holders": {
+      "get": {
+        "operationId": "getOrgGrantHolders",
+        "summary": "Who holds anything in the organization, from grant. (owner/admin/auditor)",
+        "description": "The org-admin Grants pane's Who-holds read from grant. (canon mn-9rzonp v26/v27): class counts keyed by subject kind, resource type, route and environment over the whole filtered set, and one page of up to 100 holders in byte order after `cursor`, each with its holdings counted. Agents and services are holders as peers of people. No resource id is named. Owner, admin or auditor. `type`, `environment` and `cursor` are each optional and at most once; anything malformed, repeated or unknown is `400 invalid_request` and grant. is not called. Answers `404` exactly as an unknown route while the organization's effective `grant` capability flag is off. `503 grant_unavailable` when grant. is not configured or does not answer; `403 grant_subject_unavailable` when the caller has no Zitadel subject to send.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "A grant. resource type, `[a-z][a-z0-9_]{0,63}`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "test",
+                "preview",
+                "production"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's `next_cursor`: a grant. holder subject, a typed id or a `team:<id>#member` member set.",
+            "schema": {
+              "type": "string",
+              "maxLength": 140,
+              "pattern": "^(?:(?:user|service):[A-Za-z0-9_-]{1,128}|agent:mnm-[a-z0-9-]{1,120}|team:[A-Za-z0-9_-]{1,128}#member)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Who holds anything in the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "counts",
+                    "holders",
+                    "approximate"
+                  ],
+                  "properties": {
+                    "counts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "subject_kind",
+                          "type",
+                          "route",
+                          "environment",
+                          "holders",
+                          "n"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "subject_kind": {
+                            "type": "string",
+                            "enum": [
+                              "user",
+                              "service",
+                              "agent",
+                              "team"
+                            ]
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "creator",
+                              "direct",
+                              "inherited"
+                            ]
+                          },
+                          "environment": {
+                            "type": "string"
+                          },
+                          "holders": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "holders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "subject",
+                          "held"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "subject": {
+                            "type": "string"
+                          },
+                          "held": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "type",
+                                "role",
+                                "route",
+                                "environment",
+                                "n"
+                              ],
+                              "additionalProperties": false,
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "role": {
+                                  "type": "string"
+                                },
+                                "route": {
+                                  "type": "string",
+                                  "enum": [
+                                    "creator",
+                                    "direct",
+                                    "inherited"
+                                  ]
+                                },
+                                "environment": {
+                                  "type": "string"
+                                },
+                                "n": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string"
+                    },
+                    "approximate": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/grants/holdings": {
+      "get": {
+        "operationId": "getOrgGrantHoldings",
+        "summary": "What one subject holds in the organization, from grant. (owner/admin/auditor)",
+        "description": "The org-admin Grants pane's read of one subject's holdings from grant. (canon mn-c0amqk, mn-9rzonp v23), proxied read-only with this API's own grant. credential: class counts of every holding by type, role, route and environment, and the holdings themselves only for resources the calling admin may read by grant.'s own standing. Owner, admin or auditor. Answers `404` exactly as an unknown route while the organization's effective `grant` capability flag is off. `400 invalid_subject` when `subject` is not exactly one id in grant.'s typed subject grammar (grant. is not called). `503 grant_unavailable` when grant. is not configured or does not answer; `403 grant_subject_unavailable` when the caller has no Zitadel subject to send.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": true,
+            "description": "The subject whose holdings are read, as a grant. typed id: `user:` or `service:` then `[A-Za-z0-9_-]{1,128}`, or `agent:mnm-` then `[a-z0-9-]{1,120}`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 136,
+              "pattern": "^(?:(?:user|service):[A-Za-z0-9_-]{1,128}|agent:mnm-[a-z0-9-]{1,120})$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subject's holdings in the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "counts",
+                    "holdings",
+                    "approximate"
+                  ],
+                  "properties": {
+                    "counts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "role",
+                          "route",
+                          "environment",
+                          "n"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "creator",
+                              "direct",
+                              "inherited"
+                            ]
+                          },
+                          "environment": {
+                            "type": "string"
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "holdings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "resource",
+                          "role",
+                          "route",
+                          "environment"
+                        ],
+                        "properties": {
+                          "resource": {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "id"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "creator",
+                              "direct",
+                              "inherited"
+                            ]
+                          },
+                          "environment": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "approximate": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/grants/mine": {
+      "get": {
+        "operationId": "getOrgGrantMine",
+        "summary": "What the caller holds in the organization, from grant. (any member)",
+        "description": "The caller's own holdings from grant. (canon mn-9rzonp v27, a self read): grant.'s holdings read with the subject fixed to the caller's own Zitadel subject, proxied read-only with this API's own grant. credential. Any member of the organization. The route takes no `subject`: a request naming one is `400 invalid_subject` and grant. is not called. Answers `404` exactly as an unknown route while the organization's effective `grant` capability flag is off. `503 grant_unavailable` when grant. is not configured or does not answer; `403 grant_subject_unavailable` when the caller has no Zitadel subject to send.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's holdings in the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "counts",
+                    "holdings",
+                    "approximate"
+                  ],
+                  "properties": {
+                    "counts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "role",
+                          "route",
+                          "environment",
+                          "n"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "creator",
+                              "direct",
+                              "inherited"
+                            ]
+                          },
+                          "environment": {
+                            "type": "string"
+                          },
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "holdings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "resource",
+                          "role",
+                          "route",
+                          "environment"
+                        ],
+                        "properties": {
+                          "resource": {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "id"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string",
+                            "enum": [
+                              "creator",
+                              "direct",
+                              "inherited"
+                            ]
+                          },
+                          "environment": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "approximate": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/orgs/{org_id}/grants/settings": {
+      "get": {
+        "operationId": "getOrgGrantSettings",
+        "summary": "Grant settings for organization (owner/admin/auditor)",
+        "description": "The org-admin Grants pane's read of the organization's sharing settings from grant. (canon mn-c0amqk): `{ requests_allowed, sharing_beyond_org }`, proxied read-only with this API's own grant. credential. Owner, admin or auditor. Answers `404` exactly as an unknown route while the organization's effective `grant` capability flag is off. `503 grant_unavailable` when grant. is not configured or does not answer; `403 grant_subject_unavailable` when the caller has no Zitadel subject to send (not a session or Zitadel-issued bearer user on a Zitadel deployment).",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's grant sharing settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "requests_allowed",
+                    "sharing_beyond_org"
+                  ],
+                  "properties": {
+                    "requests_allowed": {
+                      "type": "boolean"
+                    },
+                    "sharing_beyond_org": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -61344,38 +62802,18 @@
     "/plans": {
       "get": {
         "operationId": "listPublicPlans",
-        "security": [],
-        "summary": "List public pricing plans",
+        "summary": "List public pricing plans (retired)",
+        "description": "Retired (MNE-8422). Mnemom bills in mu; there are no subscription plans to list. Always returns 410 Gone, before authentication. Kept as a documented deprecation signal rather than a bare 404.",
+        "deprecated": true,
+        "security": [
+          {}
+        ],
         "tags": [
           "Billing"
         ],
         "responses": {
-          "200": {
-            "description": "Public plans",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "plans": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Plan"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -61389,36 +62827,18 @@
     "/plans/public": {
       "get": {
         "operationId": "listPublicPlansAlias",
-        "summary": "List public pricing plans (alias of `/plans`)",
-        "description": "Returns non-archived, public-visibility plans sorted by `sort_order`. Identical to `GET /plans`; this alias exists for stable linking from marketing pages.",
+        "summary": "List public pricing plans (alias of `/plans`) (retired)",
+        "description": "Retired (MNE-8422) alongside `GET /plans`. Mnemom bills in mu; there are no subscription plans to list. Always returns 410 Gone, before authentication.",
+        "deprecated": true,
+        "security": [
+          {}
+        ],
         "tags": [
           "Billing"
         ],
-        "security": [],
         "responses": {
-          "200": {
-            "description": "Public plan list.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "plans"
-                  ],
-                  "properties": {
-                    "plans": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Plan"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "410": {
+            "$ref": "#/components/responses/Retired"
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -63711,7 +65131,7 @@
       "put": {
         "operationId": "putProtectionByAgent",
         "summary": "Publish or replace the protection manifest",
-        "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Honors an optional `If-Match` for optimistic concurrency (stale → 412). Body cap 128 KiB. See ADR-008 and ADR-023.",
+        "description": "Accepts YAML (`text/yaml`, `application/yaml`) or JSON. Body is the full `UnifiedProtectionCard`; server-side composition merges it across the platform → org → team → agent cascade and writes the canonical composed card. Requires `Idempotency-Key`. Honors an optional `If-Match` for optimistic concurrency (stale → 412). Publishing `mode` `observe`, `nudge` or `enforce` requires the agent's µ billing account (the one the gateway charges) to exist and hold a positive balance, read from billing at publish time: no account → 402 `billing_unconfigured`, no µ → 402 `balance_depleted` (both with `error.details.top_up_url`), billing unreachable → 503 `balance_unverified`. Mode `off` is always allowed. Plans do not gate this. Body cap 128 KiB. See ADR-008 and ADR-023.",
         "tags": [
           "Protection"
         ],
@@ -63809,6 +65229,16 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "402": {
+            "description": "No µ to govern with: the agent has no µ billing account (`billing_unconfigured`) or its balance is used up (`balance_depleted`). `error.message` reads \"Out of µ — recharge at <top_up_url>.\" and `error.details.top_up_url` is the deployment's web app billing page (`https://www.mnemom.ai/settings/billing` in production). Not a plan gate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -63832,6 +65262,9 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -75520,6 +76953,17 @@
           "Safe House"
         ],
         "deprecated": true,
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page's `pagination.after` (same keyset cursor as `/safe-house/evaluations`). A malformed cursor is a 400.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Evaluation page.",
@@ -75845,6 +77289,7 @@
             "name": "after",
             "in": "query",
             "required": false,
+            "description": "Opaque cursor: pass the previous page's `pagination.after` to fetch the next (older) page. Pages are keyed on `(created_at, id)`, so walking the cursor until it is null returns every evaluation in the window exactly once. A malformed cursor is a 400.",
             "schema": {
               "type": "string"
             }
@@ -76336,6 +77781,17 @@
         "description": "Same shape as `/safe-house/evaluations`, but scoped to outbound (egress) screening — exfiltration detection on agent-originated traffic.",
         "tags": [
           "Safe House"
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous page's `pagination.after` (same keyset cursor as `/safe-house/evaluations`). A malformed cursor is a 400.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -77637,7 +79093,7 @@
       "post": {
         "operationId": "createSimSession",
         "summary": "Create a Dojo sim session and begin the runner (\"Begin Sim\").",
-        "description": "Creates a `dojo_sim_sessions` row for the agent + scenario and starts the server-side runner (a per-session Durable Object that drives the Agent Smith ↔ agent loop and survives the human closing the tab). The runner resolves the agent's gateway compute key server-side BY `agent_id` (via the agent↔TryMeConfig link from onboarding) — the cleartext key never travels in the request. Emits SimEvents readable via `GET /v1/sim/{session_id}/stream`. MNE-531.\n\nThis operation returns `409` for THREE distinct causes; branch on the stable `error.code`, NEVER on the status alone (a client that assumes 409 means \"a session is already running\" will offer a force-end remedy that cannot help, succeeds at ending nothing, and loops):\n\n- `active_sim_session` — the agent already has a `pending`/`running`/`paused` session. `error.details.session_id` carries the BLOCKING session's id so the client can stop that session directly. It is omitted (no `details` at all) on the DB unique-constraint backstop path, where a concurrent create raced the pre-check and the racing session's id is not known.\n- `dojo_provider_key_missing` — no dojo provider key resolves for the agent's provider. An admin must set it (`/admin/dojo`) and the agent must be bound to its Try-Me config. Force-ending sessions does nothing for this.\n- `agent_unnamed` — `agents.name` is empty for this agent, and the sim needs a name to spar as it. Remedy: `PUT /v1/agents/{id}` with `{\"name\": \"…\"}` (2-32 chars, letters/digits/hyphens), then retry. Names are normally written at birth from the gateway's `x-mnemom-agent` header, but birth is NOT the only writer — do not send the operator back through birth for an agent that already exists. Force-ending sessions does nothing for this.\n\nAn unrecognised or absent code on a 409 should fall back to displaying `error.message` verbatim rather than assuming any of the above.",
+        "description": "Creates a `dojo_sim_sessions` row for the agent + scenario and starts the server-side runner (a per-session Durable Object that drives the Agent Smith ↔ agent loop and survives the human closing the tab). The runner resolves the agent's gateway compute key server-side BY `agent_id` (via the agent↔TryMeConfig link from onboarding) — the cleartext key never travels in the request. Emits SimEvents readable via `GET /v1/sim/{session_id}/stream`. MNE-531.\n\nThis operation returns `409` for THREE distinct causes; branch on the stable `error.code`, NEVER on the status alone (a client that assumes 409 means \"a session is already running\" will offer a force-end remedy that cannot help, succeeds at ending nothing, and loops):\n\n- `active_sim_session` — the agent already has a `pending`/`running`/`paused` session. `error.details.session_id` carries the BLOCKING session's id so the client can stop that session directly. It is omitted (no `details` at all) on the DB unique-constraint backstop path, where a concurrent create raced the pre-check and the racing session's id is not known.\n- `dojo_provider_key_missing` — no dojo provider key resolves for the agent's provider. An admin must set it (`/admin/dojo`) and the agent must be bound to its Try-Me config. Force-ending sessions does nothing for this.\n- `agent_unnamed` — `agents.name` is empty for this agent, and the sim needs a name to spar as it. Remedy: `PUT /v1/agents/{id}` with `{\"name\": \"…\"}` (2-32 chars, letters/digits/hyphens), then retry. Names are normally written at birth from the gateway's `x-mnemom-agent` header, but birth is NOT the only writer — do not send the operator back through birth for an agent that already exists. Force-ending sessions does nothing for this.\n\nAn unrecognised or absent code on a 409 should fall back to displaying `error.message` verbatim rather than assuming any of the above.\n\nEvery spar turn is charged in µ to the agent's billing account, so Begin Sim first reads that account's balance from billing (plans do not matter): no µ billing account → `402 dojo_billing_unconfigured`, balance at or below zero → `402 dojo_balance_depleted` (both carry `error.details.top_up_url`, the deployment's web app billing page — `https://www.mnemom.ai/settings/billing` in production — and a plain `error.message` starting \"Out of µ — recharge at <that page>.\"), billing unreachable → `503 dojo_balance_unverified` (fail closed). No session is created in any of these cases. The runner re-reads the balance before each turn (a funded read is trusted for 30 seconds) and the gateway checks every agent call, so a run that runs out of µ mid-session stops at once, before another Agent Smith turn, and completes with `outcome.ended` `balance_depleted` or `billing_unconfigured` (or `billing_unverified` when the balance could not be checked: try again in a minute), after one `system` `rating` SimEvent carrying `ended`, `message` and `top_up_url`. Other gateway refusals of the agent's call also end the run at once, with their own `ended` and a plain `message` but no `top_up_url` (recharging is not the remedy): `account_suspended` (a suspended account), `billing_refused` (any other billing refusal), and `dojo_refused` (a Dojo rule: `403 dojo_claim_required`, or `400 dojo_model_unpinned` / `dojo_model_not_allowed` / `dojo_max_tokens_exceeded` / `dojo_invalid_body` / `dojo_multiple_completions`).",
         "tags": [
           "Dojo"
         ],
@@ -77736,6 +79192,16 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "No µ to spar with: `dojo_billing_unconfigured` (no µ billing account) or `dojo_balance_depleted` (balance used up). `error.details.top_up_url` is the deployment's web app billing page (`https://www.mnemom.ai/settings/billing` in production). No session was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -86353,6 +87819,102 @@
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/waitlist": {
+      "post": {
+        "operationId": "joinWaitlist",
+        "summary": "Join the waitlist",
+        "description": "Appends one waitlist row per submission (no dedupe on email) and sends an acknowledgement email on EVERY submission. Anti-spam: honeypot `company_website` + Cloudflare Turnstile (`turnstile_token`).",
+        "tags": [
+          "Billing"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "interests"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "interests": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "research",
+                        "mnemom_agent"
+                      ]
+                    }
+                  },
+                  "source": {
+                    "type": "string",
+                    "default": "waitlist_page"
+                  },
+                  "turnstile_token": {
+                    "type": "string"
+                  },
+                  "company_website": {
+                    "type": "string",
+                    "description": "Honeypot — must be empty."
+                  },
+                  "engagement": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Joined the waitlist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
