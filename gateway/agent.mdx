@@ -388,6 +388,7 @@ The agent-management verbs live under the same namespace:
 mnemom agent list [--org <slug|id>] [--all]           # agents in your active org (--all: every org)
 mnemom agent claim <id-or-name> --key <key> [--org <slug>]
 mnemom agent move <id-or-name> --to <slug|id>
+mnemom agent export [id-or-name]                      # download the agent's full record
 ```
 
 ## Sessions: `mnemom agent sessions` / `show`
@@ -418,6 +419,43 @@ scrollback. It also prints the command that resumes the session through
 `mnemom agent` (see [Resume a session](#resume-a-session)). Each row's `Goal` column, and `show`'s goal-mode field, read `ON`
 (sealed contract), `IMPLICIT`, or `OFF`. For an implicit-mode session, `show`
 also prints the statement the gateway inferred.
+
+## Share your agent's record
+
+Every turn of a `mnemom agent` session lands on your agent's record. There are
+two ways to show that record to someone else.
+
+**A link anyone can check.** Once the agent has 50 analyzed integrity
+checkpoints, it has a public Trust Rating page anyone can open without an
+account, and a verification endpoint that proves the rating comes from signed,
+tamper-evident checkpoints:
+
+```
+https://www.mnemom.ai/agents/<agent-id>/reputation
+https://api.mnemom.ai/v1/reputation/<agent-id>/verify
+```
+
+People outside your org see the proof, but the checkpoint reasoning is removed.
+See [Trust Ratings](/concepts/reputation-scores#public-reputation-pages).
+
+**The full record, as a file.** `mnemom agent export` downloads everything: each
+checkpoint with its reasoning, the daily score history, reclassifications, card
+amendments, disagreement reviews and policy evaluations with card gaps.
+
+```bash
+mnemom agent export                       # the agent you launch with, all time, JSON
+mnemom agent export my-coder --since 30d  # the last 30 days
+mnemom agent export my-coder --format csv --from 2026-09-01 --to 2026-09-30
+```
+
+It prints where the file went, how many records of each kind it holds, the
+file's SHA-256 (so the recipient can check it arrived unchanged), and the
+agent's public links. The file includes the reasoning that outsiders normally
+don't see, so it is written readable only by you. Send it only to people who
+should see that reasoning; for everyone else, send the public link. You must be
+a member of the org that owns the agent. A period with more than 10,000 records
+of one kind is refused; export it in parts with `--since` or `--from`/`--to`.
+See [`mnemom agent export`](/gateway/cli#mnemom-agent-export-id-or-name).
 
 ## Launch shapes
 
