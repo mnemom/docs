@@ -503,13 +503,13 @@ what was sealed. The gateway echoes the full hash back on every response as
 The contract is sealed on the **first turn** of a session. A later request that
 sends a different or invalid contract header is ignored outright and the sealed
 contract keeps governing, so a client hiccup mid-session never kills a governed
-session — the only way a live seal's terms change is the owner update path
+session. The only way a live seal's terms change is the owner update path
 below.
 
 ### Seal lifetime
 
 A seal lives for 24 hours since it was last touched by an active request on
-that conversation — each request slides the window forward, so a session you
+that conversation. Each request slides the window forward, so a session you
 keep using never lapses on its own. If the session goes quiet for a full 24
 hours, the seal lapses, and the next request that carries a goal seals a
 brand-new contract (version 1 again, fresh guardrail and judge counters) rather
@@ -522,8 +522,8 @@ seals as a first seal.
 
 ### Updating a sealed contract
 
-The agent itself can never change its own sealed contract — not by asking for
-it, and not by writing something the fence would otherwise allow. The one way a
+The agent itself can never change its own sealed contract. It can't change it
+by asking for it, or by writing something the fence would otherwise allow. The one way a
 live seal's requirements, path rules, mode or ceilings change after the first
 turn is an explicit update sent by the agent's owner through the Mnemom API,
 never inferred from anything said in the conversation.
@@ -639,8 +639,8 @@ Three things to know before relying on an update:
   [Ceilings](#ceilings-nudge-vs-enforce), or is off if the cell has none.
 - **Mode is the one field that carries over when omitted.** If the update
   doesn't name a mode, the session's current `nudge`/`enforce` mode is kept
-  unchanged. Name a mode explicitly — including `nudge`, to downgrade an
-  `enforce` session — and that value wins instead.
+  unchanged. If you name a mode explicitly, that value wins instead. This
+  includes naming `nudge` to downgrade an `enforce` session.
 - **Time is counted from the first seal.** `time_limit_s` measures from when
   the contract was first sealed, not from the update. Setting
   `"time_limit_s": 3600` on a session that has already run for two hours puts
@@ -668,8 +668,8 @@ crossed, the session may never see the notice.
 ### Ceilings: nudge vs enforce
 
 Every sealed contract has a mode, `nudge` or `enforce` (default `nudge`, set
-with `--mode`). The mode governs what happens when a guardrail ceiling — turns,
-spend, or, when the contract sets one, wall-clock time — is crossed. `stall`
+with `--mode`). The mode governs what happens when a guardrail ceiling is
+crossed: turns, spend, or, when the contract sets one, wall-clock time. `stall`
 (consecutive no-write turns) is informational only in both modes; a crossed
 stall ceiling is never grounds for a refusal.
 
@@ -748,8 +748,8 @@ each one against your fences.
   such as `git status &&`. If a command
   is too long to read in full, the fence-check line in your traces names the
   part that was not read.
-- Other write-shaped commands — `mkdir`, `touch`, `sed -i`, `ln`, running a
-  script, and similar — are **not** fence-checked. The fence-check line counts
+- Other write-shaped commands, such as `mkdir`, `touch`, `sed -i`, `ln` or
+  running a script, are **not** fence-checked. The fence-check line counts
   them as writes that were not checked, and the judge decides from the full
   turn.
 - A target written with a shell variable or command substitution is resolved
@@ -759,23 +759,23 @@ each one against your fences.
   `HOME` is set in one of those commands, or when the session's earlier
   commands name exactly one home directory (`/Users/<name>` or
   `/home/<name>`). A target still
-  unresolved after that — including a file `xargs` appends from its input —
-  sets no automatic verdict. The judge decides from the full turn, and the
+  unresolved after that sets no automatic verdict. This includes a file `xargs`
+  appends from its input. The judge decides from the full turn, and the
   fence-check line names the target as unresolved rather than silently passing
   over it.
 - A resolved write that lands outside every allowed path, or under a forbidden
   one, is always at least a `violation` verdict. The allowed-path check applies
   only when the contract has at least one `--allow` rule. The mechanical check
   can only raise the judge's verdict on a fenced write, never lower it, and on
-  its own it never blocks the request either way — see
+  its own it never blocks the request either way. See
   [Ceilings](#ceilings-nudge-vs-enforce) above for what does.
 
 #### Temporary and scratch files
 
 There is no exemption for `/tmp` or any other scratch directory. A temp or
-scratch file is a write like any other, so if the contract has `--allow` rules
-and the agent writes outside them — a log in `/tmp`, a `$(mktemp)` file — that
-write is a `violation`. The gateway places a `$(mktemp)` file under `$TMPDIR`
+scratch file is a write like any other. If the contract has `--allow` rules
+and the agent writes outside them, for example a log in `/tmp` or a `$(mktemp)`
+file, that write is a `violation`. The gateway places a `$(mktemp)` file under `$TMPDIR`
 when the session has set that variable in a command, and under `/tmp`
 otherwise.
 
@@ -823,8 +823,8 @@ a fresh verdict). A session without subagents or teammates normally reads
 per subagent or teammate thread. Only the first 64 threads in a session are
 tracked; the counts of any thread beyond that are left out of the figure. Any
 other nonzero count means a turn was
-cut off, its grading failed, or its grading is still in flight — not that
-judging is turned off.
+cut off, its grading failed, or its grading is still in flight. It does not
+mean judging is turned off.
 
 ### Lead-directed sessions
 
@@ -833,7 +833,7 @@ top of whatever `--requirement` flags you pass: that this session may push its
 own branches and open draft or ready pull requests, from a git worktree, but
 never merge them. Pass it when a session is being run on someone else's
 direction and that direction includes pushing branches or opening PRs on its
-own — it turns "the lead said I could do this" into part of what the judge
+own. It turns "the lead said I could do this" into part of what the judge
 grades the session against, instead of something asserted only in the
 conversation.
 
@@ -850,8 +850,8 @@ The requirement line itself reads:
 > draft or ready pull requests, from a git worktree, never the primary
 > checkout; it may not merge them.
 
-Passing `--lead-directed` more than once on the same launch adds it only once
-— the requirement never duplicates in the sealed statement.
+Passing `--lead-directed` more than once on the same launch adds it only once.
+The requirement never duplicates in the sealed statement.
 
 ## Context folding
 
