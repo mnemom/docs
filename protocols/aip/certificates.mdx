@@ -186,6 +186,22 @@ This commitment proves the analysis was performed over specific inputs without r
 
 Any party can verify an IntegrityCertificate using the following five steps. Steps 1-4 can be performed offline with the certificate and the public key. Step 5 requires a network call to the prover service.
 
+<Warning>
+**Known issue: older API-minted certificates fail the signature and chain checks.** This affects certificates for checkpoints stored through `POST /v1/analyze` with `store_checkpoint` (checkpoint `source` value `hybrid_api`) and created before the cutoff for the cell that stored them. For those certificates, Step 2 (signature) and Step 3 (chain) fail, and `POST /v1/verify` returns `valid: false` with `checks.signature.valid` and `checks.chain.valid` both `false`.
+
+The cause is a defect (MNE-8537), not tampering. The stored checkpoint timestamp was the database insert time instead of the timestamp that was signed and chained, so the `signed_payload` rebuilt for the certificate differs from the bytes that were signed. The Merkle inclusion proof (Step 4) and the input commitment check still pass for these certificates.
+
+The fix (mnemom-api#3701) applies to checkpoints created at or after the cutoff. Certificates for earlier checkpoints are not re-signed and keep failing the signature and chain checks. Certificates for checkpoints written by the gateway are not affected. On us-2 the fix rolled out in stages, so some checkpoints from the few minutes before the cutoff verify normally.
+
+To tell whether a certificate is affected, compare the `timestamp` field inside `proofs.signature.signed_payload` with the cutoff below. Do not use `issued_at`, which is the time the certificate was fetched.
+
+| Cell | API host | Cutoff (UTC) |
+|------|----------|--------------|
+| us-2 | `api.mnemom.ai` | `CUTOFF_US2_PENDING` |
+| us-1 | `api-us1.mnemom.ai` | `CUTOFF_US1_PENDING` |
+| test | `api-az-test.mnemom.ai` | `CUTOFF_TEST_PENDING` |
+</Warning>
+
 ### Step 1: Fetch the public key
 
 Retrieve the signing key referenced by `proofs.signature.key_id`:
