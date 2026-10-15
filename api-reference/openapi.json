@@ -1138,9 +1138,10 @@
           "api:write",
           "admin:org",
           "admin:platform",
+          "invites:synthetic",
           "api"
         ],
-        "description": "Capability-based scope (ADR-049). `gateway` permits gateway-worker traffic; `api:read` and `api:write` permit identity-scoped GET and write endpoints respectively; `admin:org` permits org-admin operations on orgs the bearer owns/admins (per-request membership re-check); `admin:platform` permits `/v1/admin/*` Mnemom-staff operations (per-request staff-role re-check). The legacy `api` scope is accepted for backward compatibility and aliased to `api:read` + `api:write` at the auth gate; new keys should use the canonical vocabulary."
+        "description": "Capability-based scope (ADR-049). `gateway` permits gateway-worker traffic; `api:read` and `api:write` permit identity-scoped GET and write endpoints respectively; `admin:org` permits org-admin operations on orgs the bearer owns/admins (per-request membership re-check); `admin:platform` permits `/v1/admin/*` Mnemom-staff operations (per-request staff-role re-check). `invites:synthetic` is the customer-journey testpass scope: staff-only to mint, must be the key's ONLY scope, grants no general API access, and is honoured only by POST /v1/admin/member-invites (Mnemom Agent invite), POST /v1/admin/member-invites/{inviteId}/revoke, DELETE /v1/admin/users/{id} and GET /v1/admin/synthetic/account, each confined to addresses whose local part starts with `cj-synt-` (per-request staff-role re-check of the key owner). The legacy `api` scope is accepted for backward compatibility and aliased to `api:read` + `api:write` at the auth gate; new keys should use the canonical vocabulary."
       },
       "ApiKeyWhoAmI": {
         "type": "object",
@@ -1448,6 +1449,11 @@
           "checkpoint_id": {
             "type": "string"
           },
+          "request_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The gateway's per-proxied-request id (ADR-065 mnemom_request_id), when the gateway wrote this checkpoint with a request-scoped logger. Null on rows written before migration 548 or by a caller with no request context."
+          },
           "agent_id": {
             "type": "string"
           },
@@ -1559,6 +1565,10 @@
             "type": "string",
             "minLength": 1,
             "description": "Card schema version (required, non-empty). Current canonical value: `unified/2026-04-26`."
+          },
+          "content_version": {
+            "type": "string",
+            "description": "Optional. Which default content the card carries, e.g. `mnemom-agent-default/2.1.0` (semver within a lineage). Distinct from `card_version`, the schema version. New agents are born with it; composition carries the agent card's value onto the canonical card."
           },
           "autonomy_mode": {
             "type": "string",
@@ -6202,6 +6212,31 @@
               "null"
             ]
           },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The gateway's per-proxied-request id (ADR-065 mnemom_request_id), when the gateway wrote this row with a request-scoped logger. Null on rows written before migration 548 or by a caller with no request context."
+          },
+          "turn_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The turn's ordinal within its conversation, when known at the write site. Mirrors integrity_checkpoints.turn_index (migration 384)."
+          },
+          "carried": {
+            "type": "boolean",
+            "description": "true = a replay of a verdict this session already recorded for the same content on the same surface (a carried re-flag, not a fresh firing); false = a fresh screen. Count detections with carried = false (database/migrations/550)."
+          },
+          "first_evaluation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "On a carried row: the id of the fresh sh_evaluations row whose verdict it carries (soft pointer, no FK). NULL on fresh rows, or when the first row id is unknown."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -7211,6 +7246,10 @@
             "minLength": 1,
             "description": "Card schema version (required, non-empty). Current canonical value: `unified/2026-04-26`."
           },
+          "content_version": {
+            "type": "string",
+            "description": "Optional. Which default content the card carries, e.g. `mnemom-agent-default/2.1.0` (semver within a lineage). Distinct from `card_version`, the schema version. New agents are born with it; composition carries the agent card's value onto the canonical card."
+          },
           "autonomy_mode": {
             "type": "string",
             "enum": [
@@ -7652,6 +7691,10 @@
         "properties": {
           "card_version": {
             "type": "string"
+          },
+          "content_version": {
+            "type": "string",
+            "description": "Optional. Which default content the card carries, e.g. `mnemom-agent-default/2.1.0` (semver within a lineage). Distinct from `card_version`, the schema version. New agents are born with it; composition carries the agent card's value onto the canonical card."
           },
           "card_id": {
             "type": "string"
@@ -35546,8 +35589,8 @@
     "/artifacts/vault-token": {
       "post": {
         "operationId": "mintArtifactVaultToken",
-        "summary": "Mint a short-lived artifacts.mnemom vault bearer for the caller's active org.",
-        "description": "Authenticates the caller's platform session, reads the active org and role from `get_user_context`, and returns a 300-second Ed25519 JWS (`org_id`, `org_role`, typed `sub: user:<id>`) signed with a DEDICATED vault key (not the AAP attestation key) whose public half is published in `/v1/.well-known/jwks.json`. The org is never taken from the request. 403 when there is no active org or the role is below member; 503 (fail-closed) when the vault signing key is not configured. A scope-clamped MCP OAuth token cannot mint.",
+        "summary": "Mint a short-lived artifacts.mnemom vault bearer for the caller's active org, or for another org the caller is an accepted member of.",
+        "description": "Authenticates the caller's platform session, reads the caller's orgs and roles from `get_user_context`, and returns a 300-second Ed25519 JWS (claims `org_id`, `org_role`, typed `sub: user:<id>`, and a UUIDv4 `jti`) signed with a DEDICATED vault key (not the AAP attestation key) whose public half is published in `/v1/.well-known/jwks.json`. The org defaults to the caller's active org and its role. An optional JSON body `{org_id}` names a different org instead: it must be one of the caller's ACCEPTED memberships (a pending invite is not membership), and the signed `org_role` is that membership's role — the body selects among the caller's own orgs and never grants an org or a role. The optional `X-Artifact-Producer` / `X-Artifact-Producer-Key` headers let a first-party cell service calling on its user's behalf attest which producer it is; a valid attestation adds a `producer` claim and grants nothing. 400 `invalid_body` when a non-empty body is not a JSON object or its `org_id` is not a non-empty string; 403 when there is no active org, the requested org is not an accepted membership (`not_a_member`), the role is below member, or the producer attestation fails (`producer_not_attested`); 503 (fail-closed) when the vault signing key is not configured. A scope-clamped MCP OAuth token cannot mint.",
         "tags": [
           "Attestation"
         ],
@@ -35556,6 +35599,43 @@
             "BearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "name": "X-Artifact-Producer",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional cell-producer attestation: the name of the first-party producer service calling on its user's behalf. Sent together with `X-Artifact-Producer-Key`; sending only one of the two is refused with 403 `producer_not_attested`. A valid attestation adds a `producer` claim to the token; it never changes the org or role."
+          },
+          {
+            "name": "X-Artifact-Producer-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional cell-producer attestation: the producer's own key, checked against a server-held digest (the API stores digests only, never a producer key). Sent together with `X-Artifact-Producer`; an unknown producer or a key that does not match is refused with 403 `producer_not_attested` and nothing is signed."
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "org_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Org to mint for. Omit (or send no body) for the caller's active org. When present it must be one of the caller's ACCEPTED memberships, else 403 `not_a_member`; the signed `org_role` is that membership's role."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Vault bearer.",
@@ -35603,11 +35683,16 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest",
+            "description": "`invalid_body` — a non-empty body that is not a JSON object, or an `org_id` that is not a non-empty string."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/Forbidden",
+            "description": "`not_a_member` — the requested `org_id` is not one of the caller's accepted memberships; `producer_not_attested` — the producer headers are incomplete, name an unknown producer, or carry a key that does not match; `no_active_org`; `insufficient_role` (below member); `vault_token_session_required` (a scoped OAuth token); `vault_subject_invalid`."
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -39559,6 +39644,7 @@
       "get": {
         "operationId": "listInvoices",
         "summary": "List invoices",
+        "description": "Finalized Stripe invoices (open, paid, uncollectible; never draft or void) for the caller's own organization. Requires org owner or admin. Behind BILLING_STRIPE_DOCUMENTS_ENABLED: 404 to every caller when off. 409 (code not_linked) when the org has no Stripe customer; 502 when Stripe fails; 503 when the Stripe credential is unset. Refunds and credit notes are not included.",
         "tags": [
           "Billing"
         ],
@@ -39603,11 +39689,20 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -40234,10 +40329,17 @@
                       "items": {
                         "$ref": "#/components/schemas/Receipt"
                       }
+                    },
+                    "stripeLinked": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "receipts"
+                    "receipts",
+                    "stripeLinked"
                   ]
                 }
               }
@@ -41682,7 +41784,7 @@
       "post": {
         "operationId": "requestZkProof",
         "summary": "Request ZK proof",
-        "description": "Request a zero-knowledge proof for a checkpoint's verdict derivation. If a proof already exists, returns its current status. Otherwise, creates a pending proof request and dispatches it to the SP1 prover service. The caller must be a member of the org that governs the checkpoint's agent; any other caller gets the same 404 as a missing checkpoint. Each newly queued proof is charged in μ (class analyze.zk-proof, one unit, deduplicated per checkpoint) to the billing account of the org that governs the agent; returning an existing proof is not charged. If that billing account cannot be resolved, no proof is queued (503, or 409 when the org has no billing account).",
+        "description": "Request a zero-knowledge proof for a checkpoint's verdict derivation. The prover input is built from the stored checkpoint (verdict, concerns, reasoning summary, thinking-block hash, model, card hash and values hash), the same input the sampled and deferred proof paths send. The caller must be a member of the org that governs the checkpoint's agent. Any other caller gets the same 404 as a missing checkpoint. If a proof already exists, returns 200 with its current status and nothing is charged. Failed, dead-lettered and skipped proofs are never re-queued. If the existing proof was deferred, it is resolved and dispatched to the prover and returns 202 with the existing proof_id. Otherwise a pending proof is created and dispatched to the SP1 prover service (202). Each newly queued or deferred-resolved proof is charged in μ (class analyze.zk-proof, one unit, deduplicated per checkpoint) to the billing account of the org that governs the agent. If that billing account cannot be resolved, no proof is queued (503, or 409 when the org has no billing account). A synthetic checkpoint, or one whose stored verdict or concerns the prover cannot read, is refused with 409 and error code proof_inputs_unavailable. A checkpoint that predates the stored card and values hashes is refused with 409 and error code proof_inputs_partial. When no prover is bound on the deployment the request is refused with 503 and error code prover_unavailable. For every refusal no proof is queued and nothing is charged.",
         "tags": [
           "Verification"
         ],
@@ -41725,7 +41827,7 @@
             }
           },
           "202": {
-            "description": "Proof request accepted",
+            "description": "Proof request accepted: a new proof was queued, or an existing deferred proof was resolved and dispatched (same proof_id)",
             "content": {
               "application/json": {
                 "schema": {
@@ -41733,7 +41835,7 @@
                   "properties": {
                     "proof_id": {
                       "type": "string",
-                      "description": "Proof identifier (prf-{8 random chars})"
+                      "description": "Proof identifier (prf-{8 random chars}). The existing id when a deferred proof was resolved"
                     },
                     "status": {
                       "type": "string",
@@ -57722,6 +57824,7 @@
             "name": "window_days",
             "in": "query",
             "required": false,
+            "description": "Rollup window in days, 1–90 (default 30).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -58021,10 +58124,12 @@
                 "additionalProperties": false,
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "New human-readable name for the escalation rule; omit to keep the current one."
                   },
                   "predicate": {
-                    "$ref": "#/components/schemas/GovernanceEscalationPredicate"
+                    "$ref": "#/components/schemas/GovernanceEscalationPredicate",
+                    "description": "Replacement match condition (by source, severity, scope, and/or pattern_type); omit to keep the current one."
                   },
                   "destination_ids": {
                     "type": "array",
@@ -58035,7 +58140,8 @@
                     "description": "Allowed empty when enabled is false (Tier 4 §4.4 default rules)"
                   },
                   "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Turn the rule on or off; omit to leave it unchanged."
                   }
                 }
               }
@@ -58346,19 +58452,23 @@
                 "properties": {
                   "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": true,
+                    "description": "Replacement channel-specific delivery settings (e.g. webhook { url, secret }, slack { webhook_url }, email { to }, pagerduty { routing_key }); omit to keep the current ones."
                   },
                   "filter": {
-                    "$ref": "#/components/schemas/GovernanceDestinationFilter"
+                    "$ref": "#/components/schemas/GovernanceDestinationFilter",
+                    "description": "Replacement filter limiting which signals reach this destination (by source, severity, scope, or pattern_type); omit to keep the current one."
                   },
                   "enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Turn the destination on or off; omit to leave it unchanged."
                   },
                   "display_name": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "New label shown in the operator console; null clears it, omit to keep the current one."
                   }
                 }
               }
@@ -63954,6 +64064,7 @@
           {
             "name": "hours",
             "in": "query",
+            "description": "Analytics window in hours, 1–720 (default 24).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -64184,6 +64295,7 @@
             "name": "revision_number",
             "in": "path",
             "required": true,
+            "description": "Revision to read (1 is the first revision; list_posture_revisions shows the rest).",
             "schema": {
               "type": "integer",
               "minimum": 1
