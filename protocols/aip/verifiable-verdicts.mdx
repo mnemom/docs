@@ -121,6 +121,8 @@ The observer's DDR ([Disagreement-Driven Review](/protocols/aip/specification#15
 
 This means only **confirmed real violations** are proven, which matters most during rapid development, when alignment cards drift often.
 
+A deferred proof can also be forced ahead of DDR with [on-demand proving](#on-demand-proving), which resolves the record the same way as `aip_miss`.
+
 ### On-demand proving
 
 Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id}/prove`](/api-reference/endpoint/post-checkpoints-id-prove). This is useful when:
@@ -130,7 +132,25 @@ Any checkpoint can be proven on demand via [`POST /v1/checkpoints/{checkpoint_id
 - The stochastic sample missed a checkpoint of interest
 - A deferred proof needs to be forced without waiting for DDR
 
-The request needs an API key belonging to a member of the org that governs the checkpoint's agent; any other caller gets the same `404` as a missing checkpoint. If a proof already exists, the endpoint returns its current status. Each newly queued proof is charged in μ to that org's billing account (rate card class `analyze.zk-proof`, see [Pricing](/pricing/overview)); returning an existing proof is not charged. If the billing account cannot be resolved, no proof is queued and the request fails with `503` (or `409` when the org has no billing account).
+The request needs an API key belonging to a member of the org that governs the checkpoint's agent. Any other caller gets the same `404` as a missing checkpoint.
+
+The prover input is rebuilt from the stored checkpoint: the verdict, concerns, reasoning summary, thinking-block hash and model, plus the card and values commitments that `/v1/analyze` persists on the checkpoint. The raw model response is never stored and is not needed to prove.
+
+| Response | Meaning | Charged |
+|----------|---------|---------|
+| `200` | A proof already exists for this checkpoint and is not `deferred`. It is returned with its current status, including `failed`, `dead_lettered`, `skipped_card_gap` and `skipped_noise`. The endpoint never re-queues those (re-proving is the internal reproof path's job). | No |
+| `202` with a new `proof_id` | A new proof was queued from the rebuilt input. The body is `{proof_id, status: "queued", estimated_completion_ms}`. | Yes, once per checkpoint |
+| `202` with the existing `proof_id` | The existing proof was `deferred`. This call resolved it to `pending` (outcome `aip_miss`) and dispatched it to the prover. This is how a deferred proof is forced without waiting for DDR. | Yes, once per checkpoint |
+| `404` `not_found` | Unknown checkpoint, or the caller is not a member of the governing org. | No |
+| `409` `proof_inputs_unavailable` | The checkpoint is a synthetic fail-open checkpoint (written when the analysis model was unavailable or its response could not be parsed, so there was no analysis to prove), or the rebuilt input does not pass the prover's input validation. No proof is queued. | No |
+| `409` `proof_inputs_partial` | The checkpoint predates the commitment columns and was never proven, so its card or values commitment is missing. Mnemom never produces a proof with empty commitments. Not retryable: a checkpoint like this cannot be proven on demand. | No |
+| `409` (no billing account) | The org has no billing account, so no proof is queued. | No |
+| `503` `prover_unavailable` | No prover is bound on this cell. No proof record is written. | No |
+| `503` `service_unavailable` | The checkpoint read or the billing lookup failed. No proof is queued. | No |
+
+Each newly queued proof is charged in μ to that org's billing account (rate card class `analyze.zk-proof`, see [Pricing](/pricing/overview)). The charge is deduplicated by checkpoint: a checkpoint already charged by analyze-time sampling is not billed again, and forcing a deferred proof uses the same deduplication key, so a later DDR resolution of the same record does not charge a second time. Returning an existing proof is not charged. If the billing account cannot be resolved, no proof is queued and the request fails with `503` (or `409` when the org has no billing account).
+
+Concurrent requests for the same checkpoint never queue two proofs. In-flight proofs are unique per checkpoint, so the second request receives the `200` response for the record the first one created.
 
 ---
 
