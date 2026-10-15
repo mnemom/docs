@@ -295,7 +295,8 @@ function tableCells(line) {
 // checkLifecycleRows(text, models) → [{ id, problem }]
 //
 // For each registry row with a lifecycle, finds the table row whose FIRST cell
-// is exactly `` `id` `` and checks its status cell (the second cell):
+// is `` `id` `` (alone or in a comma-separated list of backticked ids) and
+// checks its status cell (the second cell):
 //   · retired (retired_on on or before now) → contains "Retired <retired_on>",
 //     and the row names `` `successor` `` when the registry gives one.
 //   · retired_on still ahead → the row names the retired_on date (the shutdown
@@ -306,8 +307,12 @@ export function checkLifecycleRows(text, models, now = new Date()) {
   for (const line of text.split(/\r?\n/)) {
     const cells = tableCells(line);
     if (!cells || cells.length < 2) continue;
-    const m = cells[0].match(/^`([^`]+)`$/);
-    if (m && !rows.has(m[1])) rows.set(m[1], { cells, line });
+    // A first cell may list several ids ("`gemini-3-pro`, `gemini-3-flash`");
+    // the row then carries the lifecycle of each.
+    if (!/^`[^`]+`(?:\s*,\s*`[^`]+`)*$/.test(cells[0])) continue;
+    for (const [, id] of cells[0].matchAll(/`([^`]+)`/g)) {
+      if (!rows.has(id)) rows.set(id, { cells, line });
+    }
   }
   const problems = [];
   for (const model of models) {
@@ -633,6 +638,22 @@ async function selfTest() {
     "live registry with a new provider key → its rows read, provider filled in",
     newKey.source === "live" && newKey.models.some((m) => m.id === "mistral-large-3" && m.provider === "mistral"),
   );
+
+  // 15) A table row whose first cell lists several ids (`a`, `b`) carries the
+  //     lifecycle row for each of them.
+  const multiRegistry = {
+    source: "fixture",
+    models: [
+      ...registry.models.filter((m) => m.id !== "gemini-3-pro"),
+      { id: "gemini-3-pro", name: "Gemini 3 Pro", provider: "gemini", supported: false, lifecycle: { deprecated_on: "2026-10-14" } },
+    ],
+  };
+  const multiRow = "| `gemini-3-pro`, `gemini-3-flash` | Deprecated 2026-10-14 | 2027-01-14 | `gemini-3.8-flash` |";
+  const multi = checkModelCoverage({
+    pages: [{ file: "concepts/provider-support.mdx", text: wrap("    Claude Opus 4.8") + "\n\n" + futTable(multiRow) }],
+    registry: multiRegistry,
+  });
+  assert("lifecycle row in a multi-id first cell → matched", multi.ok && multi.lifecycleProblems.length === 0);
 
   console.log(`\nself-test: ${pass}/${pass + fail} assertions passed`);
   return fail === 0;
