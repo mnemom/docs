@@ -35,8 +35,11 @@
  *      successor) once retired_on is on or before today (UTC), or, before that
  *      day, a row naming the retired_on date and "Deprecated <deprecated_on>"
  *      when set. A retired id claimed inside a supported region also FAILS:
- *      it is still listed, but as retired, not as a current choice. Before
- *      its retired_on day it may still be claimed, the provider still serves it.
+ *      it is still listed, but as retired, not as a current choice. The
+ *      registry renders a retired row `supported: false`. The rule fires on
+ *      that row and on a row that still says `supported: true` (a body built
+ *      before the retire day, or a stale snapshot). Before its retired_on day
+ *      the id may still be claimed, the provider still serves it.
  *
  * Sibling to check-path-references.mjs / check-redirects.mjs; same contract:
  *   Exits 0 clean. Exits 1 on any failure (unknown claim, disagreement, missing
@@ -141,12 +144,16 @@ function parseModels(text, whence) {
 // Normalize a marketing name for case/whitespace-insensitive matching.
 export const normalizeName = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim();
 
-// Builds resolution vocabularies from the registry's SUPPORTED entries.
+// Builds resolution vocabularies from the registry's SUPPORTED entries, plus
+// every row retired as of `now`. The registry renders a retired row
+// supported:false, and indexing it anyway lets a claim on it resolve to its id
+// (so "GPT-5 Codex" is not read as "GPT-5" plus residue) and fail as a retired
+// claim in checkModelCoverage.
 //   supportedIds:   Set<string> of canonical ids (compared verbatim)
 //   supportedNames: Set<string> of normalized marketing names
 //   nameToId:       Map<normalizedName, id>
 //   allKnown:       Set<string> of every id (supported + passthrough) for logging
-export function buildRegistryIndex(models) {
+export function buildRegistryIndex(models, now = new Date()) {
   const supportedIds = new Set();
   const supportedNames = new Set();
   const nameToId = new Map();
@@ -154,7 +161,7 @@ export function buildRegistryIndex(models) {
   for (const m of models) {
     if (!m || typeof m.id !== "string") continue;
     allKnown.add(m.id);
-    if (m.supported !== true) continue;
+    if (m.supported !== true && !isRetired(m, now)) continue;
     supportedIds.add(m.id);
     if (typeof m.name === "string" && m.name.trim()) {
       const norm = normalizeName(m.name);
@@ -320,10 +327,13 @@ export function checkLifecycleRows(text, models, now = new Date()) {
       if (lc.successor && !row.line.includes(`\`${lc.successor}\``)) {
         problems.push({ id: model.id, problem: `row must name the successor \`${lc.successor}\`` });
       }
-    } else if (lc.retired_on && !row.cells.slice(2).some((c) => c.includes(lc.retired_on))) {
-      problems.push({ id: model.id, problem: `row must name the shutdown date ${lc.retired_on}` });
-    } else if (lc.deprecated_on && !status.includes(`Deprecated ${lc.deprecated_on}`)) {
-      problems.push({ id: model.id, problem: `status cell must read "Deprecated ${lc.deprecated_on}", found "${status}"` });
+    } else {
+      if (lc.retired_on && !row.cells.slice(2).some((c) => c.includes(lc.retired_on))) {
+        problems.push({ id: model.id, problem: `row must name the shutdown date ${lc.retired_on}` });
+      }
+      if (lc.deprecated_on && !status.includes(`Deprecated ${lc.deprecated_on}`)) {
+        problems.push({ id: model.id, problem: `status cell must read "Deprecated ${lc.deprecated_on}", found "${status}"` });
+      }
     }
   }
   return problems;
@@ -333,7 +343,7 @@ export function checkLifecycleRows(text, models, now = new Date()) {
 // Pure of process.exit / console so it can be exercised against throwaway
 // fixtures. `pages` is [{ file, text }]; `registry` is { models, source }.
 export function checkModelCoverage({ pages, registry, now = new Date() }) {
-  const index = buildRegistryIndex(registry.models);
+  const index = buildRegistryIndex(registry.models, now);
 
   const perPage = pages.map(({ file, text }) => {
     const region = extractSentinelRegion(text);
@@ -360,8 +370,10 @@ export function checkModelCoverage({ pages, registry, now = new Date() }) {
     }
   }
 
-  // A retired id may stay in the registry's supported set (marked, never
-  // removed), but a supported region presenting it as a current choice is wrong.
+  // A supported region must not present a retired id as a current choice,
+  // whether the registry row reads supported:false (a retired row, resolvable
+  // through buildRegistryIndex) or still supported:true (a body built before
+  // the retire day, or a stale snapshot).
   const retiredIds = new Set(registry.models.filter((m) => isRetired(m, now)).map((m) => m.id));
   const retiredClaims = [];
   for (const p of present) {
@@ -514,13 +526,13 @@ async function selfTest() {
 
   // 12) Lifecycle rows. A retired registry row must keep a table row with a
   //     "Retired <date>" status naming the successor, and must not be claimed
-  //     as supported.
+  //     as supported. The registry renders a retired row supported:false.
   const lcRegistry = {
     source: "fixture",
     models: [
       ...registry.models.filter((m) => m.id !== "gpt-5-codex"),
       {
-        id: "gpt-5-codex", name: "GPT-5 Codex", provider: "openai", supported: true,
+        id: "gpt-5-codex", name: "GPT-5 Codex", provider: "openai", supported: false,
         lifecycle: { deprecated_on: "2026-04-22", retired_on: "2026-07-23", successor: "gpt-5.6-sol" },
       },
       { id: "gpt-4o", name: "GPT-4o", provider: "openai", supported: false, lifecycle: { deprecated_on: "2026-10-14" } },
@@ -551,7 +563,23 @@ async function selfTest() {
     pages: [{ file: "concepts/provider-support.mdx", text: wrap("    GPT-5 Codex") + "\n\n" + goodTable }],
     registry: lcRegistry,
   });
-  assert("retired id claimed as supported → flagged", !lcClaimed.ok && lcClaimed.retiredClaims.some((c) => c.id === "gpt-5-codex"));
+  assert(
+    "retired id (supported:false) claimed by name → flagged as a retired claim, not read as GPT-5",
+    !lcClaimed.ok &&
+      lcClaimed.retiredClaims.some((c) => c.id === "gpt-5-codex") &&
+      !lcClaimed.pages[0].claimedIds.has("gpt-5"),
+  );
+  // The same claim against a registry that still says supported:true (a body
+  // built before the retire day, or a stale snapshot) → the retired-claim rule.
+  const staleRegistry = {
+    source: "fixture",
+    models: lcRegistry.models.map((m) => (m.id === "gpt-5-codex" ? { ...m, supported: true } : m)),
+  };
+  const lcStale = checkModelCoverage({
+    pages: [{ file: "concepts/provider-support.mdx", text: wrap("    GPT-5 Codex") + "\n\n" + goodTable }],
+    registry: staleRegistry,
+  });
+  assert("retired id claimed against a stale supported:true row → flagged", !lcStale.ok && lcStale.retiredClaims.some((c) => c.id === "gpt-5-codex"));
 
   // 13) A marker landed ahead of retired_on changes nothing until that day
   //     (00:00 UTC), the same rule as the gateway's isRetired.
@@ -576,6 +604,13 @@ async function selfTest() {
     pages: futPage("| `gpt-5` | Deprecated 2026-10-14 | TBD | `gpt-5.6-sol` |"), registry: futRegistry, now: dayBefore,
   });
   assert("future retired_on: row without the shutdown date → flagged", !futNoDate.ok && futNoDate.lifecycleProblems.length === 1);
+  const futNoDateNoStatus = checkModelCoverage({
+    pages: futPage("| `gpt-5` | Supported | TBD | `gpt-5.6-sol` |"), registry: futRegistry, now: dayBefore,
+  });
+  assert(
+    "future retired_on: row missing both the date and the Deprecated status → both flagged",
+    !futNoDateNoStatus.ok && futNoDateNoStatus.lifecycleProblems.length === 2,
+  );
   const futDue = checkModelCoverage({ pages: futPage(futRow), registry: futRegistry, now: boundary });
   assert(
     "00:00 UTC on retired_on: claim and Deprecated status both → flagged",
