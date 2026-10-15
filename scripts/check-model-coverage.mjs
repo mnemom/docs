@@ -121,9 +121,8 @@ export async function loadRegistry({ env: e = env, fetchImpl = fetch, snapshotPa
 // snapshot uses the flat { models: [{ ..., provider }] } shape. Both are accepted
 // and normalized to the flat list. Before MNE-8796 only the flat shape parsed,
 // so the live tier always threw, was swallowed above, and every run silently
-// read the snapshot.
-const PROVIDERS = ["anthropic", "openai", "gemini"];
-
+// read the snapshot. Every top-level array is a provider list, so a provider the
+// gateway adds later is read rather than dropped.
 function parseModels(text, whence) {
   let doc;
   try {
@@ -132,9 +131,10 @@ function parseModels(text, whence) {
     throw new Error(`Registry at ${whence} is not valid JSON: ${err.message}`);
   }
   if (doc && Array.isArray(doc.models)) return doc.models;
-  if (doc && PROVIDERS.some((p) => Array.isArray(doc[p]))) {
-    return PROVIDERS.flatMap((p) =>
-      Array.isArray(doc[p]) ? doc[p].filter((m) => m && typeof m === "object").map((m) => ({ ...m, provider: p })) : [],
+  const providers = doc && typeof doc === "object" ? Object.keys(doc).filter((p) => Array.isArray(doc[p])) : [];
+  if (providers.length > 0) {
+    return providers.flatMap((p) =>
+      doc[p].filter((m) => m && typeof m === "object").map((m) => ({ ...m, provider: p })),
     );
   }
   throw new Error(`Registry at ${whence} has no "models" array and no provider-keyed lists.`);
@@ -615,6 +615,23 @@ async function selfTest() {
   assert(
     "00:00 UTC on retired_on: claim and Deprecated status both → flagged",
     !futDue.ok && futDue.retiredClaims.some((c) => c.id === "gpt-5") && futDue.lifecycleProblems.length === 1,
+  );
+
+  // 14) A provider key the script has not seen before is read, not dropped.
+  const newKey = await loadRegistry({
+    env: { MODEL_REGISTRY_URL: "https://registry.test/models.json" },
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          openai: [{ id: "gpt-5", name: "GPT-5", supported: true }],
+          mistral: [{ id: "mistral-large-3", name: "Mistral Large 3", supported: true }],
+        }),
+      ),
+    snapshotPath,
+  });
+  assert(
+    "live registry with a new provider key → its rows read, provider filled in",
+    newKey.source === "live" && newKey.models.some((m) => m.id === "mistral-large-3" && m.provider === "mistral"),
   );
 
   console.log(`\nself-test: ${pass}/${pass + fail} assertions passed`);
