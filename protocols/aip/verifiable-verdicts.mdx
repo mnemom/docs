@@ -146,13 +146,13 @@ The prover input is rebuilt from the stored checkpoint: the verdict, concerns, r
 | `409` `proof_inputs_partial` | The checkpoint predates the commitment columns and was never proven, so its card or values commitment is missing. Mnemom never produces a proof with empty commitments. Not retryable: a checkpoint like this cannot be proven on demand. | No |
 | `409` (no billing account) | The org has no billing account, so no proof is queued. | No |
 | `503` `prover_unavailable` | No prover is bound on this cell. No proof record is written. | No |
-| `503` `proof_resolve_failed` | The existing proof was `deferred` and the resolve step could not rebuild its input or write the record. Nothing was dispatched. Retry later. | No |
-| `409` `proof_in_flight` | Another request queued a proof for this checkpoint at the same moment and its record was not readable yet. Retry and you get the `200` response for that record. | No |
+| `200` with `status: "deferred"` | The existing proof was `deferred` and the resolve step could not rebuild its input or write the record. Nothing was dispatched and nothing is charged. Retry later. | No |
+| `200` with `status: "pending"` and a null `proof_id` | Another request queued a proof for this checkpoint at the same moment and its record was not readable yet. Retry and you get the `200` response for that record. | No |
 | `503` `service_unavailable` | The checkpoint read or the billing lookup failed. No proof is queued. | No |
 
 Each newly queued proof is charged in μ to that org's billing account (rate card class `analyze.zk-proof`, see [Pricing](/pricing/overview)). The charge is deduplicated by checkpoint: a checkpoint already charged by analyze-time sampling is not billed again, and forcing a deferred proof uses the same deduplication key, so a later DDR resolution of the same record does not charge a second time. Returning an existing proof is not charged. If the billing account cannot be resolved, no proof is queued and the request fails with `503` (or `409` when the org has no billing account).
 
-Concurrent requests for the same checkpoint never queue two proofs. In-flight proofs are unique per checkpoint, so the second request receives the `200` response for the record the first one created, or `409` `proof_in_flight` in the rare case that record is not readable yet.
+Concurrent requests for the same checkpoint never queue two proofs. In-flight proofs are unique per checkpoint, so the second request receives the `200` response for the record the first one created. In the rare case that record is not readable yet, the `200` body carries `status: "pending"` with a null `proof_id`, and a retry returns the record.
 
 ---
 
