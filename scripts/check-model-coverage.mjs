@@ -40,6 +40,11 @@
  *      that row and on a row that still says `supported: true` (a body built
  *      before the retire day, or a stale snapshot). Before its retired_on day
  *      the id may still be claimed, the provider still serves it.
+ *   5. Translations. Where `fr/` or `es/` holds a translation of either page,
+ *      its sentinel region gets rules (a) and (b) and the retired-claim rule,
+ *      but not (c): a translation may lag its English source, and
+ *      check-i18n-lag.mjs tracks that. A retired model must still leave every
+ *      translated list.
  *
  * Sibling to check-path-references.mjs / check-redirects.mjs; same contract:
  *   Exits 0 clean. Exits 1 on any failure (unknown claim, disagreement, missing
@@ -68,6 +73,11 @@ const SENTINEL_END = "<!-- model-coverage:supported:end -->";
 
 // The two canonical pages whose supported-model regions must reconcile.
 const PAGE_FILES = ["quickstart/gateway.mdx", "concepts/provider-support.mdx"];
+
+// Locale trees whose translation of a PAGE_FILES page, where one exists at
+// `<locale>/<page>`, is checked for retired and unknown claims (the same
+// locales check-i18n-lag.mjs tracks).
+const LOCALES = ["fr", "es"];
 
 const scriptDir = () => dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SNAPSHOT = () => join(scriptDir(), "model-registry-snapshot.json");
@@ -121,9 +131,8 @@ export async function loadRegistry({ env: e = env, fetchImpl = fetch, snapshotPa
 // snapshot uses the flat { models: [{ ..., provider }] } shape. Both are accepted
 // and normalized to the flat list. Before MNE-8796 only the flat shape parsed,
 // so the live tier always threw, was swallowed above, and every run silently
-// read the snapshot.
-const PROVIDERS = ["anthropic", "openai", "gemini"];
-
+// read the snapshot. Every top-level array is a provider list, so a provider the
+// gateway adds later is read rather than dropped.
 function parseModels(text, whence) {
   let doc;
   try {
@@ -132,9 +141,10 @@ function parseModels(text, whence) {
     throw new Error(`Registry at ${whence} is not valid JSON: ${err.message}`);
   }
   if (doc && Array.isArray(doc.models)) return doc.models;
-  if (doc && PROVIDERS.some((p) => Array.isArray(doc[p]))) {
-    return PROVIDERS.flatMap((p) =>
-      Array.isArray(doc[p]) ? doc[p].filter((m) => m && typeof m === "object").map((m) => ({ ...m, provider: p })) : [],
+  const providers = doc && typeof doc === "object" ? Object.keys(doc).filter((p) => Array.isArray(doc[p])) : [];
+  if (providers.length > 0) {
+    return providers.flatMap((p) =>
+      doc[p].filter((m) => m && typeof m === "object").map((m) => ({ ...m, provider: p })),
     );
   }
   throw new Error(`Registry at ${whence} has no "models" array and no provider-keyed lists.`);
@@ -295,7 +305,8 @@ function tableCells(line) {
 // checkLifecycleRows(text, models) → [{ id, problem }]
 //
 // For each registry row with a lifecycle, finds the table row whose FIRST cell
-// is exactly `` `id` `` and checks its status cell (the second cell):
+// is `` `id` `` (alone or in a comma-separated list of backticked ids) and
+// checks its status cell (the second cell):
 //   · retired (retired_on on or before now) → contains "Retired <retired_on>",
 //     and the row names `` `successor` `` when the registry gives one.
 //   · retired_on still ahead → the row names the retired_on date (the shutdown
@@ -306,8 +317,12 @@ export function checkLifecycleRows(text, models, now = new Date()) {
   for (const line of text.split(/\r?\n/)) {
     const cells = tableCells(line);
     if (!cells || cells.length < 2) continue;
-    const m = cells[0].match(/^`([^`]+)`$/);
-    if (m && !rows.has(m[1])) rows.set(m[1], { cells, line });
+    // A first cell may list several ids ("`gemini-3-pro`, `gemini-3-flash`");
+    // the row then carries the lifecycle of each.
+    if (!/^`[^`]+`(?:\s*,\s*`[^`]+`)*$/.test(cells[0])) continue;
+    for (const [, id] of cells[0].matchAll(/`([^`]+)`/g)) {
+      if (!rows.has(id)) rows.set(id, { cells, line });
+    }
   }
   const problems = [];
   for (const model of models) {
@@ -342,29 +357,38 @@ export function checkLifecycleRows(text, models, now = new Date()) {
 // ── Core check (exported for --self-test) ────────────────────────────────────
 // Pure of process.exit / console so it can be exercised against throwaway
 // fixtures. `pages` is [{ file, text }]; `registry` is { models, source }.
-export function checkModelCoverage({ pages, registry, now = new Date() }) {
+// `localizedPages` are the translated counterparts of `pages` (same shape): their
+// regions get the sentinel, unknown-claim and retired-claim rules but are left
+// out of the cross-page agreement, since a translation may lag its English
+// source (check-i18n-lag.mjs tracks that).
+export function checkModelCoverage({ pages, localizedPages = [], registry, now = new Date() }) {
   const index = buildRegistryIndex(registry.models, now);
 
-  const perPage = pages.map(({ file, text }) => {
+  const perPage = [
+    ...pages.map((p) => ({ ...p, localized: false })),
+    ...localizedPages.map((p) => ({ ...p, localized: true })),
+  ].map(({ file, text, localized }) => {
     const region = extractSentinelRegion(text);
     if (region === null) {
-      return { file, sentinelMissing: true, claimedIds: new Set(), unknownClaims: new Set() };
+      return { file, localized, sentinelMissing: true, claimedIds: new Set(), unknownClaims: new Set() };
     }
     const { claimedIds, unknownClaims } = extractSupportedClaims(region, index);
-    return { file, sentinelMissing: false, claimedIds, unknownClaims };
+    return { file, localized, sentinelMissing: false, claimedIds, unknownClaims };
   });
 
   // Cross-page disagreement = symmetric difference of claimed ids, computed only
-  // across pages that actually have a region (a missing region is its own error).
+  // across English pages that actually have a region (a missing region is its
+  // own error).
   const present = perPage.filter((p) => !p.sentinelMissing);
+  const agreeing = present.filter((p) => !p.localized);
   const disagreements = [];
-  if (present.length >= 2) {
+  if (agreeing.length >= 2) {
     const union = new Set();
-    for (const p of present) for (const id of p.claimedIds) union.add(id);
+    for (const p of agreeing) for (const id of p.claimedIds) union.add(id);
     for (const id of [...union].sort()) {
-      const onlyIn = present.filter((p) => !p.claimedIds.has(id)).map((p) => p.file);
+      const onlyIn = agreeing.filter((p) => !p.claimedIds.has(id)).map((p) => p.file);
       if (onlyIn.length > 0) {
-        const claimedBy = present.filter((p) => p.claimedIds.has(id)).map((p) => p.file);
+        const claimedBy = agreeing.filter((p) => p.claimedIds.has(id)).map((p) => p.file);
         disagreements.push({ id, claimedBy, missingFrom: onlyIn });
       }
     }
@@ -617,6 +641,59 @@ async function selfTest() {
     !futDue.ok && futDue.retiredClaims.some((c) => c.id === "gpt-5") && futDue.lifecycleProblems.length === 1,
   );
 
+  // 14) A provider key the script has not seen before is read, not dropped.
+  const newKey = await loadRegistry({
+    env: { MODEL_REGISTRY_URL: "https://registry.test/models.json" },
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          openai: [{ id: "gpt-5", name: "GPT-5", supported: true }],
+          mistral: [{ id: "mistral-large-3", name: "Mistral Large 3", supported: true }],
+        }),
+      ),
+    snapshotPath,
+  });
+  assert(
+    "live registry with a new provider key → its rows read, provider filled in",
+    newKey.source === "live" && newKey.models.some((m) => m.id === "mistral-large-3" && m.provider === "mistral"),
+  );
+
+  // 15) A table row whose first cell lists several ids (`a`, `b`) carries the
+  //     lifecycle row for each of them.
+  const multiRegistry = {
+    source: "fixture",
+    models: [
+      ...registry.models.filter((m) => m.id !== "gemini-3-pro"),
+      { id: "gemini-3-pro", name: "Gemini 3 Pro", provider: "gemini", supported: false, lifecycle: { deprecated_on: "2026-10-14" } },
+    ],
+  };
+  const multiRow = "| `gemini-3-pro`, `gemini-3-flash` | Deprecated 2026-10-14 | 2027-01-14 | `gemini-3.8-flash` |";
+  const multi = checkModelCoverage({
+    pages: [{ file: "concepts/provider-support.mdx", text: wrap("    Claude Opus 4.8") + "\n\n" + futTable(multiRow) }],
+    registry: multiRegistry,
+  });
+  assert("lifecycle row in a multi-id first cell → matched", multi.ok && multi.lifecycleProblems.length === 0);
+
+  // 16) A translated page's supported region is checked for retired and unknown
+  //     claims and its sentinels, but not for agreement: translations lag.
+  const enPage = { file: "concepts/provider-support.mdx", text: wrap("    Claude Opus 4.8, GPT-5") + "\n\n" + goodTable };
+  const loc = (body) => [{ file: "es/quickstart/gateway.mdx", text: wrap(body) }];
+  const locLag = checkModelCoverage({ pages: [enPage], localizedPages: loc("| OpenAI | GPT-5 |"), registry: lcRegistry });
+  assert("translated region claiming a subset → ok, no disagreement", locLag.ok && locLag.disagreements.length === 0);
+  const locRetired = checkModelCoverage({ pages: [enPage], localizedPages: loc("| OpenAI | GPT-5, GPT-5 Codex |"), registry: lcRegistry });
+  assert(
+    "translated region claiming a retired id → flagged",
+    !locRetired.ok && locRetired.retiredClaims.some((c) => c.id === "gpt-5-codex" && c.file === "es/quickstart/gateway.mdx"),
+  );
+  const locUnknown = checkModelCoverage({ pages: [enPage], localizedPages: loc("| OpenAI | GPT-5, GPT-5.2 |"), registry: lcRegistry });
+  assert("translated region claiming an unknown id → flagged", !locUnknown.ok);
+  const locBare = checkModelCoverage({
+    pages: [enPage],
+    localizedPages: [{ file: "fr/quickstart/gateway.mdx", text: "| OpenAI | GPT-5 |" }],
+    registry: lcRegistry,
+  });
+  assert("translated page without sentinels → hard fail", !locBare.ok);
+
   console.log(`\nself-test: ${pass}/${pass + fail} assertions passed`);
   return fail === 0;
 }
@@ -628,7 +705,8 @@ function printHelp() {
       "Usage: check-model-coverage.mjs [options]",
       "",
       "Reconciles the supported-model claims in quickstart/gateway.mdx and",
-      "concepts/provider-support.mdx against the gateway model registry.",
+      "concepts/provider-support.mdx against the gateway model registry, and",
+      "checks their fr/ and es/ translations for retired or unknown claims.",
       "",
       "Options:",
       "  --root <dir>        Docs root (default: repo root, resolved from scripts/).",
@@ -693,10 +771,18 @@ async function main() {
     }
     pages.push({ file: rel, text: readFileSync(p, "utf8") });
   }
+  const localizedPages = [];
+  for (const rel of PAGE_FILES) {
+    for (const locale of LOCALES) {
+      const file = `${locale}/${rel}`;
+      const p = resolve(root, file);
+      if (existsSync(p)) localizedPages.push({ file, text: readFileSync(p, "utf8") });
+    }
+  }
 
   let result;
   try {
-    result = checkModelCoverage({ pages, registry });
+    result = checkModelCoverage({ pages, localizedPages, registry });
   } catch (err) {
     console.error(`✗ check-model-coverage failed: ${err.message}`);
     exit(1);
@@ -737,7 +823,10 @@ async function main() {
     console.error("\n✗ check-model-coverage: pages are not reconciled against the registry.");
     exit(1);
   }
-  console.log("\n✓ check-model-coverage: both pages reconciled against the registry's supported set.");
+  console.log(
+    "\n✓ check-model-coverage: both pages reconciled against the registry's supported set" +
+      (localizedPages.length ? `, ${localizedPages.length} translation(s) claim no retired or unknown model.` : "."),
+  );
   exit(0);
 }
 
