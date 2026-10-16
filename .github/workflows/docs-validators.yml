@@ -20,6 +20,13 @@ name: Docs quality validators
 #     provider-support concept page agree with each other and with the model
 #     registry on which models are claimed as supported.
 #
+# Also wired here (docs#586 follow-up): the api-reference projection gate.
+#   - check:api-reference-drift — `generate-api-reference.mjs --check` exits 1
+#     if regenerating would write, refresh, re-nav, or orphan any endpoint page.
+#     openapi-freshness.yml only gates the committed openapi.json, so a stale
+#     stub page merged unnoticed before this step.
+#   - test:api-reference — the gate's own node:test suite.
+#
 # All 4 scripts use only Node built-ins (confirmed by reading their imports),
 # so no `npm ci` step is needed — mirrors the `check:redirects` / `check:nav-
 # pages` / `check:nav-coverage` steps in mintlify-ci.yml. Each runs as its own
@@ -80,3 +87,11 @@ jobs:
       # because nothing ran this.
       - name: Check corpus body artifact (MNE-8794)
         run: npm run check:corpus-body
+
+      # docs#586 follow-up: endpoint pages + nav must equal the generator's
+      # projection of api-reference/openapi.json (Node built-ins only).
+      - name: Check api-reference drift
+        run: npm run check:api-reference-drift
+
+      - name: Test api-reference generator
+        run: npm run test:api-reference
