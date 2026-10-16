@@ -8,9 +8,13 @@ icon: "satellite-dish"
 Two complementary surfaces for reacting to canonical card changes without polling:
 
 - **Server-Sent Events** at `GET /v1/agents/{id}/stream` — long-lived HTTP connection; you
-  receive a `card_changed` SSE frame whenever the agent's canonical card recomposes.
+  receive a `card_changed` SSE frame whenever the agent's canonical card content changes.
 - **Signed webhook subscriptions** at `POST /v1/agents/{id}/notifications/webhook` — Mnemom
   POSTs a signed payload to your URL on each canonical change.
+
+A canonical change is a new `content_hash` and `version`. A recompose that leaves the card
+content unchanged emits nothing, including one that only moves `_composition` metadata such as
+`exemptions_applied` (see [`_composition`](/specifications/alignment-card-schema#_composition-canonical-only)).
 
 Both surfaces read from the [transparency log](/concepts/transparency-log). This is a distinct
 mechanism from the org-level [Webhook Notifications](/guides/webhooks) system — different
