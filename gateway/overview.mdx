@@ -5,12 +5,12 @@ sidebarTitle: "Overview"
 icon: "satellite-dish"
 ---
 
-Mnemom is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable alignment traces — what decisions were made, what alternatives were considered, and whether behavior matches declared values. Your prompts and responses are never stored.
+Mnemom is a transparent AI agent tracing gateway. It observes your AI agent's API calls and builds verifiable conduct traces: what decisions were made, what alternatives were considered, and whether conduct matches the values declared in the agent's Alignment Card. Your prompts and responses are never stored.
 
 Mnemom is [AAP](/protocols/aap/specification)-compliant and [AIP](/protocols/aip/specification)-compliant. It produces structured [AP-Traces](https://github.com/mnemom/aap) and runs per-turn [AIP](https://github.com/mnemom/aip) integrity checks on every agent interaction.
 
 <Note>
-The hosted gateway at `gateway.mnemom.ai` is what you integrate against regardless of which backend serves a given request — that endpoint, its request/response contract, and the headers documented in [Enforcement Modes](/gateway/enforcement) are the stable surface. If you'd rather run your own instance, see the [self-hosted quickstart](/quickstart/self-hosted) for that deployment's infrastructure requirements -- they describe the self-hosted stack only, not how Mnemom operates the managed service.
+The hosted gateway at `gateway.mnemom.ai` is what you integrate against regardless of which backend serves a given request. That endpoint, its request/response contract, and the headers documented in [Enforcement Modes](/gateway/enforcement) are the stable surface. If you'd rather run your own instance, see the [self-hosted quickstart](/quickstart/self-hosted) for that deployment's infrastructure requirements; they describe the self-hosted stack only, not how Mnemom operates the managed service.
 </Note>
 
 ## Architecture
@@ -55,21 +55,21 @@ Named agents use the `x-mnemom-agent` header to specify an agent name (e.g., `x-
 
 The system consists of five components:
 
-1. **Gateway** — Intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background — extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and — in nudge mode — recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered — on streaming this adds latency.
+1. **Gateway**: intercepts API requests to Anthropic, OpenAI, and Gemini. It identifies your agent via API key hash (zero-config), attaches tracing metadata, and injects thinking/reasoning per provider. What the gateway does with the analysis depends on the integrity mode. In **observe** and **nudge** modes, streaming responses (99%+ of traffic) are returned to the client immediately (zero added latency) while AIP analysis runs in the background: extracting thinking blocks, running integrity analysis with Claude Haiku (~3s), creating cryptographically attested checkpoints (Ed25519 + hash chain + Merkle tree), and (in nudge mode) recording the verdict for carryover into the agent's next turn. Non-streaming responses in these modes are analyzed post-hoc after the response returns. In **enforce** mode the guarantee is stronger: the gateway gates the same turn on both streaming and non-streaming, evaluating the response before it is delivered so a violating response is blocked rather than delivered; on streaming this adds latency.
 
-    That describes the *response* path. On the **request** path the gateway also runs [Safe House](/concepts/safe-house) front-door screening, and that is not a single gate per turn: it screens the inbound message and, when `screen_surfaces.tool_responses` is enabled, each tool result the request is handing back to the model — synchronously, before the body is forwarded upstream. A flagged tool result is withheld (replaced with a quarantine notice) or decorated as untrusted in that same request. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
+    That describes the *response* path. On the **request** path the gateway also runs [Safe House](/concepts/safe-house) front-door screening, and that is not a single gate per turn: it screens the inbound message and, when `screen_surfaces.tool_responses` is enabled, each tool result the request is handing back to the model, synchronously, before the body is forwarded upstream. A flagged tool result is withheld (replaced with a quarantine notice) or decorated as untrusted in that same request. See [When the front door runs](/concepts/safe-house#when-the-front-door-runs).
 
-2. **Observer** — A scheduled background process that processes gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against alignment cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints. AIP integrity analysis is handled entirely by the gateway.
+2. **Observer**: a scheduled background process that processes gateway logs to build AAP-compliant AP-Traces. It extracts thinking blocks from logged responses, analyzes decisions with Claude Haiku, builds AP-Traces, and verifies them against Alignment Cards using the AAP SDK. The observer links its traces to gateway-created AIP checkpoints. AIP integrity analysis is handled entirely by the gateway.
 
-3. **API** — Serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
+3. **API**: serves agent data, traces, integrity scores, drift alerts, enforcement status, and a unified conscience timeline. Powers both the CLI and the web dashboard.
 
-4. **CLI** — The `mnemom` command. Configures your local environment and queries your agent's transparency data. See the [CLI Reference](/gateway/cli) for details.
+4. **CLI**: the `mnemom` command. Configures your local environment and queries your agent's transparency data. See the [CLI Reference](/gateway/cli) for details.
 
-5. **Dashboard** — Web UI at [mnemom.ai](https://mnemom.ai) where you can view the conscience timeline, claim your agent, and monitor alignment.
+5. **Dashboard**: web UI at [mnemom.ai](https://mnemom.ai) where you can view the conscience timeline, claim your agent, and monitor its conduct against its Alignment Card.
 
 ## Supported providers
 
-The gateway routes and traces Anthropic, OpenAI, and Gemini — see
+The gateway routes and traces Anthropic, OpenAI, and Gemini; see
 [Provider Support](/concepts/provider-support) for the current supported-model
 list and per-provider feature coverage. Anthropic and OpenAI models that you host
 on Microsoft Foundry are served through the same `/anthropic` and `/openai` doors.
@@ -79,13 +79,13 @@ See [Microsoft Foundry](/gateway/microsoft-foundry) for the setup.
 
 Mnemom Gateway builds AP-Traces that record:
 
-- **Action** — What the agent did (type, name, category)
-- **Decision** — What alternatives were considered and why one was selected
-- **Escalation** — Whether the agent escalated to a human and why
-- **Verification** — Whether the trace is consistent with the agent's declared alignment card
-- **Integrity** — Per-turn AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
-- **Protection** — Safe House front-door and back-door verdicts. The front door records one evaluation per inbound surface, so a turn that carries tool results produces several — see [When the front door runs](/concepts/safe-house#when-the-front-door-runs)
-- **Policy** — [Policy evaluation](/concepts/policy-engine) results including verdict (pass/warn/fail), violations, warnings, and coverage report. The `X-Policy-Verdict` response header indicates the result.
+- **Action**: what the agent did (type, name, category)
+- **Decision**: what alternatives were considered and why one was selected
+- **Escalation**: whether the agent escalated to a human and why
+- **Verification**: whether the trace is consistent with the agent's declared Alignment Card
+- **Integrity**: per-turn AIP analysis of thinking blocks, with verdict (clear/review_needed/boundary_violation)
+- **Protection**: Safe House front-door and back-door verdicts. The front door records one evaluation per inbound surface, so a turn that carries tool results produces several; see [When the front door runs](/concepts/safe-house#when-the-front-door-runs)
+- **Policy**: [Policy evaluation](/concepts/policy-engine) results including verdict (pass/warn/fail), violations, warnings, and coverage report. The `X-Policy-Verdict` response header indicates the result.
 
 ### What is NOT stored
 
@@ -93,7 +93,7 @@ Your prompts, responses, and API keys are never stored. Only SHA-256 hashes of A
 
 ## AIP compatibility
 
-Coverage varies by provider — see [Provider Support](/concepts/provider-support#aip-coverage-by-provider--the-headline-commitment)
+Coverage varies by provider; see [Provider Support](/concepts/provider-support#aip-coverage-by-provider--the-headline-commitment)
 for the full matrix and honest disclosure. In short: Anthropic and Gemini get
 full thinking-trace analysis; OpenAI gets none through the gateway today (its
 Chat Completions door never returns reasoning content, on any model).
@@ -110,16 +110,16 @@ Claiming gives you a private dashboard with full trace history, integrity scores
 
 ## Current limitations
 
-- **API key auth only** — Agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
-- **Multi-agent support** — Multiple named agents can share a single API key with distinct identities using the `x-mnemom-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
-- **AIP requires exposed reasoning** — AIP integrity checking needs a provider that exposes thinking content. Anthropic and Gemini do; OpenAI's Chat Completions door does not expose any reasoning content today, on any model, so OpenAI gets synthetic `clear` verdicts rather than analysis — see [Provider Support](/concepts/provider-support).
-- **Hosted gateway** — The default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
+- **API key auth only**: agent identification uses API key hashing (SHA-256, works identically across all providers). OAuth and other auth methods are not supported.
+- **Multi-agent support**: multiple named agents can share a single API key with distinct identities using the `x-mnemom-agent` header. See the [Multi-Agent Setup](/guides/multi-agent-setup) guide and the [Agent CRUD API](/api-reference/endpoint/post-agents) for programmatic registration.
+- **AIP requires exposed reasoning**: AIP integrity checking needs a provider that exposes thinking content. Anthropic and Gemini do; OpenAI's Chat Completions door does not expose any reasoning content today, on any model, so OpenAI gets synthetic `clear` verdicts rather than analysis; see [Provider Support](/concepts/provider-support).
+- **Hosted gateway**: the default gateway runs on Mnemom infrastructure. Self-hosting is possible but requires manual setup.
 - **Model hosts.** The gateway reaches each provider's own API, plus Anthropic and OpenAI models on [Microsoft Foundry](/gateway/microsoft-foundry). Other model hosts are not supported.
 
 ## Dependencies
 
-- [Agent Alignment Protocol (AAP)](/protocols/aap/specification) — [`@mnemom/agent-alignment-protocol`](https://www.npmjs.com/package/@mnemom/agent-alignment-protocol) on npm
-- [Agent Integrity Protocol (AIP)](/protocols/aip/specification) — [`@mnemom/agent-integrity-protocol`](https://www.npmjs.com/package/@mnemom/agent-integrity-protocol) on npm
+- [Agent Alignment Protocol (AAP)](/protocols/aap/specification): [`@mnemom/agent-alignment-protocol`](https://www.npmjs.com/package/@mnemom/agent-alignment-protocol) on npm
+- [Agent Integrity Protocol (AIP)](/protocols/aip/specification): [`@mnemom/agent-integrity-protocol`](https://www.npmjs.com/package/@mnemom/agent-integrity-protocol) on npm
 - API keys: Anthropic (required for AIP analysis), OpenAI and Gemini (optional, for multi-provider tracing)
 
 If you're running the [self-hosted](/quickstart/self-hosted) stack instead of the hosted gateway, it deploys on Cloudflare Workers with a Supabase Postgres database.
