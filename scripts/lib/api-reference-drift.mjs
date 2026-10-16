@@ -195,23 +195,24 @@ export function computeDrift({ spec, existingFiles, readEndpoint, docs }) {
     }
   }
 
-  // Refresh existing generated stubs whose title drifted from the current spec
-  // summary (e.g. after a sync). Hand-written pages (non-stub) are left untouched.
+  // Refresh existing generated stubs whose title/description drifted from the
+  // current spec (e.g. after a sync). Pages are matched by their openapi:
+  // directive, not by slug filename: pages named before the generator existed
+  // (post-checkpoints-id-prove.mdx for POST /checkpoints/{checkpoint_id}/prove)
+  // never match slug() and would otherwise go stale silently. Hand-written
+  // pages (non-stub) are left untouched; orphan directives are reported above.
   const refreshList = [];
-  for (const [path, item] of Object.entries(spec.paths || {})) {
-    for (const m of METHODS) {
-      const op = item[m];
-      if (!op) continue;
-      const key = `${m.toUpperCase()} ${path}`;
-      if (HELD.has(key)) continue;
-      const file = `${slug(m, path)}.mdx`;
-      if (!fileSet.has(file)) continue;
-      const cur = readEndpoint(file);
-      if (!STUB_RE.test(cur)) continue; // hand-written page — never overwrite
-      const title = (op.summary || "").trim() || op.operationId || key;
-      const body = stubBody(title, m, path, op);
-      if (cur !== body) refreshList.push({ file, body });
-    }
+  for (const [file, { method, path }] of directiveByFile) {
+    const m = method.toLowerCase();
+    const op = (spec.paths?.[path] || {})[m];
+    if (!op) continue;
+    const key = `${method} ${path}`;
+    if (HELD.has(key)) continue;
+    const cur = readEndpoint(file);
+    if (!STUB_RE.test(cur)) continue; // hand-written page — never overwrite
+    const title = (op.summary || "").trim() || op.operationId || key;
+    const body = stubBody(title, m, path, op);
+    if (cur !== body) refreshList.push({ file, body });
   }
 
   // ---- Navigation ----

@@ -102,6 +102,36 @@ test("hand-written (non-stub) page with the same slug is never overwritten → r
   assert.equal(r.written, 0);
 });
 
+test("drifted stub whose filename is not the generator slug is refreshed by its openapi: directive", () => {
+  // Pre-generator page names (e.g. post-checkpoints-id-prove.mdx for
+  // POST /checkpoints/{checkpoint_id}/prove) never match slug(); the refresh
+  // pass must still find them through their directive (docs#586 follow-up).
+  const oldOp = widgetOp("List widgets");
+  const newOp = widgetOp("List widgets (v2)");
+  const r = run({
+    spec: { paths: { "/widgets/{widget_id}": { get: newOp } } },
+    pages: { "get-widgets-id.mdx": stubBody("List widgets", "get", "/widgets/{widget_id}", oldOp) },
+    docs: docsWith([{ group: "Tools", pages: ["api-reference/endpoint/get-widgets-id"] }]),
+  });
+  assert.equal(r.refreshed, 1);
+  assert.equal(r.refreshList[0].file, "get-widgets-id.mdx", "refresh rewrites the existing file, never a slug-named copy");
+  assert.equal(r.refreshList[0].body, stubBody("List widgets (v2)", "get", "/widgets/{widget_id}", newOp));
+  assert.equal(r.written, 0);
+  assert.equal(r.added, 0);
+});
+
+test("hand-written page whose filename is not the generator slug is never overwritten → refreshed === 0", () => {
+  const handWritten =
+    '---\ntitle: "List widgets"\nopenapi: "GET /widgets/{widget_id}"\n---\n\nA hand-written narrative body that must be preserved.\n';
+  const r = run({
+    spec: { paths: { "/widgets/{widget_id}": { get: widgetOp("List widgets (v2)") } } },
+    pages: { "get-widgets-id.mdx": handWritten },
+    docs: docsWith([{ group: "Tools", pages: ["api-reference/endpoint/get-widgets-id"] }]),
+  });
+  assert.equal(r.refreshed, 0);
+  assert.equal(r.written, 0);
+});
+
 test("endpoint page whose openapi: directive is absent from the spec → orphans.length === 1", () => {
   const r = run({
     spec: { paths: {} },
