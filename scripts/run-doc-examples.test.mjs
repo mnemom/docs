@@ -153,9 +153,9 @@ test("renderCoverageSummary: below-floor verdict + no skip table when empty", ()
 function runCli(cliArgs) {
   return spawnSync(process.execPath, [SCRIPT, ...cliArgs], {
     encoding: "utf8",
-    // Ensure no staging token is inherited so any valid-flag path stops at the
+    // Ensure no test cell token is inherited so any valid-flag path stops at the
     // "secret not configured" exit(0) branch instead of hitting the network.
-    env: { ...process.env, MNEMOM_STAGING_TOKEN: "" },
+    env: { ...process.env, MNEMOM_TEST_TOKEN: "" },
   });
 }
 
@@ -197,7 +197,7 @@ function runCliWithSpec(cliArgs, extraEnv = {}) {
     encoding: "utf8",
     env: {
       ...process.env,
-      MNEMOM_STAGING_TOKEN: "",
+      MNEMOM_TEST_TOKEN: "",
       OPENAPI_SPEC_PATH: FIXTURE_SPEC,
       ...extraEnv,
     },

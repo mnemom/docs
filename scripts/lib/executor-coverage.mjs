@@ -4,7 +4,7 @@
  *
  * The live executor (`run-doc-examples.mjs`) discovers every safe-to-run
  * `curl https://api.mnemom.ai/v1/*` example in the docs, then splits them
- * into an executable `plan` (actually run against staging) and a `skipped`
+ * into an executable `plan` (actually run against the test cell) and a `skipped`
  * list (missing fixtures, write ops, unresolved placeholders, …). "Executor
  * coverage" is the share of DISCOVERED examples the executor actually runs
  * live. A high skip rate silently erodes the value of the live check without
@@ -127,7 +127,7 @@ export function renderCoverageSummary({
   lines.push("### Live doc-example executor coverage");
   lines.push("");
   lines.push(
-    "_Share of discovered `curl` examples the live executor runs against staging. A high skip rate (missing fixtures, write ops, unresolved placeholders) erodes the check without failing it._",
+    "_Share of discovered `curl` examples the live executor runs against the test cell. A high skip rate (missing fixtures, write ops, unresolved placeholders) erodes the check without failing it._",
   );
   lines.push("");
   lines.push("| Metric | Value |");
