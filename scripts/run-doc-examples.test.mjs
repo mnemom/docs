@@ -299,3 +299,13 @@ test("target: --base-url overrides MNEMOM_TEST_BASE_URL", () => {
   assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
   assert.match(r.stdout, /→ GET\s+https:\/\/flag\.example\.test\/v1\/health\s/);
 });
+
+test("secret absent: names MNEMOM_TEST_TOKEN, exits 0, sends nothing", () => {
+  const r = runTarget([]);
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stdout, /^MNEMOM_TEST_TOKEN is not set\./m);
+  assert.match(r.stdout, /secret not configured/);
+  // Exits before the plan is built, so no request line or host is printed.
+  assert.doesNotMatch(r.stdout, /Plan:/);
+  assert.doesNotMatch(r.stdout, /api-staging|MNEMOM_STAGING/);
+});
