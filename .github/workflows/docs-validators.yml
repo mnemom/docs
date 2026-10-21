@@ -27,6 +27,13 @@ name: Docs quality validators
 #     stub page merged unnoticed before this step.
 #   - test:api-reference — the gate's own node:test suite.
 #
+# Also wired here (docs#607 follow-up): the live doc-examples runner's suite.
+#   - test:doc-examples: node:test suite for scripts/run-doc-examples.mjs
+#     (coverage floor, CLI flags, test-cell default base, MNEMOM_TEST_TOKEN
+#     notice). Network-free, but the runner imports ajv, so it is the one step
+#     that needs `npm ci`; that install runs last so it cannot affect the
+#     steps above.
+#
 # All 4 scripts use only Node built-ins (confirmed by reading their imports),
 # so no `npm ci` step is needed — mirrors the `check:redirects` / `check:nav-
 # pages` / `check:nav-coverage` steps in mintlify-ci.yml. Each runs as its own
@@ -95,3 +102,11 @@ jobs:
 
       - name: Test api-reference generator
         run: npm run test:api-reference
+
+      # docs#607 follow-up: the runner behind doc-examples-live.yml had 22+
+      # tests and no workflow running them. npm ci (lockfile-frozen) for ajv.
+      - name: Install script dependencies
+        run: npm ci
+
+      - name: Test doc-examples runner
+        run: npm run test:doc-examples
