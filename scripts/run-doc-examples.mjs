@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * run-doc-examples.mjs — T5-1.3 live staging executor.
+ * run-doc-examples.mjs: T5-1.3 live executor, run against the Azure test
+ * cell (api-az-test.mnemom.ai, MNE-8861).
  *
  * Re-uses the extraction primitives from `lib/doc-examples-extract.mjs`
  * to find every `curl https://api.mnemom.ai/v1/*` invocation in docs,
  * filters to the subset that's safe to execute live, substitutes
  * placeholders from `scripts/staging-fixtures.json`, retargets the URL
- * at staging, and executes the request. Reports per-example status.
+ * at the test cell, and executes the request. Reports per-example status.
  *
  * Safety profile (v1):
  *   - GET requests only by default. Writes (POST/PUT/PATCH/DELETE) are
@@ -28,13 +29,18 @@
  *   (never an env var); it defaults to 0 (report-only).
  *
  * Auth:
- *   The MNEMOM_STAGING_TOKEN env var (CI: secret of the same name)
- *   carries a staging-scoped service-account token. The executor
- *   replaces any `Authorization: Bearer <placeholder>` header with the
- *   staging token. Examples without an Authorization header get one
- *   added. If the token is unset and --dry-run is not passed, the
- *   script exits 0 with a "skipped: no staging token" notice — that's
- *   the workflow's "secret not configured" branch.
+ *   The MNEMOM_TEST_TOKEN env var (CI: secret of the same name)
+ *   carries a test-cell organization API key minted for this job. The
+ *   executor replaces any `Authorization` or `X-Mnemom-Api-Key` header
+ *   with that token (see the header-choice comment below). Examples
+ *   without an auth header get one added. If the token is unset and
+ *   --dry-run is not passed, the script exits 0 with a "MNEMOM_TEST_TOKEN
+ *   is not set" notice. That is the workflow's "secret not configured"
+ *   branch.
+ *
+ * Target:
+ *   MNEMOM_TEST_BASE_URL (CI: repo variable of the same name), or
+ *   --base-url, overrides the default https://api-az-test.mnemom.ai/v1.
  *
  * Exit codes:
  *   0  — no executed call returned a status outside the example's
@@ -118,7 +124,7 @@ let scope = "introduction.mdx,changelog.mdx,quickstart,guides,concepts,specifica
 let dryRun = false;
 let includeWrites = false;
 let verbose = false;
-let stagingBase = env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1";
+let testBase = env.MNEMOM_TEST_BASE_URL ?? "https://api-az-test.mnemom.ai/v1";
 let minExecutedPctArg;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -126,10 +132,10 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--dry-run") dryRun = true;
   else if (a === "--include-writes") includeWrites = true;
   else if (a === "--verbose") verbose = true;
-  else if (a === "--staging-base") stagingBase = args[++i];
+  else if (a === "--base-url") testBase = args[++i];
   else if (a === "--min-executed-pct") minExecutedPctArg = args[++i];
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--staging-base url] [--min-executed-pct N] [--verbose]");
+    console.log("Usage: run-doc-examples.mjs [--scope dirs] [--dry-run] [--include-writes] [--base-url url] [--min-executed-pct N] [--verbose]");
     exit(0);
   } else {
     console.error(`Unknown flag: ${a}`);
@@ -168,9 +174,9 @@ try {
   // will skip with "unresolved placeholder" until the file gets populated.
 }
 
-const stagingToken = env.MNEMOM_STAGING_TOKEN ?? null;
-if (!stagingToken && !dryRun) {
-  console.log("MNEMOM_STAGING_TOKEN is not set. Live execution requires a staging-scoped token.");
+const testToken = env.MNEMOM_TEST_TOKEN ?? null;
+if (!testToken && !dryRun) {
+  console.log("MNEMOM_TEST_TOKEN is not set. Live execution requires a test-cell API key.");
   console.log("Pass --dry-run to parse + filter examples without executing them.");
   console.log("Exiting 0 (skipped — workflow's 'secret not configured' branch).");
   exit(0);
@@ -184,7 +190,7 @@ const specIndex = buildSpecIndex(spec);
 
 // Write allowlist. Each entry: { method, path } templated. Adding to
 // this list is an intentional opt-in that says: "this write op is safe
-// to run live against staging from CI, including cleanup." Most writes
+// to run live against the test cell from CI, including cleanup." Most writes
 // have side effects (create agent, register webhook) that require an
 // idempotency-key + cleanup pass.
 //
@@ -208,7 +214,7 @@ function isWriteAllowed(method, specPath) {
 // Some doc URLs use literal `{agent_id}` placeholders in the path (shape-
 // only; not runnable). Others use well-known illustrative example IDs
 // (`mnm-550e8400-e29b-41d4-a716-446655440000`, `agent-xyz`, `team-abc123`,
-// `agent_abc123`) that don't exist in staging. The executor treats these
+// `agent_abc123`) that don't exist in the test cell. The executor treats these
 // as "needs fixture" — same skip class as `$VAR`-style placeholders.
 const TEMPLATE_RE = /^\{[a-z_][a-z0-9_]*\}$/i;
 const EXAMPLE_ID_PATTERNS = [
@@ -315,7 +321,7 @@ function assertExpectedStatus(specPath, method, status) {
   // we always treat them as "documented behavior" for now since they
   // mean the executor's auth is wrong, not the doc. This is a CI
   // operational concern, not a drift signal.
-  if (status === 401 || status === 403) return { ok: true, why: `auth (${status}) — staging token issue, not doc drift` };
+  if (status === 401 || status === 403) return { ok: true, why: `auth (${status}): test cell token issue, not doc drift` };
   return { ok: false, why: `undocumented status ${status}` };
 }
 
@@ -345,7 +351,7 @@ for (const file of files) {
       }
 
       // Literal `{template}` or example-ID segments in the URL need
-      // staging fixtures — without them every request 404s.
+      // fixtures. Without them every request 404s.
       const needsFixture = pathSegmentsNeedingFixture(norm.segments);
       if (needsFixture.length > 0) {
         skipped.push({ file, line: block.line, method, url, reason: `needs fixture for path segment(s): ${needsFixture.join(", ")}` });
@@ -358,10 +364,10 @@ for (const file of files) {
         continue;
       }
 
-      // Rewrite host: api.mnemom.ai/v1/<path> → ${stagingBase}/<path>.
+      // Rewrite host: api.mnemom.ai/v1/<path> to ${testBase}/<path>.
       const final = new URL(urlResolved.resolved);
       const pathOnly = final.pathname.replace(/^\/v1\//, "/");
-      const stagingURL = stagingBase.replace(/\/$/, "") + pathOnly + final.search;
+      const testURL = testBase.replace(/\/$/, "") + pathOnly + final.search;
 
       // Inject auth header. The header choice depends on the token shape:
       // `mnm_*` / `mnemom_*` are Mnemom API keys and MUST go via
@@ -372,7 +378,7 @@ for (const file of files) {
       // to Authorization: Bearer so a misshapen token still hits the
       // server (where it 401s honestly rather than skipping silently here).
       const filteredHeaders = headers.filter((h) => !/^authorization\s*:/i.test(h) && !/^x-mnemom-api-key\s*:/i.test(h));
-      const tokenValue = stagingToken ?? "DRY_RUN_TOKEN";
+      const tokenValue = testToken ?? "DRY_RUN_TOKEN";
       if (/^mnm_|^mnemom_/.test(tokenValue)) {
         filteredHeaders.push(`X-Mnemom-Api-Key: ${tokenValue}`);
       } else {
@@ -384,7 +390,7 @@ for (const file of files) {
         line: block.line,
         method,
         specPath: matched.raw,
-        url: stagingURL,
+        url: testURL,
         body: body ?? null,
         headers: filteredHeaders,
       });

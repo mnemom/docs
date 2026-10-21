@@ -1,22 +1,26 @@
-name: Doc Examples Live (staging)
+name: Doc Examples Live (test cell)
 
-# T5-1.3 (Safe House Hardening) — live executor for the doc-as-spec
+# T5-1.3 (Safe House Hardening): live executor for the doc-as-spec
 # walker. Runs every safe-to-execute curl example from customer-facing
-# MDX against the staging environment and asserts the response status
-# is documented in the spec (or a 2xx). Catches runtime drift the
-# static walker can't see (endpoints the spec documents but staging
-# hasn't deployed yet; subtle parameter validation differences).
+# MDX against the Azure test cell (api-az-test.mnemom.ai) and asserts the
+# response status is documented in the spec (or a 2xx). Catches runtime
+# drift the static walker can't see (endpoints the spec documents but the
+# test cell hasn't deployed yet, subtle parameter validation differences).
+# Retargeted from api-staging to the test cell by MNE-8861
+# (https://linear.app/mnemom-dev/issue/MNE-8861).
 #
 # Triggers:
-#   - schedule nightly (1 hour after the static walker; staging should
-#     be quiet by then)
-#   - workflow_dispatch (manual; useful for one-off verification after
+#   - schedule nightly (1 hour after the static walker, the test cell
+#     should be quiet by then)
+#   - workflow_dispatch (manual, useful for one-off verification after
 #     adding fixtures or expanding the WRITE_ALLOWLIST)
 #
 # This workflow is NOT PR-blocking. It can only run with
-# MNEMOM_STAGING_TOKEN configured (a staging-scoped service-account
-# token); without the secret it skips with a notice. Failures here
-# surface as Actions tab warnings, not failed-PR red checks.
+# MNEMOM_TEST_TOKEN configured (a test-cell organization API key minted
+# for this job only, never a us-1 or us-2 key). Without the secret it
+# skips with a notice. The base URL comes from repo variable
+# MNEMOM_TEST_BASE_URL. Failures here surface as Actions tab warnings,
+# not failed-PR red checks.
 
 on:
   schedule:
@@ -25,7 +29,7 @@ on:
 
 jobs:
   execute-examples:
-    name: Run safe doc curl examples against staging
+    name: Run safe doc curl examples against the test cell
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,12 +47,13 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Preflight — staging token configured?
+      - name: Preflight, test cell token configured?
         id: preflight
         run: |
-          if [ -z "${{ secrets.MNEMOM_STAGING_TOKEN }}" ]; then
-            echo "::notice::MNEMOM_STAGING_TOKEN secret is not set. Live execution skipped."
-            echo "Set a staging-scoped service-account token in repo secrets to enable T5-1.3 live runs."
+          if [ -z "${{ secrets.MNEMOM_TEST_TOKEN }}" ]
+          then
+            echo "::notice::MNEMOM_TEST_TOKEN secret is not set. Live execution skipped."
+            echo "Set a test-cell organization API key as repo secret MNEMOM_TEST_TOKEN to enable T5-1.3 live runs."
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "skip=false" >> $GITHUB_OUTPUT
@@ -57,6 +62,6 @@ jobs:
       - name: Execute safe doc examples
         if: steps.preflight.outputs.skip == 'false'
         env:
-          MNEMOM_STAGING_TOKEN: ${{ secrets.MNEMOM_STAGING_TOKEN }}
-          MNEMOM_STAGING_BASE_URL: ${{ vars.MNEMOM_STAGING_BASE_URL || 'https://api-staging.mnemom.ai/v1' }}
+          MNEMOM_TEST_TOKEN: ${{ secrets.MNEMOM_TEST_TOKEN }}
+          MNEMOM_TEST_BASE_URL: ${{ vars.MNEMOM_TEST_BASE_URL || 'https://api-az-test.mnemom.ai/v1' }}
         run: node scripts/run-doc-examples.mjs --verbose

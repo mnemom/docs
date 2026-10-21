@@ -2,14 +2,15 @@
 /**
  * seed-staging-fixtures.mjs — T5-1.3 v2.
  *
- * Idempotently ensures the staging fixtures the live executor needs are
- * present in the staging environment, and writes their IDs into
- * `scripts/staging-fixtures.json` so the executor can substitute them
- * into doc curl examples.
+ * Idempotently ensures the fixtures the live executor needs are present
+ * in the Azure test cell (api-az-test.mnemom.ai, MNE-8861), and writes
+ * their IDs into `scripts/staging-fixtures.json` so the executor can
+ * substitute them into doc curl examples.
  *
  * Run manually (not in CI). Requires:
- *   MNEMOM_STAGING_TOKEN     — staging-scoped service-account or PAT
- *   MNEMOM_STAGING_BASE_URL  — optional; default https://api-staging.mnemom.ai/v1
+ *   MNEMOM_TEST_TOKEN     test-cell organization API key or PAT
+ *   MNEMOM_TEST_BASE_URL  optional, default https://api-az-test.mnemom.ai/v1
+ *   MNEMOM_TEST_ORG_ID    optional, pins the fixture org (see step 1)
  *
  * Behavior:
  *   - `GET /v1/auth/me` to discover the user's default org_id.
@@ -50,10 +51,10 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
-const token = env.MNEMOM_STAGING_TOKEN;
-const base = (env.MNEMOM_STAGING_BASE_URL ?? "https://api-staging.mnemom.ai/v1").replace(/\/$/, "");
+const token = env.MNEMOM_TEST_TOKEN;
+const base = (env.MNEMOM_TEST_BASE_URL ?? "https://api-az-test.mnemom.ai/v1").replace(/\/$/, "");
 if (!token) {
-  console.error("MNEMOM_STAGING_TOKEN is required");
+  console.error("MNEMOM_TEST_TOKEN is required");
   exit(2);
 }
 
@@ -87,22 +88,22 @@ async function api(method, path, body) {
 }
 
 // ── 1. Identify the target org ────────────────────────────────────────
-// Explicit env var (MNEMOM_STAGING_ORG_ID) takes precedence — pins the
+// Explicit env var (MNEMOM_TEST_ORG_ID) takes precedence. It pins the
 // seeder to a known fixture org regardless of which orgs the principal
 // happens to be a member of. Falls back to `/api-keys/whoami` for
 // principals whose key is org-bound (whoami uses resolveAuthPrincipal,
 // which accepts both JWTs and `X-Mnemom-Api-Key`). `/auth/me` was the
 // previous discovery endpoint but is JWT-only (getAuthUser), so
 // API-key-bound seeders 401'd there.
-let orgId = env.MNEMOM_STAGING_ORG_ID ?? null;
+let orgId = env.MNEMOM_TEST_ORG_ID ?? null;
 if (!orgId) {
   const me = await api("GET", "/api-keys/whoami");
   orgId = me.org_id ?? me.default_org_id ?? me.user?.default_org_id ?? null;
 }
 if (!orgId) {
   throw new Error(
-    "Could not resolve org_id. Either set MNEMOM_STAGING_ORG_ID explicitly, " +
-      "or bind the staging key to an org so /api-keys/whoami returns it.",
+    "Could not resolve org_id. Either set MNEMOM_TEST_ORG_ID explicitly, " +
+      "or bind the test cell key to an org so /api-keys/whoami returns it.",
   );
 }
 
@@ -135,7 +136,7 @@ try {
 
 // ── 3. Find an existing agent on this user (do not create, since
 //        agent provisioning is identity-bound and creating one here would
-//        consume the staging user's agent quota). The first agent visible
+//        consume the test cell user's agent quota). The first agent visible
 //        is fine for read-only doc examples.
 let agentId = null;
 try {
