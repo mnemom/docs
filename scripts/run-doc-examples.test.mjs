@@ -19,9 +19,11 @@
  * values (MNE-339).
  */
 
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -234,4 +236,66 @@ test("CLI --dry-run + local spec: no skip reasons emitted when list is empty", (
   const r = runCliWithSpec(["--dry-run", "--scope", ""]);
   assert.equal(r.status, 0);
   assert.ok(!r.stdout.includes("Skipped by reason:"), "no skip-reason lines when nothing was skipped");
+});
+
+// ── Target + secret contract (MNE-8861, docs#607 follow-up) ─────────────────
+// The nightly job must reach the test cell, never api-staging (being shut down
+// under MNE-7971), and must skip with a named notice when its secret is absent.
+// A one-page MDX scope and a one-path spec, both written to a temp dir, give a
+// single planned GET whose retargeted URL --dry-run --verbose prints. Network-
+// free: --dry-run stops before any request, and the token-absent run exits
+// before loadSpec().
+const TARGET_DIR = mkdtempSync(join(tmpdir(), "run-doc-examples-target-"));
+const TARGET_PAGE = join(TARGET_DIR, "page.mdx");
+const TARGET_SPEC = join(TARGET_DIR, "openapi.json");
+writeFileSync(TARGET_PAGE, "```bash\ncurl https://api.mnemom.ai/v1/health\n```\n");
+writeFileSync(
+  TARGET_SPEC,
+  JSON.stringify({
+    openapi: "3.1.0",
+    info: { title: "Target fixture", version: "0.0.0" },
+    paths: { "/health": { get: { responses: { 200: { description: "ok" } } } } },
+  }),
+);
+after(() => rmSync(TARGET_DIR, { recursive: true, force: true }));
+
+// The retired names are set on purpose: the runner must not read them.
+function runTarget(cliArgs, extraEnv = {}) {
+  const env = {
+    ...process.env,
+    MNEMOM_TEST_TOKEN: "",
+    MNEMOM_STAGING_BASE_URL: "https://api-staging.mnemom.ai/v1",
+    MNEMOM_STAGING_TOKEN: "not-a-real-token",
+    OPENAPI_SPEC_PATH: TARGET_SPEC,
+    ...extraEnv,
+  };
+  if (!("MNEMOM_TEST_BASE_URL" in extraEnv)) delete env.MNEMOM_TEST_BASE_URL;
+  return spawnSync(process.execPath, [SCRIPT, "--scope", TARGET_PAGE, ...cliArgs], {
+    encoding: "utf8",
+    env,
+  });
+}
+
+test("target: default base is the test cell, never api-staging", () => {
+  const r = runTarget(["--dry-run", "--verbose"]);
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stdout, /Plan: 1 executable example\(s\)/);
+  assert.match(r.stdout, /→ GET\s+https:\/\/api-az-test\.mnemom\.ai\/v1\/health\s/);
+  assert.doesNotMatch(r.stdout, /api-staging/);
+});
+
+test("target: MNEMOM_TEST_BASE_URL overrides the default base", () => {
+  const r = runTarget(["--dry-run", "--verbose"], {
+    MNEMOM_TEST_BASE_URL: "https://example.test/v1",
+  });
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stdout, /→ GET\s+https:\/\/example\.test\/v1\/health\s/);
+});
+
+test("target: --base-url overrides MNEMOM_TEST_BASE_URL", () => {
+  const r = runTarget(["--dry-run", "--verbose", "--base-url", "https://flag.example.test/v1"], {
+    MNEMOM_TEST_BASE_URL: "https://example.test/v1",
+  });
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stdout, /→ GET\s+https:\/\/flag\.example\.test\/v1\/health\s/);
 });
