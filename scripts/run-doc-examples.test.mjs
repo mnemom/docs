@@ -201,6 +201,9 @@ function runCliWithSpec(cliArgs, extraEnv = {}) {
       ...process.env,
       MNEMOM_TEST_TOKEN: "",
       OPENAPI_SPEC_PATH: FIXTURE_SPEC,
+      // Under Actions the child would append its coverage table to the job's
+      // real step summary (run-doc-examples.mjs, `if (summaryPath)`).
+      GITHUB_STEP_SUMMARY: "",
       ...extraEnv,
     },
   });
@@ -267,6 +270,7 @@ function runTarget(cliArgs, extraEnv = {}) {
     MNEMOM_STAGING_BASE_URL: "https://api-staging.mnemom.ai/v1",
     MNEMOM_STAGING_TOKEN: "not-a-real-token",
     OPENAPI_SPEC_PATH: TARGET_SPEC,
+    GITHUB_STEP_SUMMARY: "", // keep the child's table out of the job summary
     ...extraEnv,
   };
   if (!("MNEMOM_TEST_BASE_URL" in extraEnv)) delete env.MNEMOM_TEST_BASE_URL;
