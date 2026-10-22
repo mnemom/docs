@@ -1,18 +1,20 @@
 ---
 title: "Sign-in options"
-description: "How Claude Code signs in to Anthropic when you launch it with mnemom agent: a Claude Team or Enterprise subscription, an Anthropic API key, or an Anthropic Console login."
+description: "How Claude Code signs in to Anthropic when you launch it with mnemom agent: a Claude Team or Enterprise subscription, or an Anthropic API key."
 sidebarTitle: "Sign-in options"
 icon: "key"
 ---
 
 `mnemom agent` sends Claude Code's model traffic through the Mnemom gateway, but
-Claude Code still has to sign in to Anthropic. There are three ways to do that:
+Claude Code still has to sign in to Anthropic. There are two ways to do that:
 
 | Option | `auth` setting | Anthropic bills | You need |
 | --- | --- | --- | --- |
 | [Claude subscription](#claude-subscription-team-or-enterprise) | `subscription` | your Claude Team or Enterprise plan | Claude Code signed in with your Team or Enterprise claude.ai account |
 | [Anthropic API key](#anthropic-api-key) | `api-key` (default) | the Anthropic account that owns the key | an API key (`sk-ant-…`) |
-| [Anthropic Console](#anthropic-console) | `console` | API usage on your Console organization | Claude Code signed in with `/login` → "Anthropic Console account" |
+
+If you pay for Claude through the Anthropic Console, use an API key. See
+[Anthropic Console accounts](#anthropic-console-accounts).
 
 Your Mnemom µ balance is checked and charged the same way whichever option you
 pick. See [Account and µ balance](/gateway/agent).
@@ -37,9 +39,8 @@ an API key and you are asked again next time.
 | Claude Code is signed in with | What `mnemom agent` does |
 | --- | --- |
 | A Claude Team or Enterprise plan | Asks: subscription or API key |
-| An Anthropic Console account, and the API key `/login` created is on this machine | Asks: Console or API key |
 | A Claude Pro or Max plan | Uses an API key, says why, and saves `auth = api-key` |
-| An Anthropic Console account without that key (for example, a `claude auth login --console` profile) | Uses an API key, says why, and saves `auth = api-key` |
+| An Anthropic Console account | Uses an API key, says why, and saves `auth = api-key` |
 | Amazon Bedrock, Google Vertex AI or Microsoft Foundry | Uses an API key, says why, and saves `auth = api-key` |
 | Nothing | Uses an API key and saves nothing |
 
@@ -53,8 +54,8 @@ nothing set uses an API key.
 To change the option later, or set it for one launch:
 
 ```bash
-mnemom agent config set auth subscription   # or api-key, console
-mnemom agent my-session --auth console      # this launch only
+mnemom agent config set auth subscription   # or api-key
+mnemom agent my-session --auth api-key      # this launch only
 ```
 
 Precedence: `--auth`, then `MNEMOM_AGENT_AUTH`, then `auth` in
@@ -105,33 +106,20 @@ The key goes only to the Claude Code process `mnemom agent` launches. It is neve
 logged, printed or passed as a command-line argument. If no key is found,
 `mnemom agent` stops instead of launching Claude Code without the gateway.
 
-## Anthropic Console
+## Anthropic Console accounts
 
-Use this if your team pays for Claude through the Anthropic Console (API
-billing) and you sign Claude Code in with a Console account.
+If your team pays for Claude through the Anthropic Console (API billing), create
+an API key at [console.anthropic.com](https://console.anthropic.com) and use it
+as described in [Anthropic API key](#anthropic-api-key). `mnemom agent` does not
+use the key that Claude Code's `/login` → "Anthropic Console account" creates.
 
-1. Run `claude`, then `/login` → **Anthropic Console account**. Claude Code
-   creates an API key for you and keeps it on this machine: in your login
-   keychain on macOS, otherwise in Claude Code's `.claude.json`.
-2. Run `mnemom agent` and pick **Anthropic Console**, or run
-   `mnemom agent config set auth console`.
+Earlier CLI versions had an `auth = console` option. It is no longer supported:
 
-On every launch, `mnemom agent` reads the key Claude Code created and uses it
-exactly like an API key you supplied. It never copies the key into its own
-files.
-
-If Claude Code has no Console key on this machine, a launch with
-`auth = console` stops with this message:
-
-```text
-mnemom agent: auth = console, but Claude Code has no Anthropic Console login on this machine.
-  Sign in: run `claude`, then /login → "Anthropic Console account".
-  Or use a key instead: `mnemom agent config set auth api-key`.
-```
-
-This happens, for example, after `claude auth login --console`, which signs you
-in without creating a key. Sign in again with `/login` as above, or switch to an
-API key.
+- A saved `auth = console` (in `~/.mnemom/launcher.toml` or `MNEMOM_AGENT_AUTH`)
+  does not stop a launch. The launch uses an Anthropic API key and prints a
+  one-line notice. Run `mnemom agent config set auth api-key` to stop the notice.
+  `mnemom agent doctor` reports it too.
+- `--auth console` and `mnemom agent config set auth console` are refused.
 
 ## Related
 

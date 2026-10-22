@@ -52,8 +52,8 @@ the same as a sub-verb.
 
 Without an invitation, `mnemom agent` stops before launching anything. It says
 Mnemom Agent isn't enabled for your organization yet and shows how to redeem an
-invitation. Nothing is started or charged. To request an invitation, contact us
-at [mnemom.ai/contact](https://www.mnemom.ai/contact). `mnemom agent doctor`
+invitation. Nothing is started or charged. To request access, join the waitlist
+at [mnemom.ai/waitlist](https://www.mnemom.ai/waitlist). `mnemom agent doctor`
 shows the same access check.
 
 Mnemom staff (`@mnemom.ai` accounts) are enabled by default and skip this step.
@@ -81,7 +81,12 @@ mnemom agent fix-auth                                    # named, no goal
 mnemom agent fix-auth --goal "make login work on Safari" # named, goal on
 ```
 
-Non-interactive runs (pipes, CI) never prompt; they need a session name.
+Non-interactive runs (pipes, CI) never prompt; they need a session name. Pass it
+before `--`, or as Claude Code's own `--name <name>` after `--`:
+
+```bash
+mnemom agent -- --name nightly-check -p "run the test suite"
+```
 
 Before Claude Code starts, `mnemom agent` makes sure the agent the session runs
 as is claimed in your org (see [Your governed agent](#your-governed-agent)). It
@@ -187,7 +192,7 @@ out, run `mnemom experimental disable implicit`. Until you opt in,
 `--implicit` is refused with a pointer to `mnemom experimental enable implicit`,
 and a saved `goal_mode = "implicit"` is ignored with the same pointer.
 
-`--implicit` cannot be combined with `--goal`/`--requirement`/`--allow`/`--forbid`/`--goal-id`
+`--implicit` cannot be combined with `--goal`/`--requirement`/`--allow`/`--forbid`/`--goal-id`/`--mode`/`--lead-directed`
 — a sealed contract always wins on the gateway, so the launch refuses the
 combination rather than silently ignore `--implicit`.
 
@@ -221,13 +226,14 @@ mnemom agent doctor
 ```
 
 A read-only check with an actionable hint for anything not ready: your settings
-file, the coding-agent CLI, your Anthropic key source, **gateway health** (a
-`200` plus the `x-mnemom-verdict` header that proves governance is live), a
-gateway that belongs to a different Mnemom deployment than the rest of the CLI,
-your **Mnemom Agent access** for the active org, and the CLI's auto-update
-status. It writes nothing, never reads
-your key's value, and exits non-zero when the machine is not launch-ready, so a
-script can gate on it.
+file, the coding-agent CLI, how Claude Code signs in (your Anthropic key source,
+or your claude.ai login on a [subscription](/gateway/agent-sign-in)), **gateway
+health** (a `200` plus the `x-mnemom-verdict` header that proves governance is
+live), a gateway that belongs to a different Mnemom deployment than the rest of
+the CLI, your **Mnemom Agent access** for the active org, your agent's
+governance modes (see [Default cards](#default-cards)), and the CLI's
+auto-update status. It writes nothing, never reads your key's value, and exits
+non-zero when the machine is not launch-ready, so a script can gate on it.
 
 ## Account and µ balance
 
@@ -244,7 +250,7 @@ top-up completes. An accepted invitation credits your starter µ automatically.
 | Gateway | `https://gateway.mnemom.ai` (the gateway the rest of the CLI uses) | `--gateway <url>`, `MNEMOM_AGENT_GATEWAY`, `config set gateway` |
 | Launch shape | **Terminal** — a governed session in this terminal. | `config set launch` |
 | Permissions | Claude Code's permission prompts are **off** (`--dangerously-skip-permissions`). See [Permission prompts](#permission-prompts) | `--no-yolo` (per launch) |
-| Agent | a governed `agent-<you>` agent, claimed into your org before the first session | `--agent <slug>`, `config set agent` |
+| Agent | a governed `agent-<you>` agent, claimed into your org before the first session | `--agent <slug\|id>`, `config set agent`, `config set agent_id` |
 | Sign-in | Anthropic API key, unless you pick another option on first launch | `--auth`, `config set auth` |
 | Key source | env → saved store → prompt | `config set key_source` |
 
@@ -279,15 +285,17 @@ mnemom agent config path                 # print the file path
 | `gateway` | Gateway host (default `https://gateway.mnemom.ai`) |
 | `model` | Model to launch (CLI alias or concrete id, e.g. `claude-sonnet-5`) |
 | `agent` | Governed agent identity slug (`x-mnemom-agent`) |
+| `agent_id` | Pin launches to one agent by its full id (`mnm-<uuid>`). `--agent` wins over it; it wins over `agent`. See [Pin an agent](#pin-an-agent) |
 | `effort` | Reasoning effort (`low`\|`medium`\|`high`\|`xhigh`\|`max`) |
 | `cli` | Coding-agent CLI to launch (name or full path; default `claude`) |
 | `launch` | Launch shape — `terminal` |
-| `auth` | How Claude Code signs in to Anthropic: `api-key` (default), `subscription` or `console`. See [Sign-in options](/gateway/agent-sign-in) |
+| `auth` | How Claude Code signs in to Anthropic: `api-key` (default) or `subscription`. See [Sign-in options](/gateway/agent-sign-in) |
 | `key_source` | Where to source the Anthropic key (`env`\|`store`\|`prompt`) |
 | `goal_mode` | What a launch with no `--goal`/`--implicit`/`--no-implicit` does — `implicit` or `off`. Ignored until you opt in to the experimental `implicit` feature, so implicit mode is never on by default. After you opt in, an unset value means `implicit`; set `off` to use implicit mode only with `--implicit` |
 | `context` | Context folding default — `true`/`false` (default `true`; also settable per-launch with `--context`/`--no-context`) |
 | `context_profile` | How the gateway folds context — `balanced`, `aggressive`, `adaptive` or `off`; unset means the gateway's own default (also `--context-profile`, `MNEMOM_AGENT_CONTEXT_PROFILE`) |
-| `compact_at` | Gateway compaction target — a token count from 50k to just under 1M (`200k` works), or `1m`/`off` for none (default: none). A target needs the experimental `compaction-intercept` feature (also `--compact-at`, `MNEMOM_COMPACT_AT`) |
+| `compaction_intercept` | The [compaction intercept](#compaction-intercept) — `true`/`false` (default `true`; also `--compaction-intercept`/`--no-compaction-intercept`, `MNEMOM_AGENT_COMPACTION_INTERCEPT`) |
+| `compact_at` | Gateway compaction target — a token count from 50k to just under 1M (`200k` works), or `1m`/`off` for none (default: none). A target rides on the compaction intercept (also `--compact-at`, `MNEMOM_COMPACT_AT`) |
 | `guardrails.max_turns` | Contract guardrail: turn ceiling (positive integer) |
 | `guardrails.budget_usd` | Contract guardrail: spend ceiling in USD (positive number) |
 | `guardrails.stall_turns` | Contract guardrail: consecutive no-write turns (positive integer) |
@@ -360,15 +368,17 @@ confirm the claim.
 
 ### Default cards
 
-A newly claimed agent gets a default coding posture. Both cards are published
-**off**, because alignment and protection analysis are billed: the alignment card
-has `autonomy_mode` and `integrity_mode` set to `off` and
-`principal.relationship: delegated_authority`; the protection card has
-`mode: off`, with thresholds `0.60 / 0.80 / 0.95` and all four screen surfaces
-declared so it is ready when you turn it on. Turn them on with
-[`mnemom card`](/gateway/cli#card-commands) and
-[`mnemom protection`](/gateway/cli#protection-commands). The goal contract does
-the nudging.
+A newly claimed agent gets a default coding posture. The checks that cost a
+model call per turn are **off**, because they are billed:
+
+- the alignment card has `integrity_mode: off` (no AIP integrity analysis) and
+  `principal.relationship: delegated_authority`. Its `autonomy_mode` is
+  `observe`: autonomy checks are rules only, with no model call;
+- the protection card has `mode: off` (no Safe House screening), with thresholds
+  `0.60 / 0.80 / 0.95` and all four screen surfaces declared so it is ready when
+  you turn it on.
+
+The goal contract does the nudging.
 
 ```bash
 mnemom agent setup                  # check (and if needed claim) the agent and refresh its cards; no launch
@@ -379,6 +389,37 @@ mnemom agent my-session --no-setup  # skip the default-card writes for this laun
 `--no-setup` only skips the card writes. The agent is still checked and, if
 needed, claimed. `mnemom agent setup` uses an Anthropic API key. Bring your own
 agent any time with `--agent <slug>`.
+
+To turn governance on when you set up the agent, pass `--governance`. It sets AIP
+integrity analysis and Safe House screening to `observe`:
+
+```bash
+mnemom agent setup --governance               # integrity analysis and Safe House screening
+mnemom agent setup --governance integrity     # one of them: integrity or safe-house
+mnemom agent setup --no-governance            # everything off, autonomy checks included
+```
+
+A refresh of an agent that is already claimed keeps the modes its cards carry,
+unless you pass `--governance` or `--no-governance`. You can also change the cards
+with [`mnemom card`](/gateway/cli#card-commands) and
+[`mnemom protection`](/gateway/cli#protection-commands). A stricter org, team or
+platform policy can raise a mode above the agent's own card; `mnemom agent
+doctor` names the layer when that happens.
+
+### Pin an agent
+
+To always launch as one specific agent, pass its full id, or save it:
+
+```bash
+mnemom agent my-session --agent mnm-<uuid>
+mnemom agent config set agent_id mnm-<uuid>
+```
+
+A pinned launch reads the agent's name, then runs only if the gateway serves
+exactly that agent and it is yours and claimed. It never claims or creates an
+agent. A shortened id is refused, so it is never sent as an agent name. A pinned
+launch needs a Mnemom API key; if there is none, it creates a gateway-only key,
+as a [subscription launch](/gateway/agent-sign-in#claude-subscription-team-or-enterprise) does.
 
 ### Managing agents
 
@@ -409,6 +450,7 @@ mnemom agent show              # the newest session
 mnemom agent show fix-auth     # by session name (newest match wins)
 mnemom agent show a1b2c3d4     # by a unique conversation-id prefix
 mnemom agent show --json
+mnemom agent show fix-auth --follow   # then print each new verdict as it lands
 ```
 
 `show` merges the local launch record with the gateway's **live** goal state for
@@ -419,6 +461,10 @@ scrollback. It also prints the command that resumes the session through
 `mnemom agent` (see [Resume a session](#resume-a-session)). Each row's `Goal` column, and `show`'s goal-mode field, read `ON`
 (sealed contract), `IMPLICIT`, or `OFF`. For an implicit-mode session, `show`
 also prints the statement the gateway inferred.
+
+`--follow` keeps watching after the snapshot and prints each new verdict once, until
+you press Ctrl-C or the session's seal lapses. It checks every 3 seconds; change
+that with `--follow-interval <seconds>` or `MNEMOM_AGENT_FOLLOW_INTERVAL`.
 
 ## Share your agent's record
 
@@ -878,7 +924,7 @@ anywhere, nothing is sent and the gateway's default applies.
 | `balanced` | Keeps more of the earlier work verbatim and folds later — for long sessions that revisit earlier files and decisions. |
 | `aggressive` | Folds earlier and keeps a tighter working set — for cost-sensitive sessions and short, focused tasks. |
 | `adaptive` | Sizes the fold to the conversation: no fold below 200k tokens, `aggressive` from 200k to 1M, `balanced` above. |
-| `off` | No gateway folding; compaction is left to the coding agent. Same as `--no-context`. |
+| `off` | No gateway folding; compaction is left to the coding agent and the [compaction intercept](#compaction-intercept) is off too. Same as `--no-context`. Refused with `--compaction-intercept` or `--compact-at <n>`. |
 
 ```bash
 mnemom agent long-session --context-profile aggressive
@@ -891,12 +937,47 @@ the session being resumed (with `--continue` or `--resume <session-id>`), else `
 context_profile`, else `off` when folding is turned off by `context = false` or
 `MNEMOM_AGENT_CONTEXT`, else the gateway's default.
 
+### Compaction intercept
+
+The compaction intercept is **on by default** (CLI 0.17.23 and later). The
+gateway reports the real context size to Claude Code, so Claude Code compacts at
+its own threshold, and the gateway answers that compaction at once from its fold
+instead of sending it to the model.
+
+```bash
+mnemom agent long-session --no-compaction-intercept   # off for this launch
+mnemom agent config set compaction_intercept false    # off for every launch
+```
+
+`MNEMOM_AGENT_COMPACTION_INTERCEPT=0` also turns it off. `--compaction-intercept`
+turns it back on for one launch.
+
+`--compact-at <n>` pulls the compaction point forward for one session: a token
+count from 50k to just under 1M (`200k` works). `1m`, `off` or no value leaves
+Claude Code's normal 1M-window schedule alone. A target rides on the compaction
+intercept, so it is refused together with `--no-compaction-intercept`. Save a
+default with `config set compact_at` or `MNEMOM_COMPACT_AT`.
+
+### Auto-compact
+
+If you turned Claude Code's auto-compact off (`DISABLE_AUTO_COMPACT`,
+`DISABLE_COMPACT`, or `autoCompactEnabled: false` in a settings file), a long
+session stops with "Prompt is too long" when it reaches the context limit. So
+`mnemom agent` turns auto-compact back on for that session and says so. It
+changes nothing on disk. If the switch is in a settings file and you pass your
+own `--settings` to Claude Code after `--`, it can't be turned back on; the
+launch warns you instead.
+
+To keep it off, pass `--allow-autocompact-off` or set
+`MNEMOM_AGENT_ALLOW_AUTOCOMPACT_OFF=1`.
+
 ## How Claude Code signs in
 
-Claude Code can sign in to Anthropic three ways under `mnemom agent`: an
-Anthropic API key (the default), your Claude Team or Enterprise subscription, or
-the API key your Anthropic Console login created. Your first launch in a
-terminal asks which one when there is a choice, and saves the answer.
+Claude Code can sign in to Anthropic two ways under `mnemom agent`: an
+Anthropic API key (the default), or your Claude Team or Enterprise subscription.
+If you pay through the Anthropic Console, use an API key from the Console. Your
+first launch in a terminal asks which one when there is a choice, and saves the
+answer.
 [Sign-in options](/gateway/agent-sign-in) covers each one, where the API key is
 looked up, and what you see when something is missing.
 
@@ -905,13 +986,13 @@ looked up, and what you see when something is missing.
 | Flag | Meaning |
 | --- | --- |
 | `--invite <token>` | Redeem a Mnemom Agent invitation, then launch if a session name is given |
-| `--auth <mode>` | How Claude Code signs in: `api-key`, `subscription` or `console` — see [Sign-in options](/gateway/agent-sign-in) |
+| `--auth <mode>` | How Claude Code signs in: `api-key` or `subscription` — see [Sign-in options](/gateway/agent-sign-in) |
 | `--goal`, `--requirement`, `--allow`, `--forbid`, `--goal-id` | Contract fields (`--goal` required if any are given) |
 | `--implicit` / `--no-implicit` | Turn implicit goal alignment on/off for this launch (`--implicit` needs the opt-in experimental `implicit` feature; not combinable with the contract fields above) |
 | `--max-turns`, `--budget`, `--stall` | Guardrail ceilings |
 | `--mode <nudge\|enforce>` | Contract mode (a contract field — requires `--goal`); default `nudge`. See [Ceilings: nudge vs enforce](#ceilings-nudge-vs-enforce) |
 | `--lead-directed` | Add the fixed lead-directed push/PR requirement (a contract field — requires `--goal`). See [Lead-directed sessions](#lead-directed-sessions) |
-| `--agent <slug>` | Governed identity (default `agent-<you>`). Claimed before launch either way |
+| `--agent <slug\|id>` | Governed identity (default `agent-<you>`). Claimed before launch either way. A full `mnm-<uuid>` id [pins](#pin-an-agent) the launch to that agent |
 | `--cli <name\|path>` | Coding-agent CLI to launch (default `claude`) |
 | `--gateway <url>` | Gateway host override |
 | `--model <alias\|id>`, `--effort <level>` | Model + reasoning effort |
@@ -919,23 +1000,26 @@ looked up, and what you see when something is missing.
 | `--no-yolo` | Keep Claude Code's permission prompts: do not pass `--dangerously-skip-permissions` |
 | `--context` / `--no-context` | Force context folding on/off for this launch (on by default) |
 | `--context-profile <profile>` | `balanced`, `aggressive`, `adaptive` or `off` — see [Context profiles](#context-profiles) |
-| `--compact-at <n\|200k\|1m\|off>` | Gateway compaction target for this session, from 50k to just under 1M; `1m` or `off` means none. A target needs the experimental `compaction-intercept` feature |
+| `--compaction-intercept` / `--no-compaction-intercept` | Turn the [compaction intercept](#compaction-intercept) on/off for this launch (on by default) |
+| `--compact-at <n\|200k\|1m\|off>` | Gateway compaction target for this session, from 50k to just under 1M; `1m` or `off` means none. Refused with `--no-compaction-intercept` |
+| `--allow-autocompact-off` | Keep Claude Code's auto-compact off if you turned it off — see [Auto-compact](#auto-compact) |
 | `--conversation-id <id>` | Conversation id to send (default: generated) |
 | `--no-context-hint` | Do not seed Claude Code's context-hint feature flag |
-| `--no-context-handoff`, `--no-compaction-intercept` | Keep that experimental feature off for this launch, even when your settings turn it on |
+| `--no-context-handoff` | Keep the experimental context-handoff feature off for this launch, even when your settings turn it on |
 | `--setup` / `--no-setup` | Re-check the agent and refresh its default cards / skip the card writes. The agent is claimed either way — see [Your governed agent](#your-governed-agent) |
+| `--governance [features]` / `--no-governance` | Turn AIP integrity analysis and Safe House screening on (`integrity`, `safe-house`, or both) / turn every check off — see [Default cards](#default-cards) |
 | `--dry-run` | Print the resolved launch plan and exit |
 | `--first-run` | Show the [first-run savings screen](/gateway/agent-savings) again, then exit |
 
 Anything after `--` is passed straight through to the coding-agent CLI.
 
-Flags of experimental features (`--implicit`, `--slack`, `--context-handoff`,
-`--compaction-intercept`) are hidden from `--help` until you turn the feature on
+Flags of experimental features (`--implicit`, `--slack`, `--context-handoff`)
+are hidden from `--help` until you turn the feature on
 with [`mnemom experimental enable`](/gateway/cli#experimental-features-mnemom-experimental).
 
 ## Related
 
-- [Sign-in options](/gateway/agent-sign-in) — subscription, API key or Anthropic Console
+- [Sign-in options](/gateway/agent-sign-in) — Claude subscription or Anthropic API key
 - [Savings estimates](/gateway/agent-savings) — the first-run savings screen and the in-session counter
 - [CLI reference](/gateway/cli) — the full `mnemom` command surface
 - [Agent claim flow](/guides/agent-claim-flow)
