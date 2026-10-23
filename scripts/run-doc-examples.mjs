@@ -6,7 +6,7 @@
  * Re-uses the extraction primitives from `lib/doc-examples-extract.mjs`
  * to find every `curl https://api.mnemom.ai/v1/*` invocation in docs,
  * filters to the subset that's safe to execute live, substitutes
- * placeholders from `scripts/staging-fixtures.json`, retargets the URL
+ * placeholders from `scripts/test-cell-fixtures.json`, retargets the URL
  * at the test cell, and executes the request. Reports per-example status.
  *
  * Safety profile (v1):
@@ -163,11 +163,11 @@ try {
 // ── Fixtures + auth ──────────────────────────────────────────────────────
 let fixtures = {};
 try {
-  const raw = JSON.parse(readFileSync("scripts/staging-fixtures.json", "utf8"));
+  const raw = JSON.parse(readFileSync("scripts/test-cell-fixtures.json", "utf8"));
   fixtures = raw?.values ?? {};
 } catch (err) {
   if (err.code !== "ENOENT") {
-    console.error("staging-fixtures.json is malformed:", err.message);
+    console.error("test-cell-fixtures.json is malformed:", err.message);
     exit(2);
   }
   // Missing fixture file is fine in v1 (empty fixtures). Most examples
@@ -459,7 +459,7 @@ if (dryRun) {
 }
 
 if (plan.length === 0) {
-  console.log("Nothing to execute. Populate scripts/staging-fixtures.json to unlock examples.");
+  console.log("Nothing to execute. Populate scripts/test-cell-fixtures.json to unlock examples.");
   exit(0);
 }
 

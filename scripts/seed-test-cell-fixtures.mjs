@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * seed-staging-fixtures.mjs — T5-1.3 v2.
+ * seed-test-cell-fixtures.mjs — T5-1.3 v2.
  *
  * Idempotently ensures the fixtures the live executor needs are present
  * in the Azure test cell (api-az-test.mnemom.ai, MNE-8861), and writes
- * their IDs into `scripts/staging-fixtures.json` so the executor can
+ * their IDs into `scripts/test-cell-fixtures.json` so the executor can
  * substitute them into doc curl examples.
  *
  * Run manually (not in CI). Requires:
@@ -21,11 +21,11 @@
  *   - List teams for that org. If one with name="mnemom-doc-fixtures"
  *     exists, reuse it. Otherwise skip (team-create requires a card,
  *     out of scope for v2 v1).
- *   - Write the resolved IDs into scripts/staging-fixtures.json under
+ *   - Write the resolved IDs into scripts/test-cell-fixtures.json under
  *     `.values.{ORG_ID, WEBHOOK_ENDPOINT_ID, TEAM_ID, AGENT_ID}`.
  *
  * Output is JSON-only on stdout — pipe into the fixtures file:
- *   node scripts/seed-staging-fixtures.mjs > scripts/staging-fixtures.json
+ *   node scripts/seed-test-cell-fixtures.mjs > scripts/test-cell-fixtures.json
  *
  * Or with --apply, the script updates the file in place.
  */
@@ -43,10 +43,10 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--webhook-receiver") webhookReceiver = args[++i];
   else if (a === "--fixture-name") fixtureName = args[++i];
   else if (a === "--help" || a === "-h") {
-    console.log("Usage: seed-staging-fixtures.mjs [--apply] [--webhook-receiver url] [--fixture-name name]");
+    console.log("Usage: seed-test-cell-fixtures.mjs [--apply] [--webhook-receiver url] [--fixture-name name]");
     console.log();
     console.log("Without --apply, prints the resolved fixtures as JSON on stdout.");
-    console.log("With --apply, writes scripts/staging-fixtures.json directly.");
+    console.log("With --apply, writes scripts/test-cell-fixtures.json directly.");
     exit(0);
   }
 }
@@ -164,10 +164,10 @@ try {
 }
 
 // ── 5. Emit / write fixtures ─────────────────────────────────────────────
-const existing = existsSync("scripts/staging-fixtures.json")
+const existing = existsSync("scripts/test-cell-fixtures.json")
   ? (() => {
       try {
-        return JSON.parse(readFileSync("scripts/staging-fixtures.json", "utf8"));
+        return JSON.parse(readFileSync("scripts/test-cell-fixtures.json", "utf8"));
       } catch {
         return {};
       }
@@ -176,7 +176,7 @@ const existing = existsSync("scripts/staging-fixtures.json")
 
 const merged = {
   ...existing,
-  _README: existing._README ?? "Staging fixtures for T5-1.3 live executor. Populated by scripts/seed-staging-fixtures.mjs; safe to commit (test entity IDs only, no secrets).",
+  _README: existing._README ?? "Azure test cell (api-az-test) fixtures for T5-1.3 live executor. Populated by scripts/seed-test-cell-fixtures.mjs; safe to commit (test entity IDs only, no secrets).",
   values: {
     ...(existing.values ?? {}),
     ORG_ID: orgId,
@@ -187,8 +187,8 @@ const merged = {
 };
 
 if (apply) {
-  writeFileSync("scripts/staging-fixtures.json", JSON.stringify(merged, null, 2) + "\n");
-  console.error(`Wrote scripts/staging-fixtures.json:`);
+  writeFileSync("scripts/test-cell-fixtures.json", JSON.stringify(merged, null, 2) + "\n");
+  console.error(`Wrote scripts/test-cell-fixtures.json:`);
   console.error(`  ORG_ID = ${orgId}`);
   console.error(`  WEBHOOK_ENDPOINT_ID = ${webhookEndpointId}`);
   if (agentId) console.error(`  AGENT_ID = ${agentId}`);
