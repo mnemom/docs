@@ -26,8 +26,8 @@
  * endpoint and example body matches.
  *
  * Out of scope (deliberate follow-ons):
- *  - Live execution against staging (needs credential handling, idempotency
- *    discipline, cleanup; deferred to T5-1.3).
+ *  - Live execution against the Azure test cell (api-az-test) (needs
+ *    credential handling, idempotency discipline, cleanup; deferred to T5-1.3).
  *  - gateway.mnemom.ai/* URLs (passthrough, no first-party spec).
  *  - Non-curl examples — JSON-only / YAML / Python / TypeScript fenced
  *    blocks. Spec-page YAML/JSON parsing through the production validator
