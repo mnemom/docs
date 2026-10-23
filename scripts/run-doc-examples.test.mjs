@@ -22,7 +22,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -312,4 +312,51 @@ test("secret absent: names MNEMOM_TEST_TOKEN, exits 0, sends nothing", () => {
   // Exits before the plan is built, so no request line or host is printed.
   assert.doesNotMatch(r.stdout, /Plan:/);
   assert.doesNotMatch(r.stdout, /api-staging|MNEMOM_STAGING/);
+});
+
+// ── Fixture load (docs#616 follow-up) ───────────────────────────────────────
+// The runner reads `scripts/test-cell-fixtures.json` relative to its cwd and
+// treats ENOENT as "no fixtures" (run-doc-examples.mjs, Fixtures + auth), so a
+// wrong path would silently skip every `{org_id}` example in the nightly run.
+// Run from the repo root, as doc-examples-live.yml does, and assert `{org_id}`
+// resolves to the committed ORG_ID; any other path leaves the example skipped
+// with "needs fixture for path segment(s): {org_id}". Network-free (--dry-run).
+const REPO_ROOT = join(__dirname, "..");
+const FIXTURE_ORG_ID = JSON.parse(
+  readFileSync(join(__dirname, "test-cell-fixtures.json"), "utf8"),
+).values.ORG_ID;
+const ORG_PAGE = join(TARGET_DIR, "org-page.mdx");
+const ORG_SPEC = join(TARGET_DIR, "org-openapi.json");
+writeFileSync(ORG_PAGE, "```bash\ncurl https://api.mnemom.ai/v1/orgs/{org_id}/members\n```\n");
+writeFileSync(
+  ORG_SPEC,
+  JSON.stringify({
+    openapi: "3.1.0",
+    info: { title: "Fixture-load fixture", version: "0.0.0" },
+    paths: { "/orgs/{org_id}/members": { get: { responses: { 200: { description: "ok" } } } } },
+  }),
+);
+
+test("fixtures: {org_id} resolves from scripts/test-cell-fixtures.json", () => {
+  assert.equal(typeof FIXTURE_ORG_ID, "string");
+  assert.ok(FIXTURE_ORG_ID.length > 0, "committed fixture file has no ORG_ID");
+  const env = {
+    ...process.env,
+    MNEMOM_TEST_TOKEN: "",
+    OPENAPI_SPEC_PATH: ORG_SPEC,
+    GITHUB_STEP_SUMMARY: "",
+  };
+  delete env.MNEMOM_TEST_BASE_URL;
+  const r = spawnSync(process.execPath, [SCRIPT, "--scope", ORG_PAGE, "--dry-run", "--verbose"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env,
+  });
+  assert.equal(r.status, 0, `unexpected exit ${r.status}\nstderr: ${r.stderr}`);
+  assert.doesNotMatch(r.stdout, /needs fixture/);
+  assert.match(r.stdout, /Plan: 1 executable example\(s\); 0 skipped\./);
+  assert.ok(
+    r.stdout.includes(`→ GET    https://api-az-test.mnemom.ai/v1/orgs/${FIXTURE_ORG_ID}/members `),
+    `planned URL does not carry the committed ORG_ID\nstdout: ${r.stdout}`,
+  );
 });
