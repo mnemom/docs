@@ -225,7 +225,7 @@ const KNOWN_BODY_DRIFT = [
   // spec fix in mnemom-api/openapi.json (which also has the stale
   // 8-event enum in openapi/tags/webhook-notifications.ts source) was
   // a separate cross-repo follow-up — flagged in
-  // safe-house-hardening/audit/t5-4-allowlist-empty-2026-05-15.md and
+  // safe-house-hardening/audits/t5-4-allowlist-empty-2026-05-15.md and
   // closed 2026-05-21 by mnemom/mnemom-api#475.)
 
   // (closed 2026-05-15 by T5-4 PR 6 — 11 body-drift entries spanning
