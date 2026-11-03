@@ -5,6 +5,7 @@
  *
  * Mintlify default (from the bundled CSS):
  *   .eyebrow { height: 1.25rem; color: var(--primary); font-weight: 600; }
+ * Colour: secondary text (inherit + opacity), not teal, for contrast.
  * Frontend limelight eyebrow (mnemom-website/client/global.css):
  *   --tracking-eyebrow: 0.08em; text-transform: uppercase; font-weight: 500.
  *
@@ -23,6 +24,8 @@
     "  letter-spacing: 0.08em;",
     "  font-weight: 500;",
     "  font-size: 0.75rem;",
+    "  color: inherit;",
+    "  opacity: 0.7;",
     "}",
   ].join("\n");
   document.head.appendChild(style);
