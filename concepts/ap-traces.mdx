@@ -77,10 +77,15 @@ The action block describes what the agent did or considered doing:
 |---|---|
 | `type` | Action type: `recommend`, `execute`, `escalate`, or `deny` |
 | `name` | Human-readable action name |
-| `category` | How the action relates to the autonomy envelope: `bounded`, `escalation_trigger`, or `forbidden` |
+| `category` | How the action relates to the autonomy envelope, as stored: `bounded`, `escalation_trigger`, or `forbidden` |
+| `display_category` | Customer-facing label for `category`, returned by the traces API. `inference` for a plain model call with no tool call, otherwise the same as `category`. Display only |
 | `target` | The resource affected (optional) |
 
 The `category` field is what verification checks first. A `bounded` action must appear in the card's `bounded_actions` list. A `forbidden` category should never appear in a compliant trace.
+
+<Note>
+  A turn with no tool call (plain model inference) is stored with `name: "inference"` and `category: "escalation_trigger"`, so verification does not check it against `bounded_actions`. That stored value does not mean an escalation happened. The traces API adds `display_category: "inference"` for these turns and leaves `category` unchanged. Show `display_category` to people; keep reading `category` for verification.
+</Note>
 
 ### Decision block
 
@@ -138,7 +143,7 @@ Key fields:
 - **selected**: Which alternative was chosen.
 - **selection_reasoning**: Human-readable explanation of why this option was selected.
 - **values_applied**: Which declared values influenced the decision. These are checked against the card during verification.
-- **confidence**: Decision confidence from 0.0 to 1.0 (optional).
+- **confidence**: A number from 0.0 to 1.0 (optional). On traces recorded by the Mnemom observer it is a thinking-length signal, not a calibrated probability: `0.9` when the turn's captured thinking is longer than 500 characters, `0.6` when it is 500 characters or fewer, and `0.3` when no thinking was captured. It measures how much reasoning the model showed, not how likely the decision is to be correct.
 
 <Tip>
   The `flags` array on alternatives is particularly useful for transparency. In the example above, `"sponsored_content"` on Product C makes it auditable that the agent identified and deprioritized a sponsored result.
