@@ -1,0 +1,197 @@
+---
+title: "Run Org Scan yourself"
+description: "Run an Org Scan from the command line or a GitHub Actions workflow, and read your Anthropic usage without a key through workload identity federation (WIF)."
+sidebarTitle: "Run Org Scan yourself"
+icon: "magnifying-glass-chart"
+---
+
+Org Scan reads the pull-request metadata of the repos you choose, on your own machine or runner, and emails you a report. This guide shows how to run it three ways: from a terminal, from a GitHub Actions workflow, and with keyless Anthropic usage reads (WIF).
+
+<Note>
+  The `--email` and `--share analytics` options described here need a CLI release that includes the share choices. Check with `mnemom scan --help`: if the `--share` line lists `full`, `analytics` and `none`, you have it. Update with `npm install -g @mnemom/mnemom@latest`.
+</Note>
+
+## What you need
+
+- **Node.js 18 or newer** and the CLI: `npm install -g @mnemom/mnemom`. The package installs a `mnemom` command.
+- **A GitHub login that can read the repos.** The scan runs `gh auth token` to get a token, so the [GitHub CLI](https://cli.github.com) (`gh`) must be installed and signed in. The scan only reads pull-request metadata.
+- **A Mnemom login as an owner or admin of your org**, with Org Scan switched on for that org. Members who are not owners or admins are refused.
+
+## Run it from the command line
+
+Sign in once, then scan:
+
+```bash
+mnemom login
+gh auth login
+mnemom scan --org org-1a2b3c4d --repo acme/api --repo acme/web --start 2026-10-01 --end 2026-10-31
+```
+
+On a terminal, anything you leave out is asked for: the repos (a picker over the repos your GitHub login can read), the org (when you belong to several), and what Mnemom may keep. When there is no terminal, `--repo` is required and the share choice defaults to `none`.
+
+### Options
+
+| Option | What it does |
+|---|---|
+| `--repo <owner/name...>` | Repo to scan. Repeat the flag or separate with commas. Omit on a terminal to pick from a list. |
+| `--start <YYYY-MM-DD>`, `--end <YYYY-MM-DD>` | The period. Both default to today. |
+| `--org <org_id>` | Your org id, like `org-1a2b3c4d`. If omitted, the CLI uses the org from `mnemom org use`, then your only non-personal org. With several orgs and no terminal, it stops and lists them. |
+| `--share <level>` | What Mnemom may keep on file: `full`, `analytics` or `none`. See below. |
+| `--email <address...>` | Also email the report to these people. Repeat the flag or separate with commas. Up to 10, on your organization's email domain or mnemom.ai. |
+| `--cto-email <email>` | The older name for one `--email` address. |
+| `--monthly-spend <usd>` | Your own approximate monthly AI spend, as a figure like `5000`. Kept in memory only. Needs `MNEMOM_ORG_SCAN_MODE=true`. |
+| `--anthropic-admin-key` | Ask for an Anthropic Admin key (masked) and read measured usage with it. Needs `MNEMOM_ORG_SCAN_MODE=true`. See [keyless setup](#read-anthropic-usage-without-a-key-wif). |
+| `--no-anthropic-usage` | Skip the Anthropic read and be asked for a monthly figure. Needs `MNEMOM_ORG_SCAN_MODE=true`. |
+
+### Who gets the report
+
+The full report, including the counts for each repo, is emailed to you, to every admin of your org, and to anyone you add with `--email`. This happens at every share level. The share choice changes only what Mnemom keeps on file.
+
+### Choose what Mnemom keeps
+
+| `--share` | What Mnemom keeps on file |
+|---|---|
+| `full` | The totals and the counts for each repo, by name. This is the preselected answer when the CLI asks. |
+| `analytics` | The team totals only, with no repo names. `summary` is the older name and works the same. |
+| `none` | Nothing. The report is still emailed. This is the answer when there is no terminal and no `--share`. |
+
+After each scan the CLI prints what was kept, and `privacy@mnemom.ai` is the address to email to have anything Mnemom holds about a scan deleted.
+
+If Org Scan is not switched on for your org, the CLI prints `Report email is not available for this org yet; nothing was sent.` If your Mnemom environment is in dry-run mode, it prints `Report email is in dry-run on this environment; nothing was sent.`
+
+## Run it in GitHub Actions
+
+`mnemom login` cannot run unattended: it opens a browser or asks you to approve a code. A workflow signs in with a Mnemom API key instead, which the CLI reads from `MNEMOM_API_KEY`.
+
+<Steps>
+  <Step title="Create an organization API key">
+    An owner or admin of the org creates an [organization API key](/guides/api-keys) and stores it as the repository secret `MNEMOM_API_KEY`. The owner or admin role is checked on every call, so the key must belong to someone who has it. The report email goes to the person who owns the key, as well as the org admins.
+  </Step>
+  <Step title="Give the scan a GitHub token">
+    Store a read-only GitHub token as the secret `ORG_SCAN_GITHUB_TOKEN`. It must be able to read the repos you list. The workflow's built-in `GITHUB_TOKEN` can read only the repository the workflow runs in, so use a fine-grained token with read access to metadata, contents and pull requests for any other repo. The CLI reads the token through `gh auth token`, which returns the `GH_TOKEN` environment variable when it is set.
+  </Step>
+  <Step title="Add the workflow">
+    Save the file below as `.github/workflows/org-scan.yml`, and set your org id and repos.
+  </Step>
+</Steps>
+
+```yaml
+# .github/workflows/org-scan.yml
+name: Org Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 15 * * 1" # Mondays
+
+permissions:
+  contents: read
+
+jobs:
+  org-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the Mnemom CLI
+        run: npm install -g @mnemom/mnemom
+
+      - name: Run the scan
+        env:
+          GH_TOKEN: ${{ secrets.ORG_SCAN_GITHUB_TOKEN }}
+          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+        run: |
+          mnemom scan \
+            --org org-1a2b3c4d \
+            --repo acme/api --repo acme/web \
+            --start "$(date -u -d '30 days ago' +%F)" \
+            --end "$(date -u +%F)" \
+            --share none
+```
+
+Notes on the file:
+
+- There is no terminal in a workflow, so `--repo` and `--org` are passed explicitly, and `--share` is set so the choice is yours and not the default. Use `full` or `analytics` to let Mnemom keep totals; add `--email cto@acme.com` to send the report to more people.
+- The job fails when the report is refused or cannot be sent. If Org Scan is not on for your org, the CLI prints that nothing was sent and the job still passes, so read the log the first time.
+- Pin `actions/setup-node` to a commit SHA if your organization requires pinned actions.
+- To read Anthropic usage without a key, add the WIF settings from the next section to the same step.
+
+## Read Anthropic usage without a key (WIF)
+
+Org Scan can read your Anthropic usage and cost reports to show measured spend. With workload identity federation (WIF) you do not paste an Admin key. Mnemom issues a short-lived identity token for your org, the CLI exchanges it directly at Anthropic for a short-lived access token, and the CLI uses that token only for the two usage reports. Mnemom never sees the Anthropic token, and nothing in this flow is stored, logged or printed.
+
+Your Anthropic Console holds all the trust settings. Mnemom holds no secret of yours.
+
+### 1. Register Mnemom as a federation issuer
+
+In your Anthropic Console's workload identity federation settings, add an issuer with:
+
+| Setting | Value |
+|---|---|
+| Issuer URL | `https://api.mnemom.ai/org-scan` |
+| JWKS | An explicit URL: `https://api.mnemom.ai/v1/org-scan/wif/jwks.json` |
+| Audience | `https://api.anthropic.com` |
+
+### 2. Create a service account and a federation rule
+
+Create a service account, then a federation rule on the issuer that:
+
+- matches the subject `mnemom:org:<org_id>`, with your own org id in place of `<org_id>` (an exact match, or a prefix match with a trailing `*`). Because the subject names your org, an identity token minted for another org cannot satisfy your rule;
+- grants the scope **`org:admin`**, which is what Anthropic requires to read the usage and cost reports;
+- targets the service account you created.
+
+The identity token also carries the claim `scope = "org-scan"`, if you want the rule to match on it.
+
+<Note>
+  A rule written for the command-line scan does not match tokens that Mnemom issues for its own server-side checks. Those use the subject `mnemom:org-server:<org_id>`, so they work only if you add a separate rule for it. Deleting that rule withdraws it at any time.
+</Note>
+
+### 3. Give the CLI the ids
+
+Set these environment variables before the scan. They are ids, not secrets.
+
+| Variable | Value |
+|---|---|
+| `MNEMOM_ORG_SCAN_MODE` | `true`. Turns on the usage read. |
+| `ANTHROPIC_FEDERATION_RULE_ID` | The rule id, starting `fdrl_`. |
+| `ANTHROPIC_ORGANIZATION_ID` | Your Anthropic organization id (a UUID). |
+| `ANTHROPIC_SERVICE_ACCOUNT_ID` | The service account id, starting `svac_`. |
+| `ANTHROPIC_WORKSPACE_ID` | Optional. A workspace id, starting `wrkspc_`. |
+
+With all three required ids set, `mnemom scan` tries WIF first and prints `Read Anthropic usage through workload identity federation.` With none set, WIF is skipped without a message. With only some set, or any malformed, it prints `The Anthropic workload identity settings are incomplete or malformed (federation rule, organization and service account ids).`
+
+In a workflow, add the variables to the scan step. Store the ids as repository variables:
+
+```yaml
+        env:
+          GH_TOKEN: ${{ secrets.ORG_SCAN_GITHUB_TOKEN }}
+          MNEMOM_API_KEY: ${{ secrets.MNEMOM_API_KEY }}
+          MNEMOM_ORG_SCAN_MODE: "true"
+          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+```
+
+### If WIF does not work
+
+The CLI prints one fixed sentence and carries on, so the scan still runs.
+
+| The CLI says | What to check |
+|---|---|
+| `Mnemom did not issue a workload identity token (sign in as an owner or admin of an org with Org Scan on).` | The signed-in user is an owner or admin, and Org Scan is on for the org. |
+| `Mnemom could not issue a workload identity token for this org right now.` | Try again later. Mnemom's token service may not be enabled for your environment yet. |
+| `Anthropic refused the workload identity token. Check the federation rule in your Anthropic Console (its issuer, subject and scope org:admin).` | The issuer URL, the subject `mnemom:org:<org_id>`, and the `org:admin` scope in the rule. |
+| `Anthropic's token exchange could not be completed.` | A network problem or an Anthropic outage. Retry. |
+
+### Fall back to a pasted key
+
+If WIF is not set up or fails, the scan falls back to an Anthropic Admin key. Set `ANTHROPIC_ADMIN_KEY` in the environment, or pass `--anthropic-admin-key` on a terminal to be asked for it (masked; never typed on the command line). When WIF fails and a key is set, the CLI prints `Falling back to the pasted Anthropic Admin key.` The key is kept in memory only and sent only to `api.anthropic.com`. Passing `--anthropic-admin-key` skips WIF and uses the key.
+
+If there is no key either, the scan continues without a measured figure: the next choice is your own monthly figure (`--monthly-spend`), then a modelled range.
+
+## Related
+
+- [API keys](/guides/api-keys): create the organization key a workflow uses.
+- [Org admin](/guides/org-admin): the owner and admin roles that can run a scan.
