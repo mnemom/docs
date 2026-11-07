@@ -352,7 +352,7 @@ function selfTest() {
       "Removed: call `POST /v1/exemptions` to grant one.", // FAIL (no op)
       "Badge: https://api.mnemom.ai/v1/reputation/agent-1/badge.svg renders it.", // OK (api-host URL)
       "Proxy: POST https://gateway.mnemom.ai/anthropic/v1/messages (Anthropic).", // ignored (foreign host)
-      "SLOs published at [`/trust/slos`](https://trust.mnemom.ai/slos).", // allowlisted
+      "SLOs published at [`/trust/slos`](https://www.mnemom.ai/trust/slos).", // allowlisted
       "See [the concepts page](/concepts/agent-cards) for the model.", // ignored (doc slug, not a resource)
       "Under `/v1/agents/{agent_id}/*` live the sub-resources.", // ignored (glob)
       "Source lives in `/agents/preview-surface.ts` for the curious.", // ignored (code file)
