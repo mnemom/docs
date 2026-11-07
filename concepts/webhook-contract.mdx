@@ -47,7 +47,7 @@ The first-attempt timeout is **30 seconds** (mirroring Stripe / Cloudflare recei
 
 ### 7. Replay path
 
-Every emitted event is durably stored in `webhook_events` and can be replayed via `POST /v1/orgs/:org_id/webhooks/events/:event_id/replay`. Replay re-fans-out the event to all currently-subscribed active endpoints (or to a caller-specified subset via `endpoint_ids[]` in the request body).
+Every emitted event is durably stored in `webhook_events` for **30 days** after it is emitted and can be replayed during that window via `POST /v1/orgs/:org_id/webhooks/events/:event_id/replay`. Replay re-fans-out the event to all currently-subscribed active endpoints (or to a caller-specified subset via `endpoint_ids[]` in the request body).
 
 Replay differs from `redeliver`:
 
@@ -55,6 +55,8 @@ Replay differs from `redeliver`:
 - **`redeliver`** retries one specific delivery row.
 
 Both shapes ship — Stripe-equivalent ergonomics. See the [webhook event catalog](/api-reference/webhook-events) for the full API surface.
+
+**Replay window.** `replay` and `redeliver` both accept an event only within 30 days of its emission. An event that is still stored but older than 30 days returns `410` with error code `replay_window_expired`. Events older than 30 days are deleted by a daily retention job, and a deleted event returns `404`. Receivers that need an event for longer than 30 days should keep their own copy when they receive it.
 
 The replay endpoint requires an `Idempotency-Key` header; reuse with the same key returns the cached delivery list (does NOT mint a second fan-out). Cached replays carry an `Idempotent-Replay: true` response header.
 
