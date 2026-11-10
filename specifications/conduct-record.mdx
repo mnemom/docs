@@ -1,0 +1,193 @@
+---
+title: "Conduct Record"
+description: "The signed conduct record and PR record Mnemom builds for a recorded coding session: fields, Ed25519 signing, the digest chain, offline verification with @mnemom/verify, the two PR checks, and what a valid record does not prove."
+sidebarTitle: "Conduct Record"
+icon: "file-signature"
+---
+
+<Note>
+**Availability.** Record is not offered to customers yet. Today it runs only for Mnemom's own organization, and the PR checks run only on six of Mnemom's own repositories. This page describes the format so that anyone holding a record can check it.
+</Note>
+
+A **conduct record** is a signed statement of what happened in one recorded conversation: what it cost, which goal it ran under, what Safe House did, and which integrity checkpoints it cites. A **PR record** is a signed statement that ties a pull request head to the conduct records behind it and says which of the PR's commits Mnemom can bind to a recorded session.
+
+Both are signed with the AAP attestation key published in the same JWKS as the key for [attestation tokens](/specifications/attestation-token), and both can be checked offline with [`@mnemom/verify`](https://www.npmjs.com/package/@mnemom/verify).
+
+## Record types
+
+| `typ` | `unit_kind` | One statement covers |
+|---|---|---|
+| `AAP-ConductRecord/v1` | `conversation` | One build of one conversation lineage. A new build is signed only when the lineage's state changed. |
+| `AAP-PRRecord/v1` | `pull_request` | One pull request head. It is rebuilt on each write and is never chained. |
+
+The `typ` field pins the domain. A conduct record can never pass as an attestation token, a transparency root or a PR record, because the verifier checks `typ` before anything else.
+
+## Conduct record fields
+
+Every value is a hash, an enum, an id, a count, a duration, a money amount, a tool name or a timestamp. The builder checks every key and every string against a fixed allowlist before signing, and a statement that holds anything else is never signed. No prompt, response, file content or tool argument is ever in a record.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `typ` | `"AAP-ConductRecord/v1"` | Statement type. |
+| `unit_kind` | `"conversation"` | What one record covers. |
+| `org_id` | string | The organization the conversation belongs to. |
+| `lineage_key` | string | The conversation lineage this record is a build of. |
+| `built_at` | ISO 8601 UTC | When this build was made. |
+| `previous_digest` | 64 lowercase hex, or `null` | Digest of the previous build of the same lineage. `null` on the first build. See [Digest chain](#digest-chain). |
+| `signing_key_id` | string | The `kid` of the key that signed this record. |
+| `cost.model_cost_mmu` | integer string | Model cost in millimu. |
+| `cost.mu_charged_mmu` | integer string, or `null` | The µ share billing charged. `null` when there is no billing row for the lineage. |
+| `cost.mu_provisional_mmu` | integer string, or `null` | While the µ share is pending: `model_cost_mmu * mu_rate_bps / 10000`, rounded down. `null` otherwise. |
+| `cost.mu_status` | `pending` \| `final` \| `none` | `final` once billing charged a share. `pending` before the conversation is closed and billed. `none` when it closed with no share, which reads "not charged", never 0. |
+| `cost.mu_rate_bps` | integer | The µ rate in basis points, `400` (4% of model cost). Carried in the record so a later rate change cannot alter a signed record. |
+| `cost.row_count` | integer | Billing rows the totals cover. |
+| `cost.as_of` | ISO 8601 UTC | When the totals were read. |
+| `goal.mode` | `off` \| `implicit` \| `sealed` | How the goal was checked. |
+| `goal.contract_sha256` | 64 lowercase hex, or `null` | Full sha256 of the canonical sealed contract. Set only when `mode` is `sealed`. |
+| `goal.seal_version` | integer, or `null` | Seal version. |
+| `goal.seal_reason` | `first_seal` \| `reseal_after_expiry` \| `owner_update`, or `null` | Why this seal was made. |
+| `goal.previous_contract_sha256` | 64 lowercase hex, or `null` | The contract this seal replaced. |
+| `goal.canon_node_status` | `written` \| `pending` | Present only when a sealed contract cites a Canon node. |
+| `goal.canon_node_id` | `mn-` plus 6 characters, or `null` | The Canon node id. `null` while the node write is `pending`. |
+| `goal.on_goal`, `goal.judged`, `goal.turns` | integer, or `null` | Turns judged on goal, turns judged, and all turns. All `null` exactly when `mode` is `off`. |
+| `protection.acts[]` | array | One entry per Safe House act: `mode` (`off` \| `observe` \| `nudge` \| `enforce`, as stored at the act, not the mode now), `verdict` (`pass` \| `warn` \| `nudge` \| `quarantine` \| `block`) and `tool_name` (set only for a tool call, never its arguments). |
+| `people.messages_from_person` | integer, or `null` | Messages from a person. `null` when the client was not validated, and the line reads "unclassified". |
+| `people.compactions` | integer | Context compactions in the conversation. |
+| `checkpoints[]` | array | Cited [integrity checkpoints](/concepts/integrity-checkpoints): `checkpoint_id`, `combined_commitment`, `commitment_signature`, `commitment_key_id` and `card_hash`. |
+| `lines[]` | array | The human-readable lines, each with `class`, `key` and `text`. See [Lines](#lines). |
+| `signature` | base64url | Ed25519 signature. The only field outside the signed bytes. |
+
+### Lines
+
+Every line comes from one claim table. The builder never writes a sentence of its own. Each line has exactly one `class`, from `measured`, `verdict`, `estimate`, `benchmark` or `outcome`, and a line never combines classes. The words "safe", "correct" and "prevented" never appear in the claim table's wording. A tool name is shown as it is, so a tool named `safe-shell` still reads "stopped safe-shell". A Safe House line is only as strong as what happened: under `enforce`, only a `block` or `quarantine` verdict reads "stopped", and a `warn` or `nudge` verdict reads "flagged". The provisional µ amount appears only on the `cost.mu` line.
+
+## PR record fields
+
+| Field | Type | Meaning |
+|---|---|---|
+| `typ` | `"AAP-PRRecord/v1"` | Statement type. |
+| `unit_kind` | `"pull_request"` | What one record covers. |
+| `signing_key_id` | string | The `kid` of the key that signed this record. |
+| `head_sha` | 40 lowercase hex | The PR head the record was built for. |
+| `conduct_digests` | array of 64 lowercase hex | Digests of the conduct records in the same bundle. |
+| `commits[]` | array of `{ sha, bound }` | The PR's commits in PR order, cut at `head_sha`. `bound` is `true` when Mnemom's commit index holds that commit, by SHA or by `git patch-id --stable`, for the same organization and repository. A commit message trailer alone never binds a commit. |
+| `issued_at`, `built_at` | ISO 8601 UTC | The same value: the newest conduct record's `built_at`, so the same inputs produce the same bytes. |
+| `prev_digest`, `previous_digest` | `null` | Always `null`. Both names are written so readers of either name see the same link. |
+| `signature` | base64url | Ed25519 signature. |
+
+A commit that Mnemom cannot bind, for example one whose diff GitHub will not serve, is shown as `bound: false`. The record never claims a binding it cannot show.
+
+## Signing and keys
+
+- **Algorithm.** Ed25519 (`EdDSA`).
+- **Signed bytes.** Canonical JSON of the statement with `signature` removed: object keys sorted recursively, no whitespace, arrays kept in order, and primitives serialized as by `JSON.stringify`.
+- **Signature encoding.** Unpadded base64url of the 64-byte signature.
+- **Key.** The AAP attestation key, named by `signing_key_id`. The signer refuses to build a record when the key or its id is missing.
+- **Public keys.** Published at `https://api.mnemom.ai/v1/.well-known/jwks.json`. That document holds the active key and any key retired in the last 25 hours. A record signed by a key retired earlier fails against it with `key_not_found`, even though the record is genuine. The "Mnemom record" PR check verifies against every retired key except one retired as compromised, so it does not have this gap.
+
+## Digest chain
+
+A record's **digest** is the lowercase sha256 hex of its signed bytes. The digest is returned beside the record, never inside it, so anyone can recompute it from the record alone.
+
+Each new build of a conversation lineage names the previous build's digest in `previous_digest`. A PR record names each conduct record it covers in `conduct_digests`. Inside a bundle, the verifier follows the `previous_digest` links and fails a statement whose link does not hold with `chain_broken`. That covers a missing build in the middle of a chain, a link to a statement of another type or lineage, and a fork. When the first record of a chain names a predecessor the bundle does not hold, because retention removed builds older than 30 days, the verifier reports the flag `lineage truncated` instead and the bundle can still be valid. A `conduct_digests` entry that names a statement of the wrong type fails with `linked_statement_wrong_typ`, and one that names nothing in the bundle is the flag `linked statement not in bundle`.
+
+## Record bundle
+
+The PR checks place a bundle on the pull request:
+
+```json
+{
+  "typ": "AAP-RecordBundle/v1",
+  "statements": []
+}
+```
+
+`statements` holds the lineage's conduct records in build order, followed by one PR record.
+
+- On a pull request from a branch in the same repository, the bundle is committed to the head branch at `.mnemom/records/<pr-number>.json`. The commit message carries `[skip ci]`, a `Mnemom-Record-Bundle` trailer, and a `Mnemom-Pre-Bundle-Head` trailer naming the head the record was built for.
+- On a pull request from a fork, and on pull requests from Mnemom's own automated workers, the bundle is never committed. It rides in the "Mnemom record" check summary instead, unless it is too large for that summary.
+
+## Verify a record
+
+`@mnemom/verify` is a library. It makes no network calls, and you supply the public keys. Version 0.6.3 has no command-line entry point, so `npx @mnemom/verify` does not run a check. Call `verify()` from a script instead:
+
+```bash
+npm install @mnemom/verify
+curl -s https://api.mnemom.ai/v1/.well-known/jwks.json -o jwks.json
+```
+
+```js
+// verify-record.mjs
+import { readFile } from "node:fs/promises"
+import { verify } from "@mnemom/verify"
+
+const [bundlePath, headSha] = process.argv.slice(2)
+const bundle = JSON.parse(await readFile(bundlePath, "utf8"))
+const jwks = JSON.parse(await readFile("jwks.json", "utf8"))
+
+const result = await verify(bundle, jwks, headSha ? { expected_head_sha: headSha } : {})
+console.log(JSON.stringify({ valid: result.valid, reasons: result.reasons, flags: result.flags }, null, 2))
+process.exit(result.valid ? 0 : 1)
+```
+
+Pass the head the record was built for, which is the `Mnemom-Pre-Bundle-Head` trailer on the bundle commit:
+
+```bash
+HEAD_SHA=$(git log -1 --format='%(trailers:key=Mnemom-Pre-Bundle-Head,valueonly)' -- .mnemom/records/123.json)
+node verify-record.mjs .mnemom/records/123.json "$HEAD_SHA"
+```
+
+`valid` is `true` only when every statement verifies and every bundle check holds. `reasons` says why not. A statement's reasons carry its index as a prefix, for example `0:signature_invalid`. `flags` are notes that never change `valid`.
+
+### Reason codes
+
+| Code | Meaning |
+|---|---|
+| `not_an_object` | The statement is not a JSON object. |
+| `unknown_typ` | `typ` is not a supported statement type. |
+| `unsupported_expected_typ` | `expectedTyp` is not a supported statement type. |
+| `typ_mismatch` | The statement is not of the `expectedTyp` type. |
+| `unsupported_alg` | The statement names an `alg` other than `EdDSA`. |
+| `signing_key_id_missing` | The statement names no key. |
+| `signature_missing` | The statement has no signature. |
+| `signature_malformed` | The signature is not base64url, or does not decode to 64 bytes. |
+| `key_not_found` | The JWKS has no key with that id. |
+| `key_not_ed25519` | The key is not an Ed25519 OKP key declared `EdDSA`. |
+| `signature_invalid` | The signature does not match the statement. |
+| `digest_mismatch` | The statement digest is not `expectedDigest`. |
+| `bundle_not_an_object` | The input is not a JSON object. |
+| `bundle_unknown_typ` | The bundle `typ` is not `AAP-RecordBundle/v1`. |
+| `bundle_statements_missing` | The bundle has no `statements` array. |
+| `digest_malformed` | A linked digest is not 64 lowercase hex characters. |
+| `linked_statement_wrong_typ` | A link points at a statement of the wrong type. |
+| `card_line_class_not_allowed` | A share card line has a class other than `measured`, `outcome` or `verdict`. |
+| `card_verdict_without_coverage` | A share card verdict line carries no coverage. |
+| `chain_broken` | The record chain does not hold inside the bundle. |
+| `head_mismatch` | The latest PR record names another head. |
+| `head_unbound` | No valid PR record in the input names a head. |
+| `expected_head_malformed` | `expected_head_sha` is not a lowercase hex commit id of 40 or 64 characters. |
+
+The flags are `card hash not recorded`, `card not bound`, `linked statement not in bundle` and `lineage truncated`.
+
+## PR checks
+
+The Record GitHub App posts two checks.
+
+| Check | Where | Conclusion |
+|---|---|---|
+| **Mnemom record** | The PR head | `success` when a bundle was built for the head and the published verifier accepts it, or rejects it only with `head_unbound` because no PR record could be added to it. `failure` when the bundle built for the head does not verify, or when a bundle already committed at the head fails for a reason other than the head binding, whatever the repository's settings say. A built bundle that fails is never committed or posted. `neutral` when no record could be built for the head (no Mnemom session made it, no commit report reached Mnemom, or the builder was unavailable), or the bundle commit did not land. A repository that sets `check_fail_mode = fail_closed` gets `failure` instead of `neutral` when no record could be built. |
+| **Mnemom outcome** | The merge commit | Always `neutral`. Its summary is one line from the claim table, for example "merged, no revert in 7 days". The default window is 7 days. A revert inside the window is recorded, and a line never reads "accepted". This check is a check run, not a signed statement. |
+
+The App also keeps one comment on the PR, updated in place, that says where the bundle is and how many of the PR's commits are bound.
+
+## What verification does not prove
+
+A valid result proves that the key named by `signing_key_id` signed these exact bytes, and that the links inside the bundle hold. It does not prove:
+
+- **That the agent behaved well or the code is right.** A record says what was measured and judged. Its own wording never says "safe", "correct" or "prevented".
+- **That the inputs were right.** The signature shows that Mnemom signed the cost, counts and verdicts. It does not check them against the conversation, which is never in the record.
+- **That a checkpoint holds.** The verifier only flags a citation with no card binding (`card not bound`) or no card hash (`card hash not recorded`). To check a checkpoint itself, verify its certificate as described in [integrity checkpoints](/concepts/integrity-checkpoints).
+- **That the record is complete.** Retention removes old builds (`lineage truncated`), and the chain is checked only inside the bundle you hold.
+- **That an unbound commit came from no session.** `bound: false` means Mnemom cannot show the binding. It is not evidence either way.
+- **That the keys are Mnemom's.** The verifier trusts the JWKS you hand it. Fetch it from `api.mnemom.ai` over HTTPS and pin it yourself.
+- **That the outcome line is signed.** The "Mnemom outcome" check is a check run, not a signed statement.
