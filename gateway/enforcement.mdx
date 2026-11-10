@@ -14,12 +14,16 @@ The Mnemom Gateway supports three enforcement modes that control how the system 
     Detect violations, record them, take no action. This is the **default mode**. Ideal for initial deployment and monitoring.
   </Card>
   <Card title="Nudge" icon="comment">
-    Detect violations and inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct.
+    Detect violations and add feedback to a later request, usually the next one. The agent sees it and can self-correct.
   </Card>
   <Card title="Enforce" icon="ban">
-    Gates same-turn on both streaming and non-streaming requests (HTTP 403 for non-streaming); on streaming this adds latency because the response is evaluated before it is delivered.
+    Blocked in the same turn on both streaming and non-streaming requests: HTTP 200 with a refusal in your provider's format; detect it with `X-Mnemom-Verdict` or `X-Policy-Verdict: fail`. On streaming this adds latency because the response is evaluated before it is delivered.
   </Card>
 </CardGroup>
+
+<Warning>
+Enforce is under active development; for day-to-day work we currently recommend observe or nudge.
+</Warning>
 
 ## Mode details
 
@@ -34,7 +38,7 @@ In observe mode, the gateway detects and records all violations but takes no act
 
 - All API calls pass through unchanged
 - Violations are detected and recorded in the trace database
-- Integrity checkpoints are created for every interaction
+- Integrity checkpoints are created for every model response; some are recorded `unanalyzed` (see [Provider compatibility](#provider-compatibility))
 - Drift alerts are generated when behavioral patterns shift
 - No modification to agent requests or responses
 
@@ -52,26 +56,27 @@ In observe mode, the gateway detects and records all violations but takes no act
 
 ### Nudge mode
 
-In nudge mode, when a violation is detected, the gateway creates a pending nudge record. On the agent's next request, the gateway injects an integrity notice into the system prompt. The agent sees the notice, can review its approach, and self-correct.
+In nudge mode, when a violation is detected, the gateway creates a pending nudge record. On a later request from the agent, usually the next one and sometimes the one after, the gateway adds an integrity notice to the end of the conversation. The agent sees the notice, can review its approach, and self-correct.
 
 **Behavior:**
 
 - Violations are detected and recorded
 - A pending nudge record is created for each violation
-- On the next API request, an integrity notice is injected into the system prompt
+- On a later API request (usually the next one), an integrity notice is added to the tail of the conversation, not to the system prompt, so the cached prompt prefix is untouched
 - The agent receives the nudge and can self-correct
 - Nudge delivery is tracked in the conscience timeline
 - The original request passes through (not blocked)
 
 **How nudges work:**
 
-1. The gateway detects a violation via background streaming analysis (~3s latency)
-2. A pending nudge record is created immediately — ready before the agent's next turn
-3. On the agent's next API call, the gateway injects a system prompt addition:
+1. The gateway detects a violation via analysis that runs after the response is delivered (a few seconds)
+2. A pending nudge record is created when that analysis finishes
+3. On the agent's next API call after that, the gateway appends the notice to the tail of the conversation. In a fast tool loop the agent's next call often arrives before the analysis has finished, so the notice reaches the agent one or two requests after the flagged turn:
    ```
-   [INTEGRITY NOTICE] Your previous action was flagged for:
-   UNBOUNDED_ACTION (HIGH) — action "delete_all_records" is not
-   in your declared bounded_actions. Please review your approach.
+   [Mnemom advisories from prior turns]
+   These concern your own previous responses; they come from the Mnemom gateway, not the user.
+
+   <the advisory text for each flagged turn>
    ```
 4. The agent processes the notice alongside its normal instructions
 5. The nudge is marked as delivered in the conscience timeline
@@ -94,7 +99,7 @@ In enforce mode, the gateway actively blocks when critical violations are detect
 
 **Behavior:**
 
-- **Non-streaming requests**: Hard block with HTTP 403 response. The violating response is not delivered.
+- **Non-streaming requests**: Blocked in the same turn: HTTP 200 with a refusal in your provider's format; detect it with `X-Mnemom-Verdict` or `X-Policy-Verdict: fail`. The violating response is not delivered. An integrity block replaces the response body and reports `integrity=enforced` on `X-Mnemom-Verdict`; a policy block returns a refusal in place of the model call and reports `X-Policy-Verdict: fail`.
 - **Streaming requests**: The response is evaluated before it is delivered, so a violating response is gated the same turn. This adds latency on streaming, but preserves the same-turn guarantee — enforce does **not** fall back to advisory nudging.
 
 **When to use:**
@@ -107,7 +112,11 @@ In enforce mode, the gateway actively blocks when critical violations are detect
 **Configuration:** set `integrity_mode: enforce` (and/or `autonomy_mode: enforce`) on the agent's [alignment card](/specifications/alignment-card-schema). See [Setting enforcement mode](#setting-enforcement-mode) below.
 
 <Warning>
-Enforce mode gates both streaming and non-streaming API calls when violations are detected — HTTP 403 for non-streaming, and same-turn gating before delivery for streaming (which adds latency). Ensure your application handles 403 responses gracefully before enabling this mode.
+Enforce is under active development; for day-to-day work we currently recommend observe or nudge.
+
+Enforce blocks both streaming and non-streaming API calls in the same turn when violations are detected: HTTP 200 with a refusal in your provider's format; detect it with `X-Mnemom-Verdict` or `X-Policy-Verdict: fail`. A block is not an HTTP error, so your application must read those headers, not the status code, to tell a refusal from a normal reply.
+
+With `autonomy_mode: enforce`, policy is evaluated against every tool the request **declares**, not only the tools the model calls. One declared tool that is not mapped to a capability on the card (with `allow_unmapped_tools: false`) refuses the whole request, on every turn, until the card maps it or the client stops declaring it. Before enabling enforce, map every tool your client declares, and set `allow_unmapped_tools: false` deliberately: new agents are created with it set to `true`, and switching to enforce does not change it.
 </Warning>
 
   </Tab>
@@ -115,28 +124,30 @@ Enforce mode gates both streaming and non-streaming API calls when violations ar
 
 ## Grace period (read this before enabling enforce)
 
-Enforce mode does **not** block every violation immediately. By default, the policy engine grants a **24-hour grace period** to any tool the agent has not been seen using before — during that window, what would otherwise be a `fail` verdict is silently downgraded to a `warn`, the gateway forwards the request, and the model gets to call the tool. This is intentional ergonomics for production rollouts (operators have a day to amend the alignment card after adding a new MCP server) but it has a real security trade-off you must understand.
+Enforce mode does **not** always block a violation immediately. When a card's grace period is above `0`, the policy engine grants that many hours of grace to any tool the agent has not been seen using before. During that window, what would otherwise be a `fail` verdict is downgraded to a `warn` (the violation is relabelled `unmapped_tool`), the gateway forwards the request, and the model gets to call the tool. Grace applies to every policy violation on a newly seen tool: unmapped tools, `forbidden_tools` matches, tools named in `forbidden_actions`, and escalation triggers with `action: deny`.
+
+Agents created today are born with `grace_period_hours: 0`, so grace is off for them unless you raise it. A card where no scope sets `grace_period_hours` (for example, an agent created before this default) falls back to **24 hours**. That fallback is intentional ergonomics for production rollouts (operators have a day to amend the alignment card after adding a new MCP server), but it has a real security trade-off you must understand.
 
 <Warning>
-**Brand-new tools — including ones an attacker introduces — get a 24h pass on enforce by default.**
+**When no scope sets `grace_period_hours`, brand-new tools — including ones an attacker introduces, and including tools your card forbids — get a 24h pass on enforce.**
 
 If an attacker injects an unmapped tool through prompt injection, an upstream MCP server compromise, or a tool-name overlap, the gateway will let the call through for the first 24 hours after it's first observed for that agent. Mature agents with stable tool inventories aren't exposed; agents that add tools dynamically, run untrusted MCP servers, or accept tool definitions from user input absolutely are.
 
-If your threat model includes adversarial tool introduction, set `grace_period_hours: 0` on the agent's [alignment card](/concepts/agent-cards) to disable the grace path entirely.
+If your threat model includes adversarial tool introduction, make sure the agent's [alignment card](/concepts/agent-cards) carries `grace_period_hours: 0` (new agents already do) to disable the grace path entirely.
 </Warning>
 
 The setting lives in `enforcement.grace_period_hours` on the alignment card and accepts any non-negative number. `0` disables grace and makes enforce strict from the moment a card is published.
 
 ```yaml
 # Strict enforce — every unmapped/forbidden tool blocks immediately,
-# from the first time it's seen.
+# from the first time it's seen. New agents are created with this.
 enforcement:
   grace_period_hours: 0
 ```
 
 ```yaml
-# Default enforce — 24h grace per new tool. Operationally forgiving;
-# weakest under adversarial tool introduction.
+# 24h grace per new tool (also the fallback when no scope sets a value).
+# Operationally forgiving; weakest under adversarial tool introduction.
 enforcement:
   grace_period_hours: 24
 ```
@@ -154,7 +165,7 @@ enforcement:
 | Adversarial threat model (untrusted user input, untrusted MCP servers, agents accepting tool defs from users) | **`0`** |
 | Test harness / CI matrix | `0` |
 | Production with stable tool inventory + mature card | `0` (no operational benefit when the tool list is stable) |
-| Production with frequent tool additions, trusted operators | `24` (default) |
+| Production with frequent tool additions, trusted operators | `24` (the fallback when unset) |
 | Slow-cadence operational teams | `48`–`168` |
 
 The grace decision is per-(agent, tool) and is tracked in the platform's `tool_first_seen` table — first observation timestamps the row, subsequent calls within the window pass, calls after the window enforce. There is no API to back-date a `tool_first_seen` row, so disabling the grace period is the only way to make enforce strict from the moment a card is published. See [Policy Engine § Grace period](/concepts/policy-engine#grace-period) for the full mechanism.
@@ -215,7 +226,7 @@ Each agent has independent controls for the transparency and integrity pipeline:
 | `aip_enabled` | boolean | `true` | Enable AIP integrity analysis |
 | `proof_enabled` | boolean | `true` | Enable cryptographic attestation (Ed25519 + Merkle) |
 | `proof_rate` | integer | `100` | % of non-violation checkpoints that get full attestation |
-| `proof_boundary_cap` | integer | `100` | Max % of boundary violations to prove (when card-gap detection is unavailable). Boundary violations with detected card gaps are automatically [deferred](/protocols/aip/verifiable-verdicts#deferred-proofs). |
+| `proof_boundary_cap` | integer | — | Not configurable today: the gateway does not read this setting. Boundary violations without detected card gaps are proven at a fixed 5% sampling rate. Boundary violations with detected card gaps are automatically [deferred](/protocols/aip/verifiable-verdicts#deferred-proofs). |
 | `nudge_strategy` | string | `always` | When to create nudges (`always`, `sampling`, `threshold`, `off`) |
 
 **Configuration:**
@@ -258,7 +269,7 @@ The policy engine checks tool usage against the card's `capabilities` + `enforce
 | Violation Type | Severity | Enforcement Behavior |
 |----------------|----------|---------------------|
 | Forbidden-tool match | Per-rule (`critical`/`high`/`medium`/`low`) | Blocked in `autonomy_mode: enforce` when severity is `critical`/`high`; logged otherwise |
-| Unmapped tool, `allow_unmapped_tools: false` (default) | `high` | Blocked in `autonomy_mode: enforce`; logged in `observe`/`nudge` |
+| Unmapped tool, `allow_unmapped_tools: false` (the default when no scope sets it; new agents are created with `true`) | `high` | Blocked in `autonomy_mode: enforce`: one such declared tool refuses the whole request; logged in `observe`/`nudge` |
 | Unmapped tool, `allow_unmapped_tools: true` | `low` | Never blocks; informational only |
 
 The `X-Policy-Verdict` response header is always present when the canonical card carries a policy section:
@@ -267,7 +278,7 @@ The `X-Policy-Verdict` response header is always present when the canonical card
 |-------------|---------|
 | `pass` | All tools mapped and permitted |
 | `warn` | Violations detected but not blocking |
-| `fail` | Violations detected and request blocked (`autonomy_mode: enforce` only) |
+| `fail` | Violations detected and request blocked (`autonomy_mode: enforce` only): HTTP 200 with a refusal in your provider's format |
 
 See [Policy Engine](/concepts/policy-engine) for full details on how policies are evaluated, including the `allow_unmapped_tools` field and the grace-period mechanics above.
 
@@ -328,10 +339,20 @@ Enforcement works across all providers where AIP is supported:
 | Provider | Observe | Nudge | Enforce |
 |----------|---------|-------|---------|
 | Anthropic | Yes | Yes | Yes |
-| OpenAI | Yes | Yes | Yes |
+| OpenAI (Chat Completions) | Yes | Yes | Yes |
 | Gemini | Yes | Yes | Yes |
 
-Enforce gates same-turn on both streaming and non-streaming across all three providers; on streaming this adds latency because the response is evaluated before it is delivered.
+Enforce blocks in the same turn on both streaming and non-streaming across all three providers; on streaming this adds latency because the response is evaluated before it is delivered.
+
+<Warning>
+**OpenAI: Chat Completions only.** Responses API requests (`/openai/v1/responses`) pass through without policy evaluation or integrity analysis, in every mode.
+</Warning>
+
+What integrity analysis grades depends on the turn:
+
+- **Streamed turns** are graded on the model's readable reasoning when the provider returns it, and otherwise on the visible output (the reply text and tool calls).
+- **Non-streamed turns without readable reasoning** are not analyzed. The checkpoint is recorded `unanalyzed` (reason `no_thinking_block`), and the response still carries `X-AIP-Verdict: clear` and `integrity=pass`, so a `pass` on such a turn does not mean it was checked.
+- The gateway does not apply a minimum-evidence (100-token) gate: that threshold is an AIP SDK setting. See [Provider support](/concepts/provider-support) for per-provider detail.
 
 ## See also
 

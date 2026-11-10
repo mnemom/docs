@@ -123,8 +123,8 @@ Severity determines how the policy engine handles a match:
 
 | Severity | Enforce Mode | Warn Mode |
 |---|---|---|
-| `critical` | **Blocked** — tool call denied with 403 | Warning recorded |
-| `high` | **Blocked** — tool call denied with 403 | Warning recorded |
+| `critical` | **Blocked** — the whole request is refused in the same turn (HTTP 200 with a provider-format refusal, `X-Policy-Verdict: fail`) | Warning recorded |
+| `high` | **Blocked** — the whole request is refused in the same turn (HTTP 200 with a provider-format refusal, `X-Policy-Verdict: fail`) | Warning recorded |
 | `medium` | Warning only (not blocked) | Warning recorded |
 | `low` | Warning only (not blocked) | Warning recorded |
 
@@ -191,7 +191,7 @@ defaults:
   unmapped_severity: "critical" | "high" | "medium" | "low"  # Required
   fail_open: boolean       # Required
   enforcement_mode: "warn" | "enforce" | "off"  # Optional, defaults to "warn"
-  grace_period_hours: number  # Optional; unset unless a scope sets it (gateway falls back to 24)
+  grace_period_hours: number  # Optional; new agents are created with 0; unset → gateway falls back to 24
 ```
 
 | Field | Type | Required | Default | Description |
@@ -200,7 +200,7 @@ defaults:
 | `unmapped_severity` | string | Yes | -- | Severity level assigned to unmapped tool violations or warnings. **When extracted from a card, this is computed from `unmapped_tool_action`** (`deny` → `high`, `warn` → `medium`, `allow` → `low`) — the card's own `enforcement.default_unmapped_severity` field is not consulted for this. |
 | `fail_open` | boolean | Yes | -- | If `true`, policy engine errors (e.g., malformed policy, evaluation timeout) result in the tool call being **allowed**. If `false`, errors result in the call being **denied**. |
 | `enforcement_mode` | string | No | `"warn"` | Global enforcement mode. `"off"` disables policy evaluation entirely. `"warn"` evaluates but only records warnings. `"enforce"` actively blocks violations. |
-| `grace_period_hours` | number | No | *(unset)* | Hours after a new policy is deployed before `enforce` mode takes effect. When extracted from a card, this is `enforcement.grace_period_hours` verbatim (unset when no scope sets it) — the gateway, not this field, is what falls back to a 24h default at consumption time. |
+| `grace_period_hours` | number | No | *(unset)* | Hours after the gateway first sees a tool for an agent during which that tool's violations are downgraded to warnings (relabelled `unmapped_tool`). Applies to every violation type on that tool: unmapped tools, forbidden-rule matches, `forbidden_actions` entries and `deny` escalation triggers. When extracted from a card, this is `enforcement.grace_period_hours` verbatim (unset when no scope sets it) — the gateway, not this field, is what falls back to a 24h default at consumption time. New agents are created with `0`. |
 
 <Warning>
 Setting `fail_open: true` means that if the policy engine encounters an internal error, **all tool calls will be permitted**. This maximizes availability but reduces safety guarantees. For high-risk agents, set `fail_open: false` to ensure errors fail safely.
@@ -393,7 +393,7 @@ defaults:
 
 4. **`escalation_triggers`** -- Ticket updates require human approval during ramp-up. File writes and external navigation are permitted but logged.
 
-5. **`defaults`** -- Unmapped tools produce a `medium` warning (not blocked). `fail_open: false` ensures that policy engine errors are treated as denials. The 24-hour grace period means a newly deployed policy runs in warn mode for the first day, even if `enforcement_mode` is later changed to `enforce`.
+5. **`defaults`** -- Unmapped tools produce a `medium` warning (not blocked). `fail_open: false` ensures that policy engine errors are treated as denials. The 24-hour grace period means each tool's violations are downgraded to warnings for the first 24 hours after the gateway first sees that tool for the agent, even in `enforce` — including forbidden-rule matches.
 
 ---
 

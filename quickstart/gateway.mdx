@@ -302,8 +302,14 @@ The Mnemom Gateway supports three enforcement modes when an integrity violation 
 | Mode | Behavior |
 |------|----------|
 | `observe` | Detect violations, record them, take no action (default) |
-| `nudge` | Detect violations, inject feedback into the agent's next request via system prompt. The agent sees it and can self-correct. |
+| `nudge` | Detect violations and add feedback to a later request from the agent, usually the next one. The agent sees it and can self-correct. |
 | `enforce` | Gates same-turn on both streaming and non-streaming requests. The request still completes with a `2xx` status — the response body is replaced with an agent-voice intervention message and `X-Mnemom-Verdict` reports `integrity=enforced`. On streaming this adds latency because the response is evaluated before it is delivered. |
+
+<Warning>
+Enforce is under active development; for day-to-day work we currently recommend observe or nudge.
+</Warning>
+
+New agents are created with `integrity_mode: observe`, `autonomy_mode: observe`, Safe House protection `off`, `allow_unmapped_tools: true` and `grace_period_hours: 0`. Set `allow_unmapped_tools: false` on the card before you switch `autonomy_mode` to `enforce`; changing the mode does not change it.
 
 Set enforcement mode by updating the agent's alignment card. `integrity_mode` and `autonomy_mode` are top-level fields on the alignment card; the legacy `/v1/agents/{id}/enforcement` endpoint was retired 2026-05-14.
 

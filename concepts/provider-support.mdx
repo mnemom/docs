@@ -124,7 +124,8 @@ OpenAI's reasoning summaries are a **Responses API** feature (`reasoning.summary
 
 **What this means in practice:**
 - Boundary violations that surface in the model's final response are still caught equally well on OpenAI — Safe House and CLPI don't depend on the thinking trace.
-- Boundary violations that would only have surfaced in the model's hidden reasoning are **not caught** on OpenAI — AIP has nothing to analyze, so a checkpoint below the minimum-evidence threshold is emitted as a synthetic `clear` without an analysis-LLM call, not a partial-confidence verdict.
+- Boundary violations that would only have surfaced in the model's hidden reasoning are **not caught** on OpenAI — AIP has no reasoning to analyze. A streamed turn is graded on its visible output (reply text and tool calls) instead. A non-streamed turn is recorded `unanalyzed` (`no_thinking_block`) without an analysis-LLM call, and its response still reports `X-AIP-Verdict: clear` / `integrity=pass`.
+- **Responses API requests (`/openai/v1/responses`) pass through without policy evaluation or integrity analysis.** Policy and integrity coverage on OpenAI is Chat Completions only.
 - If your application relies on AIP catching boundary violations in the model's *reasoning* specifically, use Anthropic or Gemini for that workload. OpenAI models remain fully supported for inference, Safe House, and CLPI — just not for thinking-trace inspection.
 
 This is the load-bearing honesty disclosure: Mnemom does not claim AIP thinking-trace coverage on OpenAI, on any model, through the gateway as it exists today.
@@ -162,7 +163,7 @@ Of all per-provider gaps, **thinking-trace coverage** is the load-bearing one:
 In aggregate:
 
 - **Safe House dispatch** adds ~15 ms P50 / ~60 ms P95 across all providers (the dispatch path is provider-agnostic).
-- **AIP analysis** runs post-response (before delivery in `enforce`, which adds the latency below; post-delivery in `observe`/`nudge`), only when a thinking trace was extracted. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash emits thinner traces and completes AIP analysis in P50 ≤ 800 ms. OpenAI requests skip the analysis-LLM call entirely (no trace to analyze) and add no AIP latency.
+- **AIP analysis** runs post-response (before delivery in `enforce`, which adds the latency below; post-delivery in `observe`/`nudge`), when a thinking trace was extracted, or on a streamed turn without one, on the visible output. Cost varies by upstream-response token volume — Anthropic Opus with full extended thinking emits the largest traces and therefore the longest AIP analysis tails (P95 up to 2.5 seconds). Gemini 2.5 Flash emits thinner traces and completes AIP analysis in P50 ≤ 800 ms. Non-streamed OpenAI requests skip the analysis-LLM call entirely (no trace to analyze) and add no AIP latency; streamed OpenAI turns are graded on their visible output.
 
 The gateway does not interrupt a response mid-stream. In `enforce`, AIP runs after the upstream response completes but before the gateway delivers it to the customer, so a violating response is gated before delivery (adding latency); this holds on every provider. In `observe` and `nudge`, the response is delivered first and the verdict is recorded post-hoc.
 
