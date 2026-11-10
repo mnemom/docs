@@ -59,7 +59,7 @@ Every value is a hash, an enum, an id, a count, a duration, a money amount, a to
 
 ### Lines
 
-Every line comes from one claim table. The builder never writes a sentence of its own. Each line has exactly one `class`, from `measured`, `verdict`, `estimate`, `benchmark` or `outcome`, and a line never combines classes. The words "safe", "correct" and "prevented" never appear. A Safe House line is only as strong as what happened: under `enforce`, only a `block` or `quarantine` verdict reads "stopped", and a `warn` or `nudge` verdict reads "flagged". The provisional µ amount appears only on the `cost.mu` line.
+Every line comes from one claim table. The builder never writes a sentence of its own. Each line has exactly one `class`, from `measured`, `verdict`, `estimate`, `benchmark` or `outcome`, and a line never combines classes. The words "safe", "correct" and "prevented" never appear in the claim table's wording. A tool name is shown as it is, so a tool named `safe-shell` still reads "stopped safe-shell". A Safe House line is only as strong as what happened: under `enforce`, only a `block` or `quarantine` verdict reads "stopped", and a `warn` or `nudge` verdict reads "flagged". The provisional µ amount appears only on the `cost.mu` line.
 
 ## PR record fields
 
@@ -175,7 +175,7 @@ The Record GitHub App posts two checks.
 
 | Check | Where | Conclusion |
 |---|---|---|
-| **Mnemom record** | The PR head | `success` when a bundle was built for the head and the published verifier accepts it. `failure` when the bundle built for the head does not verify, or when a bundle already committed at the head fails for a reason other than the head binding, whatever the repository's settings say. A built bundle that fails is never committed or posted. `neutral` when no record could be built for the head (no Mnemom session made it, no commit report reached Mnemom, or the builder was unavailable), or the bundle commit did not land. A repository that sets `check_fail_mode = fail_closed` gets `failure` instead of `neutral` when no record could be built. |
+| **Mnemom record** | The PR head | `success` when a bundle was built for the head and the published verifier accepts it, or rejects it only with `head_unbound` because no PR record could be added to it. `failure` when the bundle built for the head does not verify, or when a bundle already committed at the head fails for a reason other than the head binding, whatever the repository's settings say. A built bundle that fails is never committed or posted. `neutral` when no record could be built for the head (no Mnemom session made it, no commit report reached Mnemom, or the builder was unavailable), or the bundle commit did not land. A repository that sets `check_fail_mode = fail_closed` gets `failure` instead of `neutral` when no record could be built. |
 | **Mnemom outcome** | The merge commit | Always `neutral`. Its summary is one line from the claim table, for example "merged, no revert in 7 days". The default window is 7 days. A revert inside the window is recorded, and a line never reads "accepted". This check is a check run, not a signed statement. |
 
 The App also keeps one comment on the PR, updated in place, that says where the bundle is and how many of the PR's commits are bound.
@@ -184,7 +184,7 @@ The App also keeps one comment on the PR, updated in place, that says where the 
 
 A valid result proves that the key named by `signing_key_id` signed these exact bytes, and that the links inside the bundle hold. It does not prove:
 
-- **That the agent behaved well or the code is right.** A record says what was measured and judged. It never says "safe", "correct" or "prevented".
+- **That the agent behaved well or the code is right.** A record says what was measured and judged. Its own wording never says "safe", "correct" or "prevented".
 - **That the inputs were right.** The signature shows that Mnemom signed the cost, counts and verdicts. It does not check them against the conversation, which is never in the record.
 - **That a checkpoint holds.** The verifier only flags a citation with no card binding (`card not bound`) or no card hash (`card hash not recorded`). To check a checkpoint itself, verify its certificate as described in [integrity checkpoints](/concepts/integrity-checkpoints).
 - **That the record is complete.** Retention removes old builds (`lineage truncated`), and the chain is checked only inside the bundle you hold.
