@@ -368,12 +368,16 @@ confirm the claim.
 
 ### Default cards
 
-A newly claimed agent gets a default coding posture. The checks that cost a
-model call per turn are **off**, because they are billed:
+A newly claimed agent gets a default coding posture. AIP integrity analysis is
+**on**, in `observe`, so every turn is analyzed and the agent can earn a
+[Trust Rating](#share-your-agents-record). It costs a model call per turn and
+is billed at cost on top of the agent fee. Safe House screening is **off** until
+you turn it on:
 
-- the alignment card has `integrity_mode: off` (no AIP integrity analysis) and
-  `principal.relationship: delegated_authority`. Its `autonomy_mode` is
-  `observe`: autonomy checks are rules only, with no model call;
+- the alignment card has `integrity_mode: observe` (AIP integrity analysis,
+  record only) and `principal.relationship: delegated_authority`. Its
+  `autonomy_mode` is `observe`: autonomy checks are rules only, with no model
+  call;
 - the protection card has `mode: off` (no Safe House screening), with thresholds
   `0.60 / 0.80 / 0.95` and all four screen surfaces declared so it is ready when
   you turn it on.
@@ -390,17 +394,24 @@ mnemom agent my-session --no-setup  # skip the default-card writes for this laun
 needed, claimed. `mnemom agent setup` uses an Anthropic API key. Bring your own
 agent any time with `--agent <slug>`.
 
-To turn governance on when you set up the agent, pass `--governance`. It sets AIP
-integrity analysis and Safe House screening to `observe`:
+To choose the billed checks when you set up the agent, pass `--governance`. A bare
+`--governance` sets both AIP integrity analysis and Safe House screening to
+`observe`. A list sets exactly the features it names to `observe` and turns the
+others off, so `--governance safe-house` turns integrity analysis off.
+Autonomy checks stay on under every `--governance` choice:
 
 ```bash
-mnemom agent setup --governance               # integrity analysis and Safe House screening
-mnemom agent setup --governance integrity     # one of them: integrity or safe-house
-mnemom agent setup --no-governance            # everything off, autonomy checks included
+mnemom agent setup --governance                      # integrity analysis and Safe House screening
+mnemom agent setup --governance integrity,safe-house # the same, named
+mnemom agent setup --governance safe-house           # Safe House only; integrity analysis off
+mnemom agent setup --governance none                 # opt out of integrity analysis; Safe House off
+mnemom agent setup --no-governance                   # everything off, autonomy checks included
 ```
 
 A refresh of an agent that is already claimed keeps the modes its cards carry,
-unless you pass `--governance` or `--no-governance`. You can also change the cards
+unless you pass `--governance` or `--no-governance`. An existing agent with no
+alignment card of its own is not opted in to integrity analysis by a refresh:
+it gets `integrity_mode: off`. You can also change the cards
 with [`mnemom card`](/gateway/cli#card-commands) and
 [`mnemom protection`](/gateway/cli#protection-commands). A stricter org, team or
 platform policy can raise a mode above the agent's own card; `mnemom agent
@@ -1047,7 +1058,7 @@ looked up, and what you see when something is missing.
 | `--no-context-hint` | Do not seed Claude Code's context-hint feature flag |
 | `--no-context-handoff` | Keep the experimental context-handoff feature off for this launch, even when your settings turn it on |
 | `--setup` / `--no-setup` | Re-check the agent and refresh its default cards / skip the card writes. The agent is claimed either way — see [Your governed agent](#your-governed-agent) |
-| `--governance [features]` / `--no-governance` | Turn AIP integrity analysis and Safe House screening on (`integrity`, `safe-house`, or both) / turn every check off — see [Default cards](#default-cards) |
+| `--governance [features]` / `--no-governance` | Set exactly the named billed checks to `observe` (`integrity`, `safe-house`, `all` or `none`; bare = both) / turn every check off — see [Default cards](#default-cards) |
 | `--dry-run` | Print the resolved launch plan and exit |
 | `--first-run` | Show the [first-run savings screen](/gateway/agent-savings) again, then exit |
 
