@@ -34,6 +34,15 @@ name: Docs quality validators
 #     that needs `npm ci`; that install runs last so it cannot affect the
 #     steps above.
 #
+# Also wired here (MNE-9916): the code-facts gate.
+#   - check:code-facts: a page that opts in with a `code-facts:` MDX comment
+#     must not state a value that contradicts scripts/code-facts-snapshot.json,
+#     the vendored code-facts.json files mnemom-api and mnemom-platform
+#     generate from their own constants. code-facts.yml checks the snapshot
+#     against those repos.
+#   - test:code-facts: the gate's own node:test suite (contradiction, stale
+#     snapshot, unknown fact, rewritten phrase, malformed annotation).
+#
 # All 4 scripts use only Node built-ins (confirmed by reading their imports),
 # so no `npm ci` step is needed — mirrors the `check:redirects` / `check:nav-
 # pages` / `check:nav-coverage` steps in mintlify-ci.yml. Each runs as its own
@@ -102,6 +111,14 @@ jobs:
 
       - name: Test api-reference generator
         run: npm run test:api-reference
+
+      # MNE-9916: annotated pages agree with the vendored code facts
+      # (Node built-ins only).
+      - name: Check code facts (MNE-9916)
+        run: npm run check:code-facts
+
+      - name: Self-test code facts (MNE-9916)
+        run: npm run test:code-facts
 
       # docs#607 follow-up: the runner behind doc-examples-live.yml had 22+
       # tests and no workflow running them. npm ci (lockfile-frozen) for ajv.
