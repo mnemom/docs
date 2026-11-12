@@ -77,6 +77,12 @@ agents.txt                 # Mirror of /for-agents agent pitch (also at root)
   extract of the billing rate card). Change a price by re-running
   `node scripts/sync-ratecard.mjs` against the new card, then editing the page;
   `npm run check:pricing-ratecard` must pass (`.github/workflows/pricing-ratecard.yml`).
+- **Values that code decides are checked against code.** A page that states a
+  default, a composition rule, a status code or provider coverage can pin it
+  with a `code-facts:` MDX comment naming the fact, the literal, and the quoted
+  phrase (syntax in `scripts/lib/code-facts.mjs`). `npm run check:code-facts`
+  fails when the claim contradicts `scripts/code-facts-snapshot.json`, which
+  `node scripts/sync-code-facts.mjs` vendors from mnemom-api and mnemom-platform.
 - **`for-agents/` mirrors the second-person tone of agents.txt on
   www.mnemom.ai.** Keep them aligned in voice.
 - **Internal links use absolute paths** (`/concepts/foo`), not
