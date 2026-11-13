@@ -133,14 +133,20 @@ The report does not cover:
 
 Mnemom keeps no copy of the report. The report lives on the page while it is open, and in any export you save.
 
-For each scan, Mnemom keeps a run record:
+At every share level, Mnemom keeps these records of a scan:
 
-- who started it, their role and how they signed in
-- the share level, the status, and the start and end times
-- the GitHub numbers of the repositories, not their names
-- the Anthropic Console ids you connected, if any. These are ids, not secrets.
+- **A run record**: who started it, their role and how they signed in, the share level, the status, the start and end times, the GitHub numbers of the repositories (not their names), and the Anthropic Console ids you connected, if any. These are ids, not secrets. An email address you gave for the summary is cleared when the scan ends.
+- **An audit entry when the scan starts**: who started it, the org id, the scan id, the share level and the number of repositories.
+- **An audit entry each time Mnemom issues a workload identity token** for the scan to read your Anthropic usage: who started the scan, the org id and the scan id.
 
-The run record holds no token, no report and no counts. An email address you gave for the summary is cleared when the scan ends. To have Mnemom delete a run record, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai).
+At share levels other than `none`, Mnemom also keeps:
+
+- **A run log entry**: the scan id, who ran it, the time, the share level and whether the email was delivered.
+- **A send log**: one entry for each email, with the recipient address and the subject line.
+
+At every level, Mnemom's email provider keeps its own delivery record of each email.
+
+None of these records holds a token, the report or its counts. The share levels are described in [Choose what Mnemom keeps](/guides/org-scan-run-it-yourself#choose-what-mnemom-keeps). To have Mnemom delete anything it holds about a scan, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai).
 
 ## The email summary
 
@@ -171,7 +177,7 @@ The saved page does not check its own signature. To check it, load the data file
 The data file is JSON with a `jws` field. That is a compact JWS signed by Mnemom with Ed25519. To verify it yourself:
 
 1. Read the JWS header. Check that `alg` is `EdDSA` and `typ` is `OrgScanReport/v1`.
-2. Fetch `https://api.mnemom.ai/v1/.well-known/jwks.json` and find the key whose `kid` matches the header.
+2. Fetch the signing keys from the Mnemom API host your org uses, at `/v1/.well-known/jwks.json`. For example, `https://api.mnemom.ai/v1/.well-known/jwks.json`. Find the key whose `kid` matches the header. A `kid` that is not there means the report was signed by a different Mnemom host.
 3. Verify the signature with that key.
 4. In the payload, check that `iss` is `https://mnemom.ai`, `sub` is your org id, and `exp` has not passed.
 5. The report is the `report` claim. Its `schema_version` is `org-scan-report/2`.
