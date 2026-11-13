@@ -1,0 +1,191 @@
+---
+title: "Read the Org Scan value report"
+description: "What the Org Scan value report shows, how to read a row, what is measured and what is an estimate, what Mnemom keeps, and how to export the report, open it again and verify its signature."
+sidebarTitle: "Org Scan value report"
+icon: "file-chart-column"
+---
+
+The value report is the Org Scan report that Mnemom runs for you. It reads your GitHub pull requests and, if you connect it, your Anthropic usage. It then shows up to five problems, what each one is based on, and the Mnemom capability that addresses it.
+
+<Note>
+  The value report is switched on one org at a time and is not available to customer orgs yet. Until it is on for your org, the report you get is the email from the command-line scan. See [Run Org Scan yourself](/guides/org-scan-run-it-yourself).
+</Note>
+
+## What you are asked for
+
+Two things, both in plain terms:
+
+- **Install the GitHub Scan app** on the repositories you want scanned. It is read-only. It asks for repository metadata, pull requests and checks. It does not ask for your code.
+- **Connect your Anthropic usage, or type a monthly figure.** Connecting lets the report measure your API spend. With no API usage, you can type your approximate monthly AI spend instead. Both are optional. Without either, the report has no cost row.
+
+An owner or admin of the org starts the scan, and Org Scan must be switched on for the org. See [Get Org Scan switched on](/guides/org-scan-run-it-yourself#get-org-scan-switched-on).
+
+## The period it covers
+
+The report covers the 13 most recent full weeks, in UTC, each starting on a Monday. The week in progress is never included. Trends compare the first four weeks of that window with the last four.
+
+The top of the report shows:
+
+| Label | What it is |
+|---|---|
+| Window | The first and last day of the 13 weeks. |
+| As of | When the scan ran. |
+| Rule table | The version of the rules that chose the rows, today `2026-11.2`. |
+| Repositories | The repositories the scan read. |
+
+## How to read a row
+
+The report has at most one row for each of five themes: **cost**, **velocity**, **rework**, **follow-up** and **time**. A theme with nothing to show has no row.
+
+Each row has:
+
+- **A severity**: `high`, `medium` or `watch`.
+- **A headline**: one sentence naming the problem.
+- **A figure**: the number behind the headline, marked `measured` or `estimate`.
+- **Evidence**: the counts the figure comes from, each with its label.
+- **A target**, on some rows. See [Targets](#targets).
+- **A recommended fix**: a Mnemom capability, the command that starts it, and a link to its docs.
+
+Rows are sorted by severity, `high` first. Two rows with the same severity keep the theme order above. The first row is marked as the largest.
+
+### Measured and estimate
+
+Every line that holds a dollar amount, a percentage or a number of hours says whether it is `measured` or an `estimate`.
+
+- **Measured** figures are counted from GitHub or read from your Anthropic usage reports.
+- **Estimates** are worked out from those counts. A yearly cost appears only on the cost row, as an estimate at the pace of the last four weeks.
+- **A range** is written "between X% and Y%" and is a 95% confidence interval.
+- **AI-assisted counts are a floor**, written "at least". The scan only knows a pull request is AI-assisted when it carries a mark of an AI tool, so some AI-assisted work is counted as other work.
+
+### Minimum sample
+
+A figure for the whole org needs at least 20 pull requests. The one exception is the count of merges with no approving review when every merged pull request was read. A comparison between AI-assisted work and other work needs at least 20 in each group. Below that, the figure is not shown. A median time to merge is shown only for a group with at least 20 merged pull requests.
+
+### The review figures
+
+Two figures come from pull-request reviews read on a sample. See [What the scan reads](/guides/org-scan-run-it-yourself#what-the-scan-reads-and-does-not-cover).
+
+- **Sent back for changes.** A floor, written "at least ... sent back for changes on GitHub before merging". Changes asked for outside GitHub are not seen.
+- **Merged with no approving review.** Written "merged with no approving review from a person on GitHub". An approval from a bot or app does not count. When every merged pull request was read, it is a count. Otherwise it is a share with a 95% range, "measured on a sample of N".
+
+If any review read fails, both figures are left out and the rest of the report is unchanged.
+
+### A monthly figure you typed
+
+With no Anthropic usage connected, a cost row can come from the monthly figure you typed. It is shown under the label `Reported monthly` and the headline says the team reported it. It is your figure, not a measurement, and the report marks it as an estimate.
+
+## Targets
+
+A target is a direction for a row, not a promise. Every target is labelled as an estimate and has no dollar amount. There are two kinds:
+
+- **The published target.** Only on cost rows where spend is rising: long sessions cost 20% to 35% less than stock Claude Code in Mnemom datasets. This is an estimate. Its source is [Agent savings](/gateway/agent-savings).
+- **Your own baseline.** Some rows compare you with yourself, and the line ends with `Basis:` and what it was drawn from. For example, the AI-assisted sent-back share is compared with your own rate for work with no AI mark.
+
+Targets appear on these rows only: `spend_rising_fast` and `spend_rising` (the published target), and `ai_up_output_flat`, `repos_not_ready`, `ai_sent_back_more`, `other_work_waits_longer` and `reverts_present` (your own baseline). See [Which rule picks each row](#which-rule-picks-each-row).
+
+## Which rule picks each row
+
+Rule table `2026-11.2` has 14 rules. In each theme, the first rule that matches picks the row.
+
+| Theme | Rule | Severity | When it matches |
+|---|---|---|---|
+| Cost | `spend_rising_fast` | high | Usage connected, at least $100 in the first four weeks, and spend at least doubled. |
+| Cost | `spend_rising` | medium | Usage connected, at least $100 in the first four weeks, and spend rose by at least 25%. |
+| Cost | `spend_level` | watch | Usage connected, and neither rule above matched. |
+| Cost | `spend_stated` | watch | No usage connected and a typed monthly figure above zero. |
+| Velocity | `ai_up_output_flat` | high | At least 20 AI-assisted and 20 total merges in both blocks. AI-assisted merges rose at least 50% while all merged work rose less than 25%. |
+| Velocity | `repos_not_ready` | medium | A repository with at least 20 merged pull requests where fewer than 80% had a check run. |
+| Velocity | `merged_work_trend` | watch | At least 20 merges in each block. |
+| Rework | `ai_reverts_more` | high | At least 20 in each group, AI-assisted work reverted more, and the two 95% ranges do not overlap. |
+| Rework | `reverts_present` | watch | At least 20 merged and at least one revert. |
+| Follow-up | `ai_sent_back_more` | high | At least 20 sampled in each group, AI-assisted work sent back more, and the two ranges do not overlap. |
+| Follow-up | `merged_without_approval` | medium | Every merge read, or at least 20 sampled, and at least 10% merged with no approving review. |
+| Follow-up | `sent_back_rate` | watch | At least 20 sampled in total. |
+| Time | `other_work_waits_longer` | medium | At least 20 in each group. Other work waits at least twice as long as AI-assisted work, and at least 4 hours longer. |
+| Time | `median_time` | watch | Shows the median time to merge for each group with at least 20. |
+
+## The recommended fixes
+
+Each theme has one fix. Every fix links to [Mnemom Agent](/gateway/agent).
+
+| Theme | Fix | Command |
+|---|---|---|
+| Cost | Context folding and a spend ceiling on every session | `mnemom agent --context-profile adaptive --budget 25` |
+| Velocity | Governed agents you can hand whole tasks to | `mnemom agent --goal "..." --max-turns 200` |
+| Rework | Requirements sealed into every agent session | `mnemom agent --goal "..." --requirement "All existing tests keep passing" --mode enforce` |
+| Follow-up | Goal contracts catch drift before a reviewer does | `mnemom agent --goal "..." --allow "src/billing/**" --forbid "**/*.env"` |
+| Time | Sessions that run unattended inside limits you set | `mnemom agent show <session> --follow` |
+
+## What the scan reads and does not cover
+
+From GitHub, through the Scan app, the scan reads pull-request metadata: size, check results, the merge day, revert markers, marks of AI tools, and review state on a sample. It never reads code, diffs or file names, and it does not keep who wrote or reviewed anything. The details are in [What the scan reads](/guides/org-scan-run-it-yourself#what-the-scan-reads-and-does-not-cover).
+
+From Anthropic, when you connect it, the scan reads your usage and cost reports.
+
+The report does not cover:
+
+- **Subscription seats**, such as Claude Team or Enterprise plans. Measured spend is Anthropic API usage only.
+- **Other AI providers.** Their spend is not read.
+- **AI-assisted work with no mark** of an AI tool. It is counted as other work.
+- **The quality of your code.** The scan does not read it.
+
+## What Mnemom keeps
+
+Mnemom keeps no copy of the report. The report lives on the page while it is open, and in any export you save.
+
+At every share level, Mnemom keeps these records of a scan:
+
+- **A run record**: who started it, their role and how they signed in, the share level, the status and any failure code, the times it was created, started and finished, the GitHub numbers of the repositories (not their names), and the Anthropic Console ids you connected, if any. These are ids, not secrets. An email address you gave for the summary is cleared when the scan ends.
+- **An audit entry when the scan starts**: who started it, the org id, the scan id, the share level and the number of repositories.
+- **An audit entry each time Mnemom issues a workload identity token** for the scan to read your Anthropic usage: who started the scan, the org id and the scan id.
+
+At share levels other than `none`, Mnemom also keeps:
+
+- **A run log entry**: the scan id, who ran it, the time, the share level and whether the email was delivered.
+- **A send log**: one entry for each email, with the recipient address and the subject line.
+
+At every level, Mnemom's email provider keeps its own delivery record of each email.
+
+None of these records holds a token, the report or its counts. The share levels are described in [Choose what Mnemom keeps](/guides/org-scan-run-it-yourself#choose-what-mnemom-keeps). To have Mnemom delete anything it holds about a scan, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai).
+
+## The email summary
+
+When the scan finishes, the email summary lists up to five row headlines, the window and the as-of time. It links to the Org Scan page and to the method. It never names a repository. The full report, with repository names, is on the page and in your export.
+
+## Export the report
+
+Under **Export this report**, there are two buttons:
+
+- **Save data file** saves `mnemom-org-scan-report-YYYY-MM-DD.json`. It holds the signed report.
+- **Save page** saves a single `.html` file that opens in any browser, offline. The signed data file is inside it.
+
+Both name your repositories. Keep them as you would any internal document.
+
+## Open it again
+
+No Mnemom link opens a past report, because Mnemom has no copy. To see it again:
+
+- open the saved page in a browser, or
+- load the saved data file on the **Verify a saved report** page in your organization's Org Scan settings. It checks the signature in your browser and sends nothing to Mnemom.
+
+To get a fresh report, run the scan again.
+
+## Verify the signature
+
+The saved page does not check its own signature. To check it, load the data file on the **Verify a saved report** page, or verify it yourself.
+
+The data file is JSON with a `jws` field. That is a compact JWS signed by Mnemom with Ed25519. To verify it yourself:
+
+1. Read the JWS header. Check that `alg` is `EdDSA` and `typ` is `OrgScanReport/v1`.
+2. Fetch the signing keys from the Mnemom API host your org uses, at `/v1/.well-known/jwks.json`. For example, `https://api.mnemom.ai/v1/.well-known/jwks.json`. Find the key whose `kid` matches the header. A `kid` that is not there means the report was signed by a different Mnemom host.
+3. Verify the signature with that key.
+4. In the payload, check that `iss` is `https://mnemom.ai` and `sub` is your org id. The token also carries `iat` (when it was signed) and `exp` (by default 365 days later). The **Verify a saved report** page does not check either time, so a saved report still verifies there after `exp`. Check `exp` yourself if your policy needs it.
+5. The report is the `report` claim. Its `schema_version` is `org-scan-report/2`.
+
+The `exported_at` time in the data file is outside the signature. These are the same keys and steps as for an [AAP attestation](/concepts/aap-attestation#verification).
+
+## Related
+
+- [Run Org Scan yourself](/guides/org-scan-run-it-yourself): the command-line scan, its email, and what it reads.
+- [Mnemom Agent](/gateway/agent): the capabilities the fixes point to.
+- [Agent savings](/gateway/agent-savings): the source of the published target.

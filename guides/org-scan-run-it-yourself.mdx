@@ -5,7 +5,7 @@ sidebarTitle: "Run Org Scan yourself"
 icon: "magnifying-glass-chart"
 ---
 
-Org Scan reads the pull-request metadata of the repos you choose, on your own machine or runner, and emails you a report. This guide shows how to run it three ways: from a terminal, from a GitHub Actions workflow, and with keyless Anthropic usage reads (WIF).
+Org Scan reads the pull-request metadata of the repos you choose, on your own machine or runner. It prints the results in your terminal and emails you a summary. This guide shows how to run it three ways: from a terminal, from a GitHub Actions workflow, and with keyless Anthropic usage reads (WIF).
 
 <Note>
   The `--email` and `--share analytics` options described here need a CLI release that includes the share choices. Check with `mnemom scan --help`: if the `--share` line lists `full`, `analytics` and `none`, you have it. Update with `npm install -g @mnemom/mnemom@latest`.
@@ -56,7 +56,7 @@ On a terminal, the CLI asks for anything you leave out: the repos (a picker over
 | `--start <YYYY-MM-DD>`, `--end <YYYY-MM-DD>` | The period. Both default to today. |
 | `--org <org_id>` | Your org id, like `org-1a2b3c4d`. If omitted, the CLI uses the org from `mnemom org use`, then your only non-personal org. With several orgs and no terminal, it stops and lists them. |
 | `--share <level>` | What Mnemom may keep on file: `full`, `analytics` or `none`. See below. |
-| `--email <address...>` | Also email the report to these people. Repeat the flag or separate with commas. Up to 10, on your organization's email domain or mnemom.ai. |
+| `--email <address...>` | Also email the report summary to these people. Repeat the flag or separate with commas. Up to 10, on your organization's email domain or mnemom.ai. |
 | `--cto-email <email>` | The older name for one `--email` address. |
 | `--monthly-spend <usd>` | Your own approximate monthly AI spend, as a figure like `5000`. Kept in memory only. Needs `MNEMOM_ORG_SCAN_MODE=true`. |
 | `--anthropic-admin-key` | Ask for an Anthropic Admin key (masked) and read measured usage with it. Needs `MNEMOM_ORG_SCAN_MODE=true`. See [keyless setup](#read-anthropic-usage-without-a-key-wif). |
@@ -64,11 +64,11 @@ On a terminal, the CLI asks for anything you leave out: the repos (a picker over
 
 ### Where your report goes
 
-The report is emailed to you, to every admin of your org, and to anyone you add with `--email`. This happens at every share level. The subject is `Your Mnemom org scan report is ready`, followed by the period. The email gives totals for the whole scan and never names a repo.
+A summary of the report is emailed to you, to every admin of your org, and to anyone you add with `--email`. This happens at every share level. The subject is `Your Mnemom org scan report is ready`, followed by the period. The summary gives totals for the whole scan and never names a repo.
 
-Your terminal shows the pull requests examined, the coverage and, when there is one, the spend line. When the report was emailed at `--share full`, the terminal also prints the counts for each repo, by name, as JSON under the `Kept on file by Mnemom` line. At `analytics` that JSON has the totals only. At `none` it is not printed. When the report was not emailed, for any reason, the CLI prints `Kept on file by Mnemom: nothing, because the report was not sent.` and no JSON.
+Your terminal shows the pull requests examined, the coverage and, when there is one, the spend line. When the summary was emailed at `--share full`, the terminal also prints the counts for each repo, by name, as JSON under the `Kept on file by Mnemom` line. At `analytics` that JSON has the totals only. At `none` it is not printed. When the summary was not emailed, for any reason, the CLI prints `Kept on file by Mnemom: nothing, because the report was not sent.` and no JSON.
 
-The email and your terminal output are the only copies. Mnemom keeps no copy of the report, so there is no report page in the Mnemom dashboard and no link that opens it again. Keep the email, and save the terminal output if you want the counts for each repo. To get a fresh report, run the scan again.
+Your terminal output and the emailed summary are the only copies. Mnemom keeps no copy of the report, so there is no report page in the Mnemom dashboard and no link that opens it again. Keep the email, and save the terminal output if you want the counts for each repo. To get a fresh report, run the scan again.
 
 ### Choose what Mnemom keeps
 
@@ -76,9 +76,11 @@ The share choice is your permission for what Mnemom may keep. Today Mnemom store
 
 | `--share` | What it allows Mnemom to keep | What Mnemom keeps today |
 |---|---|---|
-| `full` | The totals and the counts for each repo, by name. This is the preselected answer when the CLI asks. | A run record and a send log, described below. No report numbers. |
+| `full` | The totals and the counts for each repo, by name. In releases up to and including 0.17.44, this is the preselected answer when the CLI asks, so pressing Enter allows it. | A run record and a send log, described below. No report numbers. |
 | `analytics` | The team totals only, with no repo names. `summary` is the older name and works the same. | A run record and a send log, described below. No report numbers. |
-| `none` | Nothing. This is the answer when there is no terminal and no `--share`. | Nothing. The email is still sent, and Mnemom writes no record of the scan. |
+| `none` | Nothing. In releases after 0.17.44, this is the preselected answer when the CLI asks, so pressing Enter keeps nothing. In every release, it is the answer when there is no terminal and no `--share`. | Nothing. The email is still sent, and Mnemom writes no record of the scan. |
+
+To check which answer your CLI preselects, run `mnemom --version` and `mnemom scan --help`. If the `--share` line calls `none` the default, pressing Enter keeps nothing. If it calls `full` the default, pressing Enter allows the counts for each repo. To keep nothing on any release, pass `--share none` or pick `none` at the prompt.
 
 At `full` and `analytics`, Mnemom may keep:
 
@@ -126,7 +128,7 @@ Cost-per-pull-request lines are always labelled `estimate`. With no spend source
 ### What the scan reads and does not cover
 
 - **GitHub.** Pull-request metadata only, from `api.github.com`: size (lines added and removed, files changed), the CI result, whether it was reverted, the merge date, and marks of AI tools in the pull-request description or commit trailers. Titles and descriptions are checked in memory and dropped. The scan never reads your code.
-- **Review state, for a sample of pull requests.** In CLI releases after 0.17.44, the scan also reads the first page of reviews (up to 100) for a sample of the merged pull requests it examined. For each one it keeps two yes-or-no facts: whether a person (not a bot or app) approved it before the merge, and whether anyone asked for changes before the merge. Reviewer names and review text are dropped in memory. These reads count toward the scan's existing read and time limits, and a failed review read never changes the rest of the scan. The CLI does not show these facts yet and does not send them to Mnemom.
+- **Review state, for a sample of pull requests.** In CLI releases after 0.17.44, the scan also reads the first page of reviews (up to 100) for a sample of the merged pull requests it examined. For each review it keeps only three things: its state (approved, changes requested, or other), whether a person submitted it rather than a bot or app, and when it was submitted. Reviewer logins, user ids, review ids and review text are dropped in memory. From those it keeps two yes-or-no facts for each pull request: whether a person approved it at or before the merge, and whether anyone asked for changes at or before the merge. Reviews submitted after the merge, and dismissed approvals, do not count. A pull request with a full page of 100 reviews is left out. These reads count toward the scan's existing read and time limits, and a failed review read never changes the rest of the scan. The CLI does not show these facts yet and does not send them to Mnemom.
 - **AI tools it recognizes.** Claude Code, Codex, GitHub Copilot and Gemini. The modelled range needs at least 10 AI-assisted pull requests.
 - **Measured spend covers Anthropic API usage only.** It does not include subscription seats such as Claude Team or Enterprise plans, or spend with any other AI provider.
 
@@ -266,3 +268,4 @@ If there is no key either, the scan continues without a measured figure: the nex
 
 - [API keys](/guides/api-keys): create the organization key a workflow uses.
 - [Org admin](/guides/org-admin): the owner and admin roles that can run a scan.
+- [Read the Org Scan value report](/guides/org-scan-value-report): the report Mnemom runs for you, how to read its rows, and how to export and verify it.
