@@ -135,7 +135,7 @@ Mnemom keeps no copy of the report. The report lives on the page while it is ope
 
 At every share level, Mnemom keeps these records of a scan:
 
-- **A run record**: who started it, their role and how they signed in, the share level, the status, the start and end times, the GitHub numbers of the repositories (not their names), and the Anthropic Console ids you connected, if any. These are ids, not secrets. An email address you gave for the summary is cleared when the scan ends.
+- **A run record**: who started it, their role and how they signed in, the share level, the status and any failure code, the times it was created, started and finished, the GitHub numbers of the repositories (not their names), and the Anthropic Console ids you connected, if any. These are ids, not secrets. An email address you gave for the summary is cleared when the scan ends.
 - **An audit entry when the scan starts**: who started it, the org id, the scan id, the share level and the number of repositories.
 - **An audit entry each time Mnemom issues a workload identity token** for the scan to read your Anthropic usage: who started the scan, the org id and the scan id.
 
@@ -179,7 +179,7 @@ The data file is JSON with a `jws` field. That is a compact JWS signed by Mnemom
 1. Read the JWS header. Check that `alg` is `EdDSA` and `typ` is `OrgScanReport/v1`.
 2. Fetch the signing keys from the Mnemom API host your org uses, at `/v1/.well-known/jwks.json`. For example, `https://api.mnemom.ai/v1/.well-known/jwks.json`. Find the key whose `kid` matches the header. A `kid` that is not there means the report was signed by a different Mnemom host.
 3. Verify the signature with that key.
-4. In the payload, check that `iss` is `https://mnemom.ai`, `sub` is your org id, and `exp` has not passed.
+4. In the payload, check that `iss` is `https://mnemom.ai` and `sub` is your org id. The token also carries `iat` (when it was signed) and `exp` (by default 365 days later). The **Verify a saved report** page does not check either time, so a saved report still verifies there after `exp`. Check `exp` yourself if your policy needs it.
 5. The report is the `report` claim. Its `schema_version` is `org-scan-report/2`.
 
 The `exported_at` time in the data file is outside the signature. These are the same keys and steps as for an [AAP attestation](/concepts/aap-attestation#verification).
