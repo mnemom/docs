@@ -46,24 +46,25 @@ This is **configuration drift**: the card falls out of sync with the agent's act
     `POST /v1/teams/fault-lines` identifies value-conflict fault lines across a team; `POST /v1/teams/recommend-policy` generates policy-rule suggestions from team analysis; `POST /v1/transactions` scopes enforcement to a single bounded operation. Entitlements: `clpi_fault_lines`, `clpi_policy_recommendations`, `clpi_transactions` (risk forecasting is a related, separately entitled capability — `clpi_risk_forecast`).
   </Card>
   <Card title="Checkpoint Anchoring" icon="link" href="#checkpoint-anchoring">
-    Merkle-root checkpointing over an agent's integrity history, with signed attestation and an inclusion-proof verification endpoint. Entitlement: `clpi_on_chain`. See the caveats below before treating this as a public-chain guarantee.
+    Merkle-root checkpointing over an agent's integrity history, with signed attestation and an inclusion-proof verification endpoint. Entitlement: `clpi_on_chain`. See below for what Mnemom's endpoint checks and how to check the chain yourself.
   </Card>
 </CardGroup>
 
 ## Checkpoint anchoring
 
 <Warning>
-This is the one area where the marketing shorthand ("on-chain", "Base L2") has run ahead of what the shipped endpoints actually check. Read this section before relying on anchoring for a compliance claim.
+Mnemom's verify endpoint and a direct chain check are two different checks. Read this section before relying on anchoring for a compliance claim.
 </Warning>
 
 What's real today:
 
-- The platform computes a Merkle root over an agent's checkpoint leaves and records it, along with a leaf count and tree depth, in Mnemom's own database (`on_chain_anchors` / `score_publications` tables) — not by reading it back from a blockchain.
+- The platform computes a Merkle root over an agent's checkpoint leaves and records it, along with a leaf count and tree depth, in Mnemom's own database (`on_chain_anchors` / `score_publications` tables), and submits the root to the `MnemoMerkleAnchor` (`0xDfdbc9374907d5AdeA8f100a0D1e07e16C99816d`) contract on Base mainnet on a regular schedule. The anchor record carries the `tx_hash` and `block_number`.
 - `GET /v1/on-chain/verify-proof/{agent_id}` **recomputes** the root from the stored leaf hashes, checks the leaf count against the leaf array, and — given a `leaf_index` — regenerates and verifies a real inclusion proof against the recomputed root. A mismatch at any step returns `verified: false` with a reason; the endpoint never reports a bare `verified: true` without doing this work.
-- What that endpoint does **not** yet do is read the anchored root back from a chain. The response is explicit about this via `verification.anchored_root_source`: it proves the tree Mnemom published is internally consistent and matches the root Mnemom recorded as anchored — it does not prove a chain agrees with that record. Publishing to a public chain such that a third party can verify without trusting Mnemom's infrastructure at all is a stated direction, not a delivered guarantee today.
+- What that endpoint does **not** yet do is read the anchored root back from a chain. The response is explicit about this via `verification.anchored_root_source`: it proves the tree Mnemom published is internally consistent and matches the root Mnemom recorded as anchored — on its own it does not prove the chain agrees with that record.
+- To check the chain without trusting Mnemom, fold the returned inclusion proof to a root and call the contract's public `isRootAnchored(root)` (or `getLatestRoot()` / `getRootByIndex(i)`) on Base through any RPC provider. Mnemom does not yet ship an SDK or CLI that does this chain read for you.
 - `GET /v1/on-chain/status/{agent_id}` and `GET /v1/on-chain/history` are read-only and public; writing an anchor record is a service-key operation the platform performs on its own schedule, not something a customer calls directly.
 
-Treat checkpoint anchoring as tamper-evident bookkeeping backed by cryptographic hashing today, and as a building block toward independent chain verification — not as an existing "verify without trusting Mnemom" guarantee.
+The roots on Base are public, so the chain check needs nothing from Mnemom beyond the leaf data and inclusion proof. What Mnemom's own endpoint returns is a convenience check against Mnemom's record, as `anchored_root_source` says.
 
 ## API surface
 
