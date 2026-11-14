@@ -133,7 +133,7 @@ Live evaluation runs in real-time as requests pass through the Mnemom gateway. T
 |---|---|---|---|
 | `off` | No evaluation | No evaluation | No evaluation |
 | `observe` / `nudge` | Allow | Allow + log | Allow + log |
-| `enforce` | Allow | Allow + log | Gated same-turn on both transports: HTTP 403 (non-streaming); gated before delivery (streaming, adds latency) |
+| `enforce` | Allow | Allow + log | Blocked in the same turn on both transports: HTTP 200 with a refusal in your provider's format (streaming adds latency) |
 
   </Tab>
   <Tab title="Observer (Post)">
@@ -216,7 +216,7 @@ Policy evaluation always runs against the card's `capabilities` + `enforcement` 
     Violations are evaluated and logged but never block the request. `X-Policy-Verdict: warn` header returned. **`observe` and `nudge` map to the same policy behavior** — CLPI does not yet render a distinct nudge annotation for policy violations.
   </Card>
   <Card title="autonomy_mode: enforce" icon="ban">
-    `critical`/`high` violations block the request, same-turn on both transports. `X-Policy-Verdict: fail` header returned. HTTP 403 for non-streaming requests; streaming responses are gated before delivery (which adds latency). Lower-severity violations still only warn.
+    `critical`/`high` violations block the request in the same turn on both transports: HTTP 200 with a refusal in your provider's format; detect it with `X-Mnemom-Verdict` or `X-Policy-Verdict: fail`. Streaming adds latency. Lower-severity violations still only warn. Policy is evaluated against every tool the request declares, so one declared tool that violates policy refuses the whole request.
   </Card>
   <Card title="autonomy_mode: off" icon="power-off">
     Skip policy evaluation entirely. No `X-Policy-Verdict` header. No performance overhead.
