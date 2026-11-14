@@ -1,0 +1,98 @@
+---
+title: "Record your own agent"
+description: "Put a signed Mnemom record on every pull request your agent opens: install the CLI, add the Mnemom Record GitHub App to a repo, and run your agent."
+sidebarTitle: "Record your own agent"
+icon: "file-signature"
+---
+
+Run your coding agent through Mnemom and every pull request it opens gets a Mnemom record: a check, one comment, and a signed bundle that anyone can verify. This page takes one repository from nothing to its first recorded pull request.
+
+<Note>
+  Mnemom is enrolling invited customers one repository at a time. You run the setup below, and Mnemom then adds the repository to the Record for you. If you do not have an invitation yet, ask your Mnemom contact.
+</Note>
+
+## What you need
+
+- **Node.js 18 or newer.**
+- **The GitHub CLI (`gh`), signed in** with an account that can read the repository. The setup uses it to check the GitHub App install.
+- **A GitHub organization admin** for the repository's organization, or the person who owns a personal repository. Only they can install a GitHub App. If that is not you, the setup prints a message you can send them.
+
+## Set it up
+
+<Steps>
+  <Step title="Install the CLI and sign in">
+    ```bash
+    npm install -g @mnemom/mnemom@latest
+    mnemom login
+    ```
+  </Step>
+  <Step title="Add the Mnemom Record GitHub App to the repository">
+    ```bash
+    mnemom agent setup record acme/api
+    ```
+
+    Replace `acme/api` with your `owner/repo`. The command prints the install link for the Mnemom Record GitHub App, `https://github.com/apps/mnemom-record/installations/new`, and checks that the App is installed on the repository. It waits while you, or an organization admin, install it. To see the steps without changing anything, add `--dry-run`.
+
+    The App's permissions, and how to remove it, are in [Mnemom Record GitHub App](/guides/record-app-permissions).
+  </Step>
+  <Step title="Let Mnemom add the repository">
+    When the App is on the repository, the command finishes with:
+
+    ```text
+    Done. Mnemom Record is on acme/api.
+    The Mnemom record check appears on its PRs once Mnemom has acme/api on the Record. Not on the next PR? Ask your Mnemom contact to add acme/api.
+    ```
+
+    Installing the App does not switch the Record on by itself. While access is by invitation, Mnemom adds each repository to the Record, and the `Mnemom record` check appears on the repository's pull requests once Mnemom has added it. Until then, its pull requests get no record: no check, no comment and no bundle. If a pull request you open after setup has no `Mnemom record` check, ask your Mnemom contact to add the repository.
+  </Step>
+  <Step title="Run your agent">
+    ```bash
+    mnemom agent fix-login
+    ```
+
+    `mnemom agent` starts your agent with Mnemom recording the session. `fix-login` is the session's name: use any name you like. Plain `mnemom agent` asks for one. Commits the agent makes in a recorded session carry a `Mnemom-Conversation` trailer, which is how Mnemom ties a commit to its session. See [Mnemom agent](/gateway/agent) for the launch options.
+  </Step>
+  <Step title="Open a pull request">
+    Push the branch and open a pull request as you normally would.
+  </Step>
+</Steps>
+
+## What you get on the pull request
+
+- **The `Mnemom record` check.** Its summary says where the bundle is and lists what the record shows for each conversation.
+- **One Mnemom comment.** Mnemom posts it once and updates the same comment on later pushes, so the pull request never collects a pile of them.
+- **The signed bundle** at `.mnemom/records/<pr>.json`, where `<pr>` is the pull request number. Mnemom commits it to the pull request's branch, so pull before you push again. A pull request from a fork never gets a commit: its bundle goes in the check's summary instead.
+
+[Read and verify a Mnemom record](/guides/read-and-verify-a-record) explains each line of the comment and the check, and how to verify the bundle yourself.
+
+## The check does not block by default
+
+When Mnemom cannot build a record for a head, the `Mnemom record` check finishes as **neutral** and says why. A neutral check never stops a merge.
+
+To make it fail instead, set the repository's `check_fail_mode` to `fail_closed`. An owner or admin of your Mnemom org can do that with [Change a repo's record App settings](/api-reference/endpoint/put-orgs-org-id-record-app-settings):
+
+```bash
+curl -X PUT "https://api.mnemom.ai/v1/orgs/org-1a2b3c4d/record/app-settings?repo=acme/api" \
+  -H "X-Mnemom-Api-Key: $MNEMOM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"check_fail_mode": "fail_closed"}'
+```
+
+With `fail_closed`, a head with no record gets a **failure** check. To block the merge on it, also mark `Mnemom record` as a required status check in the repository's branch protection.
+
+A bundle that the published verifier rejects always gets a failure check, whatever the setting.
+
+## Updating the branch from its base
+
+Updating the pull request's branch from its base, with GitHub's **Update branch** button or a merge commit you push, makes a new head that no recorded session made. Mnemom keeps the record:
+
+- Mnemom builds the record from the newest earlier commit that a recorded session made, and binds it to the new head. The `Mnemom record` check, the comment and the bundle at `.mnemom/records/<pr>.json` all update for the new head as on any other push.
+- The merge commit counts in M but not in N on the `N of M commits from recorded sessions` line, because no recorded session made it. See [Read and verify a Mnemom record](/guides/read-and-verify-a-record#n-of-m-commits-from-recorded-sessions).
+
+A pull request with no commit at all from a recorded session has no record to keep. Its check says that no Mnemom session made this head, and finishes as **neutral**, or as **failure** under `fail_closed`.
+
+## Next
+
+- [Read and verify a Mnemom record](/guides/read-and-verify-a-record)
+- [Contracted agent](/quickstart/contracted-agent): label a GitHub issue and a Mnemom agent opens the pull request.
+- [Conduct record specification](/specifications/conduct-record)

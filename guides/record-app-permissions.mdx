@@ -1,0 +1,55 @@
+---
+title: "Mnemom Record GitHub App"
+description: "The permissions the Mnemom Record GitHub App asks for and what each is used for, how to uninstall it, and what stays in your repository afterwards."
+sidebarTitle: "Mnemom Record GitHub App"
+icon: "github"
+---
+
+The Mnemom Record GitHub App puts the Mnemom record on your pull requests and runs [contracted agents](/quickstart/contracted-agent) from labelled issues. An admin of your GitHub organization installs it from `https://github.com/apps/mnemom-record/installations/new`, on all repositories or on the ones they select.
+
+## Permissions
+
+GitHub shows these on the install screen. Each one is used for the following, and for nothing else.
+
+| Permission | Access | What Mnemom uses it for |
+|---|---|---|
+| Metadata | Read | Required by GitHub for every App: the repository's name and settings. |
+| Contents | Read and write | Commits the signed bundle to `.mnemom/records/<pr>.json` on the pull request's branch, and reads a head commit to find its `Mnemom-Conversation` trailer. Reads GitHub's diff of a pull request commit whose SHA Mnemom has no session report for, to compute its `git patch-id` and match a rebased commit to the recorded one, for up to 250 commits per pull request. For a contracted agent, lets the runner push its job branch, for that one repository and for one hour. |
+| Checks | Read and write | Posts the `Mnemom record` check, and the outcome check after a merge. |
+| Pull requests | Read and write | Posts and updates the one Mnemom comment on a recorded pull request. For a contracted agent, lets the runner open the job's pull request as the Mnemom Record bot. |
+| Issues | Read and write | Posts Mnemom's comments on an issue labelled `mnemom`, such as a send-back asking for what is missing, a service-limit notice, the acknowledgement when Mnemom seals the issue as a contract, and a notice when Mnemom ends a job that stalled. |
+| Actions | Read and write | Wakes the contracted agent's runner, the `.github/workflows/mnemom-agent-run.yml` workflow, when a contract is sealed. |
+
+To build a record, Mnemom reads commit metadata and, for a commit it cannot match by SHA, that commit's diff. It uses a diff only to compute the patch-id, and the bundle carries the commit SHAs, not the diff. Mnemom writes only the files, checks, comments and pull requests above. The contracted agent's runner works on your code inside your own GitHub Actions.
+
+## Uninstall
+
+An admin of your GitHub organization can remove the App from one repository or from all of them:
+
+1. Open `https://github.com/organizations/<org>/settings/installations`, where `<org>` is your GitHub organization.
+2. Next to **Mnemom Record**, select **Configure**.
+3. To remove one repository, take it out of **Repository access** and save. To remove the App everywhere, select **Uninstall** at the bottom of the page.
+
+For a repository under a personal account, use `https://github.com/settings/installations` instead.
+
+### What stops
+
+From the moment it is removed, Mnemom can no longer write to the repository:
+
+- no `Mnemom record` check, comment or bundle commit on new pushes or pull requests;
+- no outcome check, including for a merge still inside its window;
+- no response to issues labelled `mnemom`, and no contracted-agent jobs.
+
+### What stays in your repository
+
+Everything already written stays, because it is in your repository and not Mnemom's to remove:
+
+- the bundles under `.mnemom/records/` and the sealed contracts under `.mnemom/contracts/`, in the commits that added them;
+- the checks and comments already on pull requests and issues;
+- for a contracted agent, the runner workflow `.github/workflows/mnemom-agent-run.yml` and the `ANTHROPIC_API_KEY` secret. Delete them yourself if you no longer want them.
+
+A bundle you keep can still be verified after the App is gone. See [Read and verify a Mnemom record](/guides/read-and-verify-a-record).
+
+## What Mnemom keeps
+
+Removing the App does not delete what Mnemom already holds for your organization: the signed records it built, the index of recorded pull requests (repository, pull request number and commits), outcome results, and the contracts it sealed. To have Mnemom delete what it holds, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai). For agent and organization deletion, see [GDPR data subject rights](/guides/gdpr-data-subject-rights).

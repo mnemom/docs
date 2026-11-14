@@ -1,0 +1,95 @@
+---
+title: "Contracted agent"
+description: "Label a GitHub issue mnemom, and Mnemom seals it as a contract and a Mnemom agent opens a pull request for a person to review and merge."
+sidebarTitle: "Contracted agent"
+icon: "file-contract"
+---
+
+With a contracted agent, work is assigned in GitHub. A person labels an issue `mnemom`. Mnemom checks that the issue says enough to act on, seals it as a contract, and a Mnemom agent does the work in your repository's GitHub Actions and opens a pull request. A person reviews and merges that pull request. Mnemom never merges.
+
+<Note>
+  Contracted agents are open to invited customers. If your organization does not have an invitation yet, ask your Mnemom contact.
+</Note>
+
+## What you need
+
+- **Node.js 18 or newer** and the GitHub CLI (`gh`), signed in.
+- **Your Mnemom organization's invitation accepted.** If the setup prints `durable is off for <org>`, your organization has not accepted it yet: accept the invitation with `mnemom agent --invite <token>`.
+- **An Anthropic API key.** The agent's runner uses it from the repository secret `ANTHROPIC_API_KEY`, and Mnemom uses your organization's key to check each issue before it seals a contract. You pay Anthropic for both.
+- **GitHub Actions turned on** for the repository.
+
+## Set it up
+
+```bash
+npm install -g @mnemom/mnemom@latest
+mnemom login
+mnemom agent setup contracted acme/api
+```
+
+Replace `acme/api` with your `owner/repo`. The command prints its steps first, marks each one done or needed, and says who has to do the ones it cannot do for you. Add `--dry-run` to see them without changing anything.
+
+| Step | What happens | Who can do it |
+|---|---|---|
+| GitHub App | Installs the Mnemom Record GitHub App on the repository, from `https://github.com/apps/mnemom-record/installations/new`. | An admin of the GitHub organization |
+| Model key | Sets the repository secret `ANTHROPIC_API_KEY` for the runner, and gives your Anthropic key to Mnemom for the issue checks. | A repository admin sets the secret. An owner or admin of your Mnemom organization sets the key Mnemom uses. |
+| Runner | Opens a pull request that adds `.github/workflows/mnemom-agent-run.yml` and, when your GitHub login can, merges it into the default branch itself with a squash merge. It waits only when your login cannot merge the pull request, or when a merge queue or required checks hold it. | Anyone whose GitHub login can merge to the default branch. If yours cannot, a repository admin merges it. |
+| Turn on | Switches the repository on for contracted agents. | An owner or admin of your Mnemom organization |
+
+If you are not the admin a step needs, the command prints a message you can send them. When every step is done, it finishes with `Done.` and tells you to label an issue on `acme/api` with `mnemom`.
+
+The App's permissions, and how to remove it, are in [Mnemom Record GitHub App](/guides/record-app-permissions).
+
+## Assign work with the `mnemom` label
+
+Mnemom picks up only issues labelled `mnemom`. This holds on every repository, including Mnemom's own.
+
+- The person who adds the label needs write access to the repository.
+- The issue's author needs write access too. Mnemom checks the author before it judges the request, and an issue from an author without write access gets no comment at all. If an outside contributor opens the issue, a maintainer labelling it does not start a job: open a new issue yourself with the same request.
+- A label added by a bot is ignored, so another automation cannot start a job by labelling an issue.
+- An issue a bot opened is still checked and can be sent back, which uses your organization's Anthropic key, but Mnemom never seals it. The exception is a GitHub App that an owner or admin of your Mnemom organization has allowed to file issues for a person, with `PUT /v1/orgs/{org_id}/contract-step/issue-intake-apps/{app_slug}`. Its issue must name that person on a line of its own, `Requested-by: @<login>`, and that person needs write access. Mnemom then seals it with that person as the requester.
+- Removing the label later does not undo a contract that was already sealed.
+
+Write the issue as you would for a colleague: what to change, where, and how you will know it is done. The title becomes the pull request's title.
+
+## What happens next
+
+Mnemom answers on the issue with one of two comments.
+
+- **A send-back.** The issue does not say enough to act on yet. The comment asks for what is missing. Edit the issue to answer it, and Mnemom checks it again.
+- **An acknowledgement.** Mnemom sealed the issue as a contract. The comment gives the start of the contract's sha256 and says that an agent will open a pull request and a person will merge it. Mnemom posts it once per issue.
+
+If your organization is at the [service limit](#service-limit), Mnemom seals nothing and posts one comment saying so. The issue does not wait: edit it once a running job finishes, and Mnemom checks it again.
+
+## Service limit
+
+Each Mnemom organization can have up to 200 jobs running at once. There is no daily limit. This is a service limit that protects the platform, the same for every organization, not a plan limit.
+
+A new job is checked against it right before Mnemom seals the issue. An issue that is already sealed is never refused. At the limit, the comment on the issue says:
+
+> This organization has 200 jobs running, the service limit. Contact support@mnemom.ai to raise it.
+
+## Answer the agent's questions
+
+The agent may stop and ask you something while it works. List its open questions, then answer one:
+
+```bash
+mnemom agent sessions questions <name>
+mnemom agent sessions answer <name> latest 2
+```
+
+`<name>` is the job's session name, as `mnemom agent sessions` lists it. `latest` answers the newest open question. Each choice is an option number, an option label, or free text. Add `--all` to `questions` to include answered ones, and `--dismiss` to `answer` to dismiss a question without answering it.
+
+## The job's pull request
+
+- The **Mnemom Record** bot opens it.
+- It takes the issue's title, and it closes the issue when it merges.
+- It carries the sealed contract at `.mnemom/contracts/<sha256>.json`, named by the contract's sha256.
+- It gets the same `Mnemom record` check, comment and signed bundle as any recorded pull request, with the sealed contract and its judged turns on the goal line. See [Read and verify a Mnemom record](/guides/read-and-verify-a-record).
+
+A person reviews and merges the pull request. Mnemom never merges.
+
+## Next
+
+- [Read and verify a Mnemom record](/guides/read-and-verify-a-record)
+- [Record your own agent](/quickstart/record-your-agent): put a record on the pull requests your own agent opens.
+- [Mnemom Record GitHub App](/guides/record-app-permissions)

@@ -1,0 +1,162 @@
+---
+title: "Read and verify a Mnemom record"
+description: "What each line of the Mnemom record comment and check means, and how to verify the signed bundle yourself with npx @mnemom/verify, online or offline."
+sidebarTitle: "Read and verify a record"
+icon: "badge-check"
+---
+
+A pull request with a Mnemom record carries three things: the `Mnemom record` check, one Mnemom comment, and a signed bundle at `.mnemom/records/<pr>.json`. The comment and the check show the same lines, read from the bundle's own fields. The bundle is the proof. This page explains each line, then how to check the bundle yourself.
+
+## Read the lines
+
+Each line makes one kind of claim: something measured, a verdict with its coverage, or an outcome. A line never mixes them, and no line says a change is "safe" or "correct".
+
+### Cost
+
+The model cost of the recorded sessions, in US dollars: the tokens the model calls used, at the provider's published prices. The bundle carries the same amount in millimu (1 μ = $0.01).
+
+### μ
+
+The μ line is the [inference share](/pricing/overview#what-you-pay-for) for the work. While any conversation in the record has a share Mnemom has not billed yet, the comment and the check show the bare word `pending`, with no amount. They never show an estimate. The provisional amount is in the bundle only, on that conversation's signed cost line, which reads `≈ N mmu (pending)`. A pending amount is not a charge. Once every conversation's share is final, the line shows the total in US dollars. A record with no share at all reads `not charged`, never 0.
+
+### N of M commits from recorded sessions
+
+How many of the pull request's commits came from a recorded Mnemom session, out of all its commits. A commit counts when it carries a `Mnemom-Conversation` trailer and the session reported it to Mnemom. Commits made by hand, by another tool, or from a session that was not recorded count in M but not in N. They have no conduct record behind them.
+
+### Goal
+
+- **`not checked`**: no goal was set for the session, so nothing was judged against one.
+- **`implicit goal`**: the gateway inferred the goal from the conversation. See [Implicit goal mode](/gateway/implicit-goal-mode).
+- **`sealed contract`**: the session ran against a sealed contract, such as a [contracted agent](/quickstart/contracted-agent)'s issue. The line gives the first 12 hex characters of the contract's sha256, a shortened form of the full hash in the bundle, and the verdict over the judged turns, for example `sealed contract, sha256 3f9a1c07be52; 12 of 14 judged turns on goal`. The verdict covers the judged turns only, not every turn of the session.
+
+### Autonomy
+
+How much a person took part in the recorded sessions, and how often the sessions' context was compacted, counted over every session in the record. For example, `Autonomy: 3 messages from a person, 1 compaction`.
+
+- **`N messages from a person`**: the turns that a person sent, as opposed to turns the agent made on its own. The count says how often a person stepped in. It does not say what the messages asked for.
+- **`messages from a person: unclassified`**: for at least one turn in the record, Mnemom could not tell whether a person or the agent sent it. It then shows no count at all rather than a partial one.
+- **`M compactions`**: how many times a session's context was compacted, with earlier conversation summarized to make room. `0 compactions` means no context was compacted.
+
+When the record carries no data about people, the line is left out. The `Mnemom record` check's text also gives the counts for each conversation, as `Messages from a person` and `Compactions`. A conversation whose messages are unclassified has no `Messages from a person` line there.
+
+### Protection
+
+What Safe House did over the recorded sessions. Each act counts under the protection mode at the time of that act, not the mode now. The line gives the number of checks, then what they found:
+
+| The line shows | What it means |
+|---|---|
+| `not checked` | Protection was `off` for every act, so nothing was checked. |
+| `12 checks, none flagged` | Every check passed. |
+| `2 stopped` | Under `enforce`, Safe House blocked or quarantined 2 acts. Only `enforce` stops anything. |
+| `2 would have been blocked` | Under `observe` or `nudge`, 2 acts got a block verdict. Nothing was stopped: the agent's act went ahead. |
+| `1 would have been quarantined` | The same, for a quarantine verdict. |
+| `1 flagged` | Any other finding, such as a warning or a nudge, under any mode. |
+
+When nothing was stopped, the line ends with a note that says so:
+
+- **`(observe only, nothing was stopped)`**: every check ran under `observe`. Mnemom recorded the findings and did not stop or change anything the agent did.
+- **`(not enforced, nothing was stopped)`**: some checks ran under `nudge` and none under `enforce`.
+- **`(nothing was stopped)`**: some checks ran under `enforce`, and none of them blocked or quarantined an act.
+
+A full line reads, for example, `12 checks, 2 would have been blocked, 1 flagged (observe only, nothing was stopped)`. When the record carries no protection data, the line is left out.
+
+The bundle also signs one line per act that was not a pass, with the word set by the mode at the act: `flagged` under `observe`, `flagged, agent nudged` for a nudge under `nudge`, and `stopped`, with the tool name and never its arguments, for a block or quarantine under `enforce`. Those per-act words are in the bundle, not in the comment or the check.
+
+A protection line covers what the checks saw, nothing more. See [Safe House](/concepts/safe-house).
+
+### Integrity checkpoints
+
+The [integrity checkpoints](/concepts/integrity-checkpoints) the record cites. Each one carries its commitment and Mnemom's signature over it, so the verifier checks them along with the record.
+
+### Canon
+
+`off for this org`: Canon is not turned on for your organization, so the record cites no Canon node for its contract or outcome. The [conduct record specification](/specifications/conduct-record) describes the Canon fields a record carries when it is on.
+
+### Outcome
+
+The Outcome line in the comment and the check says when Mnemom looks at the outcome. It never shows the result:
+
+- **`checked 7 days after merge`**: the pull request has not merged yet.
+- **`pending until <date>`**: the pull request merged and Mnemom is watching it for a revert. The date is 7 days after the merge.
+
+The comment and the `Mnemom record` check keep that line after the window closes. The result goes in a separate check named **`Mnemom outcome`** on the merge commit, posted once the result is known. It finishes as **neutral** and its summary is one of:
+
+- **`merged, no revert in 7 days`**: the window closed with no revert.
+- **`merged by automation, no revert in 7 days`**: the same, when automation merged the pull request.
+- **`reverted`**: a revert landed inside the window.
+
+The outcome never says "accepted". It records a merge and the absence of a revert, not a judgment of the change. The 7-day window is the default. When a repository sets another window, the lines above name that window in place of 7 days. An owner or admin of your Mnemom organization can change it per repository with `outcome_window_days` in [Change a repo's record App settings](/api-reference/endpoint/put-orgs-org-id-record-app-settings). A change applies to later merges only.
+
+## Verify the bundle
+
+Anyone with the bundle can check it with one command:
+
+```bash
+npx @mnemom/verify .mnemom/records/<pr>.json
+```
+
+```text
+JWKS: https://api.mnemom.ai/v1/.well-known/jwks.json (fetched)
+[0] AAP-ConductRecord/v1  aap-prod-2026-05-23  ok
+[1] AAP-PRRecord/v1  aap-prod-2026-05-23  ok  (2 of 2 commits from recorded sessions)
+valid, with flags: card hash not recorded (x27)
+```
+
+The first line names the key set it used. Then there is one line per signed statement, and the verdict last. The command exits `0` when the bundle is valid, flags included, and `1` when it is not. It exits `2` when it could not check at all: a usage error, a file it cannot read or that is not JSON, or a key set it could not fetch.
+
+### Where the keys come from
+
+Mnemom publishes its signing keys as a JWKS at:
+
+```text
+https://api.mnemom.ai/v1/.well-known/jwks.json
+```
+
+Without `--jwks`, the command fetches that URL and makes no other request.
+
+### Verify offline
+
+To check a bundle with no network, install the package and save the key set while you are online:
+
+```bash
+npm i @mnemom/verify
+curl -o jwks.json https://api.mnemom.ai/v1/.well-known/jwks.json
+```
+
+Then, offline:
+
+```bash
+npx @mnemom/verify .mnemom/records/<pr>.json --jwks jwks.json
+```
+
+With `--jwks`, the command reads keys only from that file, and `npx` runs the copy you installed. Fetch the key set again after Mnemom rotates a key: a statement signed by a key your file does not hold fails with `key_not_found`.
+
+### Valid, with flags
+
+`valid, with flags` is a valid verdict. A flag is a note that weakens one binding, and it never changes the verdict.
+
+Today every checkpoint carries **`card hash not recorded`**. A checkpoint can carry the hash of the [alignment card](/concepts/agent-cards) in force when it was taken. Mnemom does not record that hash yet, so the bundle proves the checkpoint and its signature but does not tie it to one version of the card.
+
+The other flags are `card not bound`, `linked statement not in bundle` and `lineage truncated`. The [verifier's reason codes](https://github.com/mnemom/aip/tree/main/packages/verify#reason-codes) list them all.
+
+### Bundle size
+
+A bundle can reach about 2 MB, because a long session cites many checkpoints. The command reads the whole file before it checks it.
+
+Mnemom commits the bundle to the pull request's branch. A pull request from a fork never gets a commit, so its bundle goes in the check's summary instead. GitHub caps a check summary at 65,535 characters, so a fork's bundle larger than that is not posted, and the check says so instead of posting a bundle that is cut off.
+
+## What the record does not prove
+
+A valid verdict proves that Mnemom signed these statements, that none of them changed after signing, and that the chain between the records and the links between the statements hold.
+
+It does not prove:
+
+- **That the code is correct.** The record says how the work was done, not whether the result is right.
+- **That every commit came from a recorded session.** Read the `N of M commits from recorded sessions` line. A commit outside a recorded session has no conduct record behind it.
+- **That protection caught everything.** A protection verdict covers what the checks saw.
+- **That the goal was met beyond the judged turns.** A goal verdict covers the turns that were judged, not the whole session.
+
+## Reference
+
+- [Conduct record specification](/specifications/conduct-record): every field of the signed record.
+- [`@mnemom/verify` README](https://github.com/mnemom/aip/tree/main/packages/verify#readme): the command, its options, and verifying in code.
