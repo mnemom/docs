@@ -43,6 +43,14 @@ name: Docs quality validators
 #   - test:code-facts: the gate's own node:test suite (contradiction, stale
 #     snapshot, unknown fact, rewritten phrase, malformed annotation).
 #
+# Also wired here (MNE-10095): the api-linked pages gate.
+#   - check:api-linked-pages: every page in scripts/api-linked-pages.json, the
+#     vendored list of docs pages mnemom-api links from the Org Scan report,
+#     has a page file or a redirect in docs.json that ends at one. A signed
+#     report keeps its links, so removing or renaming such a page needs a
+#     redirect. code-facts.yml checks the list against mnemom-api.
+#   - test:api-linked-pages: the gate's own node:test suite.
+#
 # All 4 scripts use only Node built-ins (confirmed by reading their imports),
 # so no `npm ci` step is needed — mirrors the `check:redirects` / `check:nav-
 # pages` / `check:nav-coverage` steps in mintlify-ci.yml. Each runs as its own
@@ -119,6 +127,14 @@ jobs:
 
       - name: Self-test code facts (MNE-9916)
         run: npm run test:code-facts
+
+      # MNE-10095: pages mnemom-api links from the Org Scan report still
+      # resolve (Node built-ins only).
+      - name: Check api-linked pages (MNE-10095)
+        run: npm run check:api-linked-pages
+
+      - name: Self-test api-linked pages (MNE-10095)
+        run: npm run test:api-linked-pages
 
       # docs#607 follow-up: the runner behind doc-examples-live.yml had 22+
       # tests and no workflow running them. npm ci (lockfile-frozen) for ajv.

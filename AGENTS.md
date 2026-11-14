@@ -83,6 +83,13 @@ agents.txt                 # Mirror of /for-agents agent pitch (also at root)
   phrase (syntax in `scripts/lib/code-facts.mjs`). `npm run check:code-facts`
   fails when the claim contradicts `scripts/code-facts-snapshot.json`, which
   `node scripts/sync-code-facts.mjs` vendors from mnemom-api and mnemom-platform.
+- **Pages mnemom-api links must keep resolving.** `scripts/api-linked-pages.json`
+  lists the docs pages the Org Scan report links (vendored from mnemom-api by
+  `node scripts/sync-api-linked-pages.mjs`). A signed report keeps its links, so
+  removing or renaming a listed page needs a redirect in `docs.json`.
+  `npm run check:api-linked-pages` fails without one. After the move, refresh
+  mnemom-api's own list (`src/org-scan/row-builder/__fixtures__/docs-pages.v1.json`)
+  and point the api link at the new page.
 - **`for-agents/` mirrors the second-person tone of agents.txt on
   www.mnemom.ai.** Keep them aligned in voice.
 - **Internal links use absolute paths** (`/concepts/foo`), not
