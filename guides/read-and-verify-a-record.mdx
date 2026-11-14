@@ -5,7 +5,7 @@ sidebarTitle: "Read and verify a record"
 icon: "badge-check"
 ---
 
-A pull request with a Mnemom record carries three things: the `Mnemom record` check, one Mnemom comment, and a signed bundle at `.mnemom/records/<pr>.json`. The comment and the check show the same lines, built from the bundle's own words. The bundle is the proof. This page explains each line, then how to check the bundle yourself.
+A pull request with a Mnemom record carries three things: the `Mnemom record` check, one Mnemom comment, and a signed bundle at `.mnemom/records/<pr>.json`. The comment and the check show the same lines, read from the bundle's own fields. The bundle is the proof. This page explains each line, then how to check the bundle yourself.
 
 ## Read the lines
 
@@ -15,9 +15,9 @@ Each line makes one kind of claim: something measured, a verdict with its covera
 
 The model cost of the recorded sessions, in US dollars: the tokens the model calls used, at the provider's published prices. The bundle carries the same amount in millimu (1 μ = $0.01).
 
-### μ: pending
+### μ
 
-The μ line is the [inference share](/pricing/overview#what-you-pay-for) for the work. It reads `pending`, with the provisional amount, until Mnemom bills the conversation. A pending amount is not a charge. A conversation that closes with no share reads `not charged`, never 0.
+The μ line is the [inference share](/pricing/overview#what-you-pay-for) for the work. While any conversation in the record has a share Mnemom has not billed yet, the comment and the check show the bare word `pending`, with no amount. They never show an estimate. The provisional amount is in the bundle only, on that conversation's signed cost line, which reads `≈ N mmu (pending)`. A pending amount is not a charge. Once every conversation's share is final, the line shows the total in US dollars. A record with no share at all reads `not charged`, never 0.
 
 ### N of M commits from recorded sessions
 
@@ -31,14 +31,26 @@ How many of the pull request's commits came from a recorded Mnemom session, out 
 
 ### Protection
 
-What Safe House did, in words set by the protection mode at the time of each act, not the mode now:
+What Safe House did over the recorded sessions. Each act counts under the protection mode at the time of that act, not the mode now. The line gives the number of checks, then what they found:
 
-| Mode at the act | What the line says |
+| The line shows | What it means |
 |---|---|
-| `off` | `not checked` |
-| `observe` | `flagged`. Observe only: Mnemom recorded the finding and did not stop or change anything the agent did. |
-| `nudge` | `flagged, agent nudged` |
-| `enforce` | `stopped`, with the tool name and never its arguments, when an act was blocked or quarantined. A warning under `enforce` reads `flagged`. |
+| `not checked` | Protection was `off` for every act, so nothing was checked. |
+| `12 checks, none flagged` | Every check passed. |
+| `2 stopped` | Under `enforce`, Safe House blocked or quarantined 2 acts. Only `enforce` stops anything. |
+| `2 would have been blocked` | Under `observe` or `nudge`, 2 acts got a block verdict. Nothing was stopped: the agent's act went ahead. |
+| `1 would have been quarantined` | The same, for a quarantine verdict. |
+| `1 flagged` | Any other finding, such as a warning or a nudge, under any mode. |
+
+When nothing was stopped, the line ends with a note that says so:
+
+- **`(observe only, nothing was stopped)`**: every check ran under `observe`. Mnemom recorded the findings and did not stop or change anything the agent did.
+- **`(not enforced, nothing was stopped)`**: some checks ran under `nudge` and none under `enforce`.
+- **`(nothing was stopped)`**: some checks ran under `enforce`, and none of them blocked or quarantined an act.
+
+A full line reads, for example, `12 checks, 2 would have been blocked, 1 flagged (observe only, nothing was stopped)`. When the record carries no protection data, the line is left out.
+
+The bundle also signs one line per act that was not a pass, with the word set by the mode at the act: `flagged` under `observe`, `flagged, agent nudged` for a nudge under `nudge`, and `stopped`, with the tool name and never its arguments, for a block or quarantine under `enforce`. Those per-act words are in the bundle, not in the comment or the check.
 
 A protection line covers what the checks saw, nothing more. See [Safe House](/concepts/safe-house).
 
