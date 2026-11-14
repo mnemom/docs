@@ -21,6 +21,14 @@ name: Code facts
 # `node scripts/sync-code-facts.mjs`, then `npm run check:code-facts`, fix any
 # page it flags, and open a PR.
 
+#
+# The same job also keeps scripts/api-linked-pages.json honest (MNE-10095):
+# the docs pages mnemom-api links from the Org Scan report. It re-reads the api
+# source files that hold those links and fails if the api links a page the
+# list does not hold. A red run there means: re-run
+# `node scripts/sync-api-linked-pages.mjs`, then `npm run check:api-linked-pages`,
+# and open a PR.
+
 on:
   push:
     branches: ["main"]
@@ -53,3 +61,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: node scripts/sync-code-facts.mjs --check
+      - name: Compare the api-linked pages list with mnemom-api main
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: node scripts/sync-api-linked-pages.mjs --check
