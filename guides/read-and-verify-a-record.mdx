@@ -27,7 +27,7 @@ How many of the pull request's commits came from a recorded Mnemom session, out 
 
 - **`not checked`**: no goal was set for the session, so nothing was judged against one.
 - **`implicit goal`**: the gateway inferred the goal from the conversation. See [Implicit goal mode](/gateway/implicit-goal-mode).
-- **`sealed contract`**: the session ran against a sealed contract, such as a [contracted agent](/quickstart/contracted-agent)'s issue. The line gives the contract's sha256 and a verdict with its coverage, for example `12 of 14 judged turns on goal, 14 of 20 turns judged`. The verdict covers the judged turns only.
+- **`sealed contract`**: the session ran against a sealed contract, such as a [contracted agent](/quickstart/contracted-agent)'s issue. The line gives the first 12 hex characters of the contract's sha256, a shortened form of the full hash in the bundle, and the verdict over the judged turns, for example `sealed contract, sha256 3f9a1c07be52; 12 of 14 judged turns on goal`. The verdict covers the judged turns only, not every turn of the session.
 
 ### Protection
 
@@ -64,13 +64,18 @@ The [integrity checkpoints](/concepts/integrity-checkpoints) the record cites. E
 
 ### Outcome
 
-What happened after the merge:
+The Outcome line in the comment and the check says when Mnemom looks at the outcome. It never shows the result:
 
+- **`checked 7 days after merge`**: the pull request has not merged yet.
 - **`pending until <date>`**: the pull request merged and Mnemom is watching it for a revert. The date is 7 days after the merge.
-- **`merged, no revert in 7 days`**: the window closed with no revert. When automation merged it, the line says `merged by automation`.
+
+The comment and the `Mnemom record` check keep that line after the window closes. The result goes in a separate check named **`Mnemom outcome`** on the merge commit, posted once the result is known. It finishes as **neutral** and its summary is one of:
+
+- **`merged, no revert in 7 days`**: the window closed with no revert.
+- **`merged by automation, no revert in 7 days`**: the same, when automation merged the pull request.
 - **`reverted`**: a revert landed inside the window.
 
-The outcome never says "accepted". It records a merge and the absence of a revert, not a judgment of the change. The 7-day window is the default. An owner or admin of your Mnemom organization can change it per repository with `outcome_window_days` in [Change a repo's record App settings](/api-reference/endpoint/put-orgs-org-id-record-app-settings). A change applies to later merges only.
+The outcome never says "accepted". It records a merge and the absence of a revert, not a judgment of the change. The 7-day window is the default. When a repository sets another window, the lines above name that window in place of 7 days. An owner or admin of your Mnemom organization can change it per repository with `outcome_window_days` in [Change a repo's record App settings](/api-reference/endpoint/put-orgs-org-id-record-app-settings). A change applies to later merges only.
 
 ## Verify the bundle
 
