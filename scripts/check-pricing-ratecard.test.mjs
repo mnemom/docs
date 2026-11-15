@@ -36,12 +36,22 @@ test("the committed page matches the committed snapshot", () => {
 
 const AGENT = ["gateway.context.fold", "gateway.goal.judge", "gateway.goal.intent"];
 const GOVERNANCE = ["gateway.turn.governed", "gateway.sh.check", "kernel.observer.trace-analysis"];
+const MEDIA = [
+  "design.media.image",
+  "design.media.sound",
+  "design.media.video",
+  "clarity.generation",
+  "clarity.video",
+  "clarity.voice",
+  "clarity.transcribe",
+  "clarity.live-transcribe",
+];
 
-test("the snapshot is the pinned card: every gateway call at cost, a 4% share over all of them (scope all)", () => {
-  assert.equal(SNAP.version, "v2026-10-share");
+test("the snapshot is the pinned card: every gateway call at cost, a 5% share over agent work, governance on top (scope agent)", () => {
+  assert.equal(SNAP.version, "v2026-11-share-5");
   assert.equal(SNAP.peg.usd_per_mu, 0.01);
-  assert.equal(SNAP.inference_share_bps, 400);
-  assert.equal(SNAP.inference_share_scope, "all");
+  assert.equal(SNAP.inference_share_bps, 500);
+  assert.equal(SNAP.inference_share_scope, "agent");
   const by = Object.fromEntries(SNAP.classes.map((c) => [c.class, c]));
   for (const c of [...AGENT, ...GOVERNANCE]) {
     assert.equal(by[c].model, "usage", c);
@@ -55,6 +65,10 @@ test("the snapshot is the pinned card: every gateway call at cost, a 4% share ov
   assert.equal(by["rg.run.company-card"].rate_mu, 49900);
   for (const c of ["kernel.anchoring.base-l2", "kernel.egress.webhook", "kernel.egress.email"]) {
     assert.equal(by[c].rate_mu, 0, c);
+  }
+  for (const c of MEDIA) {
+    assert.equal(by[c].model, "usage", c);
+    assert.equal(classMultiplier(by[c], SNAP), 5, c);
   }
 });
 
@@ -80,7 +94,7 @@ test("a class with no cogs_multiplier falls back to the card margin, and a margi
   delete legacy.classes.find((c) => c.class === "gateway.context.fold").cogs_multiplier;
   mustFail(PAGE, /gateway\.context\.fold says 1× but the rate card's margin implies 5×/, legacy);
   // On the at-cost card no class is priced from the margin, so quoting one fails.
-  mustFail(PAGE + "\nThat is an 80% margin.\n", /80% margin, but no class on rate card v2026-10-share is priced from the card margin/);
+  mustFail(PAGE + "\nThat is an 80% margin.\n", /80% margin, but no class on rate card v2026-11-share-5 is priced from the card margin/);
   const margin = clone(legacy);
   margin.usage_margin_pct = 0.75;
   mustFail(PAGE + "\nThat is an 80% margin.\n", /80% margin; the rate card margin is 75%/, margin);
@@ -88,26 +102,26 @@ test("a class with no cogs_multiplier falls back to the card margin, and a margi
 
 test("the inference share: the page's percentage must be the card's", () => {
   const snap = clone(SNAP);
-  snap.inference_share_bps = 500;
-  mustFail(PAGE, /gateway\.turn\.inference-share says 4% but the rate card's inference share is 5%/, snap);
-  mustFail(PAGE, /quotes a 4% inference share; the rate card's is 5%/, snap);
-  mustFail(PAGE, /worked example uses a 4% share; the rate card's is 5%/, snap);
-  mustFail(PAGE + "\nAgent sessions pay 3% of the forwarded inference spend.\n", /quotes a 3% inference share; the rate card's is 4%/);
+  snap.inference_share_bps = 600;
+  mustFail(PAGE, /gateway\.turn\.inference-share says 5% but the rate card's inference share is 6%/, snap);
+  mustFail(PAGE, /quotes a 5% inference share; the rate card's is 6%/, snap);
+  mustFail(PAGE, /worked example uses a 5% share; the rate card's is 6%/, snap);
+  mustFail(PAGE + "\nAgent sessions pay 3% of the forwarded inference spend.\n", /quotes a 3% inference share; the rate card's is 5%/);
   const none = clone(SNAP);
   delete none.inference_share_bps;
   delete none.inference_share_scope;
-  mustFail(PAGE, /inference-share is listed but rate card v2026-10-share carries no inference_share_bps/, none);
+  mustFail(PAGE, /inference-share is listed but rate card v2026-11-share-5 carries no inference_share_bps/, none);
   mustFail(
-    PAGE.replace("4% of the forwarded inference spend, less the request's measured charges |", "Measured model cost |"),
-    /gateway\.turn\.inference-share must read "4% of the forwarded inference spend/,
+    PAGE.replace("5% of the forwarded inference spend, less the request's agent charges |", "Measured model cost |"),
+    /gateway\.turn\.inference-share must read "5% of the forwarded inference spend/,
   );
 });
 
 test("every usage class on the card must be on the page", () => {
   const page = PAGE.split("\n").filter((l) => !l.includes("`gateway.goal.intent`")).join("\n");
-  mustFail(page, /usage class gateway\.goal\.intent on rate card v2026-10-share is missing/);
+  mustFail(page, /usage class gateway\.goal\.intent on rate card v2026-11-share-5 is missing/);
   const share = PAGE.split("\n").filter((l) => !l.includes("`gateway.turn.inference-share`")).join("\n");
-  mustFail(share, /usage class gateway\.turn\.inference-share on rate card v2026-10-share is missing/);
+  mustFail(share, /usage class gateway\.turn\.inference-share on rate card v2026-11-share-5 is missing/);
 });
 
 test("a usage class shown with a fixed price fails", () => {
@@ -149,7 +163,7 @@ test("a missing or doubled checked region fails closed", () => {
 });
 
 test("the region must name the snapshot's rate card version", () => {
-  mustFail(PAGE.replace("`v2026-10-share`", "v2026-10-share"), /must name the rate card version/);
+  mustFail(PAGE.replace(/`v2026-11-share-5`/g, "v2026-11-share-5"), /must name the rate card version/);
 });
 
 test("a wrong peg anywhere on the page fails", () => {
@@ -191,20 +205,21 @@ test("a fixed price with the wrong unit fails", () => {
 
 test("review mutation (c): wrong worked-example arithmetic fails", () => {
   mustFail(PAGE.replace("At 1× that is 0.2 μ", "At 1× that is 0.3 μ"), /1× 0\.2 μ is 0\.3 μ; it is 0\.2 μ/);
-  mustFail(PAGE.replace("At 1× that is 3 μ", "At 5× that is 15 μ"), /worked example uses 5×; the rate card charges 1×/);
-  mustFail(PAGE.replace("10 μ in total", "10.24 μ in total"), /total is 10\.24 μ but its charges add up to 10 μ/);
+  // The card charges 1× (gateway) and 5× (generated media, Clarity), so 2× is foreign.
+  mustFail(PAGE.replace("At 1× that is 3 μ", "At 2× that is 6 μ"), /worked example uses 2×; the rate card charges/);
+  mustFail(PAGE.replace("12.74 μ in total", "12.5 μ in total"), /total is 12\.5 μ but its charges add up to 12\.74 μ/);
   mustFail(PAGE.replace("### A worked example", "### An example"), /must keep a "### A worked example" section/);
-  mustFail(PAGE.replace(/At\s+1× that is/g, "Once more that is").replace("4% of that is", "A share of"), /no "At N× that is C μ" step/);
+  mustFail(PAGE.replace(/At\s+1× that is/g, "Once more that is").replace("5% of that is", "A share of"), /no "At N× that is C μ" step/);
 });
 
 test("review mutation (c): the worked example's inference share is checked", () => {
-  mustFail(PAGE.replace("4% of that is 10 μ", "4% of that is 12 μ"), /4% of 250 μ is 12 μ; it is 10 μ/);
-  mustFail(PAGE.replace("the larger of the two, 10 μ", "the larger of the two, 13 μ"), /larger of 10 μ and 3\.24 μ is 10 μ, not 13 μ/);
-  mustFail(PAGE.replace("a 6.76 μ inference-share line", "a 7 μ inference-share line"), /inference-share line is 7 μ; it is 6\.76 μ/);
-  // Scope all: governance is inside the comparison, so a larger fold plus governance
-  // beats the share and there is no share line.
+  mustFail(PAGE.replace("5% of that is 12.5 μ", "5% of that is 12 μ"), /5% of 250 μ is 12 μ; it is 12\.5 μ/);
+  mustFail(PAGE.replace("the larger of\nthe two, 12.5 μ", "the larger of\nthe two, 13 μ"), /larger of 12\.5 μ and 3 μ is 12\.5 μ, not 13 μ/);
+  mustFail(PAGE.replace("a 9.5 μ inference-share line", "a 10 μ inference-share line"), /inference-share line is 10 μ; it is 9\.5 μ/);
+  // Scope agent: only the agent work is compared with the share, so a larger fold
+  // beats it and there is no share line; governance is added on top either way.
   const cogsWins = PAGE.replace("$0.03 (3 μ). At 1× that is 3 μ", "$0.15 (15 μ). At 1× that is 15 μ");
-  mustFail(cogsWins, /larger of 10 μ and 15\.24 μ is 15\.24 μ, not 10 μ/);
+  mustFail(cogsWins, /larger of 12\.5 μ and 15 μ is 15 μ, not 12\.5 μ/);
 });
 
 test("review mutation (c): a wrong expiry period fails", () => {
@@ -248,27 +263,27 @@ test("parsePrice reads each price form", () => {
   assert.equal(parsePrice("about a cent").kind, "unparseable");
 });
 
-test("inference_share_scope: the share row and the prose must say what the 4% is compared against", () => {
-  // Scope all (the pinned card): the row nets the measured charges, and no sentence may
-  // put governance on top. Observer trace analysis may (it runs later, off the request).
+test("inference_share_scope: the share row and the prose must say what the share is compared against", () => {
+  // Scope agent (the pinned card): the row nets agent charges only, and the page must
+  // say governance is charged on top.
   mustFail(
-    PAGE.replace("less the request's measured charges |", "less the request's agent charges |"),
-    /must read "4% of the forwarded inference spend, less the request's measured charges" \(inference_share_scope all\)/,
+    PAGE.replace("less the request's agent charges |", "less the request's measured charges |"),
+    /must read "5% of the forwarded inference spend, less the request's agent charges" \(inference_share_scope agent\)/,
   );
   mustFail(
-    PAGE + "\nGovernance, when on, is charged at measured cost on top.\n",
-    /nets governance inside the inference-share comparison \(scope all\), but the page says: ".*Governance, when on/,
+    PAGE.replace(/on\s+top/g, "as well"),
+    /bills governance on top of the inference-share comparison \(scope agent\); the page must say so/,
   );
-  assert.deepEqual(problemsFor(PAGE + "\nObserver trace analysis is charged on top.\n"), []);
-  // Scope agent: the row nets agent charges only, and the page must say governance is on top.
-  const agent = clone(SNAP);
-  agent.inference_share_scope = "agent";
-  mustFail(PAGE, /less the request's agent charges" \(inference_share_scope agent\)/, agent);
-  mustFail(PAGE, /bills governance on top of the inference-share comparison \(scope agent\); the page must say so/, agent);
-  // An absent scope is billing's default, agent.
+  // An absent scope is billing's default, agent, so the page still matches.
   const absent = clone(SNAP);
   delete absent.inference_share_scope;
-  mustFail(PAGE, /\(inference_share_scope agent\)/, absent);
+  assert.deepEqual(problemsFor(PAGE, absent), []);
+  // Scope all: the row nets the measured charges, and no sentence may put governance on
+  // top. Observer trace analysis may (it runs later, off the request).
+  const all = clone(SNAP);
+  all.inference_share_scope = "all";
+  mustFail(PAGE, /less the request's measured charges" \(inference_share_scope all\)/, all);
+  mustFail(PAGE, /nets governance inside the inference-share comparison \(scope all\), but the page says: ".*charged on top/, all);
 });
 
 test("parsePrice reads the whole cell, not a prefix", () => {
@@ -374,10 +389,10 @@ test("pageRelevantDiff sees changes to listed classes only", () => {
   assert.ok(d.includes("overdraft false → true"), d.join("\n"));
   assert.ok(d.some((x) => x.startsWith("gateway.sh.check: usage governance 1× → free_counted 0 μ")), d.join("\n"));
   const share = clone(SNAP);
-  share.inference_share_bps = 500;
+  share.inference_share_bps = 600;
   share.classes.find((c) => c.class === "gateway.goal.judge").cogs_multiplier = 2;
   const ds = pageRelevantDiff(SNAP, share, ["gateway.goal.judge"]);
-  assert.ok(ds.includes("inference_share_bps 400 → 500"), ds.join("\n"));
+  assert.ok(ds.includes("inference_share_bps 500 → 600"), ds.join("\n"));
   assert.ok(ds.includes("gateway.goal.judge: usage agent 1× → usage agent 2×"), ds.join("\n"));
   assert.ok(d.some((x) => x.startsWith("usage_margin_pct")), d.join("\n"));
 });
