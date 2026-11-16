@@ -1,0 +1,219 @@
+---
+title: "Slack channel"
+description: "Let agent sessions post to Slack and receive replies from the people you allow"
+sidebarTitle: "Slack channel"
+icon: "slack"
+---
+
+<Warning>
+**Experimental.** The Slack channel is an experimental feature of the `mnemom` CLI. Turn it on with `mnemom experimental enable slack`. It may change or be removed without a deprecation period.
+</Warning>
+
+The Slack channel connects your Mnemom agent sessions to a Slack workspace through a Slack app you create. A session can post messages, reply in threads and read threads. People on your allowlist can reach a session by replying in its thread or by addressing it by name.
+
+While the feature is off:
+
+- `mnemom agent slack` exits with code 2 and tells you how to enable it.
+- `--slack` is hidden from `--help`.
+- the `slack_*` settings are ignored, with a notice.
+
+## How it fits together
+
+- **Your Slack app.** You create it from a manifest the CLI prints. It uses Socket Mode, so nothing needs a public URL.
+- **The router.** One process per machine holds the Socket Mode connection and hands each incoming message to the right session. Slack delivers each event to only one open connection, so sessions do not connect on their own.
+- **The channel server.** `--slack` adds a small MCP channel server to the session. It shows routed messages to the model and gives it tools to reply.
+
+## Set up
+
+<Steps>
+  <Step title="Turn the feature on">
+    ```bash
+    mnemom experimental enable slack
+    ```
+  </Step>
+  <Step title="Create the Slack app">
+    ```bash
+    mnemom agent slack manifest [app-name]
+    ```
+    This prints the app manifest as JSON. At api.slack.com, create an app **From a manifest** and paste it. The default name is `<your user>-agents`; names are cut to 35 characters.
+
+    The manifest asks for these bot scopes:
+
+    - `chat:write`
+    - `chat:write.customize`
+    - `app_mentions:read`
+    - `channels:history`
+    - `groups:history`
+    - `channels:read`
+    - `channels:join`
+    - `users:read`
+
+    It subscribes to `app_mention`, `message.channels` and `message.groups`, and turns Socket Mode on.
+
+    A manifest cannot create the app-level token. Under **Basic Information → App-Level Tokens**, create one with the `connections:write` scope.
+  </Step>
+  <Step title="Log in">
+    ```bash
+    mnemom agent slack login
+    ```
+    This needs a terminal. It prompts for:
+
+    - the bot token (`xoxb-…`), which it checks with Slack;
+    - the app-level token (`xapp-…`), which you can skip;
+    - your Slack member ID (`U…`), if no allowlist exists yet.
+
+    Tokens are read masked and are never taken from the command line. They are stored in `~/.mnemom/launcher.json` (mode 0600). The environment variables `MNEMOM_SLACK_BOT_TOKEN` and `MNEMOM_SLACK_APP_TOKEN` override the stored values. The bot token is never exported into a session's environment.
+
+    Your member ID becomes the first entry on the sender allowlist (`slack_allow`), and the owner (`slack_owner`) if none is set.
+
+    Without the app-level token, sessions can post but cannot receive replies.
+  </Step>
+  <Step title="Invite the bot">
+    In each channel you want sessions to use, run `/invite @<bot>`. Set a default channel with `mnemom agent config set slack_channel <channel id>`.
+  </Step>
+  <Step title="Launch a session with --slack">
+    ```bash
+    mnemom agent --slack
+    ```
+    Setting `slack_listen = true` has the same effect as passing the flag every time.
+  </Step>
+</Steps>
+
+`mnemom agent slack logout` removes both tokens from the store.
+
+## What --slack does
+
+`--slack` does three things:
+
+- It writes an MCP config for the session at `~/.mnemom/slack/mcp-<session>.json`. That config runs `mnemom agent slack listen` as the server `mnemom-slack`.
+- It starts the router if one is not running.
+- It launches Claude Code with that config and `--dangerously-load-development-channels server:mnemom-slack`.
+
+Because this uses a development channel:
+
+- Claude Code asks you to confirm when the session starts.
+- On Team and Enterprise plans, an admin must turn on `channelsEnabled` in managed settings.
+
+`--slack` works in the terminal and remote-control shapes. It is not applied to a headless server, because the channel needs an interactive confirmation.
+
+The channel server:
+
+- checks the session's inbox every second and shows each message to the model as a `<channel source="mnemom-slack">` block;
+- does not replay messages routed before the session started listening, except messages held for it (see [Aliases](#aliases-and-held-messages));
+- gives the model three tools:
+  - `slack_reply(channel, text, thread_ts?)`
+  - `slack_delete(ts, channel?)`
+  - `slack_thread(channel, thread_ts)`, which reads a whole thread (up to 40,000 characters in total, 8,000 per message)
+
+The model is told to treat Slack messages as requests from a colleague. They never override the operator's goal or safety rules.
+
+## The router
+
+`--slack` starts the router for you. You can also run it in the foreground:
+
+```bash
+mnemom agent slack router
+```
+
+- It needs the app-level token and Node 22 or later.
+- Only one router runs per machine. Its pid is in `~/.mnemom/slack/router.pid`.
+- It reconnects two seconds after a disconnect.
+
+### Who can reach a session
+
+- Only senders whose Slack member ID is on `slack_allow` reach a session. Messages from anyone else are dropped silently. With an empty allowlist, nothing is delivered.
+- Posts by apps, including this one, are never routed, so sessions do not hear each other.
+
+### How a message finds its session
+
+| You do this | It goes to |
+|---|---|
+| Reply in a thread where a session posted | That session |
+| Mention the app, then a session name: `@<app> pv2-lead: …` | The named session |
+| Type `@pv2-lead …` as plain text | That session, if it is live |
+| Use an alias (when aliases are on) | The aliased session, live or not |
+
+Names match loosely:
+
+- Case and punctuation are ignored.
+- A name also matches the one live session whose name ends in `-<name>`.
+
+If you mention the app and no live session matches, you get a private hint listing the sessions that are live.
+
+**Sticky threads** are off by default. Turn them on with `mnemom agent config set slack_sticky_threads true`. A thread where you addressed a session then keeps routing replies to it for 30 days.
+
+A thread reply carries the thread so far as context:
+
+- each message is capped at 2,000 characters, and older replies are left out past 8,000 in total;
+- messages in that context from people who are not on the allowlist are marked `(not on allowlist)`.
+
+### Aliases and held messages
+
+Aliases are off by default. Turn them on with `mnemom agent config set slack_aliases true`.
+
+```bash
+mnemom agent slack alias                     # list
+mnemom agent slack alias <handle> <session>  # set
+mnemom agent slack alias --remove <handle>   # remove
+```
+
+Aliases are local to your machine, and the session does not need to be live when you set one.
+
+When aliases are on, a message for a session that is not listening is held, and the sender is told. If the session has not read it within 60 minutes, the router replies in the thread that it was not delivered.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `mnemom agent slack manifest [app-name]` | Print the Slack app manifest |
+| `mnemom agent slack login` / `logout` | Store or remove the tokens |
+| `mnemom agent slack status` | Show tokens, bot, default channel, router, live sessions, aliases, sticky threads, allowlist and owner. This is the default verb |
+| `mnemom agent slack post [-c C] [-t TS] [--icon-emoji E] [--] <text…\|->` | Post as this session. `-` or piped input reads stdin; text that starts with `-` goes after `--`. The channel defaults to `slack_channel` |
+| `mnemom agent slack delete [--channel C] <ts>` | Delete a message this session posted. Only works inside a session, on its own posts |
+| `mnemom agent slack inbox [--peek]` | Print unread messages routed to this session as JSON. `--peek` leaves them unread |
+| `mnemom agent slack alias …` | Manage aliases (see above) |
+| `mnemom agent slack router` | Run the router in the foreground |
+
+A session posts under its own name, which the launcher sets, so it cannot post as another session. Link previews are off.
+
+## Durable sessions and the owner-only inbox
+
+<Note>
+This part also needs the `durable` experimental feature (see [Durable sessions](/gateway/durable-sessions)), and is still being finalised.
+</Note>
+
+When the router runs with `durable` on, a message routed to a locked [durable session](/gateway/durable-sessions) goes to that session's durable inbox. It is not shown in a pane. The session gets it when it is next idle.
+
+Who can send:
+
+- **The owner.** Set your member ID with `mnemom agent config set slack_owner <id>`. You can list several IDs, comma-separated, and `MNEMOM_SLACK_OWNER_IDS` adds more. The message is sent with the owner's credential.
+- **An agent the owner allows.** `MNEMOM_SLACK_AGENT_SENDERS` maps a Slack ID to an environment variable that holds that agent's key, as `<slack id>=<ENV VAR>`. The API accepts the message only if the owner put that agent on the session's sender allowlist (`mnemom agent sessions senders`).
+- **Anyone else** gets a private note that the message was not sent.
+
+People must still be on `slack_allow` to get this far. If no owner ID is set, the router warns that your own messages to a locked session will not be sent.
+
+The sender gets a private note when a message is queued or refused. A Slack message that is delivered twice is admitted once.
+
+### Answer an owner review from the thread
+
+When a durable session is waiting on an **Owner review** question, the owner can answer it by replying `release` or `refuse` in the session's thread. Case does not matter, and a leading `@handle` is allowed. The reply answers the question instead of going to the inbox. Only owner IDs can answer this way.
+
+If the answer fails, you get a private note. You can then reply again or run `mnemom agent sessions answer <session> latest`.
+
+## Settings
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `slack_channel` | none | Default channel for `post` |
+| `slack_listen` | `false` | Act as if `--slack` were always passed |
+| `slack_allow` | your ID, after `login` | Member IDs whose messages reach sessions |
+| `slack_owner` | your ID, after `login` | Owner IDs for durable sessions (comma-separated) |
+| `slack_aliases` | `false` | Route messages by alias, and hold messages for sessions that are not listening |
+| `slack_sticky_threads` | `false` | Keep routing a thread to the session you addressed in it, for 30 days |
+
+Set them with `mnemom agent config set <key> <value>`. Member IDs look like `U012ABCDEF`.
+
+## See also
+
+- [Durable sessions](/gateway/durable-sessions)
+- [CLI reference](/gateway/cli) — experimental features
