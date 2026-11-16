@@ -5,7 +5,7 @@ sidebarTitle: "Webhook Events"
 icon: "list"
 ---
 
-52 event types your org's webhook endpoints can subscribe to. Every event uses the same envelope
+54 event types your org's webhook endpoints can subscribe to. Every event uses the same envelope
 (see [Webhook Notifications](/guides/webhooks) for delivery, signing, and retry mechanics):
 
 ```json
@@ -286,6 +286,55 @@ a specific agent.
 ```json
 { "agent_id": "agt-x", "org_id": "org-acme", "exemption_id": "exempt-abc", "exempt_section": "back_door.outgoing.pii", "exempt_patterns": ["customer_id"], "reason": "Customer-id sharing required for support flow", "granted_by": "user-admin", "expires_at": "2026-06-09T00:00:00Z" }
 ```
+
+---
+
+## Durable sessions (experimental)
+
+<Note>
+Durable sessions are experimental. Turn them on with `mnemom experimental enable durable`. These
+events and their fields may change in any release.
+</Note>
+
+A durable session is a session you lock so the host daemon keeps it running while you are away.
+The gateway checks an unattended turn of a locked session the same way it checks an attended
+one. These two events tell you when it stops such a turn, so you hear about it without watching
+the session.
+
+### `durable.turn.held`
+
+Fired when the gateway holds an unattended turn for your review, as the review band on the
+agent's card would hold an attended one. The answer is not delivered yet. The session's owner
+is asked to release or refuse it. The review's deadline and the card's timeout handling apply.
+
+```json
+{ "agent_id": "agt-x", "session_id": "sess-y", "review_id": "rev-0123456789abcdef" }
+```
+
+### `durable.turn.refused`
+
+Fired when the gateway refuses an unattended turn. The answer was not delivered. `code` names
+the check that refused it:
+
+| `code` | Meaning |
+|---|---|
+| `integrity_boundary` | The integrity check found a boundary violation. |
+| `integrity_unverified` | The integrity check could not produce a verdict, and the turn failed closed. |
+| `policy_block` | The policy engine blocked a tool call. |
+| `policy_fail_closed` | The policy check could not run, and the turn failed closed. |
+| `safe_house_withhold` | Safe House withheld the content. |
+| `canary` | A planted canary credential appeared. |
+| `review_denied` | The owner refused a held turn. |
+| `review_expired` | A held turn was not reviewed before its deadline. |
+| `grounding_refused` | The grounding check refused the turn. |
+| `release_not_picked_up` | The owner released a held turn, but the session did not pick up the release before it expired. This one also carries `review_id`. |
+
+```json
+{ "agent_id": "agt-x", "session_id": "sess-y", "code": "policy_block" }
+```
+
+With `release_not_picked_up`, the review stays released. If the session's next turn holds the
+same content, the owner is asked again.
 
 ---
 
