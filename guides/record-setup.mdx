@@ -1,0 +1,109 @@
+---
+title: "Set up the Mnemom record"
+description: "Turn on the Mnemom record from the CLI, link one or more GitHub orgs, add more later, use it without GitHub, and see what it costs."
+sidebarTitle: "Set up the Mnemom record"
+icon: "file-signature"
+---
+
+The Mnemom record is a signed statement of what happened in your recorded coding sessions. [The conduct record spec](/specifications/conduct-record) describes the format. This guide shows how to turn it on.
+
+You can set it up yourself. Any owner or admin of your Mnemom org can do it. You do not need a durable invite or a contracted (Door 2) setup. Linking a GitHub org never turns Door 2 on.
+
+## The first-run step
+
+The first time you run `mnemom agent` in a terminal, it offers an optional step to set up the Mnemom record. You answer `[Y/n/never]`.
+
+| Answer | What happens |
+|---|---|
+| `Y` | The setup starts. |
+| `n` | The step is skipped this time. |
+| `never` | You are never asked again. |
+
+Scripts and CI are never asked. The step is for terminals only.
+
+What happens next depends on where your code lives. The CLI looks at your repo's remote to decide.
+
+## On GitHub, with several orgs
+
+The Mnemom record uses a GitHub App named `mnemom-record`. The App posts the PR check and writes the PR-keyed bundle. See [PR checks](/specifications/conduct-record#pr-checks).
+
+1. The CLI starts a GitHub device sign-in. Open the link it shows and enter the code.
+2. The CLI lists the GitHub orgs where the `mnemom-record` App is installed.
+3. You pick one or more of those orgs to link to your active Mnemom org.
+4. For each org that does not have the App yet, the CLI shows an install link:
+
+   ```text
+   https://github.com/apps/mnemom-record/installations/new
+   ```
+
+   Install the App there, then run `mnemom record add` to link that org.
+
+Two rules to keep in mind:
+
+- One GitHub install belongs to one Mnemom org.
+- One Mnemom org can link many installs.
+
+Your GitHub sign-in proves that you can see the install. Mnemom uses it for that check and does not store it.
+
+Check which Mnemom org is active with `mnemom org show`. Switch with `mnemom org use`. See [Organizations](/gateway/cli#organizations).
+
+## Add more orgs later
+
+Run this at any time:
+
+```bash
+mnemom record add
+```
+
+It runs the same GitHub sign-in and list, and links the orgs you pick to your active Mnemom org. You can do this from any directory.
+
+See what is linked:
+
+```bash
+mnemom record status
+```
+
+`mnemom agent doctor` also shows a record line. See [Preflight](/gateway/agent#preflight-mnemom-agent-doctor).
+
+When you launch `mnemom agent` in a repo whose GitHub org is not linked, the CLI prints a one-line hint. The hint never blocks the launch.
+
+## Not on GitHub
+
+GitLab, Bitbucket, Azure DevOps and repos with no remote need no App.
+
+For these repos, the record is the terminal receipt you get at exit. A PR check and a PR-keyed bundle exist on GitHub only today. There is no commit-keyed bundle for other hosts yet.
+
+## Cost
+
+Turning the record on adds a provisional µ charge of 4% of model cost. The receipt shows it as pending.
+
+## Remove an org
+
+Unlink a GitHub org from your Mnemom org:
+
+```bash
+mnemom record remove <github-org>
+```
+
+This unlinks the install from your Mnemom org. It does not uninstall the App from GitHub. To uninstall the App, use your GitHub org's settings.
+
+After you unlink an org, its repos no longer get the PR check or the PR-keyed bundle from this Mnemom org. You can link the org again with `mnemom record add`.
+
+## Use the API
+
+The CLI calls these endpoints. All paths start with `/v1`. Your Mnemom org owner or admin credential is required.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /orgs/{org_id}/record` | Read whether the record is on for the org. |
+| `PUT /orgs/{org_id}/record` | Turn the record on or off for the org. |
+| `POST /orgs/{org_id}/record/installations` | Link a GitHub install. The body is `{ "installation_id": ..., "github_user_token": "..." }`. The token proves the user can see the install. It is never stored. |
+| `DELETE /orgs/{org_id}/record/installations/{installation_id}` | Unlink a GitHub install. |
+
+See also [Org Admin](/guides/org-admin) for who counts as an owner or admin.
+
+## Related
+
+- [Conduct Record](/specifications/conduct-record): the format, signing and offline verification.
+- [`mnemom record`](/gateway/cli#record-commands): the command reference.
+- [`mnemom agent`](/gateway/agent): the launcher and its first-run steps.
