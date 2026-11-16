@@ -1,0 +1,111 @@
+---
+title: "Contracted agents"
+description: "Turn a GitHub repo on so that a labelled issue is sealed as a contract and an agent opens the PR, and choose where its jobs run: your CI, your own machine, or Mnemom's hosted runner."
+sidebarTitle: "Contracted agents"
+icon: "file-contract"
+---
+
+A contracted agent works from GitHub issues instead of your terminal. You file an issue and label it `mnemom`. Mnemom checks the request, seals it as a contract and starts a job. An agent does the work and opens a PR. The [Mnemom record](/guides/record-setup) check on that PR shows the sealed contract.
+
+<Note>
+Contracted agents build on [durable sessions](/gateway/durable-sessions), which are enabled per Mnemom org by invitation. `setup contracted` checks this first. The hosted runner is a **preview**, and the server runner needs the experimental `dispatch` feature. Both may change or be removed with no deprecation period.
+</Note>
+
+## Set up a repo
+
+```bash
+mnemom agent setup contracted <owner/repo>
+```
+
+It prints its steps, then does the ones still to do. A re-run picks up where it left off. `--dry-run` prints the first screen and changes nothing. `--json` prints the plan and outcome as JSON and never prompts.
+
+With the default runner (your CI), the steps are:
+
+1. **Durable.** Checks that durable sessions are on for your org and turns the Mnemom record on.
+2. **GitHub App.** Checks that the Mnemom Record App is installed on the repo. If not, it prints the install link and waits. `--app <slug>` names a different App.
+3. **Model key.** Checks that the repo has an `ANTHROPIC_API_KEY` secret (by name only, never the value). If not, it takes the key from `$ANTHROPIC_API_KEY` or a hidden prompt. It also gives the same key to Mnemom for the intake check.
+4. **Turn on.** Switches the repo on with Mnemom.
+5. **Runner.** Checks that GitHub Actions is on, then opens a PR that adds the runner workflow and merges it. `--branch <name>` sets the PR branch (default `mnemom/record-enable`).
+
+If the runner PR is not merged yet, setup tells you to merge it before you file an issue.
+
+## Start a job from an issue
+
+Label an issue `mnemom` to start. Without the label, opening or editing an issue does nothing. Mnemom checks the request, seals it as a contract and starts a job. If the request is not clear enough, Mnemom sends it back with a comment, and you edit the issue to answer.
+
+The job opens a PR against the default branch and keeps working on it as you review. The PR gets a **Mnemom record** check that shows the sealed contract.
+
+[Hand an issue to the contracted agent](/guides/contracted-agent-issues) covers how to write an issue that seals the first time, the optional limits block, and what the agent does on its PR.
+
+## Runners
+
+Every job runs on exactly one runner. The repo has a default, and a single job can use another.
+
+| Runner | Set up with | Where it runs | Time limit per job |
+|---|---|---|---|
+| CI (default) | `setup contracted <repo>` | GitHub Actions in your repo | 6 hours |
+| Server | `setup contracted <repo> --runner server` | Your own machine | None |
+| Hosted (preview) | `setup contracted <repo> --hosted` | Mnemom's hosted runner | 1 hour by default |
+
+### CI
+
+The runner is a GitHub Actions workflow that setup adds to the repo. It runs only on the default branch, is started by Mnemom, and needs the `ANTHROPIC_API_KEY` repo secret.
+
+A job can run for up to **6 hours** (`timeout-minutes: 360`). This is GitHub's hard limit for a job. The key the job gets from Mnemom also lasts 6 hours.
+
+The Actions minutes are your own.
+
+### Server
+
+With `--runner server`, jobs wait for a runner on your own machine:
+
+```bash
+mnemom experimental enable dispatch
+MNEMOM_EXECUTOR_KEY=<key> mnemom agent run --watch
+```
+
+`mnemom agent run --once` runs a single job and exits.
+
+- A server job waits for a runner with no timeout, and it does not fall back to another runner.
+- The job's transcript stays on your machine. The two newest are kept.
+- Run setup with `--runner server` again when you re-run it. Without the flag, setup sets the default runner back to `ci`.
+
+### Hosted (preview)
+
+With `--hosted`, jobs run on Mnemom's hosted runner. There is no workflow PR and no GitHub secret.
+
+- Setup confirms you administer the repo on GitHub with a device sign-in: you enter a code in your browser.
+- It stores your Anthropic key at Mnemom, encrypted at rest. It reads the key from a hidden prompt, or from stdin with `--model-key-stdin`. The key is never written to the repo or returned by the API.
+- A hosted run lasts up to 1 hour by default.
+- The hosted runner is not on for every org yet. If it is not available to you, setup and `agent fuel` say so.
+
+## Run one job on a different runner
+
+`mnemom agent fuel` seals a batch of contracts in one confirmation. `--runner ci|hosted|server` runs that batch's jobs on the runner you name. Without it, they use the repo's default.
+
+```bash
+mnemom experimental enable fuel
+mnemom agent fuel <file> --runner hosted
+```
+
+A job on the hosted runner needs a repo that was set up with `--hosted` or `--runner server` first.
+
+## What it costs
+
+You pay Anthropic directly for the model. Your Anthropic key pays for the intake check and for the agent's work. CI jobs also use your own GitHub Actions minutes. Contracted agents are not a plan tier.
+
+## Turn a repo off
+
+```bash
+mnemom agent setup contracted <owner/repo> --off
+```
+
+New issues on the repo are no longer sealed as contracts. GitHub is left as it is: the runner workflow and the Record App stay. Run setup again without `--off` to turn the repo back on.
+
+## See also
+
+- [Hand an issue to the contracted agent](/guides/contracted-agent-issues)
+- [Set up the Mnemom record](/guides/record-setup)
+- [Durable sessions](/gateway/durable-sessions)
+- [Mnemom agent](/gateway/agent)
+- [The conduct record spec](/specifications/conduct-record)
