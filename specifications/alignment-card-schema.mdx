@@ -29,6 +29,7 @@ conscience: { ... }                    # optional; see §conscience
 autonomy: { ... }                      # required; see §autonomy
 capabilities: { ... }                  # optional; see §capabilities
 enforcement: { ... }                   # optional; see §enforcement
+context_fold: { ... }                  # optional; see §context_fold
 audit: { ... }                         # required; see §audit
 extensions: { ... }                    # optional; §extensions
 expires_at: 2026-10-26T12:00:00Z       # optional; ISO 8601 UTC; null = no expiry
@@ -41,7 +42,7 @@ version: 4                             # response-only; monotonic card version
 _composition: { ... }                  # response-only, and only when `?include_composition=true`; see §composition-metadata
 ```
 
-`PUT /v1/alignment/agent/{agent_id}` accepts `card_version`, `agent_id` (overwritten to match the URL), `autonomy_mode`, `integrity_mode`, `principal`, `values`, `conscience`, `autonomy`, `capabilities`, `enforcement`, `audit`, `extensions`, and `expires_at`. `card_id`, `issued_at`, `content_hash`, `version`, and `_composition` are server-assigned response fields — do not send them on a PUT.
+`PUT /v1/alignment/agent/{agent_id}` accepts `card_version`, `agent_id` (overwritten to match the URL), `autonomy_mode`, `integrity_mode`, `principal`, `values`, `conscience`, `autonomy`, `capabilities`, `enforcement`, `context_fold`, `audit`, `extensions`, and `expires_at`. `card_id`, `issued_at`, `content_hash`, `version`, and `_composition` are server-assigned response fields — do not send them on a PUT.
 
 ### Master switches
 
@@ -233,6 +234,26 @@ enforcement:
 <Warning>
 **`grace_period_hours` has a security trade-off.** New agents are created with `0`. The 24h fallback (when no scope sets a value) means brand-new tools, including tools the card forbids, get a one-day pass on enforce mode while operators amend the card. Under adversarial tool introduction (prompt injection, untrusted MCP servers, user-supplied tool definitions) that's a 24-hour exposure window. Set `grace_period_hours: 0` to make enforce strict from the moment a card is published. See [Enforcement § Grace period](/gateway/enforcement#grace-period-read-this-before-enabling-enforce) and [Policy Engine § Grace period](/concepts/policy-engine#grace-period).
 </Warning>
+
+## context_fold
+
+Owner opt-out for the gateway's header-less [context fold](/gateway/context-fold). Optional. The
+gateway reads it from the alignment card; the protection card does not carry it.
+
+```yaml
+context_fold:
+  enabled: false     # boolean; required when context_fold is present
+```
+
+| Field | Type | Required | Composition |
+|-------|------|----------|-------------|
+| `enabled` | boolean | Yes, when `context_fold` is present | **Off wins** across platform, org, team and agent: any scope with `enabled: false` gives `{ enabled: false }`. The key is omitted when no scope sets it. |
+
+**Absent means enabled.** An absent `context_fold`, or `enabled: true`, leaves the fold on. A present
+but malformed value counts as off.
+
+**Validation:** `context_fold` must be an object, `enabled` must be a boolean, and unknown keys are rejected
+(`must_be_object`, `must_be_boolean`, `unknown_field`).
 
 ## audit
 

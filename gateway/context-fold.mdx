@@ -1,0 +1,93 @@
+---
+title: "Context Fold for Every Agent"
+description: "How the gateway folds long Anthropic conversations for every governed agent without an x-mnemom-conversation-id header, how the owner opts out on the alignment card, and what changes for the agent."
+sidebarTitle: "Context Fold"
+icon: "compress"
+---
+
+The gateway's context fold replaces the older turns of a long conversation with a
+gateway-written digest, so the session keeps fitting the model's context window.
+The fold applies to every governed agent on the Anthropic route. Your client does
+not need to send an `x-mnemom-conversation-id` header, and the agent does not need
+to be launched with `mnemom agent`.
+
+<Note>
+Availability follows the gateway cell rollout. The fold for agents that send no
+conversation header is controlled by a cell setting that is off until the cell
+turns it on. Check with your Mnemom contact, or watch the [changelog](/changelog),
+for when it reaches your cell.
+</Note>
+
+## How the gateway identifies the conversation
+
+The fold needs to know which requests belong to one conversation. The gateway uses
+only signals that are already in the request, in this order:
+
+1. **The header.** If the request carries `x-mnemom-conversation-id`, that id is used, as before.
+2. **The session id of the client.** Claude Code and the Agent SDK send a session id, either in the
+   `x-claude-code-session-id` header or inside `metadata.user_id` of the request body. The gateway
+   uses it as the conversation.
+3. **The message chain.** If there is no session id, the gateway recognises a conversation by its
+   messages: a request whose earlier messages match a conversation the gateway has already seen
+   continues that conversation.
+
+If none of these identify a conversation, the request is forwarded unchanged.
+
+Compaction and auxiliary requests are never folded this way. These are the requests Claude Code
+marks with `x-claude-code-request-class`, compaction prompts and side queries. The fold does not
+rewrite the history a `/compact` summary is written from.
+
+## On by default, with an owner opt-out
+
+Once the rollout reaches your cell, the fold is **on by default** for every governed agent. The agent
+owner can turn it off for that agent with `context_fold` on the agent's
+[alignment card](/specifications/alignment-card-schema#context_fold):
+
+```yaml
+context_fold:
+  enabled: false
+```
+
+| Card value | Result |
+| --- | --- |
+| `context_fold` absent | Fold enabled |
+| `context_fold: { enabled: true }` | Fold enabled |
+| `context_fold: { enabled: false }` | Fold off for requests without a conversation header |
+| `context_fold` present but malformed (`enabled` is not a boolean, or `context_fold` is not an object) | Fold off. The gateway never reads a value the owner wrote as consent. |
+
+The opt-out wins over the cell setting. It is a card field, so it composes across scopes: if the
+platform, an organization, a team or the agent sets `enabled: false`, the composed card is
+`enabled: false`. An org or team template can switch the fold off for every agent under it, and an
+agent's own `enabled: true` cannot turn it back on. See
+[Card Composition](/concepts/card-composition).
+
+The opt-out applies to the header-less fold. A client that sends `x-mnemom-conversation-id` keeps its
+fold. A fold choice made in the session configuration (`x-mnemom-session-config`, or
+`--context-profile` and `--no-context` from `mnemom agent`) keeps its existing precedence, and a
+session that turns the fold off does no conversation-identification work. See
+[Context folding](/gateway/agent#context-folding) for the profiles.
+
+If the gateway cannot read the card when it checks the opt-out, it treats the agent as opted out for
+that request, so the request is forwarded unfolded. The gateway caches the opt-out result for 60 seconds
+per agent.
+
+## What changes for the agent
+
+- Older turns are replaced, in the request the gateway sends to the model, by a digest the gateway
+  writes. The system prompt and tools are not folded, and the latest messages stay word for word.
+  What a fold keeps is described under [What folding keeps](/gateway/agent#what-folding-keeps).
+- Your client keeps its full transcript. The fold changes what the gateway forwards to the
+  model, not what your client holds or shows you.
+- Tool results and earlier work can drop out of the digest, so restate anything the agent needs that
+  is not in recent turns.
+
+## Limits
+
+- **Anthropic route only.** The fold applies to `/v1/messages` on the Anthropic route. OpenAI and
+  Gemini requests are not folded.
+- **Fold only.** Identifying a conversation without a header does not turn on the other
+  conversation-level features. Implicit goal mode and sealed contracts still need the conversation
+  header or a `mnemom agent` session. See [Implicit goal mode](/gateway/implicit-goal-mode).
+- **Large requests.** A request body over 32 MiB, or a transcript over 10,000 messages, is forwarded unchanged.
+- **Billing.** The model calls the fold makes are billed as `gateway.context.fold` when fold billing is enabled. See
+  [Pricing](/pricing/overview).
