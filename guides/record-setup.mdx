@@ -7,7 +7,7 @@ icon: "file-signature"
 
 The Mnemom record is a signed statement of what happened in your recorded coding sessions. [The conduct record spec](/specifications/conduct-record) describes the format. This guide shows how to turn it on.
 
-You can set it up yourself. Any owner or admin of your Mnemom org can do it. You do not need a durable invite or a contracted (Door 2) setup. Linking a GitHub org never turns Door 2 on.
+You can set it up yourself. Any owner or admin of your Mnemom org can do it. A member can link the App installed on their own personal GitHub account; see [Who can link an install](#who-can-link-an-install). You do not need a durable invite or a contracted (Door 2) setup. Linking a GitHub org never turns Door 2 on.
 
 ## The first-run step
 
@@ -48,6 +48,16 @@ Two rules to keep in mind:
 - One Mnemom org can link many installs.
 
 Your GitHub sign-in proves that you can see the install. Mnemom uses it for that check and does not store it.
+
+### Who can link an install
+
+| Your Mnemom org role | What you can link |
+|---|---|
+| Owner or admin | Any install of the App: a GitHub org or a personal account. |
+| Member | Only the App installed on your own personal GitHub account. GitHub confirms that the install's account is a user account and that its id matches the account you signed in with. |
+| Viewer or auditor | Nothing. |
+
+A member who tries to link a GitHub org's install, or another person's personal install, gets `403 org_role_required`. Ask an owner or admin of your Mnemom org to link it. Unlinking an install and turning the record on or off stay owner or admin only.
 
 Linking an install turns the record on for your Mnemom org. Every repo in an active linked install is then enrolled. If a repo's GitHub org shows as suspended or removed, its repos are not enrolled.
 
@@ -105,14 +115,14 @@ If the name is not linked, the CLI lists the orgs that are. Only an owner or adm
 
 ## Use the API
 
-The CLI calls these endpoints. All paths start with `/v1`. Any member role can read. Writes need an owner or admin. Use a session token or an org API key. An org API key reaches only the org it was issued for.
+The CLI calls these endpoints. All paths start with `/v1`. Any member role can read. Writes need an owner or admin, except that a member can link the App installed on their own personal GitHub account (see [Who can link an install](#who-can-link-an-install)). Use a session token or an org API key. An org API key reaches only the org it was issued for.
 
 | Method and path | Purpose |
 |---|---|
 | `GET /orgs/{org_id}/record` | Read whether the record is on for the org, and the installs linked to it. It returns `enabled` and `installations`. |
 | `PUT /orgs/{org_id}/record` | Turn the record on or off for the org. The body is `{ "enabled": true }`. It returns the same shape as `GET`. Linked installs are kept when you turn it off. |
-| `POST /orgs/{org_id}/record/installations` | Link a GitHub install. The body is `{ "installation_id": ..., "github_user_token": "..." }`. The token proves the user can see the install. It is never stored. Returns `201`. Linking turns the record on. Errors: `403 github_user_cannot_see_installation`, `404 installation_not_found`, `409 installation_linked_to_other_org`, `503 github_unavailable` (retry). |
-| `DELETE /orgs/{org_id}/record/installations/{installation_id}` | Unlink a GitHub install. Returns `204`, also when the install was not linked. |
+| `POST /orgs/{org_id}/record/installations` | Link a GitHub install. The body is `{ "installation_id": ..., "github_user_token": "..." }`. The token proves the user can see the install. It is never stored. Returns `201`. Linking turns the record on. Errors: `403 github_user_cannot_see_installation`, `403 org_role_required` (your role cannot link this install), `404 installation_not_found`, `409 installation_linked_to_other_org`, `503 github_unavailable` (retry). |
+| `DELETE /orgs/{org_id}/record/installations/{installation_id}` | Unlink a GitHub install. Owner or admin only. Returns `204`, also when the install was not linked. |
 
 See also [Org Admin](/guides/org-admin) for who counts as an owner or admin.
 
