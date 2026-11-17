@@ -1,0 +1,278 @@
+---
+title: "Hand an issue to the contracted agent"
+description: "Label a GitHub issue mnemom, write it so it seals on the first try, set limits in a mnemom block or over MCP, and steer the pull request the agent opens with reviews, comments and CI."
+sidebarTitle: "Contracted agent issues"
+icon: "list-check"
+---
+
+The contracted agent (Door 2) turns a GitHub issue into a pull request. You write the issue and label it `mnemom`. Mnemom checks the request, seals it as a contract and starts an agent on it. The agent opens a pull request against your repo. Then it keeps working on that pull request: it answers your reviews, your `@mnemom-record` comments and failed CI checks, until the pull request is merged or closed.
+
+A person always merges. The agent never merges by itself. With the `auto-merge` setting it turns on GitHub auto-merge, and your branch protection still decides.
+
+This guide is for the people who write the issues and review the pull requests. An owner or admin of your Mnemom org turns Door 2 on for a repo and sets the [repo settings](#repo-settings).
+
+## Before you start
+
+- The repo is on for Door 2 in your Mnemom org, and the `mnemom-record` GitHub App is installed on it. See [Set up the Mnemom record](/guides/record-setup).
+- You have write access to the repo. Only an issue written by someone with write access is sealed.
+- The runner is the Mnemom CLI `0.18.0` or later. The runner workflow, `.github/workflows/mnemom-agent-run.yml`, pins the CLI version. Run `mnemom record enable --check` to see whether the pin is too old. An older runner still opens the pull request, but it does not act on feedback: Mnemom posts one comment on the pull request saying so, and the job ends when the pull request opens.
+
+## Label the issue `mnemom`
+
+Only an issue that carries the `mnemom` label is a request. The label is matched without regard to case.
+
+| What you do | What happens |
+|---|---|
+| Open an issue with the `mnemom` label | Mnemom checks the request. |
+| Add the `mnemom` label to an existing issue | Mnemom checks the request. |
+| Edit a labelled issue | Mnemom checks it again, for example after a send-back. |
+| Open or edit an issue without the label | Nothing happens. |
+
+The check reads the request the way a reviewer would. When something is missing, Mnemom sends the issue back: it posts one comment on the issue that tags you and lists what is missing. Nothing is sealed. Edit the issue to answer, and Mnemom checks it again.
+
+When the request passes, Mnemom seals it as a contract and posts one comment on the issue with the contract's short sha256. An agent then starts and opens a pull request. Once an issue is sealed, the job runs from the sealed text. Editing the issue afterwards does not change the job.
+
+## Write a good issue
+
+The agent works from your issue and nothing else, so the issue is the whole brief. A good issue has four parts.
+
+| Part | What to write |
+|---|---|
+| **Goal** | One or two sentences on what must be true when the work is done. Say the outcome, not the steps. |
+| **Acceptance** | A checklist a reviewer can tick off: behaviour, tests that must pass, commands that must succeed. |
+| **Scope** | Which files or folders the agent may change, and which it must not touch. |
+| **Context** | Links, error messages, related issues, the reason for the change. Anything a new teammate would need. |
+
+Tips:
+
+- Be specific. "Fix the login bug" is sent back. "`POST /login` returns 500 when the email has a plus sign; it must return 200" is not.
+- One job per issue. Split a large change into several issues.
+- Name the tests. If a test must be added, say where.
+- Put limits in a [`mnemom` block](#set-limits-with-a-mnemom-block), not in prose. Prose limits are not enforced.
+
+## Set limits with a `mnemom` block
+
+You can add an optional fenced block to the issue body to set the job's ceilings. The block is a code fence whose language is `mnemom`:
+
+````markdown
+```mnemom
+budget_usd: 5
+max_turns: 80
+time_limit: 2h
+```
+````
+
+The fields:
+
+| Key | Value | Example |
+|---|---|---|
+| `budget_usd` | The most the job may spend, in US dollars. A number greater than 0. | `budget_usd: 5` |
+| `max_turns` | The most model turns the job may take. A whole number of 1 or more. | `max_turns: 80` |
+| `time_limit` | The longest the job may run. Minutes (`45m`), hours (`2h`), or a plain whole number of minutes (`90`). | `time_limit: 2h` |
+
+Rules:
+
+- One `key: value` per line. Keys are not case-sensitive.
+- Blank lines and lines starting with `#` are allowed.
+- Every key is optional. Leave out a key to keep the default for that ceiling.
+- Only the first `mnemom` block in the issue counts.
+- An unknown key or a bad value is never ignored. The issue is sent back with a comment naming the line. Fix it and edit the issue.
+- Each value must be within the contract's own bounds. A value outside them is sent back the same way.
+
+The limits are sealed into the contract with the rest of the request. The check that decides whether to send an issue back knows the limits come from the block, so it does not ask for them in prose. The block is taken out of the task text before the check reads it.
+
+## Issue template
+
+Copy this into a new issue, or save it in your repo so it shows up in GitHub's **New issue** list.
+
+To add it as a GitHub issue template, save it as `.github/ISSUE_TEMPLATE/mnemom-job.md` on your default branch. The `labels: mnemom` line in its header adds the label for you when someone opens an issue from it.
+
+````markdown .github/ISSUE_TEMPLATE/mnemom-job.md
+---
+name: Mnemom job
+about: Hand a task to the Mnemom contracted agent. It opens a pull request and works on your feedback.
+title: ""
+labels: mnemom
+---
+
+## Goal
+
+<!-- What must be true when this is done? One or two sentences. Say the outcome, not the steps. -->
+
+## Acceptance
+
+<!-- A checklist a reviewer can tick off. -->
+
+- [ ]
+- [ ] The existing tests pass.
+
+## Scope
+
+<!-- Where the agent may work, and what it must leave alone. -->
+
+- May change:
+- Must not change:
+
+## Context
+
+<!-- Links, error messages, related issues, why this matters. -->
+
+## Limits (optional)
+
+<!-- Delete this block to use the defaults. Keys: budget_usd, max_turns, time_limit (45m, 2h). -->
+
+```mnemom
+budget_usd: 5
+max_turns: 80
+time_limit: 2h
+```
+````
+
+If you only want the label and not the template file, add the `mnemom` label by hand when you open the issue.
+
+## Do the same over MCP
+
+The Mnemom MCP server's `seal_contracts` tool submits the same request without a GitHub issue. It takes a batch of 1 to 50 contracts for one repo. Your MCP client sends your GitHub token as the `X-GitHub-Token` header, and Mnemom checks your write access to the repo with it. The token is never a tool argument.
+
+Each contract carries the same limits as structured fields:
+
+| Field | Meaning | Matches the block's |
+|---|---|---|
+| `budget_usd` | Spend ceiling in US dollars, greater than 0. | `budget_usd` |
+| `max_turns` | Turn ceiling, greater than 0. | `max_turns` |
+| `time_limit_s` | Time ceiling in **seconds**, greater than 0. `2h` is `7200`. | `time_limit` |
+
+Set `source` to `"mcp"`. Put the goal in `statement`, the acceptance items in `requirements`, and the scope in `allowed_paths` and `forbidden_paths`. Pass the request as you wrote it in `request` (`title` and `body`): the check compares the contract with it.
+
+```json
+{
+  "org_id": "org_...",
+  "repo": "acme/web",
+  "source": "mcp",
+  "contracts": [
+    {
+      "request": {
+        "title": "Accept plus signs in login emails",
+        "body": "POST /login returns 500 when the email has a plus sign. It must return 200."
+      },
+      "contract": {
+        "statement": "POST /login accepts emails that contain a plus sign and returns 200 for valid credentials.",
+        "requirements": [
+          "A test in tests/auth/login.test.ts covers an email with a plus sign.",
+          "npm test passes."
+        ],
+        "allowed_paths": ["src/auth/**", "tests/auth/**"],
+        "forbidden_paths": ["migrations/**"],
+        "budget_usd": 5,
+        "max_turns": 80,
+        "time_limit_s": 7200
+      }
+    }
+  ]
+}
+```
+
+`seal_contracts` answers at once with an `intake_id` and the status `judging`. Call `get_contract_intake` until the status changes:
+
+| Status | Meaning |
+|---|---|
+| `send_back` | Something is missing. It lists what, per contract. Nothing was sealed. Fix the contracts and submit again. |
+| `accepted` | Every contract was sealed. It returns one seal per contract, in order, with its sha256. Commit each contract's text to `.mnemom/contracts/<contract_sha256>.json` in the repo. |
+| `unavailable` | Nothing was sealed. Submit again later. |
+
+The tool descriptions in your MCP client name every field, so an agent can discover them without this page.
+
+## After the pull request opens
+
+The job does not end when the pull request opens. The agent waits on the pull request and wakes when there is something to act on.
+
+### What wakes the agent
+
+| Event | Wakes the agent? |
+|---|---|
+| A review submitted with **Request changes** | Yes |
+| A comment on the pull request that starts with `@mnemom-record` | Yes. The text after `@mnemom-record` is the instruction. |
+| An inline review comment that starts with `@mnemom-record` | Yes |
+| A failed CI check on the pull request's latest commit | Yes. Which checks count is a [repo setting](#repo-settings). |
+| An approval | No |
+| A plain comment, without `@mnemom-record` at the start | No |
+| A passing CI check | No |
+| A failed check on an older commit | No |
+| Anything from a bot, or from someone without write access | No |
+
+An example of a steering comment:
+
+```text
+@mnemom-record Keep the old function name and add a deprecation note instead of renaming it.
+```
+
+On the pull request, `@mnemom-record` steers this job. It never starts a new request. To start a new job, open a new issue.
+
+When the agent wakes, it reads everything that arrived: review comments, your instructions, and for a failed check, its summary and the end of its log. It makes the change, runs the tests, commits and pushes. Then it replies on the pull request with what it changed and why.
+
+If the agent decides no change is needed, it replies with its answer and keeps waiting. A wake with no new commit never ends the job.
+
+Events that arrive while the agent is working are queued, never dropped. When it finishes, it wakes again at once and gets all of them together. Failed checks from one push are gathered too: a CI failure wakes the agent only once two minutes pass with no new failure, so it handles them in one wake. A review or an `@mnemom-record` comment wakes it at once.
+
+### The iteration limit
+
+Each wake is one iteration, whatever woke it. The default limit is 10 iterations per job. An owner or admin can change it per repo (see [Repo settings](#repo-settings)).
+
+When the job reaches the limit, it pauses. It does not end. Mnemom posts one comment on the pull request saying it stopped and how to continue. Reviews, comments and failed checks are still queued while it is paused.
+
+Anyone with write access can let it continue:
+
+| Comment | Effect |
+|---|---|
+| `@mnemom-record continue` | 10 more iterations. |
+| `@mnemom-record continue N` | N more iterations, at most 50 per comment. |
+
+The agent then wakes with everything queued while it was paused. A `continue` on its own never spends an iteration. Comments from bots and from people without write access are ignored. Mnemom keeps a record of who raised the limit, when and by how much.
+
+### When the job ends
+
+| Event | Result |
+|---|---|
+| The pull request is merged | The job ends as finished. |
+| The pull request is closed without merging | The job ends. |
+| No qualifying activity for the repo's idle days (default 14) | The job ends. |
+
+A paused job ends the same way. The job is recorded and billed as finished when it ends. A comment after the end does not wake it: open a new issue for new work.
+
+The model the job started on stays the same for the whole job. A change to the repo's model applies to new jobs only.
+
+## Repo settings
+
+An owner or admin of the Mnemom org sets these per repo. A change applies at the job's next wake, except the model, which applies to new jobs only.
+
+| Setting | Values | Default | What it does |
+|---|---|---|---|
+| `model` | `auto`, `mini`, `pro`, `max`, `ultra` | `auto` | The model the agent runs on. |
+| `fix_iterations` | 1 to 100 | 10 | The iteration limit for each job. |
+| `checks_mode` | `required`, `all` | `required` | Which failed CI checks wake the agent. `required`: only the checks branch protection marks as required on the pull request's base branch; if the branch has none, any failed check counts. `all`: any failed check. |
+| `idle_days` | 1 to 90 | 14 | Days with no qualifying activity before the job ends. |
+| `merge_strategy` | `auto-merge`, `manual-merge` | `manual-merge` | `auto-merge` turns on GitHub auto-merge for the agent's pull request, so it merges when your branch protection allows. `manual-merge` leaves the merge to a person. The agent never merges by itself. |
+
+Besides the iteration limit, the runner has a separate wake count for the whole job, which also counts wakes that are not feedback (an answered question, a raised limit, a retry). It is the iteration limit plus 10, and never less than 20, so the iteration limit is always the one you reach first.
+
+### Over the API
+
+| Method and path | Purpose |
+|---|---|
+| `GET /v1/orgs/{org_id}/contract-step/repos` | List the org's Door 2 repos with their settings. |
+| `PUT /v1/orgs/{org_id}/contract-step/repos/{owner}/{repo}` | Turn the repo on and set any of `model`, `fix_iterations`, `checks_mode`, `idle_days`, `merge_strategy` in the JSON body. A setting you leave out keeps its current value. A bad value is a `400` that names the field. |
+
+For example, the body `{ "fix_iterations": 20, "checks_mode": "all", "merge_strategy": "auto-merge" }` raises the limit, counts every failed check and turns on auto-merge.
+
+### Over MCP
+
+| Tool | Purpose |
+|---|---|
+| `get_door2_repo_settings` | Read a repo's settings. |
+| `set_door2_repo_settings` | Set any of `model`, `fix_iterations`, `checks_mode`, `idle_days`, `merge_strategy`. |
+
+## Related
+
+- [Set up the Mnemom record](/guides/record-setup): link your GitHub org and install the `mnemom-record` App.
+- [Conduct Record](/specifications/conduct-record): the signed record of what the agent did, including the PR check.
+- [`mnemom record`](/gateway/cli#record-commands): the command reference.
