@@ -1,0 +1,139 @@
+---
+title: "Durable sessions (experimental)"
+description: "Lock a named Mnemom agent session so a host daemon on your Mac keeps it running and brings it back after a crash or reboot, then steer it with send, questions, pause, resume, done, kill and amend."
+sidebarTitle: "Durable sessions"
+icon: "infinity"
+---
+
+<Warning>
+Durable sessions are **experimental**. They are off until you turn them on with `mnemom experimental enable durable`, and they may change or be removed in any release with no deprecation period. See [Experimental features](/gateway/cli#experimental-features-mnemom-experimental).
+</Warning>
+
+A durable session is a named [Mnemom agent](/gateway/agent) session that you **lock**. A locked session no longer depends on your terminal. A host daemon on your machine keeps it running, starts it again after a crash or reboot, and delivers the messages and answers you send it.
+
+Durable sessions need two things:
+
+- **An invitation.** Durable sessions are enabled per Mnemom org. Accept your invitation with `mnemom agent --invite <token>`. If you have none, ask your Mnemom contact or join the waitlist at [mnemom.ai/waitlist](https://www.mnemom.ai/waitlist).
+- **macOS.** The host daemon runs on macOS only. On any other platform `mnemom agent host install` fails with `the host daemon runs on macOS only`.
+
+## Set up
+
+```bash
+mnemom agent setup durable        # check sign-in, the org's durable plan, and turn durable on locally
+mnemom agent host install         # enroll this machine and install the host daemon
+```
+
+`mnemom agent setup durable` walks three steps. Each is marked `✓` (done), `✗` (needs you) or `·` (still to do, or could not be checked). It picks up where it left off if you run it again. `--dry-run` shows the plan without changing anything, and `--json` prints it as JSON.
+
+1. **Agent.** You are signed in and your agent exists. If not, it runs the normal `mnemom agent` sign-in.
+2. **Plan.** Durable sessions are on for your Mnemom org. If they are off, it prints the invitation command above.
+3. **Record.** Turns durable sessions on for this machine. This is the same as `mnemom experimental enable durable`.
+
+`setup durable` does not install the host daemon. Run `mnemom agent host install` next. It reads the durable setting from `~/.mnemom/config.json` only. Turning durable on for one shell with `MNEMOM_EXPERIMENTAL` is not enough for the daemon, and `host install` says so.
+
+## Name and lock a session
+
+Start or continue a named session with `mnemom agent <name>`:
+
+```bash
+mnemom agent fix-login            # starts fix-login, or continues it if it is still open
+mnemom agent fix-login --new      # always starts a fresh session under that name
+```
+
+A name is at most 64 characters, cannot start with `-`, and cannot be a reserved verb: `sessions`, `show`, `setup`, `doctor`, `config`, `list`, `claim`, `move`, `export`, `help`, `invite`, `lock`, `done`, `kill`, `pause`, `resume`, `amend`, `host` or `containment`.
+
+A session you start this way is **tracked**: it runs in your terminal and is recorded like any other session. To make it durable, lock it:
+
+```bash
+mnemom agent lock fix-login
+```
+
+`lock` checks the following before it locks anything, and prints the fix for whichever check fails:
+
+- The session runs in the root of a git repository, and Claude Code already trusts that directory.
+- The session has had its first turn.
+- This machine has an enrolled host daemon (`mnemom agent host install`).
+- Your Mnemom account has MFA: a passkey or a TOTP factor.
+- For a GitHub repository you can push to, the default branch has branch protection or an active ruleset. A ruleset in `evaluate` mode does not count, and remotes other than github.com fail this check.
+- Durable sessions are enabled for your org.
+
+If the session is running, `lock` hands it to the daemon rather than starting a second copy. When it succeeds it prints the session's rules, budget and agent, and this note:
+
+> Here the session acts with your account's access on this machine. Never-rules and holds are tripwires, not walls; a container is the recommended home for work on its own.
+
+Once an agent has a locked session, its plain keys stop working and it becomes durable-only. If the agent already has other live sessions, lock with `--own-agent` to move the locked session to an agent of its own.
+
+You can also have the launcher lock sessions for you. Set `durable = ask` in your launcher settings to be asked `Make <name> durable? [y/N]` on each launch, or `durable = always` to lock every launch. The default is `off`.
+
+`mnemom agent sessions adopt` hands every running tracked session on this machine to the daemon at once. It shows one table and asks once per agent. `--dry-run` shows what it would do.
+
+## Talk to a locked session
+
+A locked session has no terminal you can type into. Use these instead:
+
+```bash
+mnemom agent sessions send fix-login "Also cover the logout path"
+echo "..." | mnemom agent sessions send fix-login -      # read the message from stdin
+mnemom agent sessions questions fix-login                 # list its open questions
+mnemom agent sessions answer fix-login latest 1           # answer the newest open question with option 1
+```
+
+**`sessions send`** queues a message. The daemon delivers it as the session's next prompt once the session is idle. A message is 1 to 16,384 bytes, and an undelivered message expires after 7 days.
+
+**`sessions questions`** lists the questions the session asked. When a locked session asks a question, Mnemom records it instead of showing a dialog nobody would see. `--all` also lists answered, dismissed and expired questions. A question expires 24 hours after it is asked.
+
+**`sessions answer <name> <id|latest> <choice>...`** answers one question. Give one choice per question in the ask, in order. A choice is an option number (`1`, or `1,3` for a question that allows several), an option label, or free text. `--dismiss` dismisses the question instead. If the session is waiting, it takes the answer at once; otherwise the answer reaches it as its next message.
+
+**`sessions senders list|add|remove <name>`** manages the other agents allowed to send to the session (up to 32).
+
+## Pause, resume, end and amend
+
+```bash
+mnemom agent pause fix-login
+mnemom agent resume fix-login        # the host daemon picks it up again
+mnemom agent done fix-login          # end it as completed
+mnemom agent kill fix-login          # end it as killed
+mnemom agent amend fix-login --budget 50 --turns 200
+mnemom agent sessions unlock fix-login   # return it to a tracked session
+```
+
+- Only the person who started the session can run these. An org admin who is not the owner can stop the whole agent with `mnemom agent containment pause <agent>`.
+- `pause` and `resume` apply to locked sessions only.
+- `done` and `kill` also work on a tracked session, and stop its local process.
+- A session that has ended cannot be changed.
+- Repeating a verb that already applied prints `no change`.
+- `amend` takes `--budget <usd>` and `--turns <n>`. Lowering a limit applies at once, and `--turns` can only lower. Raising the budget needs your approval in the browser (a device step: the CLI prints a URL and a code), and the session must not be paused. There is no default budget; a budget applies only if you set one.
+- `sessions unlock` also needs a device step.
+
+`pause`, `resume`, `done`, `kill`, `amend`, `lock` and the `sessions` message verbs take `--json`.
+
+## The host daemon
+
+```bash
+mnemom agent host install     # enroll this machine if needed, then install and load the daemon
+mnemom agent host status      # the daemon, its lock and its sessions
+mnemom agent host renew       # renew this machine's grant (device step)
+mnemom agent host uninstall   # unload the daemon; sessions keep running and the machine stays enrolled
+mnemom agent host enroll      # enroll only; --scope org makes the machine a runner for your org
+```
+
+- The daemon is a user LaunchAgent (`~/Library/LaunchAgents/ai.mnemom.agent-host.default.plist`). launchd restarts it if it exits.
+- It runs your locked sessions in its own tmux server and never touches your other tmux sessions.
+- It needs `claude` on your `PATH`, or `MNEMOM_AGENT_CLI` set to its absolute path.
+- It checks for work every 10 seconds and starts up to 4 sessions at once.
+- A session that fails to start 3 times in a row is suspended; `mnemom agent resume <name>` clears it.
+- A machine's grant lasts 30 days. Renew it with `mnemom agent host renew`.
+- The daemon logs to `~/.mnemom/durable/logs/daemon.log`.
+- If durable sessions are turned off in `~/.mnemom/config.json`, the daemon stays idle.
+
+`mnemom agent doctor` adds durable checks when durable sessions are on: MFA, and branch protection for the repositories of up to five open sessions. It changes nothing.
+
+## Webhooks
+
+A locked session's turns run with nobody watching. When the gateway refuses or holds one of them for your review, Mnemom sends a `durable.turn.refused` or `durable.turn.held` webhook event. See [Durable sessions events](/api-reference/webhook-events).
+
+## See also
+
+- [Mnemom agent](/gateway/agent)
+- [CLI reference](/gateway/cli)
+- [Experimental features](/gateway/cli#experimental-features-mnemom-experimental)
