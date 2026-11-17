@@ -27,11 +27,12 @@ only signals that are already in the request, in this order:
 2. **The session id of the client.** Claude Code and the Agent SDK send a session id, either in the
    `x-claude-code-session-id` header or inside `metadata.user_id` of the request body. The gateway
    uses it as the conversation.
-3. **The message chain.** If there is no session id, the gateway recognises a conversation by its
-   messages: a request whose earlier messages match a conversation the gateway has already seen
-   continues that conversation.
 
-If none of these identify a conversation, the request is forwarded unchanged.
+The gateway does not match conversations by their message content for these agents: two end users
+of one agent can send the same opening messages, and matching on content could join them into one
+conversation.
+
+A request with no header and no session id is not folded. It is forwarded unchanged.
 
 Compaction and auxiliary requests are never folded this way. These are the requests Claude Code
 marks with `x-claude-code-request-class`, compaction prompts and side queries. The fold does not
