@@ -134,7 +134,29 @@ The report does not cover:
 
 Mnemom holds the signed report on the scan's run record for 24 hours after the scan finishes, so the Org Scan page can show it again in that time. After 24 hours the run record no longer serves it. Past that, the report lives only in any export you save.
 
-An owner or admin of the org can delete a finished scan's report before the 24 hours are up with `DELETE /v1/orgs/{org_id}/scan/runs/{run_id}`. It answers `204` and records an audit entry with the org id and scan id. The run record stays, without the report. A scan that is still queued or running answers `409 scan_run_active` and nothing is deleted. A member gets `403 org_scan_role_required`.
+An owner or admin of the org can delete a finished scan's report before the 24 hours are up with `DELETE /v1/orgs/{org_id}/scan/runs/{run_id}`. It answers `204` and records an audit entry with the org id and scan id. The run record stays, without the report. Before the report, the same call deletes the usage file and the run data file described below. A scan that is still queued or running answers `409 scan_run_active` and nothing is deleted. A member gets `403 org_scan_role_required`.
+
+### Files kept beside the report
+
+Two files can be stored beside the report. Each is stored only on a Mnemom host that keeps reports in its own storage for 30 days, and only where Mnemom has switched that file on. Each is named from your org id and the scan id only, and is kept at every share level, `none` included.
+
+**The GitHub run data file** holds the counts the report was built from.
+
+- **What it holds**: counts for each repository and one row for each merged pull request, with the week, the hours to merge to one decimal place, lines added and deleted, files changed, the check result, whether it was reverted, the names of AI tools it marks, whether it was too large to read and, for a sampled pull request, the two yes or no review facts. It names your repositories, as the report does.
+- **What it never holds**: an author, reviewer, login, email address, pull request number, title, description, branch, commit, exact time or credential.
+- **How long it is kept**: as long as the report. It is stored only after the report is stored, and a scan that fails stores none.
+- **How to delete it early**: delete the report as above. Deleting your Mnemom account deletes it for every scan you started, and deleting your org deletes everything stored for it.
+
+**The Anthropic usage file** holds the usage the scan read with a temporary Admin key you pasted. With no pasted key, there is no usage file.
+
+- **What it holds**: for each day, model and context window, the tokens of uncached input, cache writes (1 hour and 5 minutes), cache reads and output. For each day and model, the cost in cents. The model names, the first day read and when the figures were last refreshed.
+- **What it never holds**: the key, a key id, a workspace, your org id, or any author, reviewer, login, email address, pull request, branch, commit or credential.
+- **How long it is kept**: 30 days after the scan finishes. If the scan fails, the cleanup that runs every five minutes deletes it.
+- **How to delete it early**: delete the report as above, which deletes this file first. Deleting your Mnemom account deletes it for every scan you started, and deleting your org deletes everything stored for it.
+
+The storage also deletes anything older than 30 days on its own. No route reads the usage file back.
+
+### Records of a scan
 
 At every share level, Mnemom keeps these records of a scan:
 
@@ -149,7 +171,7 @@ At share levels other than `none`, Mnemom also keeps:
 
 At every level, Mnemom's email provider keeps its own delivery record of each email.
 
-Apart from the 24-hour hold above, none of these records holds a token, the report or its counts. The share levels are described in [Choose what Mnemom keeps](/guides/org-scan-run-it-yourself#choose-what-mnemom-keeps). To have Mnemom delete anything it holds about a scan, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai).
+None of these records holds a token, the report or its counts. Only the held report and the two files above do. The share levels are described in [Choose what Mnemom keeps](/guides/org-scan-run-it-yourself#choose-what-mnemom-keeps). To have Mnemom delete anything it holds about a scan, email [privacy@mnemom.ai](mailto:privacy@mnemom.ai).
 
 ## The email summary
 
