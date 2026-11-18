@@ -5,15 +5,16 @@ sidebarTitle: "Contracted agent issues"
 icon: "list-check"
 ---
 
-The contracted agent (Door 2) turns a GitHub issue into a pull request. You write the issue and label it `mnemom`. Mnemom checks the request, seals it as a contract and starts an agent on it. The agent opens a pull request against your repo. Then it keeps working on that pull request: it answers your reviews, your `@mnemom-record` comments and failed CI checks, until the pull request is merged or closed.
+The contracted agent turns a GitHub issue into a pull request. You write the issue and label it `mnemom`. Mnemom checks the request, seals it as a contract and starts an agent on it. The agent opens a pull request against your repo. Then it keeps working on that pull request: it answers your reviews, your `@mnemom-record` comments and failed CI checks, until the pull request is merged or closed.
 
-A person always merges. The agent never merges by itself. With the `auto-merge` setting it turns on GitHub auto-merge, and your branch protection still decides.
+The pull request follows your merge policies. It does not have to wait for a person: with the `auto-merge` setting the agent turns on GitHub auto-merge, and your branch protection decides when it merges. The agent never merges by itself.
 
-This guide is for the people who write the issues and review the pull requests. An owner or admin of your Mnemom org turns Door 2 on for a repo and sets the [repo settings](#repo-settings).
+This guide is for the people who write the issues and review the pull requests. An owner or admin of your Mnemom org turns contracted agents on for a repo and sets the [repo settings](#repo-settings).
 
 ## Before you start
 
-- The repo is on for Door 2 in your Mnemom org, and the `mnemom-record` GitHub App is installed on it. See [Set up the Mnemom record](/guides/record-setup).
+- Your Mnemom org has access. Mnemom durable agent and Mnemom contracted agents come with the Durable agent invite tier, enabled per Mnemom org by invitation. Ask for access at [mnemom.ai/waitlist](https://www.mnemom.ai/waitlist?interest=durable-agent).
+- The repo is on for contracted agents in your Mnemom org, and the `mnemom-record` GitHub App is installed on it. See [Set up the Mnemom record](/guides/record-setup).
 - You have write access to the repo. Only an issue written by someone with write access is sealed.
 - The runner is the Mnemom CLI `0.18.0` or later. The runner workflow, `.github/workflows/mnemom-agent-run.yml`, pins the CLI version. Run `mnemom record enable --check` to see whether the pin is too old. An older runner still opens the pull request, but it does not act on feedback: Mnemom posts one comment on the pull request saying so, and the job ends when the pull request opens.
 
@@ -259,17 +260,10 @@ Besides the iteration limit, the runner has a separate wake count for the whole 
 
 | Method and path | Purpose |
 |---|---|
-| `GET /v1/orgs/{org_id}/contract-step/repos` | List the org's Door 2 repos with their settings. |
+| `GET /v1/orgs/{org_id}/contract-step/repos` | List the org's contracted-agent repos with their settings. |
 | `PUT /v1/orgs/{org_id}/contract-step/repos/{owner}/{repo}` | Turn the repo on and set any of `model`, `fix_iterations`, `checks_mode`, `idle_days`, `merge_strategy` in the JSON body. A setting you leave out keeps its current value. A bad value is a `400` that names the field. |
 
 For example, the body `{ "fix_iterations": 20, "checks_mode": "all", "merge_strategy": "auto-merge" }` raises the limit, counts every failed check and turns on auto-merge.
-
-### Over MCP
-
-| Tool | Purpose |
-|---|---|
-| `get_door2_repo_settings` | Read a repo's settings. |
-| `set_door2_repo_settings` | Set any of `model`, `fix_iterations`, `checks_mode`, `idle_days`, `merge_strategy`. |
 
 ## Related
 
