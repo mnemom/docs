@@ -7,7 +7,7 @@ icon: "list-check"
 
 The contracted agent turns a GitHub issue into a pull request. You write the issue and label it `mnemom`. Mnemom checks the request, seals it as a contract and starts an agent on it. The agent opens a pull request against your repo. Then it keeps working on that pull request: it answers your reviews, your `@mnemom-record` comments and failed CI checks, until the pull request is merged or closed.
 
-A person always merges. The agent never merges by itself.
+The pull request follows your merge policies. It does not have to wait for a person: with the `auto-merge` setting the agent turns on GitHub auto-merge, and your branch protection decides when it merges. The agent never merges by itself.
 
 This guide is for the people who write the issues and review the pull requests. An owner or admin of your Mnemom org turns contracted agents on for a repo and sets the [repo settings](#repo-settings).
 
@@ -252,7 +252,7 @@ An owner or admin of the Mnemom org sets these per repo. A change applies at the
 | `fix_iterations` | 1 to 100 | 10 | The iteration limit for each job. |
 | `checks_mode` | `required`, `all` | `required` | Which failed CI checks wake the agent. `required`: only the checks branch protection marks as required on the pull request's base branch; if the branch has none, any failed check counts. `all`: any failed check. |
 | `idle_days` | 1 to 90 | 14 | Days with no qualifying activity before the job ends. |
-| `merge_strategy` | `manual-merge` | `manual-merge` | Leaves the merge to a person. The agent never merges by itself. |
+| `merge_strategy` | `auto-merge`, `manual-merge` | `manual-merge` | `auto-merge` turns on GitHub auto-merge for the agent's pull request, so it merges when your branch protection allows. `manual-merge` leaves the merge to a person. The agent never merges by itself. |
 
 Besides the iteration limit, the runner has a separate wake count for the whole job, which also counts wakes that are not feedback (an answered question, a raised limit, a retry). It is the iteration limit plus 10, and never less than 20, so the iteration limit is always the one you reach first.
 
@@ -263,7 +263,7 @@ Besides the iteration limit, the runner has a separate wake count for the whole 
 | `GET /v1/orgs/{org_id}/contract-step/repos` | List the org's contracted-agent repos with their settings. |
 | `PUT /v1/orgs/{org_id}/contract-step/repos/{owner}/{repo}` | Turn the repo on and set any of `model`, `fix_iterations`, `checks_mode`, `idle_days`, `merge_strategy` in the JSON body. A setting you leave out keeps its current value. A bad value is a `400` that names the field. |
 
-For example, the body `{ "fix_iterations": 20, "checks_mode": "all" }` raises the limit and counts every failed check.
+For example, the body `{ "fix_iterations": 20, "checks_mode": "all", "merge_strategy": "auto-merge" }` raises the limit, counts every failed check and turns on auto-merge.
 
 ### Over MCP
 
