@@ -53,7 +53,7 @@ context_fold:
 | --- | --- |
 | `context_fold` absent | Fold enabled |
 | `context_fold: { enabled: true }` | Fold enabled |
-| `context_fold: { enabled: false }` | Fold off for requests without a conversation header |
+| `context_fold: { enabled: false }` | Fold off, including for requests that send `x-mnemom-conversation-id` |
 | `context_fold` present but malformed (`enabled` is not a boolean, or `context_fold` is not an object) | Fold off. The gateway never reads a value the owner wrote as consent. |
 
 The opt-out wins over the cell setting. It is a card field, so it composes across scopes: if the
@@ -62,10 +62,13 @@ platform, an organization, a team or the agent sets `enabled: false`, the compos
 agent's own `enabled: true` cannot turn it back on. See
 [Card Composition](/concepts/card-composition).
 
-The opt-out applies to the header-less fold. A client that sends `x-mnemom-conversation-id` keeps its
-fold. A fold choice made in the session configuration (`x-mnemom-session-config`, or
-`--context-profile` and `--no-context` from `mnemom agent`) keeps its existing precedence, and a
-session that turns the fold off does no conversation-identification work. See
+The opt-out also applies when the client sends `x-mnemom-conversation-id`: an opted-out agent's
+requests are not folded with or without the header. The header still identifies the conversation for
+the features that use it, such as implicit goal mode. A fold choice made in the session configuration (`x-mnemom-session-config`, or
+`--context-profile` and `--no-context` from `mnemom agent`) can turn the fold off for a session, and a
+session that turns it off does no conversation-identification work. It cannot turn the fold back on
+for an agent whose owner opted out. Until the rollout reaches your cell, the gateway does not read the
+opt-out, and a request with the header folds as before. See
 [Context folding](/gateway/agent#context-folding) for the profiles.
 
 If the gateway cannot read the card when it checks the opt-out, it treats the agent as opted out for
