@@ -51,6 +51,24 @@ Tips:
 - Name the tests. If a test must be added, say where.
 - Put limits in a [`mnemom` block](#set-limits-with-a-mnemom-block), not in prose. Prose limits are not enforced.
 
+## Pick the base branch
+
+By default the agent starts from your repo's default branch and opens its pull request into it. To work on another branch, add one line to the issue body that names it:
+
+```text
+Base: release/2.4
+```
+
+The key is not case-sensitive, and the name may be in backticks. The line must stand on its own.
+
+- The agent clones that branch, creates its job branch from it, and opens the pull request into it.
+- The base is read from the sealed contract, not from the live issue. Editing the issue after it is sealed does not move it.
+- The job fails before anything is cloned if the issue has more than one `Base:` line, or if the name is not a plain branch name. The run log says why.
+- If the branch does not exist in the repo, the job fails when it clones.
+- The job never falls back to the default branch.
+
+The runner needs the Mnemom CLI `0.18.8` or later. An older runner ignores the line and uses the default branch.
+
 ## Set limits with a `mnemom` block
 
 You can add an optional fenced block to the issue body to set the job's ceilings. The block is a code fence whose language is `mnemom`:
