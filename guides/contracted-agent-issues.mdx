@@ -294,9 +294,14 @@ For example, the body `{ "fix_iterations": 20, "checks_mode": "all", "merge_stra
 
 ## Changes to workflow files
 
-The token Mnemom gives a job does not have GitHub's `workflows` permission. GitHub refuses any push that creates or changes a file under `.github/workflows/` without it. If the agent's work touches a workflow file, nothing is pushed and the job fails. On a runner with the Mnemom CLI `0.18.8` or later, the failure comment on the issue names the file GitHub refused and says that nothing was pushed.
+GitHub refuses a push that creates or changes a file under `.github/workflows/` unless the token has the `workflows` permission. The `mnemom-record` App now asks for `workflows: write`. An owner of your GitHub org or account must accept the App's updated permissions before a job can use it: GitHub shows the request on the App's installation page under **Settings → GitHub Apps**.
 
-Keep workflow files out of the job's scope: list `.github/workflows/` under **Must not change** in the issue. Make workflow changes yourself.
+| Installation | What happens when the job changes a workflow file |
+|---|---|
+| Has accepted `workflows: write` | The job's push token carries it, and the change is pushed like any other file. |
+| Has not accepted it yet | GitHub refuses the push. Nothing is pushed and the job fails. On a runner with the Mnemom CLI `0.18.8` or later, the failure comment on the issue names the file GitHub refused and says that nothing was pushed. |
+
+The permission is only on the token a job pushes with, on every runner type. Until you accept it, keep workflow files out of the job's scope: list `.github/workflows/` under **Must not change** in the issue.
 
 ## Related
 
