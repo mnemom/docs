@@ -195,6 +195,7 @@ The job does not end when the pull request opens. The agent waits on the pull re
 | A comment on the pull request that starts with `@mnemom-record` | Yes. The text after `@mnemom-record` is the instruction. |
 | An inline review comment that starts with `@mnemom-record` | Yes |
 | A failed CI check on the pull request's latest commit | Yes. Which checks count is a [repo setting](#repo-settings). |
+| The pull request conflicts with its base branch | Yes, on a runner with the Mnemom CLI `0.18.7` or later. See [Merge conflicts](#merge-conflicts). |
 | An approval | No |
 | A plain comment, without `@mnemom-record` at the start | No |
 | A passing CI check | No |
@@ -214,6 +215,14 @@ When the agent wakes, it reads everything that arrived: review comments, your in
 If the agent decides no change is needed, it replies with its answer and keeps waiting. A wake with no new commit never ends the job.
 
 Events that arrive while the agent is working are queued, never dropped. When it finishes, it wakes again at once and gets all of them together. Failed checks from one push are gathered too: a CI failure wakes the agent only once two minutes pass with no new failure, so it handles them in one wake. A review or an `@mnemom-record` comment wakes it at once.
+
+### Merge conflicts
+
+GitHub sends no event when a pull request starts to conflict with its base branch, so Mnemom checks the pull request while the agent waits. When it finds a conflict, it wakes the agent once for that commit. The agent merges the base branch into the job branch, resolves the conflicts, runs the checks and pushes to the same pull request. It never force-pushes. The wake counts as one iteration.
+
+If the agent already tried on the same commit, Mnemom does not wake it again for that conflict. To have it try again, comment with `@mnemom-record`.
+
+A runner older than CLI `0.18.7` does not resolve conflicts. Mnemom posts one comment on the pull request for each new commit that conflicts, saying so. Anyone with write access can then comment `@mnemom-record merge <base> and resolve the conflicts` to have the agent do it. To move the runner to a newer CLI, update the version pinned in `.github/workflows/mnemom-agent-run.yml`.
 
 ### The iteration limit
 
