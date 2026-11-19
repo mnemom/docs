@@ -5,12 +5,12 @@
     {
       "repo": "mnemom/mnemom-api",
       "path": "code-facts.json",
-      "ref": "mnemom-api#4656"
+      "ref": "d0ad4df2b01395b32c1911f6cc66a3cb253f1bfd"
     },
     {
       "repo": "mnemom/mnemom-platform",
       "path": "gateway/code-facts.json",
-      "ref": "mnemom-platform#3405"
+      "ref": "cd195fd1fa09acf068f1132dfb3f3bbe969ad40c"
     }
   ],
   "facts": {
@@ -26,7 +26,7 @@
       "repo": "mnemom/mnemom-api",
       "source": "src/composition/compose.ts",
       "symbol": "composeAlignmentCard",
-      "summary": "The composed allow_unmapped_tools when no scope sets it."
+      "summary": "Composer rule: the composed allow_unmapped_tools when no scope sets it, the platform layer included. Not a new agent's effective value: in prod the platform layer is platform_policies.alignment_defaults, read from the DB, and may set it. New agents stamp their own (api.new_agent.allow_unmapped_tools)."
     },
     "api.compose.grace_period_hours.min_across_scopes": {
       "value": true,
@@ -40,7 +40,7 @@
       "repo": "mnemom/mnemom-api",
       "source": "src/composition/compose.ts",
       "symbol": "composeAlignmentCard",
-      "summary": "true when no scope sets grace_period_hours and the composed card leaves it out (the gateway then applies its own fallback)."
+      "summary": "Composer rule: true when no scope sets grace_period_hours, the platform layer included, and the composed card leaves it out (the gateway then applies its own fallback). Not a new agent's effective value: in prod the platform layer is platform_policies.alignment_defaults, read from the DB, and may set it. New agents stamp their own (api.new_agent.grace_period_hours)."
     },
     "api.new_agent.allow_unmapped_tools": {
       "value": true,
@@ -77,6 +77,27 @@
       "symbol": "newAgentProtectionCard",
       "summary": "mode of the protection card a new agent is born with."
     },
+    "gateway.aip.boundary_proof.sampling_rate": {
+      "value": 0.05,
+      "repo": "mnemom/mnemom-platform",
+      "source": "gateway/src/constants.ts",
+      "symbol": "BOUNDARY_PROOF_SAMPLING_RATE",
+      "summary": "Fraction of boundary_violation checkpoints without card gaps that shouldProve sends to the prover. Fixed: proof_boundary_cap is not read."
+    },
+    "gateway.policy.block.http_status": {
+      "value": 200,
+      "repo": "mnemom/mnemom-platform",
+      "source": "gateway/src/policy-block.ts",
+      "symbol": "buildPolicyBlockResponse",
+      "summary": "HTTP status of a CLPI policy block (enforce refusal and fail-closed refusal, streaming and buffered). The block is marked by X-Policy-Verdict: fail."
+    },
+    "gateway.policy.grace_period_hours.fallback": {
+      "value": 24,
+      "repo": "mnemom/mnemom-platform",
+      "source": "gateway/src/constants.ts",
+      "symbol": "GRACE_PERIOD_FALLBACK_HOURS",
+      "summary": "Grace hours the gateway applies when the composed card sets no enforcement.grace_period_hours."
+    },
     "gateway.policy.reads_declared_tools.anthropic_messages": {
       "value": true,
       "repo": "mnemom/mnemom-platform",
@@ -103,7 +124,21 @@
       "repo": "mnemom/mnemom-platform",
       "source": "gateway/src/clpi-request-tools.ts",
       "symbol": "extractToolsFromRequest",
-      "summary": "true when extractToolsFromRequest returns the tool a /openai/v1/responses request declares, so CLPI policy can evaluate it."
+      "summary": "true when extractToolsFromRequest returns the tool a /openai/v1/responses request declares with GATEWAY_OPENAI_RESPONSES_COVERAGE unset (the code default), so CLPI policy can evaluate it."
+    },
+    "gateway.policy.reads_declared_tools.openai_responses_flag": {
+      "value": "GATEWAY_OPENAI_RESPONSES_COVERAGE",
+      "repo": "mnemom/mnemom-platform",
+      "source": "gateway/src/openai-responses-coverage.ts",
+      "symbol": "OPENAI_RESPONSES_COVERAGE_FLAG",
+      "summary": "The env var that turns on CLPI tool reading (and streamed AIP) for /openai/v1/responses. Per-cell values are pinned in mnemom/deploy cells/*.json."
+    },
+    "gateway.policy.reads_declared_tools.openai_responses_flag_on": {
+      "value": true,
+      "repo": "mnemom/mnemom-platform",
+      "source": "gateway/src/openai-responses-coverage.ts",
+      "symbol": "responsesCoverageEnabled",
+      "summary": "true when extractToolsFromRequest returns the tool a /openai/v1/responses request declares with GATEWAY_OPENAI_RESPONSES_COVERAGE=true, so CLPI policy can evaluate it."
     },
     "gateway.safe_house.canary_block.http_status": {
       "value": 403,
