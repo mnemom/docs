@@ -264,10 +264,38 @@ The agent then wakes with everything queued while it was paused. A `continue` on
 | The pull request is merged | The job ends as finished. |
 | The pull request is closed without merging | The job ends. |
 | No qualifying activity for the repo's idle days (default 14) | The job ends. |
+| Someone [stops the job](#stop-a-job) | The job ends as killed. The pull request stays open. |
 
 A paused job ends the same way. The job is recorded and billed as finished when it ends. A comment after the end does not wake it: open a new issue for new work.
 
 The model the job started on stays the same for the whole job. A change to the repo's model applies to new jobs only.
+
+### Stop a job
+
+To end a job before its pull request is merged or closed, stop it. The agent stops at once and is not woken again. The pull request stays open; close it yourself if you no longer want it.
+
+The job's sealer can stop it, and so can an owner or admin of the Mnemom org. Over MCP, `get_jobs` lists the org's jobs, and its `can_act` field says whether you may stop each one. Then call `stop_job` with the org, the job id and a one-line reason:
+
+```json
+{
+  "org_id": "org_...",
+  "job_id": "<job id from get_jobs>",
+  "reason": "Superseded by a manual fix."
+}
+```
+
+Over the API, send the same `reason` to `POST /v1/orgs/{org_id}/door2/jobs/{job_id}/stop`.
+
+| Answer | Meaning |
+|---|---|
+| `200` with `already: false` | The job stopped. `stopped_at` is when. |
+| `200` with `already: true` | The job had already ended. Stopping twice answers the same. |
+| `200` with `state: "not_started"` | The job was never started and never will be. Nothing to stop. |
+| `409 job_not_started` | The job is sealed but no runner has started it yet. Try again in a minute. |
+| `403 not_job_owner` | You can see the job but you are not its sealer or an org owner or admin. |
+| `400 invalid_body` | `reason` is missing, longer than 200 characters, or more than one line. |
+
+The reason is kept in Mnemom's log only.
 
 ## Repo settings
 
