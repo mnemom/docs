@@ -45,6 +45,7 @@ Every job runs on exactly one runner. The repo has a default, and a single job c
 |---|---|---|---|
 | CI (default) | `setup contracted <repo>` | GitHub Actions in your repo | 6 hours |
 | Server | `setup contracted <repo> --runner server` | Your own machine | None |
+| Mnemom-hosted (paid beta) | `setup contracted <repo> --hosted` | Mnemom's infrastructure | Set by Mnemom per run |
 
 ### CI
 
@@ -70,9 +71,33 @@ MNEMOM_EXECUTOR_KEY=<key> mnemom agent run --watch
 - The job's transcript stays on your machine. The two newest are kept.
 - A re-run of setup without `--runner` keeps the repo on the server runner. To move it back to CI, pass `--runner ci`.
 
+### Mnemom-hosted (paid beta)
+
+<Note>
+The Mnemom-hosted runner is a paid beta. It is open to invited orgs, and each org can run only a capped number of hosted jobs at once.
+</Note>
+
+With `--hosted`, Mnemom runs the jobs. There is no workflow PR, no repo secret and no machine to keep running.
+
+```bash
+mnemom agent setup contracted <owner/repo> --hosted
+```
+
+The steps:
+
+1. **Hosted.** Confirms through GitHub that you administer the repo: you enter a code in your browser. The repo then switches to the hosted runner. You need admin or maintain on the repo, and the Mnemom Record App installed on it.
+2. **Model key.** Checks that an Anthropic key is stored for your org. If not, it reads one from a hidden prompt, or from stdin with `--model-key-stdin`. The key is stored encrypted at Mnemom. It pays for the intake check and for hosted runs, billed to you by Anthropic.
+
+`--json` cannot finish the GitHub step, so run setup once in a terminal. With no active org, setup uses your only team org. If you belong to several, it stops and asks you to run `mnemom org use <slug>`.
+
+- A hosted job needs a Mnemom balance. With none left, the job ends instead of starting.
+- When your org already has as many hosted jobs running as its cap allows, a new job waits and starts when one finishes.
+- A re-run of setup with neither flag keeps the repo hosted. To leave hosted, pass `--runner ci` or `--runner server`.
+- If setup says the hosted runner is not turned on yet, it is not open to your org. Use CI or a server runner.
+
 ## Run one job on a different runner
 
-`mnemom agent fuel` seals a batch of contracts in one confirmation. `--runner ci|server` runs that batch's jobs on the runner you name. Without it, they use the repo's default.
+`mnemom agent fuel` seals a batch of contracts in one confirmation. `--runner ci|server|hosted` runs that batch's jobs on the runner you name. Without it, they use the repo's default.
 
 ```bash
 mnemom experimental enable fuel
@@ -81,7 +106,7 @@ mnemom agent fuel <file> --runner server
 
 ## What it costs
 
-You pay Anthropic directly for the model. Your Anthropic key pays for the intake check and for the agent's work. CI jobs also use your own GitHub Actions minutes. Contracted agents are not a plan tier.
+You pay Anthropic directly for the model. Your Anthropic key pays for the intake check and for the agent's work. CI jobs also use your own GitHub Actions minutes. Hosted jobs draw on your Mnemom balance (paid beta). Contracted agents are not a plan tier.
 
 ## Turn a repo off
 
