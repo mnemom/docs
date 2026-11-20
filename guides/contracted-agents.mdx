@@ -70,6 +70,25 @@ MNEMOM_EXECUTOR_KEY=<key> mnemom agent run --watch
 - The job's transcript stays on your machine. The two newest are kept.
 - A re-run of setup without `--runner` keeps the repo on the server runner. To move it back to CI, pass `--runner ci`.
 
+### Revoke a server runner
+
+If a runner machine is lost or its key leaks, revoke it from any machine signed in as the person who enrolled it:
+
+```bash
+mnemom agent runner list                      # the runners you enrolled, with their grant; this machine's is marked
+mnemom agent runner revoke <executor-id>      # the id from the list, or its first 8 or more characters
+mnemom agent runner revoke --this-machine     # this machine's own runner
+```
+
+- The runner's key stops working at once, so it claims no more jobs.
+- Locked durable sessions the runner held are parked. The command says how many.
+- Only the person who enrolled a runner can revoke it. Anyone else gets the same answer as for an unknown id.
+- Revoking a runner that is already revoked changes nothing.
+- If the command reports a server or network error, the runner may still be live. Run it again.
+- To enroll the same machine again: `mnemom agent runner enroll --force`.
+
+Both commands take `--json`.
+
 ## Run one job on a different runner
 
 `mnemom agent fuel` seals a batch of contracts in one confirmation. `--runner ci|server` runs that batch's jobs on the runner you name. Without it, they use the repo's default.
