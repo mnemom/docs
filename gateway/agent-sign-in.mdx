@@ -90,6 +90,29 @@ What happens on a subscription launch:
   `~/.mnemom/launcher.json` (readable only by you). To use your own key instead,
   set `MNEMOM_AGENT_MNEMOM_KEY` to an org API key with the `gateway` scope.
 
+### Long-lived tokens (`claude setup-token`)
+
+`claude setup-token` makes a long-lived Claude login, used as
+`CLAUDE_CODE_OAUTH_TOKEN`. Anthropic does not tell the gateway which plan such a
+token is on, so the gateway checks its Claude organization instead:
+
+1. Someone in the same Claude organization runs Claude Code through Mnemom once
+   with a regular `claude /login` (with `CLAUDE_CODE_OAUTH_TOKEN` unset for that
+   run). If that login is on a Team or Enterprise plan, the gateway records the
+   organization as verified for 30 days. Each regular login renews it.
+2. After that, long-lived tokens that bill to that organization are accepted.
+   Allow a minute after the regular login.
+
+If the organization later stops being on a Team or Enterprise plan, the next
+regular login removes the verification. Pro and Max organizations are never
+verified, so their long-lived tokens are refused.
+
+| Gateway response | Meaning | What to do |
+| --- | --- | --- |
+| 403 `subscription_plan_unverified` | The token's Claude organization is not verified yet | Run Claude Code through Mnemom once with a regular `claude /login`, then retry |
+| 403 `subscription_login_forbidden` | Anthropic refused API access for this login | Check that your Claude organization allows Claude Code for this account, or use an API key |
+| 401 | The token is no longer valid | Run `claude /login`, or make a new token |
+
 ## Anthropic API key
 
 This is the default. `mnemom agent` looks for your key in this order:
