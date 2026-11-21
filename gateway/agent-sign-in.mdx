@@ -129,6 +129,28 @@ The key goes only to the Claude Code process `mnemom agent` launches. It is neve
 logged, printed or passed as a command-line argument. If no key is found,
 `mnemom agent` stops instead of launching Claude Code without the gateway.
 
+## No Claude login and no API key
+
+`mnemom agent` checks for a credential before it asks any first-run question and
+before Claude Code starts. If Claude Code is not signed in on this machine (no
+login and no `CLAUDE_CODE_OAUTH_TOKEN`) and there is nothing else to use, it
+stops with exit status 3:
+
+```text
+mnemom agent: no Claude login and no Anthropic API key on this machine. Mnemom runs Claude Code on your own Claude login or Anthropic API key.
+fix: sign in to Claude Code (run `claude`, then /login, on a Claude Team or Enterprise plan), or export ANTHROPIC_API_KEY=sk-ant-... (create one at console.anthropic.com)
+code: claude_credential_missing
+```
+
+- With `auth = subscription`, the message says Claude Code is not signed in. The
+  fix also names `mnemom agent config set auth api-key`, to use a key instead.
+- With `auth = api-key` (the default) and no key in the environment or the store,
+  a launch in a terminal asks for a key first. If you press Enter without one, it
+  stops the same way. A launch with no terminal stops at once.
+
+A login Mnemom can't use, such as a Pro or Max plan or an Anthropic Console
+account, is handled as described in [How the option is picked](#how-the-option-is-picked).
+
 ## Anthropic Console accounts
 
 If your team pays for Claude through the Anthropic Console (API billing), create
