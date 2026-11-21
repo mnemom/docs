@@ -176,6 +176,36 @@ Authorization: Bearer <access_token>
 
 The refresh token can be exchanged for a new access token via the standard `refresh_token` grant at `POST /v1/oauth/token` before the access token expires.
 
+### What each scope allows
+
+An access token can do only what its scopes allow. Request the scopes your agent needs.
+
+| Scope | Allows |
+|---|---|
+| `mcp:read` | Reads: `GET` requests, plus the few `POST` requests that only check or preview something and change nothing |
+| `mcp:write` | Reads and writes: every request a `mcp:read` token can make, plus the requests that create, change or delete |
+
+A token without the scope a request needs gets HTTP 403 with code `scope-missing`. The error's `details` name the scope it needed (`scope`) and the scopes the token holds (`granted_scopes`). To fix it, run the device flow again and request the missing scope.
+
+```json
+{
+  "error": {
+    "code": "scope-missing",
+    "message": "This token can't do that: it does not hold the api:write scope.",
+    "details": {
+      "who": "you",
+      "next": "sign in again and request the mcp:write scope",
+      "scope": "api:write",
+      "granted_scopes": ["mcp:read"]
+    }
+  }
+}
+```
+
+`details.scope` names the internal capability (`api:read` for `mcp:read`, `api:write` for `mcp:write`). `details.next` names the scope to request.
+
+These limits apply only to OAuth access tokens (`mcp_at_…`). API keys and dashboard sign-in sessions keep their own permissions. `mnemom login` requests both scopes, so the CLI is not affected.
+
 ---
 
 ## TTLs at a glance
