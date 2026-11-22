@@ -29,6 +29,14 @@ With the default runner (your CI), the steps are:
 
 If the runner PR is not merged yet, setup tells you to merge it before you file an issue.
 
+The runner step writes `.github/workflows/mnemom-agent-run.yml`, so your GitHub CLI login needs the `workflow` scope. A plain `gh auth login` does not include it, and GitHub then answers the write with `404 Not Found`. Add the scope once before you run setup:
+
+```bash
+gh auth refresh -h github.com -s workflow
+```
+
+If `GH_TOKEN` or `GITHUB_TOKEN` is set, `gh auth refresh` cannot change it: give that token permission to write workflow files (fine-grained token: **Workflows** read and write; classic token: the `workflow` scope). `mnemom record enable` writes the same workflow and needs the same scope.
+
 ### Set up without a browser
 
 Setup can run on a machine with no browser or terminal, such as CI or a server:
@@ -41,7 +49,13 @@ In a terminal with neither token set, setup asks you to approve in your browser,
 
 ## Start a job from an issue
 
-Label an issue `mnemom` to start. Without the label, opening or editing an issue does nothing. Mnemom checks the request, seals it as a contract and starts a job. If the request is not clear enough, Mnemom sends it back with a comment, and you edit the issue to answer.
+Label an issue `mnemom` to start. Without the label, opening or editing an issue does nothing. If the repo has no `mnemom` label yet, create it once:
+
+```bash
+gh label create mnemom --repo <owner/repo> --description "Work for the contracted Mnemom agent"
+```
+
+Mnemom checks the request, seals it as a contract and starts a job. If the request is not clear enough, Mnemom sends it back with a comment, and you edit the issue to answer.
 
 The job opens a PR against the default branch and keeps working on it as you review. The PR gets a **Mnemom record** check that shows the sealed contract.
 
