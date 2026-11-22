@@ -45,9 +45,14 @@
  *      but not (c): a translation may lag its English source, and
  *      check-i18n-lag.mjs tracks that. A retired model must still leave every
  *      translated list.
+ *   6. Snapshot drift. When the live registry loads, the committed snapshot is
+ *      compared with it (ids, row order, name, provider, supported, lifecycle).
+ *      Drift FAILS, except on a pull request (GITHUB_EVENT_NAME=pull_request),
+ *      where it is a warning: the gateway change ships before the docs change.
+ *      `--write-snapshot` regenerates the snapshot from the live registry.
  *
  * Sibling to check-path-references.mjs / check-redirects.mjs; same contract:
- *   Exits 0 clean. Exits 1 on any failure (unknown claim, disagreement, missing
+ *   Exits 0 clean. Exits 1 on any failure (unknown claim, disagreement, snapshot drift, missing
  *   sentinel region, registry hard-failure, or a failed self-test). Exits 2 on
  *   bad CLI usage.
  *
@@ -416,6 +421,67 @@ export function checkModelCoverage({ pages, localizedPages = [], registry, now =
   return { source: registry.source, pages: perPage, disagreements, retiredClaims, lifecycleProblems, ok };
 }
 
+// ── Snapshot drift (follow-up to docs#702) ──────────────────────────────────
+// The committed snapshot is read only when the live fetch fails, so a wrong
+// snapshot never showed up in a run. docs#702 hand-edited it and it ended up
+// with different ids, row order and `supported` values from the live registry.
+// When the live registry loads, the CLI now compares the snapshot with it,
+// and `--write-snapshot` regenerates the snapshot from the live registry.
+// The snapshot keeps the columns the gate reads and drops the rest (`thinking`,
+// `tier`).
+const SNAPSHOT_FIELDS = ["id", "name", "provider", "supported", "lifecycle"];
+const SNAPSHOT_NOTE =
+  "Committed fallback snapshot of the gateway /models.json registry, in a flat shape " +
+  "({ models: [{ id, name, provider, supported, lifecycle? }] }), rows in registry order. " +
+  "A row with a `lifecycle` entry is a deprecated or retired model the gateway keeps listed " +
+  "(MNE-8796: mark, never remove). loadRegistry() in check-model-coverage.mjs uses this ONLY " +
+  "when the live registry (MODEL_REGISTRY_URL, default https://gateway.mnemom.ai/models.json) " +
+  "is unreachable, so offline runs stay deterministic. Do not edit by hand: regenerate it with " +
+  "`node scripts/check-model-coverage.mjs --write-snapshot` after the gateway serves the change. " +
+  "Each run that reads the live registry fails on drift from it (a warning on pull requests).";
+
+// Reduces registry rows to the committed snapshot's columns, in row order.
+export function snapshotRows(models) {
+  return models.map((m) => {
+    const row = {};
+    for (const k of SNAPSHOT_FIELDS) if (m[k] !== undefined) row[k] = m[k];
+    return row;
+  });
+}
+
+export const serializeSnapshot = (models) =>
+  JSON.stringify({ _note: SNAPSHOT_NOTE, models: snapshotRows(models) }, null, 2) + "\n";
+
+// Key-order-insensitive value comparison for one snapshot column.
+const canonical = (v) =>
+  v && typeof v === "object" && !Array.isArray(v)
+    ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`
+    : JSON.stringify(v);
+
+// Lists every way the snapshot's rows differ from the live registry's rows:
+// a row only one side has, a column with a different value, and row order.
+export function diffSnapshot(snapshotModels, liveModels) {
+  const snap = snapshotRows(snapshotModels);
+  const live = snapshotRows(liveModels);
+  const snapById = new Map(snap.map((m) => [m.id, m]));
+  const liveById = new Map(live.map((m) => [m.id, m]));
+  const problems = [];
+  for (const m of live) if (!snapById.has(m.id)) problems.push(`${m.id}: in the live registry, missing from the snapshot`);
+  for (const m of snap) if (!liveById.has(m.id)) problems.push(`${m.id}: in the snapshot, not in the live registry`);
+  for (const m of snap) {
+    const l = liveById.get(m.id);
+    if (!l) continue;
+    for (const k of SNAPSHOT_FIELDS) {
+      if (canonical(m[k]) !== canonical(l[k])) {
+        problems.push(`${m.id}: ${k} is ${canonical(m[k])} in the snapshot, ${canonical(l[k])} in the live registry`);
+      }
+    }
+  }
+  const order = (rows, other) => rows.filter((m) => other.has(m.id)).map((m) => m.id).join(",");
+  if (order(snap, liveById) !== order(live, snapById)) problems.push("row order differs from the live registry");
+  return { ok: problems.length === 0, problems };
+}
+
 // ── Self-test ────────────────────────────────────────────────────────────────
 async function selfTest() {
   let pass = 0;
@@ -694,6 +760,40 @@ async function selfTest() {
   });
   assert("translated page without sentinels → hard fail", !locBare.ok);
 
+  // 17) Snapshot drift (follow-up to docs#702): the snapshot must hold the live
+  //     registry's rows, in its order, with its id, name, provider, supported
+  //     and lifecycle values. Columns the snapshot does not keep are ignored.
+  const liveRows = [
+    { id: "gpt-6.2-astra", name: "GPT-6.2 Astra", supported: true, thinking: true, tier: "flagship", provider: "openai" },
+    { id: "gpt-6-astra", name: "GPT-6 Astra", supported: true, thinking: true, provider: "openai" },
+    {
+      id: "o3-mini", name: "o3 Mini", supported: false, provider: "openai",
+      lifecycle: { deprecated_on: "2026-04-22", retired_on: "2026-10-23", successor: "gpt-5.6-sol" },
+    },
+  ];
+  const snapRows = snapshotRows(liveRows);
+  assert("snapshotRows keeps only the snapshot columns", snapRows.every((r) => !("thinking" in r) && !("tier" in r)));
+  assert("snapshot equal to the live rows → no drift", diffSnapshot(snapRows, liveRows).ok);
+  const reKeyed = snapRows.map((r) => (r.lifecycle ? { ...r, lifecycle: { successor: "gpt-5.6-sol", retired_on: "2026-10-23", deprecated_on: "2026-04-22" } } : r));
+  assert("lifecycle key order alone → no drift", diffSnapshot(reKeyed, liveRows).ok);
+  const has = (d, s) => !d.ok && d.problems.some((p) => p.includes(s));
+  assert("row missing from the snapshot → drift", has(diffSnapshot(snapRows.slice(1), liveRows), "gpt-6.2-astra: in the live registry"));
+  assert(
+    "row only in the snapshot → drift",
+    has(diffSnapshot([...snapRows, { id: "gemini-3-pro", name: "Gemini 3 Pro", provider: "gemini", supported: false }], liveRows), "gemini-3-pro: in the snapshot"),
+  );
+  assert(
+    "stale supported value → drift",
+    has(diffSnapshot(snapRows.map((r) => (r.id === "o3-mini" ? { ...r, supported: true } : r)), liveRows), "o3-mini: supported"),
+  );
+  assert(
+    "different name → drift",
+    has(diffSnapshot(snapRows.map((r) => (r.id === "gpt-6-astra" ? { ...r, name: "GPT 6 Astra" } : r)), liveRows), "gpt-6-astra: name"),
+  );
+  assert("rows out of registry order → drift", has(diffSnapshot([snapRows[1], snapRows[0], snapRows[2]], liveRows), "row order"));
+  const written = JSON.parse(serializeSnapshot(liveRows));
+  assert("serializeSnapshot output parses back with no drift", diffSnapshot(written.models, liveRows).ok && typeof written._note === "string");
+
   console.log(`\nself-test: ${pass}/${pass + fail} assertions passed`);
   return fail === 0;
 }
@@ -712,14 +812,20 @@ function printHelp() {
       "  --root <dir>        Docs root (default: repo root, resolved from scripts/).",
       "  --registry <path>   Local registry JSON (overrides MODEL_REGISTRY_PATH env).",
       "  --self-test         Run built-in fixtures and exit.",
+      "  --write-snapshot    Rewrite scripts/model-registry-snapshot.json from the live",
+      "                      registry and exit.",
       "  --help, -h          Show this help.",
       "",
       "Registry resolution precedence: MODEL_REGISTRY_PATH (or --registry) →",
       "live fetch of MODEL_REGISTRY_URL (default " + DEFAULT_REGISTRY_URL + ") →",
       "committed scripts/model-registry-snapshot.json.",
       "",
+      "When the live registry loads, the committed snapshot is compared with it.",
+      "Drift fails the run, except under GITHUB_EVENT_NAME=pull_request, where it",
+      "is a warning: the gateway change and the docs change land separately.",
+      "",
       "Exits 0 clean; 1 on unknown claim / disagreement / missing sentinel region /",
-      "registry hard-failure / self-test failure; 2 on bad CLI usage.",
+      "snapshot drift / registry hard-failure / self-test failure; 2 on bad CLI usage.",
     ].join("\n"),
   );
 }
@@ -729,6 +835,7 @@ async function main() {
   const defaultRoot = resolve(scriptDir(), "..");
   let root = defaultRoot;
   let registryPath = null;
+  let writeSnapshot = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -742,6 +849,7 @@ async function main() {
     if (a === "--self-test") exit((await selfTest()) ? 0 : 1);
     else if (a === "--root" || a === "--docs") root = resolve(need(a));
     else if (a === "--registry") registryPath = resolve(need(a));
+    else if (a === "--write-snapshot") writeSnapshot = true;
     else if (a === "--help" || a === "-h") {
       printHelp();
       exit(0);
@@ -760,6 +868,16 @@ async function main() {
   } catch (err) {
     console.error(`✗ check-model-coverage: registry load failed: ${err.message}`);
     exit(1);
+  }
+
+  if (writeSnapshot) {
+    if (registry.source !== "live") {
+      console.error(`✗ --write-snapshot needs the live registry; it loaded from ${registry.source}.`);
+      exit(1);
+    }
+    writeFileSync(DEFAULT_SNAPSHOT(), serializeSnapshot(registry.models));
+    console.log(`✓ wrote ${registry.models.length} row(s) from the live registry to ${DEFAULT_SNAPSHOT()}`);
+    exit(0);
   }
 
   const pages = [];
@@ -819,8 +937,36 @@ async function main() {
     console.error(`    ✗ ${LIFECYCLE_PAGE}: lifecycle row for ${p.id}: ${p.problem}`);
   }
 
+  // The committed snapshot is only read when the live fetch fails, so check it
+  // whenever the live registry is what this run read.
+  let snapshotDrift = false;
+  if (registry.source === "live") {
+    const snapshotFile = DEFAULT_SNAPSHOT();
+    const drift = existsSync(snapshotFile)
+      ? diffSnapshot(parseModels(readFileSync(snapshotFile, "utf8"), snapshotFile), registry.models)
+      : { ok: false, problems: [`${snapshotFile} does not exist`] };
+    if (drift.ok) {
+      console.log("  scripts/model-registry-snapshot.json: matches the live registry");
+    } else {
+      const onPr = env.GITHUB_EVENT_NAME === "pull_request";
+      const level = onPr ? "warning" : "error";
+      console.error(`\n${onPr ? "⚠" : "✗"} scripts/model-registry-snapshot.json differs from the live registry:`);
+      for (const p of drift.problems) {
+        console.error(`::${level} file=scripts/model-registry-snapshot.json::${p}`);
+      }
+      console.error("  Regenerate it: node scripts/check-model-coverage.mjs --write-snapshot");
+      snapshotDrift = !onPr;
+    }
+  } else {
+    console.log(`  scripts/model-registry-snapshot.json: not compared (registry source: ${registry.source})`);
+  }
+
   if (!result.ok) {
     console.error("\n✗ check-model-coverage: pages are not reconciled against the registry.");
+    exit(1);
+  }
+  if (snapshotDrift) {
+    console.error("\n✗ check-model-coverage: the committed registry snapshot has drifted from the live registry.");
     exit(1);
   }
   console.log(
