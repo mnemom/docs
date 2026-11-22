@@ -176,39 +176,36 @@ None of these records holds a token, the report or its counts. Only the held rep
 
 ## The email summary
 
-When the scan finishes, the email summary lists up to five row headlines, the window and the as-of time. It links to the Org Scan page and to the method. It never names a repository. The full report, with repository names, is on the page and in your export.
+When the scan finishes, the email summary lists up to five row headlines, the window and the as-of time. It links to the Org Scan page and to the method. It never names a repository. The full report, with repository names, is on the page and in your download.
 
 ## Export the report
 
-Under **Export this report**, there are two buttons:
+Under **Download this report**, **Download report** saves `mnemom-pulse-report-YYYY-MM-DD.html`, dated by the report's as-of day. It is a single page that opens in any browser, offline, and the signed report is inside it. The same file is the one to read and the one to verify.
 
-- **Save data file** saves `mnemom-org-scan-report-YYYY-MM-DD.json`. It holds the signed report.
-- **Save page** saves a single `.html` file that opens in any browser, offline. The signed data file is inside it.
-
-Both name your repositories. Keep them as you would any internal document.
+It names your repositories. Keep it as you would any internal document.
 
 ## Open it again
 
 For 24 hours after the scan finishes, or 30 days on a host that keeps reports in its own storage, the Org Scan page shows the report again, including after a reload. After that, no Mnemom link opens it. To see it again:
 
-- open the saved page in a browser, or
-- load the saved data file on the **Verify a saved report** page in your organization's Org Scan settings. It checks the signature in your browser and sends nothing to Mnemom.
+- open the downloaded page in a browser, or
+- load it on the **Verify a report** tab of the Org Scan page. It checks the signature in your browser and sends nothing to Mnemom. A `.json` data file saved before the report had one download loads there too.
 
 To get a fresh report, run the scan again.
 
 ## Verify the signature
 
-The saved page does not check its own signature. To check it, load the data file on the **Verify a saved report** page, or verify it yourself.
+The downloaded page does not check its own signature. To check it, use the page's **Verify signature** link, load the page on the **Verify a report** tab, or verify it yourself.
 
-The data file is JSON with a `jws` field. That is a compact JWS signed by Mnemom with Ed25519. To verify it yourself:
+The page carries the signed report in its `<script type="application/json" id="mnemom-scan-data">` block. Parse that block as JSON: it is an object with a `jws` field, the same object an older `.json` data file holds. The `jws` is a compact JWS signed by Mnemom with Ed25519. To verify it yourself:
 
 1. Read the JWS header. Check that `alg` is `EdDSA` and `typ` is `OrgScanReport/v1`.
 2. Fetch the signing keys from the Mnemom API host your org uses, at `/v1/.well-known/jwks.json`. For example, `https://api.mnemom.ai/v1/.well-known/jwks.json`. Find the key whose `kid` matches the header. A `kid` that is not there means the report was signed by a different Mnemom host.
 3. Verify the signature with that key.
-4. In the payload, check that `iss` is `https://mnemom.ai` and `sub` is your org id. The token also carries `iat` (when it was signed) and `exp` (by default 365 days later). The **Verify a saved report** page does not check either time, so a saved report still verifies there after `exp`. Check `exp` yourself if your policy needs it.
+4. In the payload, check that `iss` is `https://mnemom.ai` and `sub` is your org id. The token also carries `iat` (when it was signed) and `exp` (by default 365 days later). The **Verify a report** tab does not check either time, so a saved report still verifies there after `exp`. Check `exp` yourself if your policy needs it.
 5. The report is the `report` claim. Its `schema_version` is `org-scan-report/2`.
 
-The `exported_at` time in the data file is outside the signature. These are the same keys and steps as for an [AAP attestation](/concepts/aap-attestation#verification).
+The `exported_at` time in that object is outside the signature. These are the same keys and steps as for an [AAP attestation](/concepts/aap-attestation#verification).
 
 ## Related
 
