@@ -73,9 +73,37 @@ Every line comes from one claim table. The builder never writes a sentence of it
 | `commits[]` | array of `{ sha, bound }` | The PR's commits in PR order, cut at `head_sha`. `bound` is `true` when Mnemom's commit index holds that commit, by SHA or by `git patch-id --stable`, for the same organization and repository. A commit message trailer alone never binds a commit. |
 | `issued_at`, `built_at` | ISO 8601 UTC | The same value: the newest conduct record's `built_at`, so the same inputs produce the same bytes. |
 | `prev_digest`, `previous_digest` | `null` | Always `null`. Both names are written so readers of either name see the same link. |
+| `cost` | object, optional | This PR's share of its sessions' cost. See [PR cost](#pr-cost). Absent when the share could not be worked out. |
 | `signature` | base64url | Ed25519 signature. |
 
 A commit that Mnemom cannot bind, for example one whose diff GitHub will not serve, is shown as `bound: false`. The record never claims a binding it cannot show.
+
+### PR cost
+
+A session can open several PRs, and a PR can hold commits from several sessions. The PR record's `cost` counts only the work behind this PR's commits. A conduct record's own `cost` is still the whole conversation's total.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `cost.model_cost_mmu` | integer string | Model cost of this PR's share, in millimu, summed over `lineages`. |
+| `cost.mu_charged_mmu` | integer string, or `null` | The µ share billing charged for those rows. |
+| `cost.mu_status` | `pending` \| `final` \| `none` | As for a conduct record's `cost.mu_status`. |
+| `cost.row_count` | integer | Billing rows the share covers. |
+| `cost.lineages[]` | array | One entry per session in the bundle. |
+| `cost.lineages[].lineage_key` | string | The session's lineage. |
+| `cost.lineages[].commits` | integer | PR commits credited to this session. `0` means it reported a commit that another session did the work for. |
+| `cost.lineages[].spans[]` | array of `{ after, up_to }` | The stretches of the session counted, as ISO 8601 UTC times of its commit reports: rows after `after` up to and including `up_to`. `after` is `null` when the span starts at the session's first row. |
+| `cost.lineages[].model_cost_mmu`, `mu_charged_mmu`, `mu_status`, `row_count` | as above | The same figures for this session alone. |
+
+How the share is counted:
+
+- Each commit report owns the session's rows since its previous report. The first report owns every row before it.
+- When two sessions reported the same commit, the commit goes to the first reporter if its span holds any rows, and otherwise to the earliest other reporter whose span does.
+- A session's share is the spans of the commits credited to it. Rows after its last credited commit belong to whatever it commits next, so two PRs never count the same row.
+- If any session's share cannot be worked out, `cost` is left out and the PR shows the session totals, as before.
+
+`cost` is part of the signed bytes. A record without it, including every PR record built before this field existed, verifies exactly as before.
+
+On the PR, the record's Cost row reads `this PR: model $X · µ Y (session total model $T · µ Z)`, or "sessions total" when there are several sessions. When a PR has a single session whose share equals its total, the row reads as before.
 
 ## Signing and keys
 
