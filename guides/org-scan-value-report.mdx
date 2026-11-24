@@ -30,7 +30,7 @@ The top of the report shows:
 |---|---|
 | Window | The first and last day of the 13 weeks. |
 | As of | When the scan ran. |
-| Rule table | The version of the rules that chose the rows, today `2026-11.2`. |
+| Rule table | The version of the rules that chose the rows, today `2026-11.4`. |
 | Repositories | The repositories the scan read. |
 
 ## How to read a row
@@ -85,7 +85,7 @@ Targets appear on these rows only: `spend_rising_fast` and `spend_rising` (the p
 
 ## Which rule picks each row
 
-Rule table `2026-11.2` has 14 rules. In each theme, the first rule that matches picks the row.
+Rule table `2026-11.4` has 15 rules. In each theme, the first rule that matches picks the row.
 
 | Theme | Rule | Severity | When it matches |
 |---|---|---|---|
@@ -99,14 +99,17 @@ Rule table `2026-11.2` has 14 rules. In each theme, the first rule that matches 
 | Rework | `ai_reverts_more` | high | At least 20 in each group, AI-assisted work reverted more, and the two 95% ranges do not overlap. |
 | Rework | `reverts_present` | watch | At least 20 merged and at least one revert. |
 | Follow-up | `ai_sent_back_more` | high | At least 20 sampled in each group, AI-assisted work sent back more, and the two ranges do not overlap. |
-| Follow-up | `merged_without_approval` | medium | Every merge read, or at least 20 sampled, and at least 10% merged with no approving review. |
+| Follow-up | `merged_without_approval` | medium | Every merge read, or at least 20 sampled, and at least 10% merged with no approving review and no check run. When the scan has no check-run count for those merges, at least 10% merged with no approving review. |
+| Follow-up | `no_approval_rate` | watch | The same sample, at least 10% merged with no approving review, and under 10% merged with no approving review and no check run. |
 | Follow-up | `sent_back_rate` | watch | At least 20 sampled in total. |
 | Time | `other_work_waits_longer` | medium | At least 20 in each group. Other work waits at least twice as long as AI-assisted work, and at least 4 hours longer. |
 | Time | `median_time` | watch | Shows the median time to merge for each group with at least 20. |
 
+The three comparisons, `ai_reverts_more`, `ai_sent_back_more` and `other_work_waits_longer`, match only when at least 10% of the merged pull requests read carry a mark of an AI tool. Below that, the theme falls through to the next rule, and that row says why. `median_time` then shows the median for other work only.
+
 ## The recommended fixes
 
-Each theme has one fix, with one exception. A follow-up row picked by `merged_without_approval` gets its own fix, because that row is about work nothing on GitHub checked. Every fix links to [Mnemom Agent](/gateway/agent).
+Each theme has one fix, with two exceptions. A follow-up row picked by `merged_without_approval` gets its own fix, because that row is about work nothing on GitHub checked. A follow-up row picked by `no_approval_rate` has no fix: merging on checks without a human approval can be a choice, so the row states the figures as a fact. Every fix links to [Mnemom Agent](/gateway/agent).
 
 | Theme | Fix | Command |
 |---|---|---|
