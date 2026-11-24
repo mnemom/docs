@@ -209,16 +209,18 @@ In your Anthropic Console's workload identity federation settings, add an issuer
 
 ### 2. Create a service account and a federation rule
 
-Create a service account, then a federation rule on the issuer that:
+Create a service account, then a federation rule on the issuer from [step 1](#1-register-mnemom-as-a-federation-issuer) that:
 
-- matches the subject `mnemom:org:<org_id>`, with your own org id in place of `<org_id>` (an exact match, or a prefix match with a trailing `*`). Because the subject names your org, an identity token minted for another org cannot satisfy your rule;
+- matches the subject for where the scan runs, with your own org id in place of `<org_id>` (an exact match, or a prefix match with a trailing `*`). Because the subject names your org, an identity token minted for another org cannot satisfy your rule:
+  - `mnemom:org:<org_id>` for the command-line scan in this guide;
+  - `mnemom:org-server:<org_id>` for **Advanced** under **Connect Anthropic usage** on the Org Scan page in Mnemom. The page shows this subject with your org id filled in;
 - grants the scope **`org:admin`**, which is what Anthropic requires to read the usage and cost reports;
 - targets the service account you created.
 
-The identity token also carries the claim `scope = "org-scan"`, if you want the rule to match on it.
+The identity token also carries the claim `scope = "org-scan"` for the command-line scan and `scope = "org-scan-server"` for the Org Scan page, if you want the rule to match on it.
 
 <Note>
-  A rule written for the command-line scan does not match tokens that Mnemom issues for its own server-side checks. Those use the subject `mnemom:org-server:<org_id>`, so they work only if you add a separate rule for it. Deleting that rule withdraws it at any time.
+  The two subjects never overlap: a rule for `mnemom:org:<org_id>`, even a prefix rule with a trailing `*`, does not match `mnemom:org-server:<org_id>`. To use both the command-line scan and the Org Scan page, add a rule for each. With the Org Scan page, Mnemom exchanges the identity token at Anthropic itself and holds the Anthropic access token in memory for one connection check or one scan. It is never stored or logged. Deleting the rule withdraws it at any time.
 </Note>
 
 ### 3. Give the CLI the ids
